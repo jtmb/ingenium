@@ -1,6 +1,6 @@
 <div align="center">
 
-<!-- <img src="https://raw.githubusercontent.com/brajam/gh-llm-bootstrap/main/.github/assets/logo.svg" alt="Copilot AI Bootstrap" width="120" /> -->
+<!-- <img src="https://raw.githubusercontent.com/jtmb/copilot-ai-bootstrap/main/.github/assets/logo.svg" alt="Copilot AI Bootstrap" width="120" /> -->
 
 # Copilot AI Bootstrap
 ### Set Once — Auto-Bootstrap Every Project
@@ -36,21 +36,22 @@ graph LR
 
 ## Quick Start — Set Up the Hook (do this once)
 
-1. **Open VS Code Settings (JSON):** Press `Ctrl+Shift+P` (Mac: `Cmd+Shift+P`), type *"Preferences: Open User Settings (JSON)"*, and press Enter.
+VS Code Copilot reads hooks from `~/.copilot/hooks/` (global, applies to every project). Create this file:
 
-2. **Add the hook:** Paste the following inside the top-level `{ }` of your `settings.json`. If you already have a `"github.copilot.chat.agent.hooks"` key, merge the `"SessionStart"` array into it instead.
+**`~/.copilot/hooks/trigger-bootstrap.json`**
 
-   ```json
-    "github.copilot.chat.agent.hooks": {
+```json
+{
+    "hooks": {
         "SessionStart": [
             {
-                "command": "if [ ! -f AGENTS.md ]; then bash <(curl -fsSL https://raw.githubusercontent.com/brajam/copilot-ai-bootstrap/main/.github/scripts/hook-bootstrap.sh); fi",
-                "timeout": 30
+                "type": "command",
+                "command": "if [ ! -f AGENTS.md ]; then curl -fsSL https://raw.githubusercontent.com/jtmb/copilot-ai-bootstrap/main/.github/scripts/hook-bootstrap.sh | bash; fi"
             }
         ]
-   ```
-
-3. **Save** `settings.json` (`Ctrl+S`).
+    }
+}
+```
 
 That's it. Now:
 
@@ -60,6 +61,8 @@ That's it. Now:
 4. The AI follows all rules automatically — doc sync, code comments, testing, DRY
 
 **You never run the bootstrap scripts directly again.** The hook handles it.
+
+> **Where hooks live:** `~/.copilot/hooks/*.json` — NOT in `settings.json`. This is VS Code Copilot's global hooks directory. Each `.json` file registers one or more lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`).
 
 > **What happens?** `.github/scripts/hook-bootstrap.sh` caches this repo in `~/.cache/gh-llm-bootstrap/`, auto-detects the framework from `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml`, and calls `.github/scripts/bootstrap.sh --auto --framework <detected> /path/to/your/project`.
 
@@ -166,8 +169,8 @@ graph TD
 If you can't use hooks, or want to bootstrap once:
 
 ```bash
-git clone --depth 1 https://github.com/brajam/gh-llm-bootstrap.git
-./gh-llm-bootstrap/.github/scripts/bootstrap.sh --framework python /path/to/your-project
+git clone --depth 1 https://github.com/jtmb/copilot-ai-bootstrap.git
+./copilot-ai-bootstrap/.github/scripts/bootstrap.sh --framework python /path/to/your-project
 ```
 
 Or for non-interactive CI use:
