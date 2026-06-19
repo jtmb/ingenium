@@ -14,7 +14,7 @@ Add this to your VS Code Copilot user settings (`github.copilot.chat.agent.hooks
 {
   "SessionStart": [
     {
-      "command": "if [ ! -f AGENTS.md ]; then bash <(curl -fsSL https://raw.githubusercontent.com/brajam/gh-llm-bootstrap/main/.github/scripts/hook-bootstrap.sh); fi",
+      "command": "if [ ! -f AGENTS.md ]; then bash <(curl -fsSL https://raw.githubusercontent.com/jtmb/copilot-ai-bootstrap/main/.github/scripts/hook-bootstrap.sh); fi",
       "timeout": 30
     }
   ]
@@ -46,24 +46,24 @@ If you can't use hooks, bootstrap manually:
 
 ```bash
 # One-liner — clone and bootstrap in one go
-git clone --depth 1 https://github.com/brajam/gh-llm-bootstrap.git && \
-  ./gh-llm-bootstrap/.github/scripts/bootstrap.sh --framework python --project-name my-backend /path/to/project
+git clone --depth 1 https://github.com/jtmb/copilot-ai-bootstrap.git && \
+  ./copilot-ai-bootstrap/.github/scripts/bootstrap.sh --framework python --project-name my-backend /path/to/project
 
 # Or interactive mode
-./gh-llm-bootstrap/.github/scripts/bootstrap.sh /path/to/project
+./copilot-ai-bootstrap/.github/scripts/bootstrap.sh /path/to/project
 ```
 
 For an existing project with code already:
 
 ```bash
 # Auto-detect framework and bootstrap non-interactively
-gh-llm-bootstrap/.github/scripts/bootstrap.sh --auto --framework python /path/to/existing-project
+copilot-ai-bootstrap/.github/scripts/bootstrap.sh --auto --framework python /path/to/existing-project
 ```
 
 Pro tip: `.github/scripts/hook-bootstrap.sh` handles the auto-detection for you even in manual mode:
 
 ```bash
-bash gh-llm-bootstrap/.github/scripts/hook-bootstrap.sh --framework nextjs
+bash copilot-ai-bootstrap/.github/scripts/hook-bootstrap.sh --framework nextjs
 ```
 
 ---

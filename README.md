@@ -1,6 +1,6 @@
 <div align="center">
 
-<!-- <img src="https://raw.githubusercontent.com/brajam/gh-llm-bootstrap/main/.github/assets/logo.svg" alt="Copilot AI Bootstrap" width="120" /> -->
+<!-- <img src="https://raw.githubusercontent.com/jtmb/copilot-ai-bootstrap/main/.github/assets/logo.svg" alt="Copilot AI Bootstrap" width="120" /> -->
 
 # Copilot AI Bootstrap
 ### Set Once — Auto-Bootstrap Every Project
@@ -44,7 +44,7 @@ graph LR
     "github.copilot.chat.agent.hooks": {
         "SessionStart": [
             {
-                "command": "if [ ! -f AGENTS.md ]; then bash <(curl -fsSL https://raw.githubusercontent.com/brajam/copilot-ai-bootstrap/main/.github/scripts/hook-bootstrap.sh); fi",
+                "command": "if [ ! -f AGENTS.md ]; then bash <(curl -fsSL https://raw.githubusercontent.com/jtmb/copilot-ai-bootstrap/main/.github/scripts/hook-bootstrap.sh); fi",
                 "timeout": 30
             }
         ]
@@ -166,8 +166,8 @@ graph TD
 If you can't use hooks, or want to bootstrap once:
 
 ```bash
-git clone --depth 1 https://github.com/brajam/gh-llm-bootstrap.git
-./gh-llm-bootstrap/.github/scripts/bootstrap.sh --framework python /path/to/your-project
+git clone --depth 1 https://github.com/jtmb/copilot-ai-bootstrap.git
+./copilot-ai-bootstrap/.github/scripts/bootstrap.sh --framework python /path/to/your-project
 ```
 
 Or for non-interactive CI use:
