@@ -34,3 +34,10 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 - **Added**: `useful-tests` skill — comprehensive testing guide: test pyramid, Playwright E2E, app lifecycle (launch → wait → test → teardown), test quality checklist, AI-generated test anti-patterns, CI integration
 - **Source**: User requested skill to prevent AI agents from writing broken untested code — includes Playwright and launching the app as part of tests
 - **Category**: Always-Included cross-cutting skill
+
+## 2026-07-02 — help
+
+- **Commit**: `TBD` (will be linked after commit)
+- **Added**: `help` skill — centralized quick-reference displaying all 24 skills, their commands, triggers, and invocation patterns
+- **Source**: User requested a skill to display all commands for every skill
+- **Category**: Task skill (invocable via `/help` or "help" query)
