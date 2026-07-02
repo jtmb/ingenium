@@ -102,9 +102,9 @@ If a skill is missing from the diagram, the AI won't know when to invoke it base
 - Any bootstrap.sh entry pointing to a deleted directory?
 - Any AGENTS.md cross-reference to a removed skill?
 
-### Step 7 — Auto-Fix and Log
+### Step 7 — Auto-Fix, Commit, and Log
 
-When the audit finds issues, **fix them immediately**. Then append a summary to `.agents/skills/learnings.md`.
+When the audit finds issues, **fix them immediately**. Then commit and log.
 
 | Issue | Fix |
 |-------|-----|
@@ -115,6 +115,24 @@ When the audit finds issues, **fix them immediately**. Then append a summary to 
 | Stale reference | Remove the reference from README, USAGE.md, or bootstrap.sh |
 | Orphan skill (no SKILL.md) | Create SKILL.md from template or delete empty directory |
 | Badge count wrong | Update `skills-17%20files` to match actual count |
+
+**After applying fixes, always commit and log:**
+
+```bash
+git add -A
+git commit -m "audit: fix {N} discrepancies — {brief summary}"
+git rev-parse --short HEAD  # capture this hash
+```
+
+Then append to `.agents/skills/learnings.md`:
+
+```markdown
+## YYYY-MM-DD — audit fix
+
+- **Commit**: `{short-hash}`
+- **Fixed**: {list of what was fixed}
+- **Audit result**: {N} discrepancies found, {N} fixed
+```
 
 ---
 

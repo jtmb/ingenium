@@ -6,7 +6,7 @@
 ### Set Once — Auto-Bootstrap Every Project
 
 <p>
-  <img src="https://img.shields.io/badge/skills-22%20files-green?style=flat-square" alt="Skill files" />
+  <img src="https://img.shields.io/badge/skills-23%20files-green?style=flat-square" alt="Skill files" />
   <img src="https://img.shields.io/badge/frameworks-4%20%2B%208%20cross--cutting-purple?style=flat-square" alt="Frameworks" />
   <img src="https://img.shields.io/badge/total-~3%2C200%20lines-informational?style=flat-square" alt="Total lines" />
 </p>
@@ -17,7 +17,7 @@
 
 **The problem:** Every time you start a new project with VS Code Copilot, the AI doesn't know your conventions. It doesn't know to keep docs in sync, write comments, run tests before claiming done, or use your framework's idioms. You repeat the same instructions in every chat — and the AI drifts from your standards.
 
-**What this solves:** A **skill-based AI conventions system** that bootstraps into every project automatically. 22 skills covering frameworks, domains, and tasks — each invoked on-demand by VS Code Copilot. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
+**What this solves:** A **skill-based AI conventions system** that bootstraps into every project automatically. 23 skills covering frameworks, domains, and tasks — each invoked on-demand by VS Code Copilot. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
 
 Configure it once as a hook. Every project you open gets auto-bootstrapped with the right skills — framework detection, layered conventions, docs templates, and enforcement guardrails. No cloning, no manual copying, no per-project setup.
 
@@ -85,7 +85,7 @@ That's it. Now:
 | **Skill loader** | `.agents/skills/always-read-agents/SKILL.md` | Forces AI to scan the skill system before any code work |
 | **Project structure** | `.agents/skills/project-structure/SKILL.md` | Monorepo layout, service layering (pages/features/domain/infrastructure), naming, boundaries |
 | **Frameworks** | `.agents/skills/{fw}-conventions/SKILL.md` (4 files) | Next.js, Python, Go, Rust — build commands, idioms, project layout |
-| **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (8 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines — everything in between |
+| **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (9 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests — everything in between |
 | **Docs** | `docs/` (4 files) | Templates the AI fills in as it works — architecture, tech stack, conventions |
 | **Tasks** | `.agents/skills/{name}/SKILL.md` (8 files) | `generate-docs`, `repo-context`, `write-docs`, `update-skills`, `audit-skills` — invocable via `/` slash commands |
 | **Hooks** | `.agents/hooks/` (3 files) | PreToolUse guard, SessionStart bootstrap, PostToolUse lint |
@@ -111,6 +111,7 @@ That's it. Now:
 | 🏗️ Structure | `project-structure` | Monorepo layout, 4-layer services, naming, service boundaries |
 | 🐳 Containers | `containers` | Multi-stage builds, non-root user, HEALTHCHECK, secrets |
 | 🤖 Agent Pipelines | `agent-pipelines` | Agent loops, turn-based orchestration, state checkpoints, crash recovery |
+| 🧪 Useful Tests | `useful-tests` | Write tests that catch real bugs — unit, integration, E2E with Playwright, app lifecycle |
 | 🐚 Shell | `shell-scripts` | `set -euo pipefail`, quoting, error handling, portability |
 | 🗄️ SQL | `sql-database` | Parameterized queries, migrations, indexing, N+1 prevention |
 | 🔌 API Design | `api-design` | Status codes, error shapes, pagination, idempotency |
@@ -140,6 +141,7 @@ graph TD
     D -->|.rs files| H[rust-conventions]
     D -->|creating project| P[project-structure]
     D -->|agent loops / orchestration| AP[agent-pipelines]
+    D -->|writing tests / *.test.*| UT[useful-tests]
     D -->|Dockerfile / compose| X1[containers]
     D -->|.sh / .bash| X2[shell-scripts]
     D -->|.sql| X3[sql-database]
@@ -153,6 +155,7 @@ graph TD
     H --> J
     P --> J
     AP --> J
+    UT --> J
     X1 --> J
     X2 --> J
     X3 --> J
