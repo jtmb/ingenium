@@ -37,7 +37,7 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 
 ## 2026-07-02 — help
 
-- **Commit**: `TBD` (will be linked after commit)
+- **Commit**: `805d2ec`
 - **Added**: `help` skill — centralized quick-reference displaying all 24 skills, their commands, triggers, and invocation patterns
 - **Source**: User requested a skill to display all commands for every skill
 - **Category**: Task skill (invocable via `/help` or "help" query)
