@@ -177,19 +177,33 @@ For skills that need external docs loaded on demand:
     └── api-reference.md       ← detailed API docs, loaded when needed
 ```
 
-### Step 5 — Log to learnings.md
+### Step 5 — Commit, Then Log to learnings.md
 
-After creating or updating any skill, append a dated entry to `.agents/skills/learnings.md`:
+**Always commit changes before logging.** This ensures every learnings entry has a verifiable commit hash.
+
+1. **Commit all changes** with a descriptive message:
+   ```bash
+   git add -A
+   git commit -m "skill({name}): {brief description of what changed}"
+   ```
+
+2. **Capture the commit hash:**
+   ```bash
+   git rev-parse --short HEAD
+   ```
+
+3. **Append to `.agents/skills/learnings.md`** with the commit link:
 
 ```markdown
 ## YYYY-MM-DD — {skill-name}
 
+- **Commit**: `{short-hash}`
 - **Added/Updated**: `{skill-name}` skill — {one-line description}
 - **Source**: {what triggered this — new dependency, repeated pattern, missing coverage, stale content}
 - **Category**: {Always-Included / Task / Framework}
 ```
 
-This creates a changelog so the team can review what the AI has learned about the project.
+This creates a changelog where every entry is traceable to a specific commit.
 
 ### Step 6 — Validate
 
