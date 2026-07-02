@@ -155,6 +155,7 @@ declare -a FILES=(
     ".agents/skills/write-docs/SKILL.md|.agents/skills/write-docs/SKILL.md|optional"
     ".agents/skills/update-skills/SKILL.md|.agents/skills/update-skills/SKILL.md|optional"
     ".agents/skills/audit-skills/SKILL.md|.agents/skills/audit-skills/SKILL.md|optional"
+    ".agents/skills/help/SKILL.md|.agents/skills/help/SKILL.md|optional"
     ".agents/hooks/pre-tool-use.json|.agents/hooks/pre-tool-use.json|optional"
     ".agents/hooks/post-tool-use.json|.agents/hooks/post-tool-use.json|optional"
     ".agents/hooks/session-start.json|.agents/hooks/session-start.json|optional"
