@@ -145,6 +145,7 @@ declare -a FILES=(
     ".agents/skills/kubernetes/SKILL.md|.agents/skills/kubernetes/SKILL.md|always"
     ".agents/skills/typescript-standalone/SKILL.md|.agents/skills/typescript-standalone/SKILL.md|always"
     ".agents/skills/agent-pipelines/SKILL.md|.agents/skills/agent-pipelines/SKILL.md|always"
+    ".agents/skills/useful-tests/SKILL.md|.agents/skills/useful-tests/SKILL.md|always"
     "docs/README.md|docs/README.md|always"
     "docs/ARCHITECTURE.md|docs/ARCHITECTURE.md|always"
     "docs/TECH-STACK.md|docs/TECH-STACK.md|always"
