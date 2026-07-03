@@ -2,7 +2,7 @@
 
 This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill in `.agents/skills/` is listed here with its description, function, commands, and a link to its full documentation.
 
-**Total skills: 41**
+**Total skills: 42**
 
 ---
 
@@ -14,6 +14,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | `/create-readme` | [create-readme](.agents/skills/create-readme/SKILL.md) | Generate a README.md for the project |
 | `/generate-docs` | [generate-docs](.agents/skills/generate-docs/SKILL.md) | Scan codebase, populate `docs/` templates |
 | `/help` | [help](.agents/skills/help/SKILL.md) | Display all skills, commands, and invocation patterns |
+| `/manage-agents` | [manage-agents](.agents/skills/manage-agents/SKILL.md) | Create, update, retire, and validate agent definitions with model-to-role assignments |
 | `/repo-context` | [repo-context](.agents/skills/repo-context/SKILL.md) | Load project identity, tech stack, conventions |
 | `/update-skill-index` | [update-skill-index](.agents/skills/update-skill-index/SKILL.md) | Regenerate SKILL-INDEX.md from all skill files |
 | `/update-skills` | [update-skills](.agents/skills/update-skills/SKILL.md) | Detect new patterns, create/retire skills |
@@ -104,6 +105,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 |------|---------|
 | **Audit consistency** | `/audit-skills` |
 | **Create/update skill** | `/update-skills` |
+| **Manage agents** | `/manage-agents` |
 | **Regenerate skill index** | `/update-skill-index` |
 | **View changelog** | `cat .agents/skills/learnings.md` |
 | **List all skills** | `ls -d .agents/skills/*/ \| sed 's\|.*/\|\|;s\|/\|\|' \| sort` |
