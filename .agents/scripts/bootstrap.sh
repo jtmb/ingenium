@@ -166,6 +166,7 @@ declare -a FILES=(
     ".agents/skills/generate-docs/SKILL.md|.agents/skills/generate-docs/SKILL.md|optional"
     ".agents/skills/write-docs/SKILL.md|.agents/skills/write-docs/SKILL.md|optional"
     ".agents/skills/update-skills/SKILL.md|.agents/skills/update-skills/SKILL.md|optional"
+    ".agents/skills/update-skill-index/SKILL.md|.agents/skills/update-skill-index/SKILL.md|optional"
     ".agents/skills/audit-skills/SKILL.md|.agents/skills/audit-skills/SKILL.md|optional"
     ".agents/skills/help/SKILL.md|.agents/skills/help/SKILL.md|optional"
     ".agents/skills/web-design-reviewer/SKILL.md|.agents/skills/web-design-reviewer/SKILL.md|optional"

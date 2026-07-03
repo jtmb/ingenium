@@ -80,7 +80,7 @@ Every entry MUST include both Before and After commit hashes. Never commit witho
 
 ## What Gets Audited
 
-The audit checks 6 integration points. Every skill should appear in ALL of them (or have a valid reason not to).
+The audit checks 7 integration points. Every skill should appear in ALL of them (or have a valid reason not to).
 
 | Check | File(s) | What "correct" looks like |
 |-------|---------|--------------------------|
@@ -90,6 +90,7 @@ The audit checks 6 integration points. Every skill should appear in ALL of them 
 | **4. bootstrap.sh** | `.agents/scripts/bootstrap.sh` → FILES array | Entry exists with correct condition (`always`, `optional`, `framework:*`) |
 | **5. AGENTS.md index** | `AGENTS.md` | Points to `/help` — no stale references to deleted skills or docs |
 | **6. USAGE.md** | `USAGE.md` → skill listings, directory trees | Skill appears in tree diagrams and reference tables |
+| **7. SKILL-INDEX.md** | `SKILL-INDEX.md` (repo root) | Skill is listed in the correct table, total count matches `ls -d .agents/skills/*/ \| wc -l` |
 
 ---
 
@@ -160,7 +161,20 @@ If a skill is missing from the diagram, the AI won't know when to invoke it base
 - Any bootstrap.sh entry pointing to a deleted directory?
 - Any AGENTS.md cross-reference to a removed skill?
 
-### Step 7 — Auto-Fix, Commit, and Log
+### Step 7 — Cross-Reference SKILL-INDEX.md
+
+Compare the directory list against `SKILL-INDEX.md` at the repo root:
+
+- Every skill directory must appear in SKILL-INDEX.md
+- The total count in the header must match `ls -d .agents/skills/*/ | wc -l`
+- Each skill must be in the correct table (Invocable Task Skills, Framework Conventions, Always-Included Domain, or Core)
+- Links must point to the correct path: `.agents/skills/{name}/SKILL.md`
+- No stale entries for deleted skills
+- No duplicate entries
+
+**Fix**: If SKILL-INDEX.md is stale, run `/update-skill-index` to regenerate it, or manually update the specific entries.
+
+### Step 8 — Auto-Fix, Commit, and Log
 
 When the audit finds issues, **fix them immediately**. Then commit and log.
 
@@ -176,6 +190,10 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | Orphan skill (no SKILL.md) | Create SKILL.md from template or delete empty directory |
 | Skill missing from AGENTS.md | Not applicable — AGENTS.md is a redirect to `/help`. No per-skill rows needed. |
 | Badge count wrong | Update `skills-17%20files` to match actual count |
+| Skill missing from SKILL-INDEX.md | Add entry to appropriate table with description from SKILL.md |
+| SKILL-INDEX.md count wrong | Update `**Total skills: {N}**` to match `ls -d .agents/skills/*/ \| wc -l` |
+| SKILL-INDEX.md has stale entry | Remove the row for the deleted skill |
+| SKILL-INDEX.md has duplicate entry | Remove the duplicate row |
 
 **After applying fixes, always commit-before + commit-after and log both hashes:**
 
