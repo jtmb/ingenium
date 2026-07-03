@@ -177,6 +177,15 @@ For skills that need external docs loaded on demand:
     └── api-reference.md       ← detailed API docs, loaded when needed
 ```
 
+### Tests Go in `.agents/tests/`, Not in Skills or Deploy
+
+Tests for the skill system itself — validation scripts, audit helpers, self-improving pipeline tests — belong in `.agents/tests/` at the repo root. They should **never** be placed in:
+
+- `deploy/.agents/` — deploy is a clean slate of skills only; no scripts, hooks, or tests
+- Individual skill directories — skills are documentation, not test harnesses
+
+**If `.agents/tests/` doesn't exist, create it.** The `useful-tests` skill covers testing conventions; any test script added to `.agents/tests/` should follow those patterns.
+
 ### Step 5 — Commit, Then Log to learnings.md
 
 **Always commit changes before logging.** This ensures every learnings entry has a verifiable commit hash.
@@ -251,7 +260,7 @@ Before making any change, understand which layer you're touching:
 1. **Core** (`generic-conventions/SKILL.md`) — affects ALL projects. Change with caution.
 2. **Framework skills** (`.agents/skills/{fw}-conventions/SKILL.md`) — copied when `--framework {fw}` is selected.
 3. **Cross-cutting skills** (`.agents/skills/{domain}/SKILL.md`) — Containers, Shell, SQL, API Design, Kubernetes, TypeScript. Copied to all targets.
-4. **Core skills** (`always-read-agents`, `generic-conventions`) — always copied.
+4. **Core skills** (`generic-conventions`) — always copied.
 5. **Task skills** (`generate-docs`, `repo-context`, `write-docs`, `update-skills`) — optional. Invocable via `/` in VS Code chat.
 6. **Enforcement** (`.agents/hooks/`) — deterministic lifecycle hooks.
 7. **CI** (`.agents/workflows/ci.yml`) — matrix CI for lint/build/test.
@@ -290,7 +299,7 @@ Before making any change, understand which layer you're touching:
   └── The definitive core rules (replaces the old monolithic AGENTS.md)
   ├── docs/ (always updated alongside code)
   ├── USAGE.md (references skill system)
-  └── .agents/skills/always-read-agents/SKILL.md (forces skill system load)
+  └── .agents/skills/generic-conventions/SKILL.md (loads core rules before every code change)
 
 .agents/skills/{fw}-conventions/SKILL.md
   └── References generic-conventions, extends with framework-specific rules

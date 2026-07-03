@@ -30,7 +30,7 @@ The audit checks 6 integration points. Every skill should appear in ALL of them 
 | **2. README table** | `README.md` → Always-Included Skills or Task Skills tables | Skill listed with correct emoji, description matches SKILL.md |
 | **3. README mermaid** | `README.md` → mermaid graph TD | Node exists with skill name, connected to `D` (decision node) |
 | **4. bootstrap.sh** | `.agents/scripts/bootstrap.sh` → FILES array | Entry exists with correct condition (`always`, `optional`, `framework:*`) |
-| **5. AGENTS.md index** | `AGENTS.md` → table | (Optional) Cross-reference if skill is a core entry point |
+| **5. AGENTS.md index** | `AGENTS.md` | Points to `/help` — no stale references to deleted skills or docs |
 | **6. USAGE.md** | `USAGE.md` → skill listings, directory trees | Skill appears in tree diagrams and reference tables |
 
 ---
@@ -75,7 +75,7 @@ Compare the directory list against:
 | `*-conventions` (framework: nextjs, python, go, rust) | Framework Detection |
 | `project-structure`, `containers`, `shell-scripts`, `sql-database`, `api-design`, `kubernetes`, `typescript-standalone`, `agent-pipelines` | Always-Included Skills |
 | `generate-docs`, `write-docs`, `repo-context`, `update-skills`, `create-readme`, `audit-skills`, `gh-cli`, `thread-auto-context` | Task Skills |
-| `always-read-agents`, `generic-conventions` | Core (listed in bootstrap table, not skills tables) |
+| `generic-conventions` | Core (listed in bootstrap table, not skills tables) |
 
 ### Step 4 — Cross-Reference bootstrap.sh
 
@@ -114,6 +114,7 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | Name mismatch | Fix `name:` field in SKILL.md frontmatter |
 | Stale reference | Remove the reference from README, USAGE.md, or bootstrap.sh |
 | Orphan skill (no SKILL.md) | Create SKILL.md from template or delete empty directory |
+| Skill missing from AGENTS.md | Not applicable — AGENTS.md is a redirect to `/help`. No per-skill rows needed. |
 | Badge count wrong | Update `skills-17%20files` to match actual count |
 
 **After applying fixes, always commit and log:**
@@ -152,7 +153,6 @@ This shows skills that exist as directories but are NOT in bootstrap.sh. Reverse
 ## Integration with Other Skills
 
 - **`update-skills`** — The update-skills detection signals feed into this audit. When update-skills detects a new skill, run an audit immediately to wire it into all docs. No permission needed.
-- **`always-read-agents`** — The skill loader should reference the audit skill so the AI knows to check consistency.
 - **`generate-docs`** — When docs are regenerated, run an audit to ensure nothing fell out of sync.
 
 ---

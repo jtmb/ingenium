@@ -29,7 +29,6 @@ Now open any project, start a Copilot chat, and the hook auto-bootstraps it.
 
 **What you get (in every project):**
 - `.agents/skills/generic-conventions/SKILL.md` — core conventions (13 sections: docs, comments, tests, DRY, security, error handling, config, more)
-- `.agents/skills/always-read-agents/SKILL.md` — forces AI to load the skill system before every code change
 - `.agents/skills/{framework}-conventions/SKILL.md` — framework-specific rules (auto-detected from 5 supported frameworks)
 - `.agents/skills/containers/SKILL.md` — Docker/Compose conventions (multi-stage, non-root, HEALTHCHECK)
 - `.agents/skills/shell-scripts/SKILL.md` — Shell script safety & portability (`set -euo pipefail`, quoting, traps)
@@ -119,8 +118,6 @@ your-project/
 │   └── CONVENTIONS.md                           ←   Naming, patterns, file organization
 ├── .agents/
 │   ├── skills/                                  ← Skills (conventions + tasks)
-│   │   ├── always-read-agents/
-│   │   │   └── SKILL.md                         ←   Loads the skill system before every change
 │   │   ├── generic-conventions/
 │   │   │   └── SKILL.md                         ←   Fallback for any file type
 │   │   ├── nextjs-conventions/
@@ -270,8 +267,6 @@ For repositories with multiple languages/frameworks (e.g., Next.js frontend + Py
 monorepo/
 ├── .agents/
 │   └── skills/
-│       ├── always-read-agents/
-│       │   └── SKILL.md
 │       ├── nextjs-conventions/
 │       │   └── SKILL.md
 │       ├── python-conventions/
@@ -280,7 +275,7 @@ monorepo/
 │           └── SKILL.md
 ```
 
-Key: the `always-read-agents` and `generic-conventions` skills cover the whole repo. Framework skills are invoked when editing matching files.
+Key: the `generic-conventions` skill covers the whole repo. Framework skills are invoked when editing matching files.
 
 ---
 

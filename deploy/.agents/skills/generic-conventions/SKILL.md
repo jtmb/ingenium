@@ -11,10 +11,9 @@ Invoke this skill when working on files that don't match any framework-specific 
 
 ## Before Writing Any Code
 
-1. **Load the skill system** (use the `always-read-agents` skill)
-2. **Read relevant docs** in `docs/` for context
-3. **Check for framework-specific skills** in `.agents/skills/`
-4. **Understand the existing patterns** in the codebase before making changes
+1. **Read relevant docs** in `docs/` for context
+2. **Check for framework-specific skills** in `.agents/skills/`
+3. **Understand the existing patterns** in the codebase before making changes
 
 ## Code Comments — Mandatory
 
