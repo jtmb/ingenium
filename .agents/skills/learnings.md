@@ -2,7 +2,7 @@
 
 Changelog of all skill additions, retirements, and significant updates. Appended automatically by `update-skills` and `audit-skills`.
 
-**Convention**: Every entry MUST include a `**Commit**:` link to the git commit that made the change. When creating or updating skills, the agent commits the changes first, then records the commit hash here.
+**Convention**: Every entry MUST include both `**Before**:` and `**After**:` commit hashes. This enables reverting any skill to its pre-change state via `git checkout <before> -- .agents/skills/<name>/`. Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going forward, always capture both.
 
 ---
 
@@ -61,7 +61,8 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 
 ## 2026-07-02 — audit fix (rename to Ingenium + README stale counts)
 
-- **Commit**: `e0f8028`
+- **Before**: `6d1ff0d` (state after rename, before audit fixes)
+- **After**: `e0f8028`
 - **Renamed**: "Copilot AI Bootstrap" → "Ingenium" across 7 files — `README.md`, `USAGE.md`, `ARCHITECTURE.md`, `session-start.json`, `hook-bootstrap.sh`, `update-skills` SKILL.md (source + deploy)
 - **Catchphrase**: "Genius doesn't repeat itself. Neither should you."
 - **Visual**: Added 🌱 "skills that grow with you" badge (purple) to README header
