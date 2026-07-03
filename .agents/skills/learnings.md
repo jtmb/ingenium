@@ -48,5 +48,13 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 - **Added**: `deploy/` directory — mirrors only deployable files (21 skills, hooks, docs, scripts). Source-only items excluded: create-readme, gh-cli, playwright-mcp, thread-auto-context, learnings.md
 - **Added**: `test-self-improving.sh` in `.agents/skills/update-skills/` — validates all 4 detection signals, deploy separation integrity, frontmatter validity, and deploy file drift
 - **Changed**: `bootstrap.sh` BOOTSTRAP_DIR now points to `deploy/` instead of repo root
+
+## 2026-07-02 — always-read-agents removed
+
+- **Commit**: `f2557f0`
+- **Retired**: `always-read-agents` skill — removed from source and deploy
+- **Reason**: Circular loop — `AGENTS.md` already tells the AI to scan `.agents/skills/`, so a skill that also says "load the skill system" creates a redundant boot sequence
+- **AGENTS.md**: Simplified to 6-line redirect (no per-skill tables, no categories)
+- **Affected files**: `AGENTS.md`, `bootstrap.sh` FILES array, `README.md` (mermaid + table), `USAGE.md` (4 tree diagrams), `audit-skills`, `generic-conventions`, `help`, `update-skills`, `write-docs`
 - **Fixed**: bash 5.2 `inherit_errexit` grep subshell crashes — `{ grep ... || true; } | wc -l` pattern
 - **Source**: User requested deploy/ separation for cleaner consumer installs + test for self-improving AI pipeline
