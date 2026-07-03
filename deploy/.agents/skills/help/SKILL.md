@@ -16,7 +16,7 @@ When invoked, display this entire file as the response. It is the canonical inde
 
 ---
 
-## Invocable Task Skills (via `/` in VS Code chat)
+## Invocable Task Skills (via `/` command)
 
 | Command | Skill | Description |
 |---------|-------|-------------|

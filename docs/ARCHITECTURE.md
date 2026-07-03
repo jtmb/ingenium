@@ -120,7 +120,7 @@ graph TD
 ## Communication Patterns
 
 The project has no runtime communication — it operates entirely at edit time:
-- **AI reads skills** — VS Code Copilot/Cline scans `.agents/skills/` on startup and when file types change
+- **AI reads skills** — The AI assistant scans `.agents/skills/` on startup and when file types change
 - **AI writes skills** — `update-skills` creates new skill files; `audit-skills` fixes consistency
 - **Bootstrap copies** — `bootstrap.sh` copies `deploy/` contents to target projects
 - **Tests validate** — `test-self-improving.sh` runs as a bash script, not part of the AI loop

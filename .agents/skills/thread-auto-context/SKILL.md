@@ -32,7 +32,7 @@ Session start
        2. Download 5 bridge files from GitHub raw
        3. python3 -m venv .vscode/thread-bridge/.venv
        4. Install requests into that venv
-       5. Write .vscode/mcp.json (Copilot)
+       5. Write .vscode/mcp.json (MCP config for editors that support .vscode/)
        6. Write Cline MCP config (global + workspace)
        7. Check if server is reachable; if not, tell user how to start it
 ```
