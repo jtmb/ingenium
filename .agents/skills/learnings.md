@@ -6,6 +6,17 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 
 ---
 
+## 2026-07-02 — SKILL-INDEX.md + update-skill-index
+
+- **Before**: `6b99ba1` (state before deploy sync)
+- **After**: `e5c91b9`
+- **Added**: `SKILL-INDEX.md` at repo root — canonical index of all 41 skills with descriptions, commands, and links
+- **Added**: `update-skill-index` skill — regenerates SKILL-INDEX.md from skill frontmatter, auto-invokes on skill changes
+- **Updated**: `audit-skills` — added SKILL-INDEX.md as 7th integration check point, plus deploy sync auto-fix rows
+- **Updated**: `help` skill — added `/update-skill-index` to command tables
+- **Updated**: `AGENTS.md` — references SKILL-INDEX.md
+- **Key decision**: `SKILL-INDEX.md` is also synced to `deploy/SKILL-INDEX.md` so target projects get the index
+
 ## 2026-07-02 — agent-pipelines
 
 - **Commit**: `90e7a03`
