@@ -46,7 +46,7 @@ Consult `model-profiles` for detailed model capabilities. These are the canonica
 
 ## Agent File Format
 
-Every agent file in `.agents/agents/` uses this format:
+Every agent file in `.github/agents/` uses this format:
 
 ```yaml
 ---
@@ -126,7 +126,7 @@ Read `model-profiles/SKILL.md` → Cross-Model Strategy Guide. Match the task to
 
 ### Step 4 — Write the Agent File
 
-Create `.agents/agents/{role}.agent.md` using the format above. Follow these principles:
+Create `.github/agents/{role}.agent.md` using the format above. Follow these principles:
 - **Single role**: One persona with focused responsibilities per agent
 - **Minimal tools**: Only what the role needs — excess tools dilute focus
 - **Clear boundaries**: Define what the agent should NOT do
@@ -180,9 +180,9 @@ Append to `.agents/skills/learnings.md`:
 
 ### Procedure
 
-1. **Verify no handoffs reference it** — grep all `.agent.md` files in `.agents/agents/` for the agent name
-2. **Remove the file** — delete `.agents/agents/{name}.agent.md`
-3. **Remove from `deploy/.agents/agents/`** — if it was deployed
+1. **Verify no handoffs reference it** — grep all `.agent.md` files in `.github/agents/` for the agent name
+2. **Remove the file** — delete `.github/agents/{name}.agent.md`
+3. **Remove from `deploy/.github/agents/`** — if it was deployed
 4. **Commit and log**:
 
 ```markdown
@@ -235,12 +235,12 @@ Every agent referenced in a `handoffs:` block must exist:
 
 ```bash
 # Collect all agent names
-for f in .agents/agents/*.agent.md; do
+for f in .github/agents/*.agent.md; do
   grep "^name:" "$f" | sed 's/name: *//'
 done | sort > /tmp/agent-names.txt
 
 # Collect all handoff targets
-for f in .agents/agents/*.agent.md; do
+for f in .github/agents/*.agent.md; do
   grep -A10 "^handoffs:" "$f" | grep "agent:" | sed 's/.*agent: *//'
 done | sort -u > /tmp/handoff-targets.txt
 
@@ -266,5 +266,5 @@ Same pattern as skills — always capture Before/After hashes:
 
 ```bash
 # Revert an agent to its pre-change state:
-git checkout <before-hash> -- .agents/agents/<name>.agent.md
+git checkout <before-hash> -- .github/agents/<name>.agent.md
 ```
