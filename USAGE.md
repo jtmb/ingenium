@@ -43,6 +43,27 @@ Now open any project, start an AI chat, and the hook auto-bootstraps it.
 
 ---
 
+## Quick-Start: One-Liner Deploy
+
+For any project, run this from the project root:
+
+```bash
+curl -fsSL https://github.com/jtmb/ingenium/archive/refs/heads/main.tar.gz | tar -xz --strip=2 -C . ingenium-main/deploy/
+```
+
+This downloads the `deploy/` folder — `.agents/skills/`, `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — directly into your project. Your AI assistant picks them up automatically.
+
+---
+
+## Quick-Start: Manual Install (copy deploy)
+
+```bash
+git clone --depth 1 https://github.com/jtmb/ingenium.git
+cp -r ingeniunm/deploy/. /path/to/your-project/
+```
+
+---
+
 ## Quick-Start: Manual Bootstrap (no hooks)
 
 If you can't use hooks, bootstrap manually:
