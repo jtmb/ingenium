@@ -24,6 +24,10 @@ Every model has a maximum context length. Exceeding it silently truncates the ol
 | Gemma 3 2B | 128K tokens | ~32K tokens | Small projects only beyond 32K |
 | Gemma 2 27B | 8K tokens | ~6K tokens | Very limited — keep contexts short |
 | Gemma 2 9B / 2B | 8K tokens | ~6K tokens | Same — short contexts only |
+| Qwen3.6 27B | 256K tokens | ~192K tokens | Excellent — best-in-class context handling |
+| Qwen3.5 35B | 256K tokens | ~192K tokens | Outstanding for large projects and multi-file refactoring |
+| Qwen3.5 9B | 128K tokens | ~80K tokens | Strong 9B option; improved over Qwen2.5 7B |
+| Gemma 4 12B | 256K tokens | ~160K tokens | Excellent reasoning and tool calling; best 12B-class |
 | Qwen2.5 72B | 128K tokens | ~96K tokens | Excellent for large contexts |
 | Qwen2.5 32B | 128K tokens | ~96K tokens | Same as 72B in context handling |
 | Qwen2.5 14B | 128K tokens | ~64K tokens | Good for medium projects |
@@ -38,11 +42,11 @@ Every model has a maximum context length. Exceeding it silently truncates the ol
 
 ## Qwen Family
 
-### Qwen2.5 (September 2024 – present)
+### Qwen2.5 (September 2024 – succeeded by Qwen 3.5)
 
 **Sizes**: 7B, 14B, 32B, 72B (+ Coder and Math variants)
 
-The Qwen2.5 family is the strongest general-purpose open-weight family as of mid-2026, especially the 32B and 72B variants. Strong across coding, reasoning, and instruction-following.
+The Qwen2.5 family was the strongest general-purpose open-weight family through late 2025, now succeeded by Qwen 3.5 and Qwen 3.6. Still relevant for many tasks, especially the 32B and 72B variants. Strong across coding, reasoning, and instruction-following.
 
 #### Strengths
 
@@ -70,6 +74,70 @@ The Qwen2.5 family is the strongest general-purpose open-weight family as of mid
 - **Qwen2.5-Coder variants**: Prefer these over the base Qwen2.5 for ANY code task. They produce more idiomatic code, fewer hallucinated APIs, and better handle language-specific conventions. The 14B Coder variant approximates 32B base model performance on code tasks.
 - **All Qwen2.5**: They benefit from explicit output formatting. Instead of "fix this bug", say "Return the corrected function with a one-line comment explaining the fix." Be specific about format.
 
+### Qwen 3.6 (Early 2026 – present)
+
+**Sizes**: 27B
+
+The latest Qwen generation as of mid-2026. The 27B variant represents a major leap — it matches or exceeds Qwen2.5 72B on most benchmarks while being dramatically smaller and faster. Likely uses MoE or advanced architecture to achieve this efficiency.
+
+#### Strengths
+
+| Area | Notes |
+|------|-------|
+| **Reasoning** | Best-in-class for its size. Matches Qwen2.5 72B on math, logic, and multi-step reasoning. |
+| **Coding** | Excellent code generation and understanding. Competes with dedicated 32B–70B code models. |
+| **Instruction following** | Top-tier — handles complex, nested instructions reliably. |
+| **Tool calling** | Superior function calling, on par with GPT-3.5. Handles complex tool schemas. |
+| **Context utilization** | Full 256K context with strong middle-context retrieval. |
+
+#### Weaknesses
+
+| Area | Notes |
+|------|-------|
+| **Creative writing** | Good but not exceptional. Still prefers formulaic structure over creativity. |
+| **Availability** | May require newer inference engines; not supported by older Ollama/vLLM versions. |
+
+#### Model-Aware Hints
+
+- **Qwen 3.6 27B**: This is the go-to model when you need close-to-cloud quality locally. Use for complex multi-file refactoring, code review (full 5-lens), hypothesis-driven debugging, and any task requiring sustained reasoning. Its 256K context means you can load entire project directories.
+- **All Qwen 3.6**: Treat this model similarly to how you would treat GPT-3.5 or Claude Haiku — it can handle nearly anything you throw at it. Only reach for larger cloud models for tasks requiring extremely long (200K+) context or specialized domain knowledge.
+
+### Qwen 3.5 (Late 2025 – present)
+
+**Sizes**: 9B, 35B
+
+The bridge generation between Qwen2.5 and Qwen 3.6. The 35B variant is a standout — it outperforms Qwen2.5 72B on coding and reasoning while using half the parameters. The 9B variant significantly improves over Qwen2.5 7B.
+
+#### Strengths (35B)
+
+| Area | Notes |
+|------|-------|
+| **Coding** | Superior to Qwen2.5 72B across all languages. The 35B is the best non-3.6 Qwen for coding. |
+| **Reasoning** | Strong chain-of-thought. Handles multi-step reasoning with few errors. |
+| **Tool calling** | Reliable function calling. Good with complex schemas. |
+| **Context utilization** | 256K context, excellent retention across the full window. |
+
+#### Strengths (9B)
+
+| Area | Notes |
+|------|-------|
+| **Coding** | Strong for 9B class. Outperforms Qwen2.5 7B and Gemma 3 9B on code tasks. |
+| **Reasoning** | Good step-by-step reasoning. Handles single-file debugging well. |
+| **Efficiency** | Runs comfortably on 8GB VRAM. Fast inference. |
+
+#### Weaknesses
+
+| Area | Notes |
+|------|-------|
+| **Creative writing** (both) | Still formulaic. Qwen 3.6 improves this somewhat. |
+| **9B context** | 128K is generous for the size; quality degrades past ~80K tokens. |
+
+#### Model-Aware Hints
+
+- **Qwen 3.5 35B**: The best performance-per-parameter in the Qwen 3.5 lineup. Use for anything you'd use Qwen2.5 72B for — complex code generation, multi-file analysis, code review. Runs at ~2x the speed of Qwen2.5 72B on the same hardware.
+- **Qwen 3.5 9B**: A strong upgrade over Qwen2.5 7B. Use for everyday coding, debugging (bisect method), documentation, and single-file tasks. It outperforms Gemma 3 9B on code but Gemma 3 9B still leads on reasoning and creative tasks.
+- **All Qwen 3.5**: Like Qwen2.5, they benefit from explicit output formatting. Be specific about expected output format.
+
 ### Qwen2 (June 2024 – superseded)
 
 **Sizes**: 7B, 72B
@@ -96,11 +164,11 @@ Early generation. Limited context window (32K, effectively ~16K). Mostly superse
 
 ## Gemma Family
 
-### Gemma 3 (March 2025 – present)
+### Gemma 3 (March 2025 – succeeded by Gemma 4)
 
 **Sizes**: 2B, 7B, 9B, 27B
 
-Google's latest open model family. The 27B variant is a standout: it competes with Qwen2.5 32B in many areas while being smaller and faster. The 9B variant is the strongest 9B-class model available.
+Google's previous-generation open model family. The 27B variant was a standout in its time, now succeeded by Gemma 4. The 9B variant is still the strongest 9B-class model available among the Gemma 3 generation.
 
 #### Strengths
 
@@ -130,6 +198,37 @@ Google's latest open model family. The 27B variant is a standout: it competes wi
 - **Gemma 3 2B**: Extremely limited. Acceptable for classification, simple formatting, and single-command generation. Do NOT use for debugging, refactoring, code review, or any task requiring sustained attention.
 - **All Gemma 3**: Gemma's conciseness is an advantage for speed but can cause it to skip steps. Add explicit "show your reasoning" or "explain step by step" to prompts for complex tasks. This counteracts Gemma's tendency to jump to conclusions.
 - **Gemma 3 + tool calling**: If you need reliable function calling, prefer Qwen2.5. Gemma 3 27B can handle simple tool calls but may fail on complex schemas.
+
+### Gemma 4 (Late 2025 – present)
+
+**Sizes**: 12B
+
+Google's next-generation open model. The 12B variant is a significant leap over Gemma 3 — it addresses Gemma 3's main weakness (tool calling) while improving every other dimension. The 12B size point is new and fills the gap between 9B (too small for complex tasks) and 27B (too large for some hardware).
+
+#### Strengths
+
+| Area | Notes |
+|------|-------|
+| **Reasoning** | Outstanding — matches Gemma 3 27B while being half the size. |
+| **Tool calling** | Massively improved over Gemma 3. Now competitive with Qwen3.5 35B for function calling. |
+| **Code quality** | Significantly better than Gemma 3 9B. Approaches Qwen3.5 35B on most code tasks. |
+| **Conciseness** | Gemma 4 maintains Gemma 3's conciseness while being more thorough — a rare combination. |
+| **Multilingual** | Excellent across many languages. |
+| **Creative tasks** | Best-in-class for open-ended writing among 12B models. |
+| **Safety / refusal** | Well-tuned — very low false refusal rate. |
+
+#### Weaknesses
+
+| Area | Notes |
+|------|-------|
+| **Raw parameter count** | At 12B, still limited for tasks requiring vast knowledge recall. Qwen 3.5 35B has more raw knowledge. |
+| **Very long contexts** | 256K supported but quality degrades past ~160K. Qwen 3.6 27B handles extreme contexts better. |
+
+#### Model-Aware Hints
+
+- **Gemma 4 12B**: The best model in its size class. Use as the default for essentially all tasks — it is equally strong at reasoning, coding, tool calling, and creative work. Its main limitation is raw knowledge capacity compared to much larger models.
+- **Gemma 4 vs Qwen 3.5 35B**: For most coding tasks, they are competitive. Choose Gemma 4 when you need: better reasoning, creative work, or multilingual support. Choose Qwen 3.5 35B when you need: maximum code quality, complex tool chains, or raw knowledge recall.
+- **All Gemma 4**: Unlike Gemma 3, Gemma 4 does not need explicit "show your reasoning" prompting — it does this naturally. However, it still benefits from structured output formats for complex tasks.
 
 ### Gemma 2 (June 2024 – superseded)
 
@@ -164,47 +263,49 @@ First generation. Largely obsolete. Only relevant if you're running an older set
 
 | Task | Best model(s) | Why |
 |------|--------------|-----|
-| Complex code generation | Qwen2.5-Coder 14B / Qwen2.5 32B | Best code quality, tool calling |
-| Debugging (bisect method) | Gemma 3 9B / Qwen2.5 14B | Strong reasoning, good with structured checklists |
-| Debugging (hypothesis-driven) | Qwen2.5 32B / Gemma 3 27B | Sustained reasoning across multiple assumptions |
-| Code review (5-lens) | Qwen2.5 32B / Gemma 3 27B | Breadth of analysis requires larger models |
-| Code review (single lens) | Gemma 3 9B / Qwen2.5 14B | Focused pass on one lens is manageable |
-| Refactoring (simple recipes) | Qwen2.5-Coder 7B / Gemma 3 9B | Pattern matching — small models can handle |
-| Refactoring (multi-recipe chain) | Qwen2.5 32B / Gemma 3 27B | Chaining recipes needs sustained context |
-| Error interpretation | Gemma 3 9B / Qwen2.5 14B | Table lookup + pattern matching |
-| Documentation / README | Gemma 3 27B / Qwen2.5 32B | Creative writing + structure |
-| API design | Qwen2.5 32B / Gemma 3 27B | Needs reasoning about trade-offs |
-| Security audit (CI) | Qwen2.5-Coder 14B / Qwen2.5 32B | Best at structured checklist traversal |
-| CLI / shell scripting | Qwen2.5-Coder 7B / Gemma 3 9B | Flag recall + command construction |
-| Regex | Gemma 3 9B / Qwen2.5 14B | Pattern generation + escaping awareness |
-| Git workflow recovery | Qwen2.5 14B / Gemma 3 9B | Mechanical + lookup — small models handle |
-| Creative / narrative | Gemma 3 27B / Gemma 3 9B | Clearly better than Qwen at creative tasks |
+| Complex code generation | Qwen3.5 35B / Qwen3.6 27B | Best code quality, tool calling, reasoning |
+| Debugging (bisect method) | Gemma 4 12B / Qwen3.5 9B | Strong reasoning, structured checklist adherence |
+| Debugging (hypothesis-driven) | Qwen3.6 27B / Gemma 4 12B | Sustained reasoning across multiple assumptions |
+| Code review (5-lens) | Qwen3.6 27B / Qwen3.5 35B | Breadth of analysis requires larger models |
+| Code review (single lens) | Gemma 4 12B / Qwen3.5 9B | Focused pass on one lens — 12B is ample |
+| Refactoring (simple recipes) | Qwen3.5 9B / Gemma 4 12B | Pattern matching — smaller models handle well |
+| Refactoring (multi-recipe chain) | Qwen3.5 35B / Qwen3.6 27B | Chaining recipes needs sustained context |
+| Error interpretation | Gemma 4 12B / Qwen3.5 9B | Table lookup + pattern matching |
+| Documentation / README | Qwen3.6 27B / Gemma 4 12B | Strong structure + creative writing |
+| API design | Qwen3.5 35B / Qwen3.6 27B | Needs reasoning about trade-offs |
+| Security audit (CI) | Qwen3.5 35B / Qwen3.6 27B | Best at structured checklist traversal |
+| CLI / shell scripting | Qwen3.5 9B / Gemma 4 12B | Flag recall + command construction |
+| Regex | Gemma 4 12B / Qwen3.5 9B | Pattern generation + escaping awareness |
+| Git workflow recovery | Qwen3.5 9B / Gemma 4 12B | Mechanical + lookup — small models handle |
+| Creative / narrative | Qwen3.6 27B / Gemma 4 12B | Best creative output in the lineup |
 
 ### Prompt Adaptation by Model Size
 
 | Parameter range | Prompt strategy | Checklist format? | Context handling |
 |----------------|----------------|-------------------|------------------|
 | **2B–7B** | Single-step, specific, formatted. No multi-step reasoning. | Always — structured lists outperform prose. | Show only the relevant 10-20 lines, not the full file. |
-| **9B–14B** | Multi-step but sequential. One task at a time with explicit instructions. | Preferred — checklist works better than open-ended. | Can handle one full file at a time. Good for focused tasks. |
-| **27B–32B** | Multi-step, complex reasoning. Can chain tasks across files. | Optional — can handle open-ended but still benefits. | Can handle multiple files and project-level context. |
-| **72B** | Near cloud-model capability. Few constraints. | Rarely needed — use when you want exhaustive coverage. | Can handle full project context. Use freely. |
+| **9B–12B** | Multi-step but sequential. One task at a time with explicit instructions. | Preferred — checklist works better than open-ended. | Can handle one full file at a time. Good for focused tasks. |
+| **12B–35B** | Multi-step, complex reasoning. Can chain tasks across files. | Optional — can handle open-ended but still benefits. | Can handle multiple files and project-level context. |
+| **35B–72B** | Near cloud-model capability. Few constraints. | Rarely needed — use when you want exhaustive coverage. | Can handle full project context. Use freely. |
+| **256K context models** | Full project awareness. Can process entire directories. | Not needed — but use for exhaustive coverage checks. | Load entire project directories; excellent retrieval across full window. |
 
 ### When Skills Need Adaptation
 
 | Skill | Model-specific adaptation |
 |-------|-------------------------|
-| `debugging-patterns` | 7B-9B models → force bisect method (mechanical). 27B+ → hypothesis-driven is viable. |
-| `code-review-checklist` | 7B-14B → one lens per turn. 27B+ → two lenses per pass. 72B → full review. |
-| `refactoring-recipes` | 7B-9B → one recipe per commit, show full context. 27B+ → can chain 2-3 recipes. |
-| `self-correction-patterns` | 7B-9B → check Recognition Triggers before every output. 27B+ → can self-initiate backtracking. |
+| `debugging-patterns` | 7B-9B → force bisect method (mechanical). 12B+ (Gemma 4) → hypothesis-driven viable. 27B+ → full hypothesis-driven. |
+| `code-review-checklist` | 7B-12B → one lens per turn. 12B-35B → two lenses per pass. 35B+ → full review. |
+| `refactoring-recipes` | 7B-9B → one recipe per commit, show full context. 12B+ → can chain 2-3 recipes. 35B+ → chain entire refactoring. |
+| `self-correction-patterns` | 7B-9B → check Recognition Triggers before every output. 12B+ → can self-initiate backtracking. |
 | `cli-toolkit` | All models → flag hallucination is universal. Always verify CLI flags against the reference. |
-| `regex-reference` | 7B-14B → escaping mistakes are the most common error. 27B+ → backtracking prevention is the key risk. |
-| `git-workflows` | 7B-14B → use the Situation → Command table (don't construct from memory). 27B+ → can handle multi-step workflows. |
-| `error-interpretation` | 7B-14B → fix symptom not cause. Use the cross-language table to find root cause. 27B+ → trace error chains naturally. |
+| `regex-reference` | 7B-12B → escaping mistakes are the most common error. 12B+ → backtracking prevention is the key risk. |
+| `git-workflows` | 7B-12B → use the Situation → Command table (don't construct from memory). 12B+ → can handle multi-step workflows. |
+| `error-interpretation` | 7B-12B → fix symptom not cause. Use the cross-language table to find root cause. 12B+ → trace error chains naturally. |
 
 ## Model Notes
 
 - **This skill is self-referencing**: The guidance in this file follows the same principles it describes. The cross-model strategy tables are designed to be referenced mechanically — look up your model and task, get the recommendation.
 - **Model comparisons are time-sensitive**: New model versions are released frequently. The rankings in this skill reflect mid-2026. If you are reading this later, the specific comparisons may be outdated but the framework (parameter size → capability mapping, prompt adaptation strategies) remains valid.
-- **When in doubt, prefer the larger model**: If two models are available and one is larger, use it — unless the task is trivial. Larger models produce fewer errors, hallucinate less, and follow instructions more reliably. The inference cost difference is usually negligible for coding tasks.
-- **The "9B sweet spot"**: Models in the 9B–14B range (Gemma 3 9B, Qwen2.5 14B) are the best performance-per-resource tradeoff for most coding tasks. They fit on consumer GPUs (8–16GB VRAM), run at usable speeds, and handle 90% of single-file tasks correctly.
+- **When in doubt, prefer the larger model OR the newer generation**: If two models are available, prefer the newer generation (Qwen 3.6 > Qwen 3.5 > Qwen2.5; Gemma 4 > Gemma 3 > Gemma 2). Newer generations consistently outperform older larger models. A Qwen 3.5 35B beats Qwen2.5 72B on most tasks.
+- **The "12B sweet spot"**: With the release of Gemma 4 12B and Qwen 3.5 9B, the sweet spot has shifted upward from 9B to 9B–12B. These models fit on consumer GPUs (8–16GB VRAM), run at usable speeds, and handle 95% of typical coding tasks correctly. They also support 128K–256K context, enabling full-file and multi-file workflows.
+- **256K context models change the game**: Qwen 3.5 35B, Qwen 3.6 27B, and Gemma 4 12B all support 256K context. This means you can load entire project directories, maintain very long conversations, and process large files without truncation. Adjust your workflow accordingly — these models can handle large-scale context that was previously only possible with cloud APIs.
