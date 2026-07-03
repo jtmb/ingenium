@@ -14,7 +14,7 @@ Key properties:
 ```
 ingenium/
 ├── .agents/                    ← AI conventions system (the "product")
-│   ├── skills/                 ← 40 skills — each is a SKILL.md with YAML frontmatter
+│   ├── skills/                 ← 41 skills — each is a SKILL.md with YAML frontmatter
 │   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
 │   │   ├── {framework}-conventions/ ← nextjs, python, go, rust, typescript-standalone
 │   │   ├── {domain}-skills/       ← containers, kubernetes, api-design, sql-database, shell-scripts
@@ -25,7 +25,7 @@ ingenium/
 │   │   └── hook-bootstrap.sh   ← Auto-detection + interactive mode
 │   └── tests/ → moved to tests/
 ├── tests/                      ← Test suite (at project root, alongside docs/)
-│   └── test-self-improving.sh  ← Validates update-skills detection pipeline (21 tests)
+│   └── test-self-improving.sh  ← Validates update-skills detection pipeline (7 test functions, 20 checks)
 ├── deploy/                     ← Clean mirror for bootstrapping other projects
 │   ├── AGENTS.md               ← Minimal redirect (same as root)
 │   └── .agents/skills/         ← Skills only — no scripts, hooks, docs, or tests
@@ -81,7 +81,7 @@ The project detects its own gaps using four signals:
 3. **Repeated conventions** — patterns used 3+ times without a skill
 4. **Stale content** — skill references wrong versions or deleted paths
 
-The `test-self-improving.sh` suite (21 tests) validates all four signals, deploy integrity, frontmatter validity, and file drift.
+The `test-self-improving.sh` suite (7 test functions, 20 checks) validates all four signals, deploy integrity, frontmatter validity, and file drift.
 
 ## Data Flow
 
