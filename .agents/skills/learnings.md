@@ -9,6 +9,17 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-03 — playwright-mcp deploy sync + audit deploy mirror check
+
+- **Before**: `15e47ab` (state before fixes)
+- **After**: `6c7caec`
+- **Added**: `playwright-mcp` to `bootstrap.sh` FILES array as `optional` (was source-only, now deployable)
+- **Fixed**: `README.md` — removed `(source only)` label from playwright-mcp row
+- **Fixed**: `tests/test-self-improving.sh` — removed playwright-mcp from SOURCE_ONLY list (test 4b now expects it in deploy)
+- **Added**: Deploy mirror completeness check to `audit-skills` (check #8 — source vs deploy cross-reference)
+- **Synced**: audit-skills changes to deploy/ mirror
+- **Root cause**: bootstrap.sh has hardcoded FILES array (no auto-discovery); audit-skills had no deploy mirror completeness check
+
 ## 2026-07-02 — SKILL-INDEX.md + update-skill-index
 
 - **Before**: `6b99ba1` (state before deploy sync)
