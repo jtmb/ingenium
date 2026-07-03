@@ -13,33 +13,6 @@ description: "Model-aware instruction tuning for local LLMs — Qwen and Gemma f
 - You're debugging why a model produced unexpectedly poor output
 - You want to tailor prompts, chain-of-thought, or tool usage patterns to the specific model
 
-## 🔴 HARD RULE — Know Your Model's Context Window
-
-Every model has a maximum context length. Exceeding it silently truncates the oldest content, which can cause the model to lose track of instructions, file contents, or conversation history.
-
-| Model | Max context | Effective working limit | Recommendation |
-|-------|-------------|------------------------|----------------|
-| Gemma 3 27B | 128K tokens | ~96K tokens before quality degrades | Safe for large files, multi-file projects |
-| Gemma 3 9B / 7B | 128K tokens | ~64K tokens | Good for medium projects; degrade past 64K |
-| Gemma 3 2B | 128K tokens | ~32K tokens | Small projects only beyond 32K |
-| Gemma 2 27B | 8K tokens | ~6K tokens | Very limited — keep contexts short |
-| Gemma 2 9B / 2B | 8K tokens | ~6K tokens | Same — short contexts only |
-| Qwen3.6 27B | 256K tokens | ~192K tokens | Excellent — best-in-class context handling |
-| Qwen3.5 35B | 256K tokens | ~192K tokens | Outstanding for large projects and multi-file refactoring |
-| Qwen3.5 9B | 128K tokens | ~80K tokens | Strong 9B option; improved over Qwen2.5 7B |
-| Gemma 4 12B | 256K tokens | ~160K tokens | Excellent reasoning and tool calling; best 12B-class |
-| Qwen2.5 72B | 128K tokens | ~96K tokens | Excellent for large contexts |
-| Qwen2.5 32B | 128K tokens | ~96K tokens | Same as 72B in context handling |
-| Qwen2.5 14B | 128K tokens | ~64K tokens | Good for medium projects |
-| Qwen2.5 7B | 128K tokens | ~32K tokens | Keep prompts focused, avoid large files |
-| Qwen2.5-Coder 7B/14B | 128K tokens | ~64K tokens | Good for code-heavy contexts |
-| Qwen2 7B | 32K tokens | ~24K tokens | Moderate context; prefer Qwen2.5 |
-| Qwen1.5 7B/14B | 32K tokens | ~16K tokens | Limited; upgrade to Qwen2.5 if possible |
-
-**Practical rule of thumb**: If the skill or project files exceed half the model's max context, split the work into smaller turns or use a model with a larger context window.
-
----
-
 ## Qwen Family
 
 ### Qwen2.5 (September 2024 – succeeded by Qwen 3.5)
@@ -257,25 +230,76 @@ First generation. Largely obsolete. Only relevant if you're running an older set
 
 ---
 
+## DeepSeek Family
+
+### DeepSeek-V4 (April 2026 – present)
+
+**Sizes**: V4-Flash (284B total / 13B activated), V4-Pro (1.6T total / 49B activated)
+
+DeepSeek's fourth-generation model series, released in April 2026. Both models use Mixture-of-Experts (MoE) architecture with a novel Hybrid Attention mechanism combining Compressed Sparse Attention (CSA) and Heavily Compressed Attention (HCA). The V4-Pro-Max is widely regarded as the best open-weight model family available as of mid-2026, bridging the gap with leading closed-source models.
+
+Both models are available as open weights (MIT license) and via API (`deepseek-v4-flash`, `deepseek-v4-pro`) at `api.deepseek.com` using an OpenAI-compatible or Anthropic-compatible format.
+
+#### Architecture
+
+| Property | V4-Flash | V4-Pro |
+|----------|----------|--------|
+| **Total params** | 284B | 1.6T |
+| **Active params** | 13B | 49B |
+| **Architecture** | MoE (Hybrid Attention: CSA + HCA) | MoE (Hybrid Attention: CSA + HCA) |
+| **Pre-training** | 32T+ tokens | 32T+ tokens |
+| **License** | MIT | MIT |
+
+#### Strengths
+
+| Area | Notes |
+|------|-------|
+| **Coding** | Top-tier. V4-Pro-Max achieves 93.5 LiveCodeBench, 80.6% SWE-bench Verified, 3206 Codeforces rating — competitive with the best closed-source models. |
+| **Reasoning** | Outstanding. V4-Pro-Max scores 94.3 GPQA Diamond, 44.4 HLE, 95.2 HMMT 2026 Feb. Three reasoning modes: Non-think (fast), Think High (balanced), Think Max (maximum reasoning budget). |
+| **Knowledge** | V4-Pro is the best open model for world knowledge — 91.0 MMLU-Pro, 75.6 SimpleQA-Verified. |
+| **Agentic tasks** | Excellent tool calling and agentic workflows. Terminal Bench 2.0: 67.9, SWE Pro: 55.4, BrowseComp: 83.4, MCPAtlas: 73.6. |
+| **Long context** | Supports up to 1M tokens with efficient hybrid attention. MRCR 1M: 83.5 MMR, CorpusQA 1M: 62.0 ACC. |
+| **Efficiency (Flash)** | Only 13B activated parameters — runs on consumer hardware while delivering near-frontier performance. |
+
+#### Weaknesses
+
+| Area | Notes |
+|------|-------|
+| **Hardware requirements (Pro)** | 49B activated is demanding. Requires multiple GPUs or high-RAM setup for local inference at reasonable speed. |
+| **Inference complexity** | MoE + hybrid attention means specialized inference code. Not as straightforward as dense models. Requires the `deepseek_v4` Transformers integration or dedicated inference engines. |
+| **Availability** | Very recent (April 2026). May not yet be supported by all inference frameworks. Ollama/LM Studio support may require updates. |
+| **V4-Flash knowledge** | At 13B activated, Flash lags behind Pro on pure knowledge benchmarks and complex agentic workflows. |
+
+#### Model-Aware Hints
+
+- **DeepSeek-V4-Pro**: Use this when you need the absolute best open model for complex multi-file refactoring, full 5-lens code review, hypothesis-driven debugging, security audits, and any task requiring sustained reasoning with high accuracy. Enable Think Max mode for the hardest problems. This is a cloud-scale model — expect to use API access or a powerful multi-GPU setup.
+- **DeepSeek-V4-Flash**: The best efficiency-to-performance ratio in open models. At only 13B activated parameters, it delivers coding and reasoning performance that rivals or exceeds 70B+ dense models. Use as your default for most coding tasks when you want local inference. Enable Think High mode for complex debugging or Think Max for the hardest reasoning tasks (with a larger thinking budget).
+- **Both models**: They support three reasoning effort modes. Adjust `reasoning_effort` in API calls or configure thinking budget in local inference. Use Non-think for simple/chatty tasks, Think High for standard coding, Think Max for the hardest reasoning problems.
+- **V4-Flash vs. Qwen 3.5 35B**: V4-Flash (13B active) is broadly competitive with Qwen 3.5 35B on coding and reasoning while being much smaller and faster. Qwen wins on raw knowledge recall; V4-Flash wins on long-context and agentic tasks.
+- **V4-Pro vs. Qwen 3.6 27B**: V4-Pro (49B active) outperforms Qwen 3.6 27B on knowledge, coding benchmarks, and agentic tasks. Qwen 3.6 27B is a more practical choice for local deployment.
+- **All DeepSeek V4**: They work best with explicit instruction formatting and structured output. They follow system prompts very precisely. Use the Non-Think → Think High → Think Max progression: start with the lowest sufficient mode to save compute and time.
+
+---
+
 ## Cross-Model Strategy Guide
 
 ### Which Model for Which Task
 
 | Task | Best model(s) | Why |
 |------|--------------|-----|
-| Complex code generation | Qwen3.5 35B / Qwen3.6 27B | Best code quality, tool calling, reasoning |
+| Complex code generation | DeepSeek-V4-Pro / Qwen3.6 27B | Best code quality, tool calling, reasoning |
 | Debugging (bisect method) | Gemma 4 12B / Qwen3.5 9B | Strong reasoning, structured checklist adherence |
-| Debugging (hypothesis-driven) | Qwen3.6 27B / Gemma 4 12B | Sustained reasoning across multiple assumptions |
-| Code review (5-lens) | Qwen3.6 27B / Qwen3.5 35B | Breadth of analysis requires larger models |
-| Code review (single lens) | Gemma 4 12B / Qwen3.5 9B | Focused pass on one lens — 12B is ample |
-| Refactoring (simple recipes) | Qwen3.5 9B / Gemma 4 12B | Pattern matching — smaller models handle well |
-| Refactoring (multi-recipe chain) | Qwen3.5 35B / Qwen3.6 27B | Chaining recipes needs sustained context |
-| Error interpretation | Gemma 4 12B / Qwen3.5 9B | Table lookup + pattern matching |
+| Debugging (hypothesis-driven) | DeepSeek-V4-Pro / Qwen3.6 27B | Sustained reasoning across multiple assumptions |
+| Code review (5-lens) | DeepSeek-V4-Pro / Qwen3.6 27B | Breadth of analysis requires larger models |
+| Code review (single lens) | DeepSeek-V4-Flash / Gemma 4 12B | Focused pass on one lens |
+| Refactoring (simple recipes) | DeepSeek-V4-Flash / Qwen3.5 9B | Pattern matching — small efficient models handle |
+| Refactoring (multi-recipe chain) | DeepSeek-V4-Pro / Qwen3.6 27B | Chaining recipes needs sustained context |
+| Error interpretation | DeepSeek-V4-Flash / Gemma 4 12B | Table lookup + pattern matching |
 | Documentation / README | Qwen3.6 27B / Gemma 4 12B | Strong structure + creative writing |
-| API design | Qwen3.5 35B / Qwen3.6 27B | Needs reasoning about trade-offs |
-| Security audit (CI) | Qwen3.5 35B / Qwen3.6 27B | Best at structured checklist traversal |
-| CLI / shell scripting | Qwen3.5 9B / Gemma 4 12B | Flag recall + command construction |
-| Regex | Gemma 4 12B / Qwen3.5 9B | Pattern generation + escaping awareness |
+| API design | DeepSeek-V4-Pro / Qwen3.5 35B | Needs deep reasoning about trade-offs |
+| Security audit (CI) | DeepSeek-V4-Pro / Qwen3.5 35B | Best at structured checklist traversal |
+| CLI / shell scripting | DeepSeek-V4-Flash / Qwen3.5 9B | Flag recall + command construction |
+| Regex | Gemma 4 12B / DeepSeek-V4-Flash | Pattern generation + escaping awareness |
 | Git workflow recovery | Qwen3.5 9B / Gemma 4 12B | Mechanical + lookup — small models handle |
 | Creative / narrative | Qwen3.6 27B / Gemma 4 12B | Best creative output in the lineup |
 
@@ -305,7 +329,9 @@ First generation. Largely obsolete. Only relevant if you're running an older set
 ## Model Notes
 
 - **This skill is self-referencing**: The guidance in this file follows the same principles it describes. The cross-model strategy tables are designed to be referenced mechanically — look up your model and task, get the recommendation.
+- **Context size is set by the user or harness**: The context window is configured by the inference engine (Ollama, vLLM, llama.cpp) or API provider — not baked into the model. A model that *supports* 256K context may be run with only 8K if the user chooses. Always check the running configuration rather than assuming a model's full capability.
 - **Model comparisons are time-sensitive**: New model versions are released frequently. The rankings in this skill reflect mid-2026. If you are reading this later, the specific comparisons may be outdated but the framework (parameter size → capability mapping, prompt adaptation strategies) remains valid.
-- **When in doubt, prefer the larger model OR the newer generation**: If two models are available, prefer the newer generation (Qwen 3.6 > Qwen 3.5 > Qwen2.5; Gemma 4 > Gemma 3 > Gemma 2). Newer generations consistently outperform older larger models. A Qwen 3.5 35B beats Qwen2.5 72B on most tasks.
-- **The "12B sweet spot"**: With the release of Gemma 4 12B and Qwen 3.5 9B, the sweet spot has shifted upward from 9B to 9B–12B. These models fit on consumer GPUs (8–16GB VRAM), run at usable speeds, and handle 95% of typical coding tasks correctly. They also support 128K–256K context, enabling full-file and multi-file workflows.
-- **256K context models change the game**: Qwen 3.5 35B, Qwen 3.6 27B, and Gemma 4 12B all support 256K context. This means you can load entire project directories, maintain very long conversations, and process large files without truncation. Adjust your workflow accordingly — these models can handle large-scale context that was previously only possible with cloud APIs.
+- **When in doubt, prefer the larger model OR the newer generation**: If two models are available, prefer the newer generation (DeepSeek-V4 > Qwen 3.6 > Qwen 3.5 > Qwen2.5; Gemma 4 > Gemma 3 > Gemma 2). Newer generations consistently outperform older larger models. A Qwen 3.5 35B beats Qwen2.5 72B on most tasks.
+- **The "12B sweet spot"**: With the release of Gemma 4 12B and Qwen 3.5 9B, the sweet spot has shifted upward from 9B to 9B–12B. These models fit on consumer GPUs (8–16GB VRAM), run at usable speeds, and handle 95% of typical coding tasks correctly. DeepSeek-V4-Flash (13B active) extends this further — near-frontier performance at consumer-friendly active parameter counts.
+- **MoE models change the efficiency calculus**: DeepSeek-V4-Flash uses only 13B activated parameters out of 284B total. When comparing models, compare **active parameters** (what runs at inference time), not total parameters. A 13B-active MoE model can outperform a 35B dense model while using less memory and compute.
+- **Reasoning effort modes are the new knob**: DeepSeek-V4 (Non-think / Think High / Think Max) and other recent models offer adjustable reasoning budgets. Start with the fastest mode that works, and escalate only for difficult problems. This is more efficient than changing models for every task.
