@@ -46,7 +46,7 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 
 - **Commit**: `438c302`
 - **Added**: `deploy/` directory — mirrors only deployable files (21 skills, hooks, docs, scripts). Source-only items excluded: create-readme, gh-cli, playwright-mcp, thread-auto-context, learnings.md
-- **Added**: `test-self-improving.sh` in `.agents/skills/update-skills/` — validates all 4 detection signals, deploy separation integrity, frontmatter validity, and deploy file drift
+- **Added**: `test-self-improving.sh` in `tests/` — validates all 4 detection signals, deploy separation integrity, frontmatter validity, and deploy file drift
 - **Changed**: `bootstrap.sh` BOOTSTRAP_DIR now points to `deploy/` instead of repo root
 
 ## 2026-07-02 — always-read-agents removed
