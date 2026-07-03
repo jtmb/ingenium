@@ -1,8 +1,24 @@
-# Skills Learnings Log
+# Skill & Agent Learnings Log
 
-Changelog of all skill additions, retirements, and significant updates. Appended automatically by `update-skills` and `audit-skills`.
+Changelog of all skill additions, retirements, and significant updates. Appended automatically by `update-skills`, `audit-skills`, and `manage-agents`.
 
-**Convention**: Every entry MUST include both `**Before**:` and `**After**:` commit hashes. This enables reverting any skill to its pre-change state via `git checkout <before> -- .agents/skills/<name>/`. Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going forward, always capture both.
+**Convention**: Every entry MUST include both `**Before**:` and `**After**:` commit hashes. This enables reverting any skill or agent to its pre-change state:
+- Skills: `git checkout <before> -- .agents/skills/<name>/`
+- Agents: `git checkout <before> -- .agents/agents/<name>.agent.md`
+
+Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going forward, always capture both.
+
+### Agent Entry Template
+
+```markdown
+## YYYY-MM-DD — {agent-name} (agent)
+
+- **Before**: `{hash}` (state before agent change)
+- **After**: `{hash}`
+- **Added/Updated/Retired**: `{agent-name}.agent.md` — {one-line description}
+- **Model**: {model assignment}
+- **Source**: {what triggered — new role, model-profile update, retired role}
+```
 
 ---
 
