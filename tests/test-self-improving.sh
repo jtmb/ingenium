@@ -290,18 +290,18 @@ test_deploy_separation() {
         fail "deploy/ has $extra_count unexpected top-level item(s)" "should only have .agents/, AGENTS.md, and SKILL-INDEX.md"
     fi
 
-    # Verify no extra dirs inside deploy/.agents (only skills/)
+    # Verify only expected dirs inside deploy/.agents (skills/ and agents/)
     local agent_extra=0
     for item in "$DEPLOY_DIR/.agents"/*; do
         local name; name=$(basename "$item")
-        if [[ "$name" != "skills" ]]; then
+        if [[ "$name" != "skills" && "$name" != "agents" ]]; then
             agent_extra=$((agent_extra + 1))
         fi
     done
     if [[ "$agent_extra" -eq 0 ]]; then
-        pass "deploy/.agents is clean — only skills/"
+        pass "deploy/.agents is clean — only skills/ and agents/"
     else
-        fail "deploy/.agents has $agent_extra extra item(s)" "should only have skills/"
+        fail "deploy/.agents has $agent_extra extra item(s)" "should only have skills/ and agents/"
     fi
 
     # b) Source-only skills should NOT be in deploy/
@@ -369,6 +369,28 @@ test_deploy_integrity() {
         pass "All deployed skills match source (0 drifted files)"
     else
         fail "$drift_count deployed skill(s) differ from source" "run: cp -r .agents/skills/<name>/SKILL.md deploy/.agents/skills/<name>/"
+    fi
+
+    # Check all deployed agents match source
+    local agent_drift_count=0
+    if [[ -d "$REPO_ROOT/.agents/agents" ]]; then
+        for deploy_agent in "$DEPLOY_DIR/.agents/agents"/*.agent.md; do
+            local aname
+            aname=$(basename "$deploy_agent")
+            local source_agent="$REPO_ROOT/.agents/agents/$aname"
+            if [[ -f "$source_agent" ]]; then
+                if ! diff -q "$source_agent" "$deploy_agent" &>/dev/null; then
+                    info "$aname has drifted between source and deploy"
+                    agent_drift_count=$((agent_drift_count + 1))
+                fi
+            fi
+        done
+    fi
+
+    if [[ "$agent_drift_count" -eq 0 ]]; then
+        pass "All deployed agents match source (0 drifted files)"
+    else
+        fail "$agent_drift_count deployed agent(s) differ from source" "run: cp .agents/agents/<name>.agent.md deploy/.agents/agents/<name>.agent.md"
     fi
 }
 

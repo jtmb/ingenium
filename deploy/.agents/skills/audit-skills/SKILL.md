@@ -65,7 +65,7 @@ grep -B5 "<skill-name>" .agents/skills/learnings.md
 
 ### learnings.md Format
 
-Every entry MUST include both Before and After commit hashes. Never commit without both.
+Every entry MUST include both Before and After commit hashes. Never commit without both. The learnings log covers both skills and agents.
 
 ```markdown
 ## YYYY-MM-DD — {brief description}
@@ -76,11 +76,21 @@ Every entry MUST include both Before and After commit hashes. Never commit witho
 - **Audit result**: {N} discrepancies found, {N} fixed
 ```
 
+To find the before-hash, search learnings.md:
+
+```bash
+# For skill changes:
+grep -B5 "<skill-name>" .agents/skills/learnings.md
+
+# For agent changes:
+grep -B5 "<agent-name> (agent)" .agents/skills/learnings.md
+```
+
 ---
 
 ## What Gets Audited
 
-The audit checks 7 integration points. Every skill should appear in ALL of them (or have a valid reason not to).
+The audit checks 8 integration points. Every skill should appear in ALL of them (or have a valid reason not to).
 
 | Check | File(s) | What "correct" looks like |
 |-------|---------|--------------------------|
@@ -91,6 +101,7 @@ The audit checks 7 integration points. Every skill should appear in ALL of them 
 | **5. AGENTS.md index** | `AGENTS.md` | Points to `/help` — no stale references to deleted skills or docs |
 | **6. USAGE.md** | `USAGE.md` → skill listings, directory trees | Skill appears in tree diagrams and reference tables |
 | **7. SKILL-INDEX.md** | `SKILL-INDEX.md` (repo root) | Skill is listed in the correct table, total count matches `ls -d .agents/skills/*/ \| wc -l` |
+| **8. Agent definitions** | `.agents/agents/*.agent.md` | Frontmatter valid, `name` matches filename, `model` matches model-profiles, handoff chains resolve, deploy mirror matches source |
 
 ---
 
@@ -174,7 +185,45 @@ Compare the directory list against `SKILL-INDEX.md` at the repo root:
 
 **Fix**: If SKILL-INDEX.md is stale, run `/update-skill-index` to regenerate it, or manually update the specific entries.
 
-### Step 8 — Auto-Fix, Commit, and Log
+### Step 8 — Cross-Reference Agent Definitions
+
+Compare agent files against each other and against `model-profiles`:
+
+- Every agent in `.agents/agents/` must have valid frontmatter (`name`, `description`, `model`, `tools`)
+- `name` must match filename stem (e.g., `plan.agent.md` → `name: Plan`)
+- `model` must be consistent with `model-profiles` model-to-role assignments
+- Handoff chains must resolve — every agent referenced in `handoffs:` or `agents:` must exist
+- Agent count in deploy mirror must match source
+- No stale agent files in deploy (agent removed from source but still in deploy)
+- No deploy drift — deploy mirror content must match source
+
+```bash
+# Count agents in source vs deploy
+ls .agents/agents/*.agent.md | wc -l
+ls deploy/.agents/agents/*.agent.md | wc -l
+
+# Check name matches filename
+for f in .agents/agents/*.agent.md; do
+  name=$(grep "^name:" "$f" | head -1 | sed 's/name: *//')
+  expected=$(basename "$f" .agent.md | sed 's/\(.*\)/\u\1/')
+  if [ "$name" != "$expected" ]; then
+    echo "MISMATCH: $f name=$name expected=$expected"
+  fi
+done
+
+# Check handoff chains resolve
+for f in .agents/agents/*.agent.md; do
+  grep "^name:" "$f" | sed 's/name: *//'
+done | sort > /tmp/agent-names.txt
+
+for f in .agents/agents/*.agent.md; do
+  awk '/^handoffs:/,/^[a-z]/' "$f" | grep "agent:" | sed 's/.*agent: *//'
+done | sort -u > /tmp/handoff-targets.txt
+
+comm -13 /tmp/agent-names.txt /tmp/handoff-targets.txt
+```
+
+### Step 9 — Auto-Fix, Commit, and Log
 
 When the audit finds issues, **fix them immediately**. Then commit and log.
 
@@ -196,6 +245,14 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | SKILL-INDEX.md has duplicate entry | Remove the duplicate row |
 | SKILL-INDEX.md updated but deploy/ is stale | `cp SKILL-INDEX.md deploy/SKILL-INDEX.md` |
 | update-skill-index added but deploy/ missing | `cp -r .agents/skills/update-skill-index deploy/.agents/skills/update-skill-index` |
+| Agent missing from bootstrap.sh | Add FILES entry: `".agents/agents/{name}.agent.md\|.agents/agents/{name}.agent.md\|optional"` |
+| Agent missing from deploy mirror | `cp .agents/agents/{name}.agent.md deploy/.agents/agents/{name}.agent.md` |
+| Agent deploy drift (content mismatch) | `cp .agents/agents/{name}.agent.md deploy/.agents/agents/{name}.agent.md` |
+| Agent handoff target not found | Either create the missing agent or remove the broken handoff entry |
+| Agent model stale (not in model-profiles) | Update `model:` to current model-profiles recommendation |
+| Agent frontmatter invalid (name mismatch, missing fields) | Fix frontmatter per `manage-agents` validation rules |
+| manage-agents skill missing from bootstrap.sh | Add FILES entry: `".agents/skills/manage-agents/SKILL.md\|.agents/skills/manage-agents/SKILL.md\|optional"` |
+| manage-agents skill missing from deploy | `cp -r .agents/skills/manage-agents deploy/.agents/skills/manage-agents` |
 
 **After applying fixes, always commit-before + commit-after and log both hashes:**
 
