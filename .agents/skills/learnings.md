@@ -71,7 +71,7 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 ## 2026-07-02 — audit fix (5 new skills wired in)
 
 - **Before**: `570e88d` (state after user added 5 new skills, before audit fixes)
-- **After**: `pending` (will update after commit)
+- **After**: `ad426bc`
 - **Added 5 skills to bootstrap.sh**: `gitignore` (always), `web-design-reviewer` (optional), `chrome-devtools` (optional), `github-actions-hardening` (always), `github-actions-efficiency` (always), `postgresql-optimization` (always), `github-issues` (optional)
 - **Added 5 new skills to README**: `github-actions-hardening`, `github-actions-efficiency`, `postgresql-optimization` → Always-Included table; `chrome-devtools`, `github-issues` → Task Skills table
 - **Added 5 nodes to README mermaid**: GH, GE, PG, CD, IS
