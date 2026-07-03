@@ -38,13 +38,33 @@ Invoke this skill when working on files that don't match any framework-specific 
 
 **If docs/ files are all empty templates (`<!-- TODO -->`), populate them first before making other changes.** Empty docs are worse than no docs — they give false confidence.
 
-## Code Comments — Mandatory
+## 🔴 HARD RULE — Comments Are Mandatory
 
-Every function, class, non-obvious block, and exported symbol MUST have a comment:
+**Every function, class, non-obvious block, and exported symbol MUST have a comment.** This is not optional. This is not "if it's complex." If it exists in code, it needs a comment.
+
+**What triggers a required comment:**
+
+| Code element | Required comment |
+|-------------|-----------------|
+| Function / method | What it does, what it returns, edge cases. JSDoc/TSDoc for public APIs. |
+| Class / struct / interface | Purpose and responsibility. Why it exists. |
+| Non-obvious logic block | Why this approach, not what the code already says. |
+| Exported symbol (const, type, enum) | What it represents and where it's used. |
+| Configuration value | What it controls and valid range/options. |
+| Regex or complex condition | Plain-English explanation of what it matches. |
+
+**Comment quality rules:**
 - Write as if explaining to a new teammate — plain English
-- Focus on intent and edge cases, not restating the code
-- Keep comments up to date when logic changes
-- JSDoc/TSDoc for public APIs; inline `//` for internal logic
+- Focus on **intent and edge cases**, not restating the code
+- Keep comments up to date when logic changes — stale comments are worse than no comments
+- Public APIs: JSDoc/TSDoc/docstring with `@param`, `@returns`, `@throws`
+- Internal logic: inline `//` for why, not what
+
+**Workflow:**
+1. Write the code
+2. Ask: "Would a new teammate understand this without asking me?"
+3. If NO: add a comment. If YES but it's a public API: add a docstring anyway.
+4. Never declare a function done without a comment above it.
 
 ## Reusable Code — DRY
 
