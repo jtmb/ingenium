@@ -15,9 +15,9 @@
 # ───────────────────────────────────────────────────────────
 set -uo pipefail
 
-BOOTSTRAP_REPO_URL="${GH_LLM_BOOTSTRAP_URL:-https://github.com/jtmb/copilot-ai-bootstrap.git}"
+BOOTSTRAP_REPO_URL="${GH_LLM_BOOTSTRAP_URL:-https://github.com/jtmb/ingenium.git}"
 BOOTSTRAP_REPO_REF="${GH_LLM_BOOTSTRAP_REF:-main}"
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/gh-llm-bootstrap"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/ingenium"
 FORCE=false
 FRAMEWORK=""
 PROJECT_ROOT=""

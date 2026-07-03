@@ -251,7 +251,7 @@ When a skill is no longer relevant:
 
 # Part 2: Maintaining the Bootstrap Repo
 
-This section is for maintainers of the `gh-llm-bootstrap` repo itself. Source skills live at `.agents/skills/` and are copied to `.agents/skills/` in target projects by `bootstrap.sh`.
+This section is for maintainers of the Ingenium repo itself. Source skills live at `.agents/skills/` and are copied to `.agents/skills/` in target projects by `bootstrap.sh`.
 
 ## The Skill Architecture
 
