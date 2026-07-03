@@ -99,7 +99,7 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 ## 2026-07-02 — 8 new skills for local LLMs (9B–27B)
 
 - **Before**: `cad78e2` (state before 8 new skills)
-- **After**: `pending` (will update after commit)
+- **After**: `9dc0ea8`
 - **Category**: Always-Included cross-cutting skills
 - **Added 4 reasoning scaffolding skills** (structure for weaker reasoners):
   - `debugging-patterns` — bisect, log-driven, stack-trace analysis, anti-patterns table, agent checklist
