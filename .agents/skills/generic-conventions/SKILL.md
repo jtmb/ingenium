@@ -15,6 +15,29 @@ Invoke this skill when working on files that don't match any framework-specific 
 2. **Check for framework-specific skills** in `.agents/skills/`
 3. **Understand the existing patterns** in the codebase before making changes
 
+## 🔴 HARD RULE — Docs Must Be Updated In The Same Turn
+
+**After ANY code change, you MUST check and update docs before declaring the task done.** This is not optional. This is not "if you remember." This is mandatory.
+
+**Triggers — after editing files in these paths, immediately check docs freshness:**
+
+| Edited path | Check these docs |
+|-------------|-----------------|
+| `.agents/skills/*/SKILL.md` (skill added/removed/changed) | `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/README.md` |
+| `.agents/scripts/` (bootstrap or hooks changed) | `docs/ARCHITECTURE.md` |
+| `deploy/` (structure or files changed) | `docs/ARCHITECTURE.md` |
+| `tests/` (test infra changed) | `docs/TECH-STACK.md` |
+| `README.md`, `USAGE.md`, `AGENTS.md` (project root docs) | `docs/README.md` |
+
+**Workflow:**
+1. Finish the code change
+2. Ask: "Did I edit files in any of the trigger paths above?"
+3. If YES: read the corresponding docs, update them, and commit in the SAME turn
+4. If the relevant doc doesn't exist yet, create it
+5. Never wait for the user to say "update the docs" — do it proactively
+
+**If docs/ files are all empty templates (`<!-- TODO -->`), populate them first before making other changes.** Empty docs are worse than no docs — they give false confidence.
+
 ## Code Comments — Mandatory
 
 Every function, class, non-obvious block, and exported symbol MUST have a comment:
@@ -22,14 +45,6 @@ Every function, class, non-obvious block, and exported symbol MUST have a commen
 - Focus on intent and edge cases, not restating the code
 - Keep comments up to date when logic changes
 - JSDoc/TSDoc for public APIs; inline `//` for internal logic
-
-## Documentation — Always Keep In Sync
-
-Every source change must update the corresponding docs:
-1. Check which docs in `docs/` cover the behavior you changed
-2. Re-read those docs
-3. Update anything that's now wrong. If no doc covers it, create one.
-4. Apply doc updates in the same turn as the code change.
 
 ## Reusable Code — DRY
 

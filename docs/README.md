@@ -12,9 +12,9 @@ This directory is the project's knowledge base. It is maintained by both humans 
 
 | Doc | Covers | When to Update |
 |-----|--------|---------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Project structure, key components, data flow, communication patterns | New components, refactored structure, changed data flow |
-| [TECH-STACK.md](./TECH-STACK.md) | Languages, frameworks, key dependencies, versions, rationale | New dependencies, version upgrades, replaced libraries |
-| [CONVENTIONS.md](./CONVENTIONS.md) | Naming patterns, file organization, error handling, logging, git practices | New conventions, changed patterns |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Project structure, key components, skill system, deploy separation, data flow, bootstrap flow | New skills, moved directories, changed bootstrap logic, new top-level components |
+| [TECH-STACK.md](./TECH-STACK.md) | Languages, tools, test infrastructure, dependency policy | New tooling, changed test framework, dependency changes |
+| [CONVENTIONS.md](./CONVENTIONS.md) | Naming patterns, file organization, error handling, git practices, code style, YAML frontmatter rules | New conventions, changed naming rules, new file patterns |
 
 ## Adding a New Doc
 

@@ -1,13 +1,42 @@
 ---
 name: write-docs
-description: "Write high-quality documentation — READMEs, API docs, ADRs, architecture decision records, and AGENTS.md skill index. Use after building features, adding/removing skills, or when docs are stale. Invokes the Explore subagent by default."
+description: "Write high-quality documentation — READMEs, API docs, ADRs, architecture decision records, and AGENTS.md skill index. AUTO-INVOKE after any change to the skill system (.agents/skills/, deploy/, tests/, bootstrap scripts) or when docs are stale. Do not wait for the user to ask — check docs freshness proactively after every code change. Invokes the Explore subagent by default."
 ---
 
 # Write Project Documentation
 
+## 🔴 Auto-Invoke Trigger — Do NOT Wait For the User
+
+**This skill should be proactively invoked after ANY change to:**
+
+- `.agents/skills/*/SKILL.md` — skill added, removed, or modified
+- `.agents/scripts/` — bootstrap or hook scripts changed
+- `deploy/` — deploy structure or files changed
+- `tests/` — test infrastructure changed
+- Project root files — `README.md`, `USAGE.md`, `AGENTS.md`
+
+**Workflow:** Complete the code change → check which docs are affected → update them → commit. Same turn. No waiting.
+
+If `docs/` files are all empty `<!-- TODO -->` templates, stop and populate them first. Empty docs give false confidence.
+
 ## When to Use
 
 Invoke this skill to write project documentation. Good docs are the difference between a project that's used and one that's abandoned. They answer "what is this?", "how do I use it?", and "why was it built this way?"
+
+## Incremental Updates — Don't Regenerate Everything
+
+When a specific change was made, update only the affected docs:
+
+| Change | Docs to update |
+|--------|---------------|
+| Added/removed a skill | `docs/ARCHITECTURE.md` (skill list, directory map), `docs/CONVENTIONS.md` (naming patterns) |
+| Moved directories (e.g., tests/ to root) | `docs/ARCHITECTURE.md` (directory map) |
+| Changed bootstrap logic | `docs/ARCHITECTURE.md` (bootstrap flow) |
+| Added new dependencies | `docs/TECH-STACK.md` (dependencies table) |
+| Changed naming or file patterns | `docs/CONVENTIONS.md` |
+| Added/removed top-level dirs | `docs/ARCHITECTURE.md`, `docs/README.md` |
+
+**Never regenerate all docs from scratch** unless the project was freshly scaffolded. Incremental updates keep docs credible.
 
 ## Before You Write
 
