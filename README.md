@@ -16,11 +16,11 @@
 
 </div>
 
-**The problem:** Every time you start a new project with VS Code Copilot, the AI doesn't know your conventions. It doesn't know to keep docs in sync, write comments, run tests before claiming done, or use your framework's idioms. You repeat the same instructions in every chat — and the AI drifts from your standards.
+**The problem:** Every time you start a new project with an AI coding assistant, the AI doesn't know your conventions. It doesn't know to keep docs in sync, write comments, run tests before claiming done, or use your framework's idioms. You repeat the same instructions in every chat — and the AI drifts from your standards.
 
-**What this solves:** A **skill-based AI conventions system** — **skills that grow with you** 🌱 — that bootstraps into every project automatically. 39 skills covering frameworks, domains, and tasks — each invoked on-demand by VS Code Copilot. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
+**What this solves:** A **skill-based AI conventions system** — **skills that grow with you** 🌱 — that bootstraps into every project automatically. 39 skills covering frameworks, domains, and tasks — each invoked on-demand by any AI assistant that supports the `.agents/` convention. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
 
-Configure it once as a hook. Every project you open gets auto-bootstrapped with the right skills — framework detection, layered conventions, docs templates, and enforcement guardrails. No cloning, no manual copying, no per-project setup.
+Configure it once as a hook in your editor. Every project you open gets auto-bootstrapped with the right skills — framework detection, layered conventions, docs templates, and enforcement guardrails. No cloning, no manual copying, no per-project setup.
 
 ```mermaid
 graph LR
@@ -48,7 +48,7 @@ When the AI detects a pattern, it **creates** a new skill or updates an existing
 
 ## Quick Start — Set Up the Hook (do this once)
 
-VS Code Copilot reads hooks from `~/.copilot/hooks/` (global, applies to every project). Create this file:
+AI coding assistants that support the `.agents/` convention (e.g., VS Code Copilot, Cline) read hooks from their hook directory. For VS Code Copilot, hooks live at `~/.copilot/hooks/` (global, applies to every project). Create this file:
 
 **`~/.copilot/hooks/trigger-bootstrap.json`**
 
@@ -67,14 +67,14 @@ VS Code Copilot reads hooks from `~/.copilot/hooks/` (global, applies to every p
 
 That's it. Now:
 
-1. Open any project in VS Code
-2. Start a Copilot chat
+1. Open any project in VS Code (or your AI-supporting editor)
+2. Start an AI chat
 3. The hook auto-detects the framework (Next.js, Python, Go, Rust, or generic) and bootstraps the project
 4. The AI follows all rules automatically — doc sync, code comments, testing, DRY
 
 **You never run the bootstrap scripts directly again.** The hook handles it.
 
-> **Where hooks live:** `~/.copilot/hooks/*.json` — NOT in `settings.json`. This is VS Code Copilot's global hooks directory. Each `.json` file registers one or more lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`).
+> **Where hooks live (VS Code Copilot):** `~/.copilot/hooks/*.json` — NOT in `settings.json`. This is VS Code Copilot's global hooks directory. Other AI assistants may use different hook locations. Each `.json` file registers one or more lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`).
 
 > **What happens?** `.agents/scripts/hook-bootstrap.sh` caches this repo in `~/.cache/ingenium/`, auto-detects the framework from `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml`, and calls `.agents/scripts/bootstrap.sh --auto --framework <detected> /path/to/your/project`.
 

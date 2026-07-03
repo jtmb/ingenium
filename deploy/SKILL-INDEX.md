@@ -6,7 +6,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 
 ---
 
-## Invocable Task Skills (via `/` in VS Code chat)
+## Invocable Task Skills (via `/` command)
 
 | Command | Skill | Description |
 |---------|-------|-------------|

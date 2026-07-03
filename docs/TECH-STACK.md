@@ -32,7 +32,7 @@ The `package.json` at the project root contains entries like `solidjs`, `astro`,
 |------|----------|
 | **shellcheck** (optional) | Linting bootstrap and test scripts |
 | **git** | Version control, conventional commits |
-| **VS Code** | Primary editor — the skill system targets VS Code Copilot/Cline |
+| **Any editor with AI support** | The skill system targets any AI coding assistant that supports the `.agents/` convention (Copilot, Cline, Claude, and others) |
 
 ## Infrastructure
 
