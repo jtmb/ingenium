@@ -25,6 +25,20 @@ Before responding to the user's first request, complete these 4 steps:
 | Edit shell scripts | `shell-scripts` — `set -euo pipefail`, quoting |
 | Edit SQL/migrations | `sql-database` — parameterized queries, indexing |
 
+## 🔴 Local Model Mandatory Skills
+
+**If you are running as a local/offline model (no cloud API), these skills are NOT suggestions. You MUST load them before ANY action.**
+
+| Skill | Why mandatory for local models |
+|-------|-------------------------------|
+| `model-profiles` | Know your own model's capabilities, context limits, and prompt preferences. You make different mistakes than cloud models — adapt accordingly. |
+| `local-model-commands` | **ALL terminal commands** — never `&`, never infinite-wait. Local models frequently hang terminals with backgrounded commands. |
+| `debugging-patterns` | Systematic debugging — isolation, bisection, log-driven analysis. Local models tend to guess instead of methodically isolate. |
+| `useful-tests` | Test lifecycle, assertions, CI readiness. Local models often write tests that pass trivially or fail on edge cases. |
+| `project-structure` | Layering, naming, boundaries. Local models create `utils/` dirs and flat `src/` structures that rot over time. |
+| `error-interpretation` | Map error signatures to root causes. Local models misinterpret compiler errors and chase the wrong fix. |
+| `self-correction-patterns` | Backtracking triggers, verification loops, assumption checking. Local models double down on wrong answers instead of self-correcting. |
+
 ## Skill Quick-Reference
 
 ### ⚡ Always Loaded
@@ -62,7 +76,7 @@ Before responding to the user's first request, complete these 4 steps:
 | `code-review-checklist` | PR review, code quality audit |
 | `refactoring-recipes` | Improving code structure |
 | `self-correction-patterns` | Recovering from AI mistakes |
-| `skill` | 🔴 **Session init** — `/skill` injects bootstrap payload |
+| `skill-load` | 🔴 **Session init** — `/skill-load` injects bootstrap payload |
 | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep |
 | `regex-reference` | Writing or reviewing regular expressions |
 | `git-workflows` | Rebase, bisect, reflog, conventional commits |
@@ -78,7 +92,7 @@ Before responding to the user's first request, complete these 4 steps:
 
 | Command | Use when |
 |---------|---------|
-| `/skill` | 🔴 **FIRST MESSAGE in every session** — injects the skill-system bootstrap payload |
+| `/skill-load` | 🔴 **FIRST MESSAGE in every session** — injects the skill-system bootstrap payload |
 | `/help` | Need a skill overview |
 | `/repo-context` | Starting a new session |
 | `/update-skills` | New patterns, deps, or codebase growth — creates/retires skills |

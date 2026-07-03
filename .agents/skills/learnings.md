@@ -9,23 +9,36 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-03 — `/skill-load` rename + 🔴 Local Model Mandatory Skills section
+
+- **Before**: `30ef808` (state after /skill addition, before rename)
+- **After**: (pending)
+- **Changes**:
+  1. **Renamed `/skill` → `/skill-load`**: directory `.agents/skills/skill/` → `.agents/skills/skill-load/`, frontmatter `name: skill` → `name: skill-load`, all references updated in AGENTS.md, SKILL-INDEX.md, bootstrap.sh, deploy mirror, and learnings.md
+  2. **Added 🔴 Local Model Mandatory Skills section** to AGENTS.md: 7-row table listing skills that local/offline models MUST load — `model-profiles`, `local-model-commands`, `debugging-patterns`, `useful-tests`, `project-structure`, `error-interpretation`, `self-correction-patterns`. Each row explains WHY the skill is mandatory (not a suggestion) for local models.
+  3. **Updated `/skill-load` SKILL.md** to reference the new 🔴 Local Model Mandatory Skills section and include it in Step 2
+- **Rationale**: `/skill` was too easy to miss in a crowded AGENTS.md. `/skill-load` is explicit about its purpose. The mandatory skills section closes the gap where local models would skip these 7 skills because they looked like "suggestions" rather than requirements.
+- **Updated**: source + deploy for AGENTS.md, SKILL-INDEX.md, skill-load/SKILL.md, bootstrap.sh, learnings.md
+
+---
+
 ## 2026-07-03 — `/skill` command: session-init bootstrap payload
 
 - **Before**: `00b8acc` (state before skill creation)
-- **After**: `b896dc4`
+- **After**: `b896dc4` (originally created as `/skill`, later renamed to `/skill-load`)
 - **Problem**: Even with AGENTS.md rewrite, there was no guarantee the model reads it. AGENTS.md lives on disk, but local models don't auto-load files. They need a `/command` that injects the loading instructions directly into the prompt.
-- **Root cause**: VS Code Copilot Chat injects SKILL.md content when a `/command` is invoked. By creating a `/skill` command, the payload is guaranteed to be in the first prompt — the model CANNOT skip it because it's in the context window.
-- **Fixed**: Created `.agents/skills/skill/SKILL.md` — a 5-step numbered protocol that the model MUST execute before any action:
+- **Root cause**: VS Code Copilot Chat injects SKILL.md content when a `/command` is invoked. By creating a `/skill-load` command, the payload is guaranteed to be in the first prompt — the model CANNOT skip it because it's in the context window.
+- **Fixed**: Created `.agents/skills/skill-load/SKILL.md` — a 5-step numbered protocol that the model MUST execute before any action:
   1. Read AGENTS.md
   2. Match skills to user request using the Quick-Reference table
   3. Load every matching skill (read full SKILL.md)
   4. Note the 🔴 HARD RULEs
   5. Confirm which skills apply, then proceed
 - **Anti-Skip Rule**: Explicit instruction that the model cannot claim it "already knows" — must re-read AGENTS.md even if cached
-- **Added to**: AGENTS.md task skills table (`/skill` as first entry), SKILL-INDEX.md (Invocable Task Skills + Always-Included Domain + Skill Links), bootstrap.sh FILES array (`always` tier)
-- **Deployed**: `deploy/.agents/skills/skill/SKILL.md` synced, deploy/AGENTS.md and deploy/SKILL-INDEX.md synced
+- **Added to**: AGENTS.md task skills table (`/skill-load` as first entry), SKILL-INDEX.md (Invocable Task Skills + Always-Included Domain + Skill Links), bootstrap.sh FILES array (`always` tier)
+- **Deployed**: `deploy/.agents/skills/skill-load/SKILL.md` synced, deploy/AGENTS.md and deploy/SKILL-INDEX.md synced
 - **Skill count**: 42 → 43
-- **Design rationale**: This is a "payload skill" — its SKILL.md IS the payload. When user types `/skill`, VS Code injects this content into the prompt. The model has no choice but to follow the numbered protocol. Unlike AGENTS.md (which sits on disk and can be ignored), the payload is in-context and unavoidable.
+- **Design rationale**: This is a "payload skill" — its SKILL.md IS the payload. When user types `/skill-load`, VS Code injects this content into the prompt. The model has no choice but to follow the numbered protocol. Unlike AGENTS.md (which sits on disk and can be ignored), the payload is in-context and unavoidable.
 
 ---
 
