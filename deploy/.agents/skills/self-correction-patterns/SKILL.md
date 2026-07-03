@@ -33,6 +33,9 @@ Every output must be verified against the available evidence before being submit
 | User says "no" or "that's wrong" within seconds of your response | You made an assumption without verifying it | Backtrack to the last verified state, re-read the relevant code/files |
 | User repeats the same request with different words | They didn't get what they needed — your output missed the mark | Stop. Re-read the original request. Ask: "I want to make sure I understand. Are you asking for X?" |
 | A tool returns an error | Your command or input was incorrect | Read the error text fully, then fix the *command*, not just the error message |
+| You are about to run `find` or `grep` in `node_modules`, `.git`, `dist`, `build` | This command will scan thousands of files and hang the terminal | **STOP.** Use `tsc --noEmit`, `ls`, or read specific files instead. Check `local-model-commands` skill. |
+| A command has been running for 10+ seconds with no output | It's hung — scanning a massive directory or waiting for input it can't see | Kill it. Try a different approach: read files directly, use compiler errors, or search only `src/`. |
+| Your last response was incomplete and your next command is exploratory (`find`, `grep`, `ls`) | You're in a "drip-feed" loop — partial answers → exploratory commands → more partial answers → never finishes | **STOP.** Go back to the original request. State what you know and what you don't. Ask the user a direct question instead of running another command. |
 | You have written more than 50 lines without running anything | You are building on unverified assumptions | Stop, run the code, check for errors, then continue |
 | The same approach has been tried twice | It will not work the third time — the strategy is wrong | Switch to a fundamentally different approach |
 | The user provides a file path or code snippet you haven't seen | You may have been hallucinating a different file | Read the actual file before responding |

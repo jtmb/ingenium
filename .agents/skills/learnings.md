@@ -9,6 +9,24 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-03 — hang/drip-feed detection: `find` in node_modules + hung commands
+
+- **Before**: `894b5ee`
+- **After**: (pending)
+- **Problem**: Models run `find node_modules/ -name "*.d.ts"` which scans 50K–500K files, hangs the terminal with zero output, and the model sits there waiting. Also: "drip-feed" loops where the model dribbles partial answers, runs exploratory commands, gets no useful output, and never converges on a solution.
+- **Root cause**: `local-model-commands` only covered `&` and infinite-wait commands (servers, tail -f). `self-correction-patterns` had no trigger for hung commands or drip-feed loops.
+- **Fixed**:
+  1. **`local-model-commands`**: Added 2 new 🔴 HARD RULEs:
+     - **NEVER Search `node_modules` or Build Output Directories** — `find`/`grep` in `node_modules`, `.git`, `dist`, `build`, `.next`, `target`, `__pycache__`, `venv` hangs the terminal. 5 specific alternatives listed (tsc --noEmit, cat package.json, rg src/, ls, read docs).
+     - **Pipe Large Output Through `wc -l` First** — measure output size before running, use `head` after confirming it's manageable. > 100 results = too much, narrow search.
+  2. **`self-correction-patterns`**: Added 3 new Recognition Triggers:
+     - `find`/`grep` in `node_modules` → STOP, use tsc or read files instead
+     - Command running 10+ seconds with no output → Kill it, try different approach
+     - Last response incomplete + next command is exploratory → Drip-feed loop detected, STOP and ask user directly
+- **Updated**: `deploy/` synced. 19/19 tests pass.
+
+---
+
 ## 2026-07-03 — 🔴 Mandatory Skills: unconditional, 25 non-infra skills
 
 - **Before**: `621bdd3`
