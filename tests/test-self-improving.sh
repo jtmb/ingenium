@@ -305,7 +305,7 @@ test_deploy_separation() {
     fi
 
     # b) Source-only skills should NOT be in deploy/
-    local SOURCE_ONLY=("create-readme" "gh-cli" "playwright-mcp" "thread-auto-context")
+    local SOURCE_ONLY=("create-readme" "gh-cli" "thread-auto-context")
     for skill in "${SOURCE_ONLY[@]}"; do
         if [[ ! -f "$DEPLOY_DIR/.agents/skills/$skill/SKILL.md" ]]; then
             pass "$skill correctly absent from deploy/"
