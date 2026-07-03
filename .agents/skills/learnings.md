@@ -12,7 +12,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 ## 2026-07-03 — `/skill-load` rename + 🔴 Local Model Mandatory Skills section
 
 - **Before**: `30ef808` (state after /skill addition, before rename)
-- **After**: (pending)
+- **After**: `9db70bd`
 - **Changes**:
   1. **Renamed `/skill` → `/skill-load`**: directory `.agents/skills/skill/` → `.agents/skills/skill-load/`, frontmatter `name: skill` → `name: skill-load`, all references updated in AGENTS.md, SKILL-INDEX.md, bootstrap.sh, deploy mirror, and learnings.md
   2. **Added 🔴 Local Model Mandatory Skills section** to AGENTS.md: 7-row table listing skills that local/offline models MUST load — `model-profiles`, `local-model-commands`, `debugging-patterns`, `useful-tests`, `project-structure`, `error-interpretation`, `self-correction-patterns`. Each row explains WHY the skill is mandatory (not a suggestion) for local models.
