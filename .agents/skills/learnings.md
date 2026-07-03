@@ -12,7 +12,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 ## 2026-07-03 — AGENTS.md rewrite: mandatory skill-loading protocol
 
 - **Before**: `829e6e4` (state before AGENTS.md rewrite)
-- **After**: `0807d16`
+- **After**: `e04250c`
 - **Problem**: Local models were ignoring the entire skill system — not creating skills, not logging to learnings, not following anything outside `generic-conventions`
 - **Root cause**: AGENTS.md was 10 lines of passive text ("Start here: check .agents/skills/"). Local models read it as informational, skipped skill discovery, and fell through to `generic-conventions` (the mermaid default)
 - **Fixed**: Rewrote AGENTS.md from 10-line signpost to authoritative protocol with:
