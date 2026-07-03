@@ -314,11 +314,11 @@ test_deploy_separation() {
         fi
     done
 
-    # c) learnings.md should NOT be in deploy/
-    if [[ ! -f "$DEPLOY_DIR/.agents/skills/learnings.md" ]]; then
-        pass "learnings.md correctly absent from deploy/"
+    # c) learnings.md (template) SHOULD be in deploy/ for consumer projects
+    if [[ -f "$DEPLOY_DIR/.agents/skills/learnings.md" ]]; then
+        pass "learnings.md correctly present in deploy/"
     else
-        fail "learnings.md leaked into deploy/" "changelog is source-only"
+        fail "learnings.md missing from deploy/" "consumer projects need a learnings template"
     fi
 
     # d) bootstrap.sh (source-only) uses deploy/ as BOOTSTRAP_DIR
