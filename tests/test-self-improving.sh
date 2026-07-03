@@ -14,13 +14,13 @@
 #   6. No source-only files leaked into deploy/
 #
 # Usage:
-#   .agents/tests/test-self-improving.sh           # run all tests
-#   .agents/tests/test-self-improving.sh --verbose  # detailed output
+#   tests/test-self-improving.sh           # run all tests
+#   tests/test-self-improving.sh --verbose  # detailed output
 # ───────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKILLS_DIR="$REPO_ROOT/.agents/skills"
 DEPLOY_DIR="$REPO_ROOT/deploy"
 VERBOSE=false

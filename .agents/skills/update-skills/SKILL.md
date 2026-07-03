@@ -177,14 +177,14 @@ For skills that need external docs loaded on demand:
     └── api-reference.md       ← detailed API docs, loaded when needed
 ```
 
-### Tests Go in `.agents/tests/`, Not in Skills or Deploy
+### Tests Go in `tests/`, Not in Skills or Deploy
 
-Tests for the skill system itself — validation scripts, audit helpers, self-improving pipeline tests — belong in `.agents/tests/` at the repo root. They should **never** be placed in:
+Tests for the skill system itself — validation scripts, audit helpers, self-improving pipeline tests — belong in `tests/` at the project root, alongside `docs/`. They should **never** be placed in:
 
 - `deploy/.agents/` — deploy is a clean slate of skills only; no scripts, hooks, or tests
 - Individual skill directories — skills are documentation, not test harnesses
 
-**If `.agents/tests/` doesn't exist, create it.** The `useful-tests` skill covers testing conventions; any test script added to `.agents/tests/` should follow those patterns.
+**If `tests/` doesn't exist, create it.** The `useful-tests` skill covers testing conventions; any test script added to `tests/` should follow those patterns.
 
 ### Step 5 — Commit, Then Log to learnings.md
 
