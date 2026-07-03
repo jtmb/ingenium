@@ -213,7 +213,7 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | `github-issues` | `/github-issues` — create/update/manage issues, labels, milestones, dependencies, templates |
 | `create-readme` | `/create-readme` — create a README.md file for the project **(source only)** |
 | `gh-cli` | `/gh-cli` — GitHub CLI integration for repos, PRs, issues, releases **(source only)** |
-| `playwright-mcp` | `/playwright-mcp` — browser automation via Playwright MCP **(source only)** |
+| `playwright-mcp` | `/playwright-mcp` — browser automation via Playwright MCP |
 | `thread-auto-context` | `/thread-auto-context` — automatic persistent memory via Thread MCP **(source only)** |
 
 ## Architecture — Skill System

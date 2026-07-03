@@ -101,6 +101,7 @@ The audit checks 8 integration points. Every skill should appear in ALL of them 
 | **5. AGENTS.md index** | `AGENTS.md` | Points to `/help` — no stale references to deleted skills or docs |
 | **6. USAGE.md** | `USAGE.md` → skill listings, directory trees | Skill appears in tree diagrams and reference tables |
 | **7. SKILL-INDEX.md** | `SKILL-INDEX.md` (repo root) | Skill is listed in the correct table, total count matches `ls -d .agents/skills/*/ \| wc -l` |
+| **8. Deploy mirror** | `deploy/.agents/skills/` vs `.agents/skills/` | Every non-source-only skill in source has a matching directory in deploy, and deploy has no orphans |
 
 ---
 
@@ -206,6 +207,8 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | SKILL-INDEX.md has duplicate entry | Remove the duplicate row |
 | SKILL-INDEX.md updated but deploy/ is stale | `cp SKILL-INDEX.md deploy/SKILL-INDEX.md` |
 | update-skill-index added but deploy/ missing | `cp -r .agents/skills/update-skill-index deploy/.agents/skills/update-skill-index` |
+| Skill in source but missing from deploy/ | `cp -r .agents/skills/{name} deploy/.agents/skills/{name}` and add to bootstrap.sh |
+| Skill in deploy but not in source (orphan) | Remove from deploy/ and remove from bootstrap.sh |
 
 **After applying fixes, always commit-before + commit-after and log both hashes:**
 
@@ -241,6 +244,19 @@ comm -23 \
 ```
 
 This shows skills that exist as directories but are NOT in bootstrap.sh. Reverse `comm -13` to find bootstrap.sh entries pointing to nonexistent directories.
+
+```bash
+# One-liner to check deploy mirror completeness
+# Skills in source that are NOT in deploy (expected: source-only skills only)
+echo "=== Skills in source but missing from deploy/ ==="
+comm -23 \
+  <(for d in .agents/skills/*/; do basename "$d"; done | sort) \
+  <(for d in deploy/.agents/skills/*/; do basename "$d"; done | sort)
+echo "=== Skills in deploy but not in source (orphans) ==="
+comm -13 \
+  <(for d in .agents/skills/*/; do basename "$d"; done | sort) \
+  <(for d in deploy/.agents/skills/*/; do basename "$d"; done | sort)
+```
 
 ---
 
