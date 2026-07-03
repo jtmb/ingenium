@@ -61,7 +61,7 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 
 ## 2026-07-02 — audit fix (rename to Ingenium + README stale counts)
 
-- **Commit**: `pending`
+- **Commit**: `e0f8028`
 - **Renamed**: "Copilot AI Bootstrap" → "Ingenium" across 7 files — `README.md`, `USAGE.md`, `ARCHITECTURE.md`, `session-start.json`, `hook-bootstrap.sh`, `update-skills` SKILL.md (source + deploy)
 - **Catchphrase**: "Genius doesn't repeat itself. Neither should you."
 - **Visual**: Added 🌱 "skills that grow with you" badge (purple) to README header
