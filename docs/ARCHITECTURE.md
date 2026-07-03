@@ -14,7 +14,7 @@ Key properties:
 ```
 ingenium/
 ├── .agents/                    ← AI conventions system (the "product")
-│   ├── skills/                 ← 31 skills — each is a SKILL.md with YAML frontmatter
+│   ├── skills/                 ← 39 skills — each is a SKILL.md with YAML frontmatter
 │   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
 │   │   ├── {framework}-conventions/ ← nextjs, python, go, rust, typescript-standalone
 │   │   ├── {domain}-skills/       ← containers, kubernetes, api-design, sql-database, shell-scripts
@@ -67,7 +67,7 @@ Two bash scripts that scaffold new projects with the skill system:
 ### Deploy Separation (`deploy/`)
 
 A clean mirror containing only what gets deployed to target projects:
-- `deploy/.agents/skills/` — All 27 deployable skills (excludes 4 source-only: create-readme, gh-cli, playwright-mcp, thread-auto-context)
+- `deploy/.agents/skills/` — All 35 deployable skills (excludes 4 source-only: create-readme, gh-cli, playwright-mcp, thread-auto-context)
 - `deploy/AGENTS.md` — Minimal redirect
 - No scripts, hooks, docs, tests, or README — those are source-only
 

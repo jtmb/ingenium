@@ -6,8 +6,8 @@
 ### Genius doesn't repeat itself. Neither should you.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-31%20files-green?style=flat-square" alt="Skill files" />
-  <img src="https://img.shields.io/badge/frameworks-4%20%2B%2015%20cross--cutting-purple?style=flat-square" alt="Frameworks" />
+  <img src="https://img.shields.io/badge/skills-39%20files-green?style=flat-square" alt="Skill files" />
+  <img src="https://img.shields.io/badge/frameworks-4%20%2B%2023%20cross--cutting-purple?style=flat-square" alt="Frameworks" />
   <img src="https://img.shields.io/badge/skills%20that%20grow%20with%20you-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Skills that grow with you" />
   <img src="https://img.shields.io/badge/total-~3%2C500%20lines-informational?style=flat-square" alt="Total lines" />
 </p>
@@ -18,7 +18,7 @@
 
 **The problem:** Every time you start a new project with VS Code Copilot, the AI doesn't know your conventions. It doesn't know to keep docs in sync, write comments, run tests before claiming done, or use your framework's idioms. You repeat the same instructions in every chat — and the AI drifts from your standards.
 
-**What this solves:** A **skill-based AI conventions system** — **skills that grow with you** 🌱 — that bootstraps into every project automatically. 31 skills covering frameworks, domains, and tasks — each invoked on-demand by VS Code Copilot. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
+**What this solves:** A **skill-based AI conventions system** — **skills that grow with you** 🌱 — that bootstraps into every project automatically. 39 skills covering frameworks, domains, and tasks — each invoked on-demand by VS Code Copilot. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
 
 Configure it once as a hook. Every project you open gets auto-bootstrapped with the right skills — framework detection, layered conventions, docs templates, and enforcement guardrails. No cloning, no manual copying, no per-project setup.
 
@@ -85,7 +85,7 @@ That's it. Now:
 | **Core rules** | `.agents/skills/generic-conventions/SKILL.md` | The definitive 13-section reference: comments, docs, testing, DRY, security, error handling, config, naming |
 | **Project structure** | `.agents/skills/project-structure/SKILL.md` | Monorepo layout, service layering (pages/features/domain/infrastructure), naming, boundaries |
 | **Frameworks** | `.agents/skills/{fw}-conventions/SKILL.md` (4 files) | Next.js, Python, Go, Rust — build commands, idioms, project layout |
-| **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (15 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests, Gitignore, Web Design, GitHub Actions (hardening + efficiency), PostgreSQL — everything in between |
+| **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (23 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests, Gitignore, Web Design, GitHub Actions (hardening + efficiency), PostgreSQL, Debugging, Code Review, Refactoring, Self-Correction, CLI Toolkit, Regex, Git Workflows, Error Interpretation — everything in between |
 | **Docs** | `docs/` (4 files) | Templates the AI fills in as it works — architecture, tech stack, conventions |
 | **Tasks** | `.agents/skills/{name}/SKILL.md` (8 files deployed + 4 source-only) | `generate-docs`, `repo-context`, `write-docs`, `update-skills`, `audit-skills`, `help`, `chrome-devtools`, `github-issues` — invocable via `/` slash commands |
 | **Hooks** | `.agents/hooks/` (3 files) | PreToolUse guard, SessionStart bootstrap, PostToolUse lint |
@@ -123,6 +123,14 @@ That's it. Now:
 | 🛡️ GitHub Actions Hardening | `github-actions-hardening` | Security review — script injection, token scoping, supply chain, triggers |
 | ⚡ GitHub Actions Efficiency | `github-actions-efficiency` | Audit CI minutes, reduce costs, optimize workflow performance |
 | 🐘 PostgreSQL | `postgresql-optimization` | JSONB, arrays, custom types, full-text search, window functions, extensions |
+| 🐛 Debugging | `debugging-patterns` | Systematic debugging — bisect, log-driven, stack-trace analysis, anti-patterns |
+| ✅ Code Review | `code-review-checklist` | 5-lens review across security, correctness, perf, readability, testing |
+| 🔧 Refactoring | `refactoring-recipes` | 10 named patterns with explicit before/after code examples |
+| 🔄 Self-Correction | `self-correction-patterns` | AI mistake recognition, backtracking triggers, verification loops |
+| 🛠️ CLI Toolkit | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep — flags, recipes, gotchas |
+| 🔤 Regex | `regex-reference` | Common patterns, per-language escaping, catastrophic backtracking |
+| 🌿 Git Workflows | `git-workflows` | Rebase, bisect, reflog recovery, conventional commits, squashing |
+| ❌ Error Interpretation | `error-interpretation` | Error signature → root cause per language — cross-language patterns |
 
 ### Task Skills (invoke via `/`)
 
@@ -170,6 +178,14 @@ graph TD
     D -->|PostgreSQL| PG[postgresql-optimization]
     D -->|browser testing| CD[chrome-devtools]
     D -->|issue management| IS[github-issues]
+    D -->|debugging| DP[debugging-patterns]
+    D -->|code review| CR[code-review-checklist]
+    D -->|refactoring| RR[refactoring-recipes]
+    D -->|self-correction| SC[self-correction-patterns]
+    D -->|CLI tools| CT[cli-toolkit]
+    D -->|regex| RX[regex-reference]
+    D -->|git workflows| GW[git-workflows]
+    D -->|error interpretation| EI[error-interpretation]
     D -->|anything else| I[generic-conventions]
     E --> J[AI follows applicable skills]
     F --> J
@@ -191,6 +207,14 @@ graph TD
     PG --> J
     CD --> J
     IS --> J
+    DP --> J
+    CR --> J
+    RR --> J
+    SC --> J
+    CT --> J
+    RX --> J
+    GW --> J
+    EI --> J
     I --> J
     J --> K[update-skills detects new patterns]
     K --> L[Skill system grows with project]
