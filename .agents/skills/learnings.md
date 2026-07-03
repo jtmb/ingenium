@@ -9,6 +9,26 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-03 — `/skill` command: session-init bootstrap payload
+
+- **Before**: `00b8acc` (state before skill creation)
+- **After**: (pending)
+- **Problem**: Even with AGENTS.md rewrite, there was no guarantee the model reads it. AGENTS.md lives on disk, but local models don't auto-load files. They need a `/command` that injects the loading instructions directly into the prompt.
+- **Root cause**: VS Code Copilot Chat injects SKILL.md content when a `/command` is invoked. By creating a `/skill` command, the payload is guaranteed to be in the first prompt — the model CANNOT skip it because it's in the context window.
+- **Fixed**: Created `.agents/skills/skill/SKILL.md` — a 5-step numbered protocol that the model MUST execute before any action:
+  1. Read AGENTS.md
+  2. Match skills to user request using the Quick-Reference table
+  3. Load every matching skill (read full SKILL.md)
+  4. Note the 🔴 HARD RULEs
+  5. Confirm which skills apply, then proceed
+- **Anti-Skip Rule**: Explicit instruction that the model cannot claim it "already knows" — must re-read AGENTS.md even if cached
+- **Added to**: AGENTS.md task skills table (`/skill` as first entry), SKILL-INDEX.md (Invocable Task Skills + Always-Included Domain + Skill Links), bootstrap.sh FILES array (`always` tier)
+- **Deployed**: `deploy/.agents/skills/skill/SKILL.md` synced, deploy/AGENTS.md and deploy/SKILL-INDEX.md synced
+- **Skill count**: 42 → 43
+- **Design rationale**: This is a "payload skill" — its SKILL.md IS the payload. When user types `/skill`, VS Code injects this content into the prompt. The model has no choice but to follow the numbered protocol. Unlike AGENTS.md (which sits on disk and can be ignored), the payload is in-context and unavoidable.
+
+---
+
 ## 2026-07-03 — AGENTS.md rewrite: mandatory skill-loading protocol
 
 - **Before**: `829e6e4` (state before AGENTS.md rewrite)

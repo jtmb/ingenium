@@ -62,6 +62,7 @@ Before responding to the user's first request, complete these 4 steps:
 | `code-review-checklist` | PR review, code quality audit |
 | `refactoring-recipes` | Improving code structure |
 | `self-correction-patterns` | Recovering from AI mistakes |
+| `skill` | 🔴 **Session init** — `/skill` injects bootstrap payload |
 | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep |
 | `regex-reference` | Writing or reviewing regular expressions |
 | `git-workflows` | Rebase, bisect, reflog, conventional commits |
@@ -77,6 +78,7 @@ Before responding to the user's first request, complete these 4 steps:
 
 | Command | Use when |
 |---------|---------|
+| `/skill` | 🔴 **FIRST MESSAGE in every session** — injects the skill-system bootstrap payload |
 | `/help` | Need a skill overview |
 | `/repo-context` | Starting a new session |
 | `/update-skills` | New patterns, deps, or codebase growth — creates/retires skills |
