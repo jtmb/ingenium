@@ -4,7 +4,7 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 
 **Convention**: Every entry MUST include both `**Before**:` and `**After**:` commit hashes. This enables reverting any skill or agent to its pre-change state:
 - Skills: `git checkout <before> -- .agents/skills/<name>/`
-- Agents: `git checkout <before> -- .agents/agents/<name>.agent.md`
+- Agents: `git checkout <before> -- .github/agents/<name>.agent.md`
 
 Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going forward, always capture both.
 
@@ -160,7 +160,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 - **Before**: `a8542a8` (state before agent system)
 - **After**: `8bc1753`
-- **Added**: `.agents/agents/` directory — 4 deployable agent definition templates
+- **Added**: `.github/agents/` directory — 4 deployable agent definition templates
   - `plan.agent.md` — research/planning agent (model: `deepseek-v4-pro`; tools: read, search, web, agent)
   - `explore.agent.md` — fast read-only codebase exploration (model: `gemma-4-12b`; tools: read, search, web)
   - `coder.agent.md` — full-dev coding agent (model: `deepseek-v4-flash`; tools: read, edit, search, execute, agent)
@@ -171,6 +171,6 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 - **Updated**: `bootstrap.sh` — added 5 optional entries (4 agents + manage-agents)
 - **Updated**: `tests/test-self-improving.sh` — added agent drift check in TEST 5, updated TEST 4 to allow `agents/` in deploy
 - **Updated**: `deploy/` — mirrored all new files (4 agents, manage-agents, updated audit-skills)
-- **Key decision**: Agent files live in `.agents/agents/` (not `.github/agents/`) for deployability via existing bootstrap pipeline. Consumer projects copy to `.github/agents/` for harness auto-discovery.
+- **Key decision**: Agent files live in `.github/agents/` (the standard VS Code Copilot convention) for auto-discovery by the harness. Bootstrap copies them directly to the same path in consumer projects.
 - **Model assignments**: Planner → `deepseek-v4-pro` (complex reasoning), Coder → `deepseek-v4-flash` (coding efficiency), Explore → `gemma-4-12b` (fast research), Doc Writer → `gemma-4-12b-agentic-fable5-composer2.5-v2-3.5x-tau2` (fine-tuned creative writing)
 - **Skills**: 42 total (41 previous + 1 manage-agents)

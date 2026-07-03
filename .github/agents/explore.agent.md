@@ -2,7 +2,7 @@
 name: Explore
 description: Fast read-only codebase exploration and Q&A subagent. Prefer over manually chaining multiple search and file-reading operations to avoid cluttering the main conversation. Safe to call in parallel. Specify thoroughness: quick, medium, or thorough.
 argument-hint: Describe WHAT you're looking for and desired thoroughness (quick/medium/thorough)
-model: ['gemma-4-12b', 'deepseek-v4-flash', 'auto']
+model: ['gemma-4-12b-agentic-fable5-composer2.5-v2-3.5x-tau2', 'deepseek-v4-flash', 'auto']
 user-invocable: false
 tools: ['read', 'search', 'web']
 agents: []

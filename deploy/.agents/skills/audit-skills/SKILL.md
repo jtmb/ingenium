@@ -101,7 +101,7 @@ The audit checks 8 integration points. Every skill should appear in ALL of them 
 | **5. AGENTS.md index** | `AGENTS.md` | Points to `/help` — no stale references to deleted skills or docs |
 | **6. USAGE.md** | `USAGE.md` → skill listings, directory trees | Skill appears in tree diagrams and reference tables |
 | **7. SKILL-INDEX.md** | `SKILL-INDEX.md` (repo root) | Skill is listed in the correct table, total count matches `ls -d .agents/skills/*/ \| wc -l` |
-| **8. Agent definitions** | `.agents/agents/*.agent.md` | Frontmatter valid, `name` matches filename, `model` matches model-profiles, handoff chains resolve, deploy mirror matches source |
+| **8. Agent definitions** | `.github/agents/*.agent.md` | Frontmatter valid, `name` matches filename, `model` matches model-profiles, handoff chains resolve, deploy mirror matches source |
 
 ---
 
@@ -189,7 +189,7 @@ Compare the directory list against `SKILL-INDEX.md` at the repo root:
 
 Compare agent files against each other and against `model-profiles`:
 
-- Every agent in `.agents/agents/` must have valid frontmatter (`name`, `description`, `model`, `tools`)
+- Every agent in `.github/agents/` must have valid frontmatter (`name`, `description`, `model`, `tools`)
 - `name` must match filename stem (e.g., `plan.agent.md` → `name: Plan`)
 - `model` must be consistent with `model-profiles` model-to-role assignments
 - Handoff chains must resolve — every agent referenced in `handoffs:` or `agents:` must exist
@@ -199,11 +199,11 @@ Compare agent files against each other and against `model-profiles`:
 
 ```bash
 # Count agents in source vs deploy
-ls .agents/agents/*.agent.md | wc -l
-ls deploy/.agents/agents/*.agent.md | wc -l
+ls .github/agents/*.agent.md | wc -l
+ls deploy/.github/agents/*.agent.md | wc -l
 
 # Check name matches filename
-for f in .agents/agents/*.agent.md; do
+for f in .github/agents/*.agent.md; do
   name=$(grep "^name:" "$f" | head -1 | sed 's/name: *//')
   expected=$(basename "$f" .agent.md | sed 's/\(.*\)/\u\1/')
   if [ "$name" != "$expected" ]; then
@@ -212,11 +212,11 @@ for f in .agents/agents/*.agent.md; do
 done
 
 # Check handoff chains resolve
-for f in .agents/agents/*.agent.md; do
+for f in .github/agents/*.agent.md; do
   grep "^name:" "$f" | sed 's/name: *//'
 done | sort > /tmp/agent-names.txt
 
-for f in .agents/agents/*.agent.md; do
+for f in .github/agents/*.agent.md; do
   awk '/^handoffs:/,/^[a-z]/' "$f" | grep "agent:" | sed 's/.*agent: *//'
 done | sort -u > /tmp/handoff-targets.txt
 
@@ -245,9 +245,9 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | SKILL-INDEX.md has duplicate entry | Remove the duplicate row |
 | SKILL-INDEX.md updated but deploy/ is stale | `cp SKILL-INDEX.md deploy/SKILL-INDEX.md` |
 | update-skill-index added but deploy/ missing | `cp -r .agents/skills/update-skill-index deploy/.agents/skills/update-skill-index` |
-| Agent missing from bootstrap.sh | Add FILES entry: `".agents/agents/{name}.agent.md\|.agents/agents/{name}.agent.md\|optional"` |
-| Agent missing from deploy mirror | `cp .agents/agents/{name}.agent.md deploy/.agents/agents/{name}.agent.md` |
-| Agent deploy drift (content mismatch) | `cp .agents/agents/{name}.agent.md deploy/.agents/agents/{name}.agent.md` |
+| Agent missing from bootstrap.sh | Add FILES entry: `".github/agents/{name}.agent.md\|.github/agents/{name}.agent.md\|optional"` |
+| Agent missing from deploy mirror | `cp .github/agents/{name}.agent.md deploy/.github/agents/{name}.agent.md` |
+| Agent deploy drift (content mismatch) | `cp .github/agents/{name}.agent.md deploy/.github/agents/{name}.agent.md` |
 | Agent handoff target not found | Either create the missing agent or remove the broken handoff entry |
 | Agent model stale (not in model-profiles) | Update `model:` to current model-profiles recommendation |
 | Agent frontmatter invalid (name mismatch, missing fields) | Fix frontmatter per `manage-agents` validation rules |
