@@ -41,3 +41,12 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 - **Added**: `help` skill — centralized quick-reference displaying all 24 skills, their commands, triggers, and invocation patterns
 - **Source**: User requested a skill to display all commands for every skill
 - **Category**: Task skill (invocable via `/help` or "help" query)
+
+## 2026-07-02 — deploy/ separation + self-improving AI test
+
+- **Commit**: `438c302`
+- **Added**: `deploy/` directory — mirrors only deployable files (21 skills, hooks, docs, scripts). Source-only items excluded: create-readme, gh-cli, playwright-mcp, thread-auto-context, learnings.md
+- **Added**: `test-self-improving.sh` in `.agents/skills/update-skills/` — validates all 4 detection signals, deploy separation integrity, frontmatter validity, and deploy file drift
+- **Changed**: `bootstrap.sh` BOOTSTRAP_DIR now points to `deploy/` instead of repo root
+- **Fixed**: bash 5.2 `inherit_errexit` grep subshell crashes — `{ grep ... || true; } | wc -l` pattern
+- **Source**: User requested deploy/ separation for cleaner consumer installs + test for self-improving AI pipeline
