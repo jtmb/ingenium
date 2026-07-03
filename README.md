@@ -196,6 +196,7 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | 🌿 Git Workflows | `git-workflows` | Rebase, bisect, reflog recovery, conventional commits, squashing |
 | ❌ Error Interpretation | `error-interpretation` | Error signature → root cause per language — cross-language patterns |
 | 🧠 Model Profiles | `model-profiles` | Model-aware hints for Qwen and Gemma — context windows, strengths, prompt adaptation per model size |
+| 🤖 Local Model Commands | `local-model-commands` | Terminal command safety — no `&` backgrounding, timeout wrappers, termination signals |
 
 ### Task Skills (invoke via `/`)
 

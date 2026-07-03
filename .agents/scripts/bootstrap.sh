@@ -158,6 +158,7 @@ declare -a FILES=(
     ".agents/skills/git-workflows/SKILL.md|.agents/skills/git-workflows/SKILL.md|always"
     ".agents/skills/error-interpretation/SKILL.md|.agents/skills/error-interpretation/SKILL.md|always"
     ".agents/skills/model-profiles/SKILL.md|.agents/skills/model-profiles/SKILL.md|always"
+    ".agents/skills/local-model-commands/SKILL.md|.agents/skills/local-model-commands/SKILL.md|always"
     "docs/README.md|docs/README.md|always"
     "docs/ARCHITECTURE.md|docs/ARCHITECTURE.md|always"
     "docs/TECH-STACK.md|docs/TECH-STACK.md|always"

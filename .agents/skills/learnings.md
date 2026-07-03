@@ -9,6 +9,20 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-03 — local-model-commands skill (terminal safety for local LLMs)
+
+- **Before**: `c57b4ab` (state before skill creation)
+- **After**: `95b7e8d`
+- **Added**: `local-model-commands` skill — prevents local LLMs from backgrounding terminal commands with `&`
+- **Rationale**: Local models repeatedly append `&` to dev servers/watchers/daemons, producing zero terminal feedback and hanging the session
+- **Content**: 🔴 HARD RULE (never `&`), 🔴 HARD RULE (no infinite-wait commands), 4 safe patterns (sync, timeout wrapper, background+verify, tool mode), anti-pattern catalog (7+ examples)
+- **Deploy tier**: `always` — affects every project using local models
+- **Updated**: `bootstrap.sh` — added `local-model-commands` to FILES array (always)
+- **Updated**: `README.md` — added to Always-Included Skills table
+- **Updated**: `model-profiles` — added "Universal Local Model Behavior" section with cross-reference, synced to deploy
+- **Updated**: `SKILL-INDEX.md` (source + deploy) — new entry, count 41→42
+- **Verification**: 19/19 tests pass (skill count test expects 42 now)
+
 ## 2026-07-03 — playwright-mcp deploy sync + audit deploy mirror check
 
 - **Before**: `15e47ab` (state before fixes)
