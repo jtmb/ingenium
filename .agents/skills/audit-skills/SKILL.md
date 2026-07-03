@@ -18,6 +18,64 @@ description: "Audit the skill system for consistency — cross-reference .agents
 
 **The agent audits and fixes without asking permission.** When the audit finds a discrepancy, fix it immediately. Log all changes to `.agents/skills/learnings.md` so the user can review what happened. Never propose — just do it.
 
+## 🔴 Revert Safety — Always Commit Before Changing
+
+**Every skill system change MUST be reversible.** Before making any audit or update-skills changes, commit the current state first. This guarantees you can always `git checkout` back to the pre-change state.
+
+### Mandatory Workflow
+
+```bash
+# 1. Commit the BEFORE state (snapshot)
+git add -A
+git commit -m "audit: snapshot before fixes"
+git rev-parse --short HEAD  # capture BEFORE hash
+
+# 2. Make your changes (audit fixes, skill updates, etc.)
+
+# 3. Verify tests pass
+bash tests/test-self-improving.sh
+
+# 4. Commit and capture AFTER hash
+git add -A
+git rev-parse --short HEAD  # capture AFTER hash
+git commit -m "audit: fix {N} discrepancies — {brief summary}"
+```
+
+### Reverting a Skill
+
+To revert a specific skill to its state before the last change:
+
+```bash
+# Revert a single skill to its previous commit
+git checkout <before-hash> -- .agents/skills/<skill-name>/
+
+# If the skill also has a deploy mirror:
+git checkout <before-hash> -- deploy/.agents/skills/<skill-name>/
+
+# Verify and commit the revert
+git add -A
+git commit -m "revert: restore <skill-name> to <before-hash>"
+```
+
+To find the before-hash for any skill change, search learnings.md:
+
+```bash
+grep -B5 "<skill-name>" .agents/skills/learnings.md
+```
+
+### learnings.md Format
+
+Every entry MUST include both Before and After commit hashes. Never commit without both.
+
+```markdown
+## YYYY-MM-DD — {brief description}
+
+- **Before**: `{short-hash}` (state before changes)
+- **After**: `{short-hash}`
+- **Fixed**: {list of what was fixed}
+- **Audit result**: {N} discrepancies found, {N} fixed
+```
+
 ---
 
 ## What Gets Audited
@@ -106,6 +164,8 @@ If a skill is missing from the diagram, the AI won't know when to invoke it base
 
 When the audit finds issues, **fix them immediately**. Then commit and log.
 
+**⚠️ Commit the BEFORE state first** (see Revert Safety above). Then make fixes, then commit again with both hashes in learnings.
+
 | Issue | Fix |
 |-------|-----|
 | Skill missing from README | Add row to appropriate table with emoji and description from SKILL.md |
@@ -117,22 +177,26 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | Skill missing from AGENTS.md | Not applicable — AGENTS.md is a redirect to `/help`. No per-skill rows needed. |
 | Badge count wrong | Update `skills-17%20files` to match actual count |
 
-**After applying fixes, always commit and log:**
+**After applying fixes, always commit-before + commit-after and log both hashes:**
 
 ```bash
+# BEFORE snapshot
+git add -A && git commit -m "audit: snapshot before fixes"
+BEFORE=$(git rev-parse --short HEAD)
+
+# ... make fixes ...
+
+# Run tests
+bash tests/test-self-improving.sh
+
+# AFTER commit
 git add -A
 git commit -m "audit: fix {N} discrepancies — {brief summary}"
-git rev-parse --short HEAD  # capture this hash
-```
+AFTER=$(git rev-parse --short HEAD)
 
-Then append to `.agents/skills/learnings.md`:
-
-```markdown
-## YYYY-MM-DD — audit fix
-
-- **Commit**: `{short-hash}`
-- **Fixed**: {list of what was fixed}
-- **Audit result**: {N} discrepancies found, {N} fixed
+# Log both hashes to learnings.md:
+# - **Before**: `$BEFORE`
+# - **After**: `$AFTER`
 ```
 
 ---
