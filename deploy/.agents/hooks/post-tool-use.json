@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "echo '{\"continue\": true}'",
+        "timeout": 5
+      }
+    ]
+  }
+}
