@@ -280,14 +280,14 @@ test_deploy_separation() {
     local extra_count=0
     for item in "$DEPLOY_DIR"/*; do
         local name; name=$(basename "$item")
-        if [[ "$name" != ".agents" && "$name" != "AGENTS.md" ]]; then
+        if [[ "$name" != ".agents" && "$name" != "AGENTS.md" && "$name" != "SKILL-INDEX.md" ]]; then
             extra_count=$((extra_count + 1))
         fi
     done
     if [[ "$extra_count" -eq 0 ]]; then
-        pass "deploy/ is clean — only .agents/ and AGENTS.md"
+        pass "deploy/ is clean — only .agents/, AGENTS.md, and SKILL-INDEX.md"
     else
-        fail "deploy/ has $extra_count unexpected top-level item(s)" "should only have .agents/ and AGENTS.md"
+        fail "deploy/ has $extra_count unexpected top-level item(s)" "should only have .agents/, AGENTS.md, and SKILL-INDEX.md"
     fi
 
     # Verify no extra dirs inside deploy/.agents (only skills/)
