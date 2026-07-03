@@ -9,6 +9,22 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-03 — AGENTS.md rewrite: mandatory skill-loading protocol
+
+- **Before**: `829e6e4` (state before AGENTS.md rewrite)
+- **After**: `0807d16`
+- **Problem**: Local models were ignoring the entire skill system — not creating skills, not logging to learnings, not following anything outside `generic-conventions`
+- **Root cause**: AGENTS.md was 10 lines of passive text ("Start here: check .agents/skills/"). Local models read it as informational, skipped skill discovery, and fell through to `generic-conventions` (the mermaid default)
+- **Fixed**: Rewrote AGENTS.md from 10-line signpost to authoritative protocol with:
+  - 🔴 MANDATORY section at top — "Load Skills Before Acting"
+  - 🔴 Session Startup Checklist — 4 numbered steps (match → load → note HARD RULEs → invoke context/help)
+  - 🔴 Pre-Flight Check table — 8 action→skill mappings for the most common operations
+  - Inline Skill Quick-Reference — full catalog of 42 skills organized by category (always, framework, domain, task)
+  - Each skill row has a "Use when" column so models can match without filesystem access
+  - Self-Improvement section — explicit instructions to use update-skills, audit-skills, log to learnings
+- **Updated**: `deploy/AGENTS.md` — synced
+- **Updated**: `generic-conventions` description — added "ALWAYS check .agents/skills/ for framework/domain skills FIRST" (source + deploy)
+
 ## 2026-07-03 — local-model-commands skill (terminal safety for local LLMs)
 
 - **Before**: `c57b4ab` (state before skill creation)
