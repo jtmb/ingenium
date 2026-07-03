@@ -65,6 +65,52 @@ nginx -g 'daemon off;'  # foreground server
 
 These are acceptable for INTERACTIVE use but not for LLM-driven automation.
 
+## 🔴 HARD RULE — NEVER Search `node_modules` or Build Output Directories
+
+Running `find` or `grep` in `node_modules`, `.git`, `dist`, `build`, `.next`, `target`, `__pycache__`, `venv`, or `.venv` produces massive output (50K–500K files) and hangs the terminal. The model sits waiting for a result that either never comes or floods the context window with garbage.
+
+```bash
+# ❌ NEVER DO THIS — scans 50,000+ files, hangs terminal
+find node_modules/next/dist -name "*.d.ts"
+find . -name "*.js" | head -20        # even with head, find churns through node_modules first
+grep -r "someFunction" node_modules/   # recursive grep in dependencies = death
+rg "pattern" node_modules/             # ripgrep is faster but still scans garbage files
+```
+
+**Why it hangs:**
+- `node_modules` contains 50,000–500,000 files in a typical Next.js/React project
+- `find` must `stat()` every file to match `-name` patterns — this takes minutes
+- Even with `| head -20`, `find` doesn't know to stop early — it keeps scanning after the pipe fills
+- The model has no visibility into `find`'s progress — it just sits there waiting
+
+**What to do instead:**
+
+| You want to... | Use this instead |
+|----------------|-----------------|
+| Find type declarations for an import | `tsc --noEmit` — let the compiler tell you what's wrong |
+| Check what a package exports | `cat node_modules/<pkg>/package.json` and look at `"exports"` or `"types"` |
+| Find a function definition in your own code | `rg "function name" src/` — only search YOUR source |
+| Check if a type exists in a package | Read the package's docs, or `ls node_modules/<pkg>/dist/` (no recursive find) |
+| See all files in a specific package | `ls node_modules/<pkg>/` (flat listing, not recursive) |
+
+## 🔴 HARD RULE — Pipe Large Output Through `wc -l` First
+
+Before running any command that might produce large output, measure it first:
+
+```bash
+# ✅ Test output size first
+find src/ -name "*.ts" | wc -l        # How many files?
+rg "pattern" src/ --count              # How many matches?
+```
+
+If the count is > 100, the LLM cannot process it all. Narrow the search or use a different approach. If the count is reasonable, pipe through `head`:
+
+```bash
+# ✅ Run with head protection after confirming size
+find src/ -name "*.ts" | head -50
+rg "pattern" src/ | head -20
+```
+
 ## ✅ SAFE Patterns
 
 ### Pattern 1 — Run Sync, Expect Exit
