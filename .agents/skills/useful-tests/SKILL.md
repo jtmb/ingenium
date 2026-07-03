@@ -14,6 +14,30 @@ description: "Write tests that catch real bugs — unit, integration, and E2E wi
 - Refactoring brittle or useless tests
 - Setting up CI test pipelines
 
+## 🔴 HARD RULE — Every Code Change Must Have Tests
+
+**You MUST write or update tests in the same turn as code changes.** This is not optional. This is not "if it's easy." This is mandatory.
+
+**Triggers — after making these changes, write tests immediately:**
+
+| Code change | Tests required |
+|-------------|---------------|
+| New function / class / module | At least one unit test covering the happy path + one error path |
+| Bug fix | A regression test that fails without the fix and passes with it |
+| Refactored logic | Update existing tests; add new ones if behavior changed |
+| New API endpoint | Integration test for 200 + 4xx + 5xx |
+| New config / env var | Test default behavior and invalid input |
+| Script change (bash, etc.) | Run the script in dry-run mode; add assertion to test suite |
+
+**Workflow:**
+1. Make the code change
+2. Ask: "Did I add, fix, or change logic?"
+3. If YES: write at least one test. Run it. Verify it fails before the fix passes.
+4. If no test exists that could catch a regression of your change, create one.
+5. Never declare a task complete without running `bash tests/test-self-improving.sh` (if it exists) or the project's test suite.
+
+**A test that always passes is useless.** Every test must verify a specific behavior. If you can delete the code and the test still passes, delete the test.
+
 ## Core Principle — Tests Must Fail Before They Pass
 
 **Every AI agent writing tests must follow this rule:** Write the test first, run it, watch it fail (because the code doesn't exist yet or is wrong), then write the implementation. A test that passes on first run is probably broken — it's testing nothing.
