@@ -9,6 +9,19 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-03 — 🔴 Mandatory Skills: unconditional, 25 non-infra skills
+
+- **Before**: `621bdd3`
+- **After**: (pending)
+- **Changes**:
+  1. **Removed all "local model" qualifiers** — header, column, every row. No conditional language.
+  2. **Expanded 7 → 25 mandatory skills**: Every domain skill added except infrastructure frameworks (containers, kubernetes, github-actions-hardening, github-actions-efficiency).
+  3. **Synced deploy/AGENTS.md** (was stale with old "Local Model Mandatory Skills" header).
+  4. **Updated `/skill-load` payload** — Step 2 dropped "If you are a local model" conditional.
+- **Rationale**: Models don't know if they're local. Conditional language = excuse to skip. Fixed: no conditions, just "MUST load."
+
+---
+
 ## 2026-07-03 — `/skill-load` rename + 🔴 Local Model Mandatory Skills section
 
 - **Before**: `30ef808` (state after /skill addition, before rename)

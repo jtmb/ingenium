@@ -29,7 +29,7 @@ Using the Skill Quick-Reference table in AGENTS.md:
 
 1. Identify which framework skills match files you'll edit (`.py` → `python-conventions`, `.go` → `go-conventions`, etc.)
 2. Identify which domain skills match the task type (terminal commands → `local-model-commands`, tests → `useful-tests`, etc.)
-3. **If you are a local model**: Check the 🔴 Local Model Mandatory Skills section — those skills are NEVER optional
+3. Check the 🔴 Mandatory Skills section in AGENTS.md — every skill listed there is non-negotiable, load them all
 4. Identify which task skills are relevant (`/help` for catalog, `/repo-context` for project identity)
 
 ### Step 3: Load every matching skill
