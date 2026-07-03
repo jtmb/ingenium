@@ -12,7 +12,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 ## 2026-07-03 — `/skill` command: session-init bootstrap payload
 
 - **Before**: `00b8acc` (state before skill creation)
-- **After**: (pending)
+- **After**: `b896dc4`
 - **Problem**: Even with AGENTS.md rewrite, there was no guarantee the model reads it. AGENTS.md lives on disk, but local models don't auto-load files. They need a `/command` that injects the loading instructions directly into the prompt.
 - **Root cause**: VS Code Copilot Chat injects SKILL.md content when a `/command` is invoked. By creating a `/skill` command, the payload is guaranteed to be in the first prompt — the model CANNOT skip it because it's in the context window.
 - **Fixed**: Created `.agents/skills/skill/SKILL.md` — a 5-step numbered protocol that the model MUST execute before any action:
