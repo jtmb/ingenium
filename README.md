@@ -33,6 +33,20 @@ graph LR
     C -->|Yes| G
 ```
 
+## Table of Contents
+
+- [Getting Started](#getting-started)
+  - [Quick Install (one-liner)](#quick-install-one-liner)
+  - [Auto-Bootstrap (set up the hook)](#auto-bootstrap-set-up-the-hook)
+  - [Manual Install](#manual-install)
+  - [Manual Bootstrap (with framework detection)](#manual-bootstrap-with-framework-detection)
+- [Self-Improving AI](#self-improving-ai-skills-that-grow-with-your-project)
+- [What Gets Bootstrapped](#what-gets-bootstrapped)
+- [Coverage — Every File Type Has Rules](#coverage-every-file-type-has-rules)
+- [Architecture — Skill System](#architecture-skill-system)
+- [Key Rules](#key-rules-from-generic-conventions-skill-13-sections)
+- [Further Reading](#further-reading)
+
 ## Self-Improving AI — Skills That Grow With Your Project
 
 The system doesn't just enforce rules — it **evolves them**. The `update-skills` skill gives the AI four detection signals to identify when your project needs new or updated conventions:
@@ -46,9 +60,25 @@ The system doesn't just enforce rules — it **evolves them**. The `update-skill
 
 When the AI detects a pattern, it **creates** a new skill or updates an existing one — automatically. No approval needed. The skill system grows with your codebase. No more stale conventions docs.
 
-## Quick Start — Set Up the Hook (do this once)
+## Getting Started
 
-AI coding assistants that support the `.agents/` convention (e.g., VS Code Copilot, Cline) read hooks from their hook directory. For VS Code Copilot, hooks live at `~/.copilot/hooks/` (global, applies to every project). Create this file:
+There are several ways to add Ingenium to your project, depending on how much automation you want.
+
+### Quick Install (one-liner)
+
+For any project, run this from the project root:
+
+```bash
+curl -fsSL https://github.com/jtmb/ingenium/archive/refs/heads/main.tar.gz | tar -xz --strip=2 -C . ingenium-main/deploy/
+```
+
+This downloads the `deploy/` folder — `.agents/skills/`, `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — directly into your project. Your AI assistant picks them up automatically.
+
+> **What you get:** The full `.agents/skills/` library, `AGENTS.md` (skill index), `SKILL-INDEX.md` (reference), and `docs/` templates. Framework-specific skills and hooks are available as optional extras.
+
+### Auto-Bootstrap (set up the hook)
+
+For automatic bootstrapping across all your projects, set up a one-time hook. AI coding assistants that support the `.agents/` convention (e.g., VS Code Copilot, Cline) read hooks from their hook directory. For VS Code Copilot, hooks live at `~/.copilot/hooks/` (global, applies to every project):
 
 **`~/.copilot/hooks/trigger-bootstrap.json`**
 
@@ -65,9 +95,9 @@ AI coding assistants that support the `.agents/` convention (e.g., VS Code Copil
 }
 ```
 
-That's it. Now:
+Once the hook is in place:
 
-1. Open any project in VS Code (or your AI-supporting editor)
+1. Open any project in your AI-supporting editor
 2. Start an AI chat
 3. The hook auto-detects the framework (Next.js, Python, Go, Rust, or generic) and bootstraps the project
 4. The AI follows all rules automatically — doc sync, code comments, testing, DRY
@@ -77,6 +107,34 @@ That's it. Now:
 > **Where hooks live (VS Code Copilot):** `~/.copilot/hooks/*.json` — NOT in `settings.json`. This is VS Code Copilot's global hooks directory. Other AI assistants may use different hook locations. Each `.json` file registers one or more lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`).
 
 > **What happens?** `.agents/scripts/hook-bootstrap.sh` caches this repo in `~/.cache/ingenium/`, auto-detects the framework from `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml`, and calls `.agents/scripts/bootstrap.sh --auto --framework <detected> /path/to/your/project`.
+
+### Manual Install
+
+If you prefer to copy the files by hand:
+
+```bash
+git clone --depth 1 https://github.com/jtmb/ingenium.git
+cp -r ingeniunm/deploy/. /path/to/your-project/
+```
+
+This places everything from `deploy/` into your project root — the same contents as the one-liner above. Works offline and gives you full control over what lands.
+
+### Manual Bootstrap (with framework detection)
+
+For a smarter setup that detects your framework and copies only the relevant skills:
+
+```bash
+git clone --depth 1 https://github.com/jtmb/ingenium.git
+./ingenium/.agents/scripts/bootstrap.sh --framework python /path/to/your-project
+```
+
+Or for non-interactive CI use:
+
+```bash
+./.agents/scripts/bootstrap.sh --auto --framework nextjs /path/to/your-project
+```
+
+This runs the full bootstrap pipeline: deploys the skill system, selects framework-specific conventions, seeds docs templates, and copies hooks.
 
 ## What Gets Bootstrapped
 
@@ -251,20 +309,7 @@ graph TD
 | 🏷️ **Naming Conventions** | Descriptive, no abbreviations, language-consistent casing |
 | 🔄 **Skill System** | AGENTS.md directs AI to `.agents/skills/` for every code change. `update-skills` grows them as your project evolves. |
 
-## Manual Bootstrap (optional)
 
-If you can't use hooks, or want to bootstrap once:
-
-```bash
-git clone --depth 1 https://github.com/jtmb/ingenium.git
-./ingenium/.agents/scripts/bootstrap.sh --framework python /path/to/your-project
-```
-
-Or for non-interactive CI use:
-
-```bash
-./.agents/scripts/bootstrap.sh --auto --framework nextjs /path/to/your-project
-```
 
 ## Further Reading
 
