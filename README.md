@@ -82,7 +82,6 @@ That's it. Now:
 | Layer | File | Purpose |
 |-------|------|---------|
 | **Core rules** | `.agents/skills/generic-conventions/SKILL.md` | The definitive 13-section reference: comments, docs, testing, DRY, security, error handling, config, naming |
-| **Skill loader** | `.agents/skills/always-read-agents/SKILL.md` | Forces AI to scan the skill system before any code work |
 | **Project structure** | `.agents/skills/project-structure/SKILL.md` | Monorepo layout, service layering (pages/features/domain/infrastructure), naming, boundaries |
 | **Frameworks** | `.agents/skills/{fw}-conventions/SKILL.md` (4 files) | Next.js, Python, Go, Rust — build commands, idioms, project layout |
 | **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (9 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests — everything in between |
@@ -134,8 +133,7 @@ That's it. Now:
 
 ```mermaid
 graph TD
-    A[AI receives task] --> B[always-read-agents skill invoked]
-    B --> C[AI scans .agents/skills/]
+    A[AI receives task] --> C[AI scans .agents/skills/]
     C --> D{What files are involved?}
     D -->|.tsx/.ts in Next.js| E[nextjs-conventions]
     D -->|.py files| F[python-conventions]
@@ -197,7 +195,7 @@ graph TD
 | ❌ **Error Handling** | Never swallow, wrap with context, typed errors, crash-only |
 | ⚙️ **Configuration** | One config module, validate at startup, 12-factor, secrets ≠ config |
 | 🏷️ **Naming Conventions** | Descriptive, no abbreviations, language-consistent casing |
-| 🔄 **Skill System** | `always-read-agents` loads all conventions before every code change. `update-skills` grows them as your project evolves. |
+| 🔄 **Skill System** | AI scans `.agents/skills/` before every code change. `update-skills` grows them as your project evolves. |
 
 ## Manual Bootstrap (optional)
 

@@ -14,13 +14,13 @@
 #   6. No source-only files leaked into deploy/
 #
 # Usage:
-#   .agents/skills/update-skills/test-self-improving.sh           # run all tests
-#   .agents/skills/update-skills/test-self-improving.sh --verbose  # detailed output
+#   .agents/tests/test-self-improving.sh           # run all tests
+#   .agents/tests/test-self-improving.sh --verbose  # detailed output
 # ───────────────────────────────────────────────────────────
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SKILLS_DIR="$REPO_ROOT/.agents/skills"
 DEPLOY_DIR="$REPO_ROOT/deploy"
 VERBOSE=false
@@ -268,20 +268,41 @@ test_skill_count() {
 test_deploy_separation() {
     section "TEST 4 — Deploy/ Separation Integrity"
 
-    # a) Deploy exists and has expected structure
-    local required_dirs=(
-        "deploy/.agents/skills"
-        "deploy/.agents/hooks"
-        "deploy/.agents/scripts"
-        "deploy/docs"
-    )
-    for dir in "${required_dirs[@]}"; do
-        if [[ -d "$REPO_ROOT/$dir" ]]; then
-            pass "$dir exists"
-        else
-            fail "$dir is missing" "expected directory in deploy/"
+    # a) Deploy exists and is skills-only (no extra directories or files)
+    if [[ -d "$REPO_ROOT/deploy/.agents/skills" ]]; then
+        pass "deploy/.agents/skills exists"
+    else
+        fail "deploy/.agents/skills is missing" "expected directory in deploy/"
+    fi
+
+    # Verify no unexpected top-level files in deploy
+    # Allowed: .agents/ and AGENTS.md
+    local extra_count=0
+    for item in "$DEPLOY_DIR"/*; do
+        local name; name=$(basename "$item")
+        if [[ "$name" != ".agents" && "$name" != "AGENTS.md" ]]; then
+            extra_count=$((extra_count + 1))
         fi
     done
+    if [[ "$extra_count" -eq 0 ]]; then
+        pass "deploy/ is clean — only .agents/ and AGENTS.md"
+    else
+        fail "deploy/ has $extra_count unexpected top-level item(s)" "should only have .agents/ and AGENTS.md"
+    fi
+
+    # Verify no extra dirs inside deploy/.agents (only skills/)
+    local agent_extra=0
+    for item in "$DEPLOY_DIR/.agents"/*; do
+        local name; name=$(basename "$item")
+        if [[ "$name" != "skills" ]]; then
+            agent_extra=$((agent_extra + 1))
+        fi
+    done
+    if [[ "$agent_extra" -eq 0 ]]; then
+        pass "deploy/.agents is clean — only skills/"
+    else
+        fail "deploy/.agents has $agent_extra extra item(s)" "should only have skills/"
+    fi
 
     # b) Source-only skills should NOT be in deploy/
     local SOURCE_ONLY=("create-readme" "gh-cli" "playwright-mcp" "thread-auto-context")
@@ -300,7 +321,7 @@ test_deploy_separation() {
         fail "learnings.md leaked into deploy/" "changelog is source-only"
     fi
 
-    # d) bootstrap.sh uses deploy/ as BOOTSTRAP_DIR
+    # d) bootstrap.sh (source-only) uses deploy/ as BOOTSTRAP_DIR
     if grep -q 'BOOTSTRAP_DIR=.*deploy' "$REPO_ROOT/.agents/scripts/bootstrap.sh"; then
         pass "bootstrap.sh BOOTSTRAP_DIR points to deploy/"
     else
@@ -323,25 +344,11 @@ test_deploy_separation() {
 test_deploy_integrity() {
     section "TEST 5 — Deploy File Integrity (source vs deploy drift)"
 
-    # Check AGENTS.md
+    # Check AGENTS.md (only top-level file in deploy/)
     if diff -q "$REPO_ROOT/AGENTS.md" "$DEPLOY_DIR/AGENTS.md" &>/dev/null; then
         pass "deploy/AGENTS.md matches source"
     else
         fail "deploy/AGENTS.md differs from source" "files have drifted"
-    fi
-
-    # Check USAGE.md
-    if diff -q "$REPO_ROOT/USAGE.md" "$DEPLOY_DIR/USAGE.md" &>/dev/null; then
-        pass "deploy/USAGE.md matches source"
-    else
-        fail "deploy/USAGE.md differs from source" "files have drifted"
-    fi
-
-    # Check hook-bootstrap.sh
-    if diff -q "$REPO_ROOT/.agents/scripts/hook-bootstrap.sh" "$DEPLOY_DIR/.agents/scripts/hook-bootstrap.sh" &>/dev/null; then
-        pass "deploy hook-bootstrap.sh matches source"
-    else
-        fail "deploy hook-bootstrap.sh differs from source" "files have drifted"
     fi
 
     # Check all deployed skills match
