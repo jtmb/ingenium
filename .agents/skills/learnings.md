@@ -95,3 +95,21 @@ Changelog of all skill additions, retirements, and significant updates. Appended
   - Removed stale `always-read-agents` references from README (mermaid + Key Rules table)
   - Updated `docs/ARCHITECTURE.md`: skill count 23 → 26, deployable count 19 → 22
   - Skill count badge: 24 → 26
+
+## 2026-07-02 — 8 new skills for local LLMs (9B–27B)
+
+- **Before**: `cad78e2` (state before 8 new skills)
+- **After**: `pending` (will update after commit)
+- **Category**: Always-Included cross-cutting skills
+- **Added 4 reasoning scaffolding skills** (structure for weaker reasoners):
+  - `debugging-patterns` — bisect, log-driven, stack-trace analysis, anti-patterns table, agent checklist
+  - `code-review-checklist` — 5-lens review (security → correctness → perf → readability → testing)
+  - `refactoring-recipes` — 10 named patterns with ❌BEFORE/✅AFTER code examples
+  - `self-correction-patterns` — AI mistake recognition, backtracking triggers, verification loops
+- **Added 4 reference knowledge skills** (fill the memorization gap):
+  - `cli-toolkit` — jq, curl, sed, awk, find, xargs, grep — flags, recipes, gotchas
+  - `regex-reference` — common patterns, per-language escaping, catastrophic backtracking prevention
+  - `git-workflows` — rebase, bisect, reflog recovery, conventional commits, squashing
+  - `error-interpretation` — error signature → root cause per language + cross-language patterns
+- **All 8 include `## Model Notes` section** with model-aware hints for 7B–9B vs 14B–27B parameter range
+- **Updated files**: `README.md` (+8 rows, badge 31→39, cross-cutting 15→23, mermaid +8 nodes), `bootstrap.sh` (+8 always entries), `docs/ARCHITECTURE.md` (31→39 skills, 27→35 deployable), `deploy/` (8 new skill mirrors)
