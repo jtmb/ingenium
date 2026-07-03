@@ -68,6 +68,17 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 - **Changed**: `learnings.md` convention — entries now require both `**Before**:` and `**After**:` hashes (legacy `**Commit**:` deprecated)
 - **Source**: User requested that skill changes be reversible — always capture the pre-change commit hash
 
+## 2026-07-02 — audit fix (5 new skills wired in)
+
+- **Before**: `570e88d` (state after user added 5 new skills, before audit fixes)
+- **After**: `pending` (will update after commit)
+- **Added 5 skills to bootstrap.sh**: `gitignore` (always), `web-design-reviewer` (optional), `chrome-devtools` (optional), `github-actions-hardening` (always), `github-actions-efficiency` (always), `postgresql-optimization` (always), `github-issues` (optional)
+- **Added 5 new skills to README**: `github-actions-hardening`, `github-actions-efficiency`, `postgresql-optimization` → Always-Included table; `chrome-devtools`, `github-issues` → Task Skills table
+- **Added 5 nodes to README mermaid**: GH, GE, PG, CD, IS
+- **Fixed counts**: badge 26→31, cross-cutting 10→15, tasks 6+4→8+4, intro 26→31, framework badge 8→15 cross-cutting
+- **Removed orphan**: `contex-map` from deploy (in deploy but not in source skills)
+- **Updated**: `docs/ARCHITECTURE.md` 26→31 skills, 22→27 deployable
+
 ## 2026-07-02 — audit fix (rename to Ingenium + README stale counts)
 
 - **Before**: `6d1ff0d` (state after rename, before audit fixes)
