@@ -230,6 +230,16 @@ First generation. Largely obsolete. Only relevant if you're running an older set
 
 ---
 
+## Universal Local Model Behavior
+
+All local LLMs — regardless of family, size, or architecture — share a critical failure pattern: **backgrounding terminal commands with `&`**. When a local model appends `&` to a dev server, watcher, or daemon command, it receives zero feedback (no exit code, no output) and the session hangs indefinitely.
+
+**Always invoke [`local-model-commands`](../local-model-commands/SKILL.md) before running any terminal command with a local model.** The skill provides safe alternatives: timeout wrappers, background+verify patterns, and the 🔴 HARD RULE that every terminal command MUST produce a termination signal.
+
+Smaller models (2B–9B) are more prone to backgrounding because they don't reason about terminal lifecycle. Larger models (27B+) still do it but less frequently.
+
+---
+
 ## DeepSeek Family
 
 ### DeepSeek-V4 (April 2026 – present)
