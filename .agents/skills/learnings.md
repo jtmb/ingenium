@@ -12,7 +12,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 ## 2026-07-03 — hang/drip-feed detection: `find` in node_modules + hung commands
 
 - **Before**: `894b5ee`
-- **After**: (pending)
+- **After**: `f02d466`
 - **Problem**: Models run `find node_modules/ -name "*.d.ts"` which scans 50K–500K files, hangs the terminal with zero output, and the model sits there waiting. Also: "drip-feed" loops where the model dribbles partial answers, runs exploratory commands, gets no useful output, and never converges on a solution.
 - **Root cause**: `local-model-commands` only covered `&` and infinite-wait commands (servers, tail -f). `self-correction-patterns` had no trigger for hung commands or drip-feed loops.
 - **Fixed**:
