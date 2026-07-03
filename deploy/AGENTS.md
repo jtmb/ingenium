@@ -25,19 +25,37 @@ Before responding to the user's first request, complete these 4 steps:
 | Edit shell scripts | `shell-scripts` — `set -euo pipefail`, quoting |
 | Edit SQL/migrations | `sql-database` — parameterized queries, indexing |
 
-## 🔴 Local Model Mandatory Skills
+## 🔴 Mandatory Skills
 
-**If you are running as a local/offline model (no cloud API), these skills are NOT suggestions. You MUST load them before ANY action.**
+**These are NOT suggestions. You MUST load them before ANY action.**
 
-| Skill | Why mandatory for local models |
-|-------|-------------------------------|
-| `model-profiles` | Know your own model's capabilities, context limits, and prompt preferences. You make different mistakes than cloud models — adapt accordingly. |
-| `local-model-commands` | **ALL terminal commands** — never `&`, never infinite-wait. Local models frequently hang terminals with backgrounded commands. |
-| `debugging-patterns` | Systematic debugging — isolation, bisection, log-driven analysis. Local models tend to guess instead of methodically isolate. |
-| `useful-tests` | Test lifecycle, assertions, CI readiness. Local models often write tests that pass trivially or fail on edge cases. |
-| `project-structure` | Layering, naming, boundaries. Local models create `utils/` dirs and flat `src/` structures that rot over time. |
-| `error-interpretation` | Map error signatures to root causes. Local models misinterpret compiler errors and chase the wrong fix. |
-| `self-correction-patterns` | Backtracking triggers, verification loops, assumption checking. Local models double down on wrong answers instead of self-correcting. |
+| Skill | Why mandatory |
+|-------|--------------|
+| `generic-conventions` | Comments, docs sync, DRY, security, error handling, git. Applies to EVERYTHING. |
+| `model-profiles` | Know your model's capabilities, context limits, and prompt preferences — adapt accordingly. |
+| `local-model-commands` | **ALL terminal commands** — never `&`, never infinite-wait. |
+| `debugging-patterns` | Systematic debugging — isolation, bisection, log-driven. Do not guess, methodically isolate. |
+| `useful-tests` | Test lifecycle, assertions, CI readiness. Tests must catch real bugs, not pass trivially. |
+| `project-structure` | Layering, naming, boundaries. No `utils/` dirs, no flat `src/`. |
+| `error-interpretation` | Map error signatures to their root cause. Do not chase the wrong fix. |
+| `self-correction-patterns` | Backtracking triggers, verification loops, assumption checking. Do not double down on wrong answers. |
+| `skill-load` | **Session init** — `/skill-load` injects the bootstrap payload. First message, every session. |
+| `api-design` | REST status codes, error shapes, versioning, auth, pagination, rate limiting, idempotency. |
+| `shell-scripts` | `set -euo pipefail`, double-quote all vars, `trap cleanup EXIT`, `mktemp`. |
+| `sql-database` | Parameterized queries only, reversible migrations, indexing, connection pooling. |
+| `typescript-standalone` | Strict tsconfig, type safety, error handling, async patterns, Node.js conventions. |
+| `agent-pipelines` | AI agent orchestration, state checkpoints, crash recovery, multi-phase pipelines. |
+| `gitignore` | Ignore file patterns, structure, rules for `.gitignore`. |
+| `postgresql-optimization` | JSONB, array types, full-text search, window functions, extensions. |
+| `code-review-checklist` | Security, correctness, performance, readability, testing. |
+| `refactoring-recipes` | Extract method, invert conditional, replace magic number — before/after patterns. |
+| `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep — shell pipeline reference. |
+| `regex-reference` | Common patterns, language-specific escaping, catastrophic backtracking prevention. |
+| `git-workflows` | Rebase vs merge, bisect, reflog recovery, conventional commits, clean history. |
+| `web-design-reviewer` | UI/UX inspection, responsive design, accessibility, layout breakage. |
+| `chrome-devtools` | Browser screenshots, performance profiling, network analysis. |
+| `github-issues` | Create, update, manage issues — labels, assignees, milestones, dependencies. |
+| `playwright-mcp` | Browser automation — navigate, click, type, snapshot pages. |
 
 ## Skill Quick-Reference
 
