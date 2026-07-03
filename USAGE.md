@@ -4,91 +4,16 @@ This is your handbook for working with the layered agent instruction system. Whe
 
 ---
 
-## Quick-Start: Set Up the Hook (do this once)
+## Quick Start
 
-AI coding assistants that support the `.agents/` convention (e.g., VS Code Copilot, Cline) read hooks from their hook directory. For VS Code Copilot, hooks live at `~/.copilot/hooks/` (global, applies to every project). Create this file:
+See **[Getting Started](./README.md#getting-started)** in the README for installation options:
 
-**`~/.copilot/hooks/trigger-bootstrap.json`**
+- **Quick Install (one-liner)** — curl/tar from GitHub
+- **Auto-Bootstrap (set up the hook)** — one-time hook, auto-bootstraps every project you open
+- **Manual Install** — clone and copy `deploy/`
+- **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
 
-```json
-{
-    "hooks": {
-        "SessionStart": [
-            {
-                "type": "command",
-                "command": "if [ ! -f AGENTS.md ]; then curl -fsSL https://raw.githubusercontent.com/jtmb/ingenium/main/.agents/scripts/hook-bootstrap.sh | bash; fi"
-            }
-        ]
-    }
-}
-```
-
-Now open any project, start an AI chat, and the hook auto-bootstraps it.
-
-> **Where hooks live (VS Code Copilot):** `~/.copilot/hooks/*.json` — NOT in `settings.json`. Each `.json` file registers lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`). Other AI assistants may use different hook locations.
-
-**What you get (in every project):**
-- `.agents/skills/generic-conventions/SKILL.md` — core conventions (13 sections: docs, comments, tests, DRY, security, error handling, config, more)
-- `.agents/skills/{framework}-conventions/SKILL.md` — framework-specific rules (auto-detected from 5 supported frameworks)
-- `.agents/skills/containers/SKILL.md` — Docker/Compose conventions (multi-stage, non-root, HEALTHCHECK)
-- `.agents/skills/shell-scripts/SKILL.md` — Shell script safety & portability (`set -euo pipefail`, quoting, traps)
-- `.agents/skills/sql-database/SKILL.md` — SQL & migration best practices (parameterized queries, indexing, N+1)
-- `.agents/skills/api-design/SKILL.md` — REST API design conventions (status codes, pagination, idempotency)
-- `.agents/skills/kubernetes/SKILL.md` — Kubernetes/Helm conventions (security context, probes, resources)
-- `.agents/skills/typescript-standalone/SKILL.md` — Standalone TypeScript rules (strict config, type safety, async patterns)
-- `.agents/skills/generic-conventions/SKILL.md` — fallback for any file not covered
-- `.agents/skills/repo-context/SKILL.md` `.agents/skills/generate-docs/SKILL.md` `.agents/skills/write-docs/SKILL.md` — task skills (invocable via `/`)
-- `docs/` — pre-seeded documentation templates (ARCHITECTURE.md, TECH-STACK.md, CONVENTIONS.md)
-- `USAGE.md` — this file
-
----
-
-## Quick-Start: One-Liner Deploy
-
-For any project, run this from the project root:
-
-```bash
-curl -fsSL https://github.com/jtmb/ingenium/archive/refs/heads/main.tar.gz | tar -xz --strip=2 -C . ingenium-main/deploy/
-```
-
-This downloads the `deploy/` folder — `.agents/skills/`, `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — directly into your project. Your AI assistant picks them up automatically.
-
----
-
-## Quick-Start: Manual Install (copy deploy)
-
-```bash
-git clone --depth 1 https://github.com/jtmb/ingenium.git
-cp -r ingeniunm/deploy/. /path/to/your-project/
-```
-
----
-
-## Quick-Start: Manual Bootstrap (no hooks)
-
-If you can't use hooks, bootstrap manually:
-
-```bash
-# One-liner — clone and bootstrap in one go
-git clone --depth 1 https://github.com/jtmb/ingenium.git && \
-  ./ingenium/.agents/scripts/bootstrap.sh --framework python --project-name my-backend /path/to/project
-
-# Or interactive mode
-./ingenium/.agents/scripts/bootstrap.sh /path/to/project
-```
-
-For an existing project with code already:
-
-```bash
-# Auto-detect framework and bootstrap non-interactively
-ingenium/.agents/scripts/bootstrap.sh --auto --framework python /path/to/existing-project
-```
-
-Pro tip: `.agents/scripts/hook-bootstrap.sh` handles the auto-detection for you even in manual mode:
-
-```bash
-bash ingenium/.agents/scripts/hook-bootstrap.sh --framework nextjs
-```
+**What you get in every project:** the full `.agents/skills/` library (41 skills), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
 
 ---
 
@@ -171,8 +96,6 @@ your-project/
 │   ├── skills/                                  ← Multi-step workflows with assets
 │   │   └── {skill-name}/
 │   │       └── SKILL.md                         ←   Skill body + reference links
-│   ├── agents/                                  ← Custom agent personas
-│   │   └── {agent-name}.agent.md                ←   Agent with restricted tools
 │   └── workflows/                               ← CI enforcement
 │       └── ci.yml                               ←   Lint, test, build on push/PR
 ```
@@ -215,9 +138,7 @@ When your project has a rule that isn't framework-generic (e.g., "never import X
 
 3. **For hooks**: valid JSON with `type: "command"`.
 
-4. **For agents**: `description` + `tools` frontmatter.
-
-5. **Add to the docs map** — if the rule is significant, add an entry in `docs/ARCHITECTURE.md` or `docs/CONVENTIONS.md`.
+4. **Add to the docs map** — if the rule is significant, add an entry in `docs/ARCHITECTURE.md` or `docs/CONVENTIONS.md`.
 
 6. **Validate frontmatter** — YAML between `---` markers, no unescaped colons, spaces (not tabs). Silent failures happen with bad frontmatter.
 
@@ -273,7 +194,6 @@ Skills are the primary mechanism for adding conventions and tasks:
 | **Contradictory rules** | Core says "run tests", overlay says "skip tests in CI" | Check all skills when adding any rule |
 | **`name` mismatch in SKILL.md** | Renamed folder but not `name` field | `name` must match folder exactly; mismatch = skill won't load |
 | **Duplicating docs in skills** | Copying README content into skill files | Link to docs instead: `See docs/TESTING.md for conventions` |
-| **Too many tools on agents** | "Just in case" tool assignment | Only assign tools the agent's role actually needs — excess dilutes focus |
 
 ---
 
@@ -308,7 +228,7 @@ User-level examples: "I prefer single quotes", "Always use async/await over .the
 
 ---
 
-## Framework Support Table
+## Framework Skills
 
 | Framework | Skill | Sections Covered |
 |-----------|-------|------------------|
@@ -316,12 +236,16 @@ User-level examples: "I prefer single quotes", "Always use async/await over .the
 | Python | `python-conventions` | Build/Test, Type Hints, Docstrings, Project Structure, Testing, Code Quality, Imports, Secure Coding, Naming |
 | Go | `go-conventions` | Build/Test, Comments, Error Handling, Project Layout, Testing, Concurrency, General Practices, Secure Coding, Naming |
 | Rust | `rust-conventions` | Build/Test, Documentation, Error Handling, Project Layout, Ownership, Testing, Clippy, General Practices, Secure Coding, Naming |
+
+## Domain Skills
+
+| Domain | Skill | Sections Covered |
+|--------|-------|------------------|
 | Containers | `containers` | Multi-stage builds, Non-root user, Layer caching, .dockerignore, Digest pinning, HEALTHCHECK, Signal handling, Secrets hygiene, Image size, Compose conventions |
-| Shell | `shell-scripts` | set -euo pipefail, Quoting, Error handling, Temp files, Portability, Secrets, Organization |
+| Shell | `shell-scripts` | `set -euo pipefail`, Quoting, Error handling, Temp files, Portability, Secrets, Organization |
 | SQL | `sql-database` | Parameterized queries, Migration safety, Indexing, Connection pooling, Transactions, N+1 prevention, Query performance, Schema design |
 | API Design | `api-design` | Status codes, Error shape, Versioning, Auth, Pagination, Rate limiting, Idempotency, HTTP methods |
 | Kubernetes | `kubernetes` | Security context, Resource limits, Probes, Network policies, Labels, Deployments, Services, Ingress, ConfigMaps, Helm |
 | TypeScript | `typescript-standalone` | Strict config, Type safety, Error handling, Async patterns, Module system, Node.js conventions, Testing, Styling |
-| Generic | `generic-conventions` | Definitive core rules (docs, comments, testing, DRY, secure coding, project structure, naming) |
 
-To contribute a new framework, see "Add a New Framework Overlay" above.
+The `generic-conventions` skill covers all other file types with 13 sections — docs, comments, testing, DRY, secure coding, error handling, configuration, naming, and more. For the full skill catalog, see [`SKILL-INDEX.md`](SKILL-INDEX.md).

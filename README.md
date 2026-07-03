@@ -9,7 +9,6 @@
   <img src="https://img.shields.io/badge/skills-41%20total-green?style=flat-square" alt="Skill files" />
   <img src="https://img.shields.io/badge/frameworks-4%20%2B%2023%20domain-purple?style=flat-square" alt="Frameworks" />
   <img src="https://img.shields.io/badge/skills%20that%20grow%20with%20you-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Skills that grow with you" />
-  <img src="https://img.shields.io/badge/total-~3%2C500%20lines-informational?style=flat-square" alt="Total lines" />
 </p>
 
 ---
@@ -50,24 +49,6 @@ graph LR
 - [Architecture — Skill System](#architecture-skill-system)
 - [Key Rules](#key-rules-from-generic-conventions-skill-13-sections)
 - [Further Reading](#further-reading)
-
-## Self-Improving AI — Skills That Grow With Your Project
-
-The four detection signals (see [intro](#ingenium)) fire automatically as you code. Every change is committed and logged to `.agents/skills/learnings.md` — a full audit trail with before/after hashes so any skill can be reverted:
-
-```bash
-git checkout <before-hash> -- .agents/skills/<skill-name>/
-```
-
-| Trigger | AI action | Result |
-|---------|-----------|--------|
-| You `npm install prisma` | Signal 1 fires | `prisma-conventions` skill created |
-| You copy the same 3-file pattern 5 times | Signal 2 fires | `feature-structure` skill codifies it |
-| You write your first `.graphql` file | Signal 3 fires | `graphql-conventions` skill created |
-| You upgrade React from 18 to 19 | Signal 4 fires | `nextjs-conventions` skill updated |
-| You remove the last Prisma dependency | Signal 4 fires | `prisma-conventions` skill retired |
-
-No approvals. No stale rules. The system grows and shrinks with your codebase — always reflecting reality, never someone's outdated wiki.
 
 ## Getting Started
 
@@ -123,7 +104,7 @@ If you prefer to copy the files by hand:
 
 ```bash
 git clone --depth 1 https://github.com/jtmb/ingenium.git
-cp -r ingeniunm/deploy/. /path/to/your-project/
+cp -r ingenium/deploy/. /path/to/your-project/
 ```
 
 This places everything from `deploy/` into your project root — the same contents as the one-liner above. Works offline and gives you full control over what lands.
@@ -144,6 +125,24 @@ Or for non-interactive CI use:
 ```
 
 This runs the full bootstrap pipeline: deploys the skill system, selects framework-specific conventions, seeds docs templates, and copies hooks.
+
+## Self-Improving AI — Skills That Grow With Your Project
+
+The four detection signals (see [intro](#ingenium)) fire automatically as you code. Every change is committed and logged to `.agents/skills/learnings.md` — a full audit trail with before/after hashes so any skill can be reverted:
+
+```bash
+git checkout <before-hash> -- .agents/skills/<skill-name>/
+```
+
+| Trigger | AI action | Result |
+|---------|-----------|--------|
+| You `npm install prisma` | Signal 1 fires | `prisma-conventions` skill created |
+| You copy the same 3-file pattern 5 times | Signal 2 fires | `feature-structure` skill codifies it |
+| You write your first `.graphql` file | Signal 3 fires | `graphql-conventions` skill created |
+| You upgrade React from 18 to 19 | Signal 4 fires | `nextjs-conventions` skill updated |
+| You remove the last Prisma dependency | Signal 4 fires | `prisma-conventions` skill retired |
+
+No approvals. No stale rules. The system grows and shrinks with your codebase — always reflecting reality, never someone's outdated wiki.
 
 ## What Gets Bootstrapped
 
@@ -221,73 +220,19 @@ This runs the full bootstrap pipeline: deploys the skill system, selects framewo
 
 ```mermaid
 graph TD
-    A[AI receives task] --> B[AI reads AGENTS.md]
-    B --> C[AI scans .agents/skills/]
-    C --> D{What files are involved?}
-    D -->|.tsx/.ts in Next.js| E[nextjs-conventions]
-    D -->|.py files| F[python-conventions]
-    D -->|.go files| G[go-conventions]
-    D -->|.rs files| H[rust-conventions]
-    D -->|creating project| P[project-structure]
-    D -->|agent loops / orchestration| AP[agent-pipelines]
-    D -->|writing tests / *.test.*| UT[useful-tests]
-    D -->|help / what commands| HL[help]
-    HL --> J
-    D -->|Dockerfile / compose| X1[containers]
-    D -->|.sh / .bash| X2[shell-scripts]
-    D -->|.sql| X3[sql-database]
-    D -->|API routes| X4[api-design]
-    D -->|k8s / helm| X5[kubernetes]
-    D -->|.ts / .tsx standalone| X6[typescript-standalone]
-    D -->|.gitignore files| GI[gitignore]
-    D -->|web design review| WD[web-design-reviewer]
-    D -->|GitHub Actions security| GH[github-actions-hardening]
-    D -->|GitHub Actions efficiency| GE[github-actions-efficiency]
-    D -->|PostgreSQL| PG[postgresql-optimization]
-    D -->|browser testing| CD[chrome-devtools]
-    D -->|issue management| IS[github-issues]
-    D -->|debugging| DP[debugging-patterns]
-    D -->|code review| CR[code-review-checklist]
-    D -->|refactoring| RR[refactoring-recipes]
-    D -->|self-correction| SC[self-correction-patterns]
-    D -->|CLI tools| CT[cli-toolkit]
-    D -->|regex| RX[regex-reference]
-    D -->|git workflows| GW[git-workflows]
-    D -->|error interpretation| EI[error-interpretation]
-    D -->|model selection / model-aware hints| MP[model-profiles]
-    D -->|anything else| I[generic-conventions]
-    E --> J[AI follows applicable skills]
-    F --> J
-    G --> J
-    H --> J
-    P --> J
-    AP --> J
-    UT --> J
-    X1 --> J
-    X2 --> J
-    X3 --> J
-    X4 --> J
-    X5 --> J
-    X6 --> J
-    GI --> J
-    WD --> J
-    GH --> J
-    GE --> J
-    PG --> J
-    CD --> J
-    IS --> J
-    DP --> J
-    CR --> J
-    RR --> J
-    SC --> J
-    CT --> J
-    RX --> J
-    GW --> J
-    EI --> J
-    MP --> J
-    I --> J
-    J --> K[update-skills detects new patterns]
-    K --> L[Skill system grows with project]
+    A[AI receives task] --> B[Read AGENTS.md → scan .agents/skills/]
+    B --> C{What kind of work?}
+    C -->|Framework file| D[Load framework conventions]
+    C -->|Domain-specific file| E[Load domain conventions]
+    C -->|Slash command| F[Load task skill]
+    C -->|Everything else| G[Load generic-conventions]
+    D --> H[AI follows conventions]
+    E --> H
+    F --> H
+    G --> H
+    H --> I[update-skills detects new patterns]
+    I --> J[Skill system grows with project]
+    J --> B
 ```
 
 | Layer | Location | Trigger | Contains |
