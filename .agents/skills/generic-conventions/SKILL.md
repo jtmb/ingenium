@@ -1,6 +1,6 @@
 ---
 name: generic-conventions
-description: "Fallback coding conventions for any project — definitive core rules (comments, docs, DRY, security, observability, error handling, configuration). Use when no framework-specific skill applies."
+description: "Fallback coding conventions — ALWAYS check .agents/skills/ for framework/domain skills FIRST. Load this only when no other skill applies. Covers comments, docs, DRY, security, error handling, git, config."
 ---
 
 # Generic Coding Conventions
