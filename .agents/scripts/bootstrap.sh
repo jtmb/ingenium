@@ -172,6 +172,7 @@ declare -a FILES=(
     ".agents/skills/web-design-reviewer/SKILL.md|.agents/skills/web-design-reviewer/SKILL.md|optional"
     ".agents/skills/chrome-devtools/SKILL.md|.agents/skills/chrome-devtools/SKILL.md|optional"
     ".agents/skills/github-issues/SKILL.md|.agents/skills/github-issues/SKILL.md|optional"
+    ".agents/skills/learnings.md|.agents/skills/learnings.md|always"
     ".agents/hooks/pre-tool-use.json|.agents/hooks/pre-tool-use.json|optional"
     ".agents/hooks/post-tool-use.json|.agents/hooks/post-tool-use.json|optional"
     ".agents/hooks/session-start.json|.agents/hooks/session-start.json|optional"
