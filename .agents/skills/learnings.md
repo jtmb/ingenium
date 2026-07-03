@@ -59,6 +59,15 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 - **Fixed**: bash 5.2 `inherit_errexit` grep subshell crashes — `{ grep ... || true; } | wc -l` pattern
 - **Source**: User requested deploy/ separation for cleaner consumer installs + test for self-improving AI pipeline
 
+## 2026-07-02 — revert safety (commit-before pattern)
+
+- **Before**: `5cb8c9d` (state before revert safety feature)
+- **After**: `3b1d186`
+- **Added**: Revert Safety section to `audit-skills` SKILL.md — commit-before → make changes → commit-after workflow
+- **Added**: Revert procedure: `git checkout <before-hash> -- .agents/skills/<name>/` to restore any skill
+- **Changed**: `learnings.md` convention — entries now require both `**Before**:` and `**After**:` hashes (legacy `**Commit**:` deprecated)
+- **Source**: User requested that skill changes be reversible — always capture the pre-change commit hash
+
 ## 2026-07-02 — audit fix (rename to Ingenium + README stale counts)
 
 - **Before**: `6d1ff0d` (state after rename, before audit fixes)
