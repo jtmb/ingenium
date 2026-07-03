@@ -24,6 +24,7 @@ When invoked, display this entire file as the response. It is the canonical inde
 | `/create-readme` | `create-readme` | Generate a README.md for the project |
 | `/generate-docs` | `generate-docs` | Scan codebase, populate `docs/` templates |
 | `/repo-context` | `repo-context` | Load project identity, tech stack, conventions |
+| `/update-skill-index` | `update-skill-index` | Regenerate SKILL-INDEX.md from all skill files |
 | `/update-skills` | `update-skills` | Detect new patterns, create/retire skills |
 | `/write-docs` | `write-docs` | Write READMEs, API docs, ADRs |
 
@@ -104,6 +105,7 @@ When invoked, display this entire file as the response. It is the canonical inde
 |------|---------|
 | **Audit consistency** | `/audit-skills` or `comm -23 <(ls -d .agents/skills/*/ \| sed 's\|.*/\|\|;s\|/\|\|' \| sort) <(grep -oP '\.agents/skills/\K[^/]+(?=/SKILL\.md)' .agents/scripts/bootstrap.sh \| sort)` |
 | **Create/update skill** | `/update-skills` |
+| **Regenerate skill index** | `/update-skill-index` |
 | **View changelog** | `cat .agents/skills/learnings.md` |
 | **List all skills** | `ls -d .agents/skills/*/ \| sed 's\|.*/\|\|;s\|/\|\|' \| sort` |
 | **Check frontmatter** | `head -5 .agents/skills/{name}/SKILL.md` |
