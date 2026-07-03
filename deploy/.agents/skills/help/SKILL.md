@@ -35,7 +35,6 @@ When invoked, display this entire file as the response. It is the canonical inde
 
 | Skill | What it covers |
 |-------|---------------|
-| `always-read-agents` | Boot sequence: scan skills dir, load generic-conventions, repo-context, framework-specific skills, docs |
 | `generic-conventions` | Mandatory core rules: comments, docs sync, DRY, security, error handling, git, naming, config, testing checklist |
 
 ### Framework Conventions (loaded when editing matching files)

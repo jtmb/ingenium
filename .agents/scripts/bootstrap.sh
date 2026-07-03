@@ -135,7 +135,6 @@ declare -a FILES=(
     "AGENTS.md|AGENTS.md|always"
     "USAGE.md|USAGE.md|always"
     "README.md|README.md|always"
-    ".agents/skills/always-read-agents/SKILL.md|.agents/skills/always-read-agents/SKILL.md|always"
     ".agents/skills/generic-conventions/SKILL.md|.agents/skills/generic-conventions/SKILL.md|always"
     ".agents/skills/project-structure/SKILL.md|.agents/skills/project-structure/SKILL.md|always"
     ".agents/skills/containers/SKILL.md|.agents/skills/containers/SKILL.md|always"

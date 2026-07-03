@@ -1,6 +1,6 @@
 ---
 name: write-docs
-description: "Write high-quality documentation — READMEs, API docs, ADRs, architecture decision records. Use after building features or when docs are stale. Invokes the Explore subagent by default."
+description: "Write high-quality documentation — READMEs, API docs, ADRs, architecture decision records, and AGENTS.md skill index. Use after building features, adding/removing skills, or when docs are stale. Invokes the Explore subagent by default."
 ---
 
 # Write Project Documentation
@@ -46,6 +46,12 @@ High-level overview — link to docs/ARCHITECTURE.md for details.
 - **Copy-pasteable examples**: every code block should be runnable as-is
 - **No badges in the first screenful**: they push content below the fold
 - **Keep it current**: outdated Quick Start is worse than no Quick Start
+
+## AGENTS.md
+
+The AGENTS.md is a redirect — it points to `/help`. The actual skill catalog lives in the `help` skill and is self-maintaining (the AI scans `.agents/skills/` at runtime).
+
+**Keep it minimal:** a one-liner explaining the skill system + pointers to get started. No tables, no per-skill listings, nothing that rots.
 
 ## API Documentation
 
