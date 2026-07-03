@@ -1,24 +1,11 @@
-# Skill & Agent Learnings Log
+# Skill Learnings Log
 
-Changelog of all skill additions, retirements, and significant updates. Appended automatically by `update-skills`, `audit-skills`, and `manage-agents`.
+Changelog of all skill additions, retirements, and significant updates. Appended automatically by `update-skills` and `audit-skills`.
 
-**Convention**: Every entry MUST include both `**Before**:` and `**After**:` commit hashes. This enables reverting any skill or agent to its pre-change state:
+**Convention**: Every entry MUST include both `**Before**:` and `**After**:` commit hashes. This enables reverting any skill to its pre-change state:
 - Skills: `git checkout <before> -- .agents/skills/<name>/`
-- Agents: `git checkout <before> -- .github/agents/<name>.agent.md`
 
 Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going forward, always capture both.
-
-### Agent Entry Template
-
-```markdown
-## YYYY-MM-DD — {agent-name} (agent)
-
-- **Before**: `{hash}` (state before agent change)
-- **After**: `{hash}`
-- **Added/Updated/Retired**: `{agent-name}.agent.md` — {one-line description}
-- **Model**: {model assignment}
-- **Source**: {what triggered — new role, model-profile update, retired role}
-```
 
 ---
 
@@ -156,21 +143,17 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 - **All 8 include `## Model Notes` section** with model-aware hints for 7B–9B vs 14B–27B parameter range
 - **Updated files**: `README.md` (+8 rows, badge 31→39, cross-cutting 15→23, mermaid +8 nodes), `bootstrap.sh` (+8 always entries), `docs/ARCHITECTURE.md` (31→39 skills, 27→35 deployable), `deploy/` (8 new skill mirrors)
 
-## 2026-07-02 — Agent definitions + manage-agents skill
+## 2026-07-03 — Custom agents + manage-agents retired
 
-- **Before**: `a8542a8` (state before agent system)
-- **After**: `8bc1753`
-- **Added**: `.github/agents/` directory — 4 deployable agent definition templates
-  - `plan.agent.md` — research/planning agent (model: `deepseek-v4-pro`; tools: read, search, web, agent)
-  - `explore.agent.md` — fast read-only codebase exploration (model: `gemma-4-12b`; tools: read, search, web)
-  - `coder.agent.md` — full-dev coding agent (model: `deepseek-v4-flash`; tools: read, edit, search, execute, agent)
-  - `doc-writer.agent.md` — documentation specialist (model: `gemma-4-12b-agentic-fable5-composer2.5-v2-3.5x-tau2`; tools: read, edit, search)
-- **Added**: `manage-agents` skill — agent lifecycle management (create, update, retire, validate) with model-to-role assignment table from `model-profiles`
-- **Extended**: `learnings.md` — renamed to "Skill & Agent Learnings Log"; added agent revert command, agent entry template, and `manage-agents` as consumer
-- **Updated**: `audit-skills` — added 8th integration point for agent definitions (frontmatter, handoff chains, deploy drift, model consistency)
-- **Updated**: `bootstrap.sh` — added 5 optional entries (4 agents + manage-agents)
-- **Updated**: `tests/test-self-improving.sh` — added agent drift check in TEST 5, updated TEST 4 to allow `agents/` in deploy
-- **Updated**: `deploy/` — mirrored all new files (4 agents, manage-agents, updated audit-skills)
-- **Key decision**: Agent files live in `.github/agents/` (the standard VS Code Copilot convention) for auto-discovery by the harness. Bootstrap copies them directly to the same path in consumer projects.
-- **Model assignments**: Planner → `deepseek-v4-pro` (complex reasoning), Coder → `deepseek-v4-flash` (coding efficiency), Explore → `gemma-4-12b` (fast research), Doc Writer → `gemma-4-12b-agentic-fable5-composer2.5-v2-3.5x-tau2` (fine-tuned creative writing)
-- **Skills**: 42 total (41 previous + 1 manage-agents)
+- **Before**: `3b00e82` (state with 4 agents + manage-agents skill)
+- **After**: TBD (state after removal)
+- **Retired**: `plan.agent.md`, `explore.agent.md`, `coder.agent.md`, `doc-writer.agent.md` — 4 custom agent definitions, out of scope
+- **Retired**: `manage-agents` skill — agent lifecycle management, no longer needed without custom agents
+- **Reverted**: `audit-skills` — removed 8th integration point for agent definitions, went from 8→7 checks
+- **Reverted**: `bootstrap.sh` — removed 5 optional entries (4 agents + manage-agents)
+- **Reverted**: `USAGE.md` — removed agent persona decision node and reference table row
+- **Reverted**: `SKILL-INDEX.md` — count 42→41, removed manage-agents row
+- **Reverted**: `learnings.md` — removed agent revert command, agent entry template, manage-agents from consumer list
+- **Reverted**: `tests/test-self-improving.sh` — removed agent drift check, reverted deploy integrity checks
+- **Reverted**: `deploy/` — removed `.github/` mirror, removed manage-agents mirror
+- **Source**: User determined custom agents are out of scope for this project

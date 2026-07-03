@@ -108,9 +108,7 @@ graph TD
     Q4 -->|Yes| HOOK[".agents/hooks/{name}.json\nRuns at agent lifecycle events"]
     Q4 -->|No| Q5{Multi-step WORKFLOW with assets?}
     Q5 -->|Yes| COMPLEXSKILL[".agents/skills/{name}/SKILL.md\nBundles scripts + references"]
-    Q5 -->|No| Q6{Specialized agent PERSONA?}
-    Q6 -->|Yes| AGENT[".github/agents/{name}.agent.md\nRestricted tools + behaviors"]
-    Q6 -->|No| RECONSIDER[Reconsider — maybe it doesn't need an AI rule]
+    Q5 -->|No| RECONSIDER[Reconsider — maybe it doesn't need an AI rule]
 ```
 
 ### Quick Reference Table
@@ -122,7 +120,6 @@ graph TD
 | "Generate test cases for this file" | Task skill | `.agents/skills/gen-tests/SKILL.md` | Yes (`name`, `description`) |
 | "Block `rm -rf` without approval" | Hook | `.agents/hooks/pre-tool-use.json` | N/A (JSON) |
 | "Full database migration workflow" | Skill | `.agents/skills/db-migrate/SKILL.md` | Yes (`name`, `description`) |
-| "Code review specialist" | Agent | `.github/agents/code-reviewer.agent.md` | Yes (`description`, `tools`) |
 
 ---
 
