@@ -49,16 +49,66 @@ graph LR
 
 ## Self-Improving AI — Skills That Grow With Your Project
 
-The system doesn't just enforce rules — it **evolves them**. The `update-skills` skill gives the AI four detection signals to identify when your project needs new or updated conventions:
+The system doesn't just enforce rules — it **evolves them**. The `update-skills` skill gives the AI four detection signals to identify when your project needs new or updated conventions. When the AI spots a gap, it doesn't ask — it **writes the skill**, commits it, and logs the change.
 
-| Signal | What the AI detects | Example |
-|--------|-------------------|---------|
-| **New dependency** | A framework or library added to `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml` with no matching skill | Adding `prisma` → AI proposes an ORM skill |
-| **Repeated patterns** | 3+ files following the same unwritten convention | Every feature folder has `index.ts` + `hooks.ts` + `types.ts` → AI proposes codifying it |
-| **Missing coverage** | File types or directories with no applicable skill | `**/*.graphql` files exist but no GraphQL skill → AI flags the gap |
-| **Stale content** | A skill references outdated versions, dead paths, or wrong commands | Skill says "React 18" but `package.json` has React 19 → AI proposes update |
+### How Detection Works
 
-When the AI detects a pattern, it **creates** a new skill or updates an existing one — automatically. No approval needed. The skill system grows with your codebase. No more stale conventions docs.
+| Signal | What the AI detects | Real example |
+|--------|-------------------|--------------|
+| **New dependency** | A framework or library added to `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml` with no matching skill | Adding `prisma` → AI creates `prisma-conventions` skill with migration safety, query patterns, connection pooling |
+| **Repeated patterns** | 3+ files following the same unwritten convention | Every feature folder has `index.ts` + `hooks.ts` + `types.ts` → AI codifies the pattern into a `feature-structure` skill |
+| **Missing coverage** | File types or directories with no applicable skill | `**/*.graphql` files exist but no GraphQL skill → AI flags the gap and writes one with schema conventions, operation naming, resolver patterns |
+| **Stale content** | A skill references outdated versions, dead paths, or wrong commands | Skill says "React 18" but `package.json` has React 19 → AI updates the skill with new APIs, hooks, and patterns |
+
+### How a Skill Gets Created — Step by Step
+
+When the AI detects a pattern, here's exactly what happens:
+
+1. **Scan**: It checks `package.json`, file tree, and repeated code patterns for Signals 1-4
+2. **Write**: Creates a new `SKILL.md` with proper YAML frontmatter — name, description, and keyword triggers for AI auto-discovery
+3. **Structure**: Follows the proven template — "What This Covers" → "When to Use" → "Conventions" → "Examples" — so the skill is immediately usable
+4. **Commit**: Commits with a descriptive message linking the detection signal (e.g., `feat(skills): add prisma-conventions — Signal 1 dependency detection`)
+5. **Log**: Appends to `.agents/skills/learnings.md` — a chronological changelog with before/after commit hashes for every addition, update, and retirement
+
+### The learnings.md Audit Trail
+
+Every skill change is automatically logged to `.agents/skills/learnings.md`. Each entry captures:
+
+- **What changed**: added, updated, or retired
+- **Before/After commit hashes**: enables `git checkout <hash> -- .agents/skills/<name>/` to revert any skill to a previous state
+- **Detection signal**: which of the 4 signals triggered the change
+- **Rationale**: why the change was made
+
+```bash
+# The AI can revert any skill to its pre-change state
+git checkout <before-hash> -- .agents/skills/<skill-name>/
+```
+
+This means the skill system is **always auditable**. You can see every change, when it happened, why it was made, and how to undo it.
+
+### When Skills Retire
+
+Skills don't accumulate forever. When a dependency is removed or a pattern fades, the AI retires the skill:
+
+- Moves it out of `.agents/skills/` so it stops being invoked
+- Logs the retirement in `learnings.md` with the reason
+- Updates `SKILL-INDEX.md` to remove the entry
+
+No stale conventions. No ghost rules. The system stays lean.
+
+### This All Happens Autonomously
+
+You don't approve skill changes — they happen in the background. The AI detects, creates, updates, and retires skills as you code. Every change is logged and reversible. The skill system grows and shrinks with your project, always reflecting the actual codebase — not someone's outdated wiki.
+
+---
+
+| Trigger | AI action | Result |
+|---------|-----------|--------|
+| You `npm install prisma` | Signal 1 fires | `prisma-conventions` skill created |
+| You copy the same 3-file pattern 5 times | Signal 2 fires | `feature-structure` skill codifies it |
+| You write your first `.graphql` file | Signal 3 fires | `graphql-conventions` skill created |
+| You upgrade React from 18 to 19 | Signal 4 fires | `nextjs-conventions` skill updated |
+| You remove the last Prisma dependency | Signal 4 fires | `prisma-conventions` skill retired |
 
 ## Getting Started
 
