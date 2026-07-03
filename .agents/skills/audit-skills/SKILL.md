@@ -194,6 +194,8 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | SKILL-INDEX.md count wrong | Update `**Total skills: {N}**` to match `ls -d .agents/skills/*/ \| wc -l` |
 | SKILL-INDEX.md has stale entry | Remove the row for the deleted skill |
 | SKILL-INDEX.md has duplicate entry | Remove the duplicate row |
+| SKILL-INDEX.md updated but deploy/ is stale | `cp SKILL-INDEX.md deploy/SKILL-INDEX.md` |
+| update-skill-index added but deploy/ missing | `cp -r .agents/skills/update-skill-index deploy/.agents/skills/update-skill-index` |
 
 **After applying fixes, always commit-before + commit-after and log both hashes:**
 
