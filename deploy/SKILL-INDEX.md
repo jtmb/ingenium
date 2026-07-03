@@ -2,7 +2,7 @@
 
 This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill in `.agents/skills/` is listed here with its description, function, commands, and a link to its full documentation.
 
-**Total skills: 42**
+**Total skills: 43**
 
 ---
 
@@ -10,6 +10,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 
 | Command | Skill | Description |
 |---------|-------|-------------|
+| `/skill` | [skill](.agents/skills/skill/SKILL.md) | 🔴 Mandatory first command — inject skill-system bootstrap payload, force AGENTS.md + skill loading |
 | `/audit-skills` | [audit-skills](.agents/skills/audit-skills/SKILL.md) | Audit skill→docs consistency, auto-fix discrepancies |
 | `/create-readme` | [create-readme](.agents/skills/create-readme/SKILL.md) | Generate a README.md for the project |
 | `/generate-docs` | [generate-docs](.agents/skills/generate-docs/SKILL.md) | Scan codebase, populate `docs/` templates |
@@ -61,6 +62,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | [refactoring-recipes](.agents/skills/refactoring-recipes/SKILL.md) | Code improvement | Catalog of refactoring patterns with explicit before/after examples — extract method, invert conditional, replace magic number |
 | [regex-reference](.agents/skills/regex-reference/SKILL.md) | Regex writing, review | Regex pattern reference — common patterns, language-specific escaping, catastrophic backtracking prevention |
 | [self-correction-patterns](.agents/skills/self-correction-patterns/SKILL.md) | AI mistake recovery | Patterns for recognizing and recovering from AI mistakes — backtracking triggers, verification loops, assumption checking |
+| [skill](.agents/skills/skill/SKILL.md) | `/skill` first message | 🔴 Mandatory first command — inject skill-system bootstrap payload into prompt, forcing AGENTS.md read and skill matching |
 | [shell-scripts](.agents/skills/shell-scripts/SKILL.md) | `**/*.{sh,bash}` | Shell script conventions — safety flags, quoting, error handling, temporary files, portability |
 | [sql-database](.agents/skills/sql-database/SKILL.md) | `**/*.sql`, migrations | SQL & database conventions — parameterized queries, migration safety, indexing, connection pooling |
 | [thread-auto-context](.agents/skills/thread-auto-context/SKILL.md) | Always-applied, session start/end | Automatic persistent memory via Thread MCP — search context at session start, save decisions/preferences/constraints |
@@ -151,15 +153,16 @@ This file is the **canonical index** of all skills in this project. It is automa
 | 31 | `repo-context` | [`.agents/skills/repo-context/SKILL.md`](.agents/skills/repo-context/SKILL.md) |
 | 32 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
 | 33 | `self-correction-patterns` | [`.agents/skills/self-correction-patterns/SKILL.md`](.agents/skills/self-correction-patterns/SKILL.md) |
-| 34 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
-| 35 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
-| 36 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
-| 37 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
-| 38 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
-| 39 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
-| 40 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
-| 41 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
-| 42 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
+| 34 | `skill` | [`.agents/skills/skill/SKILL.md`](.agents/skills/skill/SKILL.md) |
+| 35 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
+| 36 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
+| 37 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
+| 38 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
+| 39 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
+| 40 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
+| 41 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
+| 42 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
+| 43 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
 
 ---
 
