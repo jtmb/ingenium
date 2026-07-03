@@ -96,6 +96,21 @@ Changelog of all skill additions, retirements, and significant updates. Appended
   - Updated `docs/ARCHITECTURE.md`: skill count 23 → 26, deployable count 19 → 22
   - Skill count badge: 24 → 26
 
+## 2026-07-02 — model-profiles skill (Qwen + Gemma model-aware hints)
+
+- **Before**: `9c413e8` (state before model-profiles skill)
+- **After**: `a5953e6`
+- **Category**: Always-Included cross-cutting skill
+- **Added**: `model-profiles` skill — comprehensive model-aware instruction tuning for Qwen (Qwen2.5 7B–72B, Coder variants) and Gemma (Gemma 3 9B–27B, Gemma 2) families
+- **Key content**:
+  - Context window reference table (128K for Qwen2.5/Gemma 3, 8K for Gemma 2)
+  - Strengths/weaknesses per model family with comparison tables
+  - Model-aware hints per size variant (which tasks each model handles well)
+  - Cross-Model Strategy Guide — task × best model matrix
+  - Prompt adaptation table by parameter range (2B–7B → 72B)
+  - Skill adaptation table mapping `debugging-patterns`, `code-review-checklist`, `refactoring-recipes`, `self-correction-patterns`, `cli-toolkit`, `regex-reference`, `git-workflows`, `error-interpretation` to model-specific guidance
+- **Updated files**: `README.md` (badge 39→40, cross-cutting 23→24, +1 table row, +1 mermaid node), `bootstrap.sh` (+1 always entry), `docs/ARCHITECTURE.md` (40 skills, 36 deployable), `deploy/` (new skill mirror)
+
 ## 2026-07-02 — 8 new skills for local LLMs (9B–27B)
 
 - **Before**: `cad78e2` (state before 8 new skills)
