@@ -99,7 +99,7 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 ## 2026-07-02 — model-profiles skill (Qwen + Gemma model-aware hints)
 
 - **Before**: `9c413e8` (state before model-profiles skill)
-- **After**: `a5953e6`
+- **After**: `349aa29`
 - **Category**: Always-Included cross-cutting skill
 - **Added**: `model-profiles` skill — comprehensive model-aware instruction tuning for Qwen (Qwen2.5 7B–72B, Coder variants) and Gemma (Gemma 3 9B–27B, Gemma 2) families
 - **Key content**:
