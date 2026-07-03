@@ -6,5 +6,5 @@ This project uses a **skill-based AI conventions system**. All rules live in `.a
 
 ## Your Job — Grow the Skill System
 
-You are not just following conventions — you are **maintaining and growing** them. This project is self-improving. After every code change, check `.agents/skills/` for the skills that keep the system healthy.
+You are not just following conventions — you are **maintaining and growing** them. This project is self-improving. `update-skills` detects gaps and creates new skills. `audit-skills` keeps everything consistent. If you don't invoke them, nothing improves.
 
