@@ -58,3 +58,19 @@ Changelog of all skill additions, retirements, and significant updates. Appended
 - **Affected files**: `AGENTS.md`, `bootstrap.sh` FILES array, `README.md` (mermaid + table), `USAGE.md` (4 tree diagrams), `audit-skills`, `generic-conventions`, `help`, `update-skills`, `write-docs`
 - **Fixed**: bash 5.2 `inherit_errexit` grep subshell crashes — `{ grep ... || true; } | wc -l` pattern
 - **Source**: User requested deploy/ separation for cleaner consumer installs + test for self-improving AI pipeline
+
+## 2026-07-02 — audit fix (rename to Ingenium + README stale counts)
+
+- **Commit**: `pending`
+- **Renamed**: "Copilot AI Bootstrap" → "Ingenium" across 7 files — `README.md`, `USAGE.md`, `ARCHITECTURE.md`, `session-start.json`, `hook-bootstrap.sh`, `update-skills` SKILL.md (source + deploy)
+- **Catchphrase**: "Genius doesn't repeat itself. Neither should you."
+- **Visual**: Added 🌱 "skills that grow with you" badge (purple) to README header
+- **Audit fixes**:
+  - Added `gitignore` and `web-design-reviewer` to README Always-Included table
+  - Added 4 source-only skills to Task Skills table (`create-readme`, `gh-cli`, `playwright-mcp`, `thread-auto-context`)
+  - Fixed cross-cutting count: 9 → 10 files
+  - Fixed tasks count: 9 → 6 deployable + 4 source-only
+  - Added `gitignore` and `web-design-reviewer` nodes to README mermaid diagram
+  - Removed stale `always-read-agents` references from README (mermaid + Key Rules table)
+  - Updated `docs/ARCHITECTURE.md`: skill count 23 → 26, deployable count 19 → 22
+  - Skill count badge: 24 → 26
