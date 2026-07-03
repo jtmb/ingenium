@@ -12,7 +12,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 ## 2026-07-03 — 🔴 Mandatory Skills: unconditional, 25 non-infra skills
 
 - **Before**: `621bdd3`
-- **After**: (pending)
+- **After**: `e7be1ba`
 - **Changes**:
   1. **Removed all "local model" qualifiers** — header, column, every row. No conditional language.
   2. **Expanded 7 → 25 mandatory skills**: Every domain skill added except infrastructure frameworks (containers, kubernetes, github-actions-hardening, github-actions-efficiency).
