@@ -1,9 +1,9 @@
 <div align="center">
 
-<!-- <img src="https://raw.githubusercontent.com/jtmb/copilot-ai-bootstrap/main/.github/assets/logo.svg" alt="Copilot AI Bootstrap" width="120" /> -->
+<img src="assets/logo.svg" alt="Ingenium" width="120" />
 
-# Copilot AI Bootstrap
-### Set Once — Auto-Bootstrap Every Project
+# Ingenium
+### Genius doesn't repeat itself. Neither should you.
 
 <p>
   <img src="https://img.shields.io/badge/skills-24%20files-green?style=flat-square" alt="Skill files" />
@@ -17,7 +17,7 @@
 
 **The problem:** Every time you start a new project with VS Code Copilot, the AI doesn't know your conventions. It doesn't know to keep docs in sync, write comments, run tests before claiming done, or use your framework's idioms. You repeat the same instructions in every chat — and the AI drifts from your standards.
 
-**What this solves:** A **skill-based AI conventions system** that bootstraps into every project automatically. 24 skills covering frameworks, domains, and tasks — each invoked on-demand by VS Code Copilot. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
+**What this solves:** A **skill-based AI conventions system** — skills that grow with you — that bootstraps into every project automatically. 25 skills covering frameworks, domains, and tasks — each invoked on-demand by VS Code Copilot. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
 
 Configure it once as a hook. Every project you open gets auto-bootstrapped with the right skills — framework detection, layered conventions, docs templates, and enforcement guardrails. No cloning, no manual copying, no per-project setup.
 
@@ -57,7 +57,7 @@ VS Code Copilot reads hooks from `~/.copilot/hooks/` (global, applies to every p
         "SessionStart": [
             {
                 "type": "command",
-                "command": "if [ ! -f AGENTS.md ]; then curl -fsSL https://raw.githubusercontent.com/jtmb/copilot-ai-bootstrap/main/.agents/scripts/hook-bootstrap.sh | bash; fi"
+                "command": "if [ ! -f AGENTS.md ]; then curl -fsSL https://raw.githubusercontent.com/jtmb/ingenium/main/.agents/scripts/hook-bootstrap.sh | bash; fi"
             }
         ]
     }
@@ -75,7 +75,7 @@ That's it. Now:
 
 > **Where hooks live:** `~/.copilot/hooks/*.json` — NOT in `settings.json`. This is VS Code Copilot's global hooks directory. Each `.json` file registers one or more lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`).
 
-> **What happens?** `.agents/scripts/hook-bootstrap.sh` caches this repo in `~/.cache/gh-llm-bootstrap/`, auto-detects the framework from `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml`, and calls `.agents/scripts/bootstrap.sh --auto --framework <detected> /path/to/your/project`.
+> **What happens?** `.agents/scripts/hook-bootstrap.sh` caches this repo in `~/.cache/ingenium/`, auto-detects the framework from `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml`, and calls `.agents/scripts/bootstrap.sh --auto --framework <detected> /path/to/your/project`.
 
 ## What Gets Bootstrapped
 
@@ -133,7 +133,8 @@ That's it. Now:
 
 ```mermaid
 graph TD
-    A[AI receives task] --> C[AI scans .agents/skills/]
+    A[AI receives task] --> B[always-read-agents skill invoked]
+    B --> C[AI scans .agents/skills/]
     C --> D{What files are involved?}
     D -->|.tsx/.ts in Next.js| E[nextjs-conventions]
     D -->|.py files| F[python-conventions]
@@ -195,15 +196,15 @@ graph TD
 | ❌ **Error Handling** | Never swallow, wrap with context, typed errors, crash-only |
 | ⚙️ **Configuration** | One config module, validate at startup, 12-factor, secrets ≠ config |
 | 🏷️ **Naming Conventions** | Descriptive, no abbreviations, language-consistent casing |
-| 🔄 **Skill System** | AI scans `.agents/skills/` before every code change. `update-skills` grows them as your project evolves. |
+| 🔄 **Skill System** | `always-read-agents` loads all conventions before every code change. `update-skills` grows them as your project evolves. |
 
 ## Manual Bootstrap (optional)
 
 If you can't use hooks, or want to bootstrap once:
 
 ```bash
-git clone --depth 1 https://github.com/jtmb/copilot-ai-bootstrap.git
-./copilot-ai-bootstrap/.agents/scripts/bootstrap.sh --framework python /path/to/your-project
+git clone --depth 1 https://github.com/jtmb/ingenium.git
+./ingenium/.agents/scripts/bootstrap.sh --framework python /path/to/your-project
 ```
 
 Or for non-interactive CI use:

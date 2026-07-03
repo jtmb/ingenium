@@ -2,7 +2,7 @@
 
 ## Overview
 
-**gh-llm-bootstrap** is a self-improving AI conventions system packaged as a bootstrap toolkit. It provides a skill-based framework that tells AI coding agents (GitHub Copilot, Cline, etc.) how to follow project conventions, enforce rules, and grow new skills as the codebase evolves. The project is self-hosting: its own skill system governs its own development.
+**Ingenium** is a self-improving AI conventions system packaged as a bootstrap toolkit. It provides a skill-based framework that tells AI coding agents (GitHub Copilot, Cline, etc.) how to follow project conventions, enforce rules, and grow new skills as the codebase evolves. The project is self-hosting: its own skill system governs its own development.
 
 Key properties:
 - **Zero runtime dependencies** — pure Markdown + YAML + shell scripts
@@ -12,7 +12,7 @@ Key properties:
 ## Directory Map
 
 ```
-gh-llm-bootstrap/
+ingenium/
 ├── .agents/                    ← AI conventions system (the "product")
 │   ├── skills/                 ← 23 skills — each is a SKILL.md with YAML frontmatter
 │   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
@@ -140,7 +140,7 @@ The project is deployed by **bootstrapping** — running `bootstrap.sh` against 
 
 ```bash
 # Bootstrap a new Next.js project with skill conventions
-./gh-llm-bootstrap/.agents/scripts/bootstrap.sh --framework nextjs /path/to/new-project
+./ingenium/.agents/scripts/bootstrap.sh --framework nextjs /path/to/new-project
 ```
 
 This copies `deploy/.agents/` + `deploy/AGENTS.md` into the target, giving it the full skill system. The bootstrap supports:
