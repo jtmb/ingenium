@@ -16,7 +16,7 @@ VS Code Copilot reads hooks from `~/.copilot/hooks/` (global, applies to every p
         "SessionStart": [
             {
                 "type": "command",
-                "command": "if [ ! -f AGENTS.md ]; then curl -fsSL https://raw.githubusercontent.com/jtmb/copilot-ai-bootstrap/main/.agents/scripts/hook-bootstrap.sh | bash; fi"
+                "command": "if [ ! -f AGENTS.md ]; then curl -fsSL https://raw.githubusercontent.com/jtmb/ingenium/main/.agents/scripts/hook-bootstrap.sh | bash; fi"
             }
         ]
     }
@@ -49,24 +49,24 @@ If you can't use hooks, bootstrap manually:
 
 ```bash
 # One-liner — clone and bootstrap in one go
-git clone --depth 1 https://github.com/jtmb/copilot-ai-bootstrap.git && \
-  ./copilot-ai-bootstrap/.agents/scripts/bootstrap.sh --framework python --project-name my-backend /path/to/project
+git clone --depth 1 https://github.com/jtmb/ingenium.git && \
+  ./ingenium/.agents/scripts/bootstrap.sh --framework python --project-name my-backend /path/to/project
 
 # Or interactive mode
-./copilot-ai-bootstrap/.agents/scripts/bootstrap.sh /path/to/project
+./ingenium/.agents/scripts/bootstrap.sh /path/to/project
 ```
 
 For an existing project with code already:
 
 ```bash
 # Auto-detect framework and bootstrap non-interactively
-copilot-ai-bootstrap/.agents/scripts/bootstrap.sh --auto --framework python /path/to/existing-project
+ingenium/.agents/scripts/bootstrap.sh --auto --framework python /path/to/existing-project
 ```
 
 Pro tip: `.agents/scripts/hook-bootstrap.sh` handles the auto-detection for you even in manual mode:
 
 ```bash
-bash copilot-ai-bootstrap/.agents/scripts/hook-bootstrap.sh --framework nextjs
+bash ingenium/.agents/scripts/hook-bootstrap.sh --framework nextjs
 ```
 
 ---
