@@ -6,7 +6,7 @@ This is your handbook for working with the layered agent instruction system. Whe
 
 ## Quick-Start: Set Up the Hook (do this once)
 
-VS Code Copilot reads hooks from `~/.copilot/hooks/` (global, applies to every project). Create this file:
+AI coding assistants that support the `.agents/` convention (e.g., VS Code Copilot, Cline) read hooks from their hook directory. For VS Code Copilot, hooks live at `~/.copilot/hooks/` (global, applies to every project). Create this file:
 
 **`~/.copilot/hooks/trigger-bootstrap.json`**
 
@@ -23,9 +23,9 @@ VS Code Copilot reads hooks from `~/.copilot/hooks/` (global, applies to every p
 }
 ```
 
-Now open any project, start a Copilot chat, and the hook auto-bootstraps it.
+Now open any project, start an AI chat, and the hook auto-bootstraps it.
 
-> **Where hooks live:** `~/.copilot/hooks/*.json` — NOT in `settings.json`. Each `.json` file registers lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`).
+> **Where hooks live (VS Code Copilot):** `~/.copilot/hooks/*.json` — NOT in `settings.json`. Each `.json` file registers lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`). Other AI assistants may use different hook locations.
 
 **What you get (in every project):**
 - `.agents/skills/generic-conventions/SKILL.md` — core conventions (13 sections: docs, comments, tests, DRY, security, error handling, config, more)

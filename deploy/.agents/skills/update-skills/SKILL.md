@@ -25,7 +25,7 @@ It covers two audiences:
 
 # Part 1: Managing Skills in Your Project
 
-Skills live at `.agents/skills/{name}/SKILL.md` in your project. They're invoked by name in VS Code Copilot chat (e.g., `/my-project-conventions`). Each skill has:
+Skills live at `.agents/skills/{name}/SKILL.md` in your project. They're invoked by name via slash command in any AI coding assistant that supports the `.agents/` convention (e.g., `/my-project-conventions`). Each skill has:
 
 ```yaml
 ---
@@ -235,7 +235,7 @@ When a skill is outdated:
 4. **Update the skill** — fix outdated commands, versions, paths, and conventions
 5. **Check for cascading updates** — if this skill says "see also X", check X too
 6. **Update docs** — if `docs/CONVENTIONS.md` references this skill, update it in the same turn
-7. **Test** — invoke the skill in VS Code chat and verify it gives correct guidance
+7. **Test** — invoke the skill via its slash command and verify it gives correct guidance
 
 ## Retire: Removing a Stale Skill
 
@@ -261,7 +261,7 @@ Before making any change, understand which layer you're touching:
 2. **Framework skills** (`.agents/skills/{fw}-conventions/SKILL.md`) — copied when `--framework {fw}` is selected.
 3. **Cross-cutting skills** (`.agents/skills/{domain}/SKILL.md`) — Containers, Shell, SQL, API Design, Kubernetes, TypeScript. Copied to all targets.
 4. **Core skills** (`generic-conventions`) — always copied.
-5. **Task skills** (`generate-docs`, `repo-context`, `write-docs`, `update-skills`) — optional. Invocable via `/` in VS Code chat.
+5. **Task skills** (`generate-docs`, `repo-context`, `write-docs`, `update-skills`) — optional. Invocable via `/` command.
 6. **Enforcement** (`.agents/hooks/`) — deterministic lifecycle hooks.
 7. **CI** (`.agents/workflows/ci.yml`) — matrix CI for lint/build/test.
 
@@ -290,7 +290,7 @@ Before making any change, understand which layer you're touching:
 
 1. Check frontmatter: `---` fences, `name` matches folder, `description` is keyword-rich
 2. Check body: clear "When to Use" section, one concern per skill, no duplicated docs content
-3. Test: invoke the skill by name in VS Code chat
+3. Test: invoke the skill by name via its slash command
 
 ## File Dependencies Map
 

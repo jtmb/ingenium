@@ -277,10 +277,10 @@ else
     echo "Next steps:"
     echo "  1. Read USAGE.md for how to add your own rules"
     echo "  2. Edit docs/ to describe your project"
-    echo "  3. Open in VS Code — the AI will follow the rules automatically"
+    echo "  3. Open in your editor with AI support — the AI will follow the rules automatically"
     echo
     if $INTERACTIVE || [[ -n "$PROJECT_NAME" ]]; then
-        echo "Tip: Run '/generate-docs' in VS Code chat to have the AI fill in docs/ templates."
+        echo "Tip: Run '/generate-docs' to have the AI fill in docs/ templates."
         echo
     fi
 fi
