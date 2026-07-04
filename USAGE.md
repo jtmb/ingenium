@@ -13,7 +13,7 @@ See **[Getting Started](./README.md#getting-started)** in the README for install
 - **Manual Install** — clone and copy `deploy/`
 - **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
 
-**What you get in every project:** the full `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` (43 items total), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
+**What you get in every project:** the full `.agents/skills/` (45 items total), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
 
 ---
 
@@ -28,9 +28,9 @@ graph TD
     Q1 -->|No| Q2{Applies to specific FILE PATTERNS?}
     Q2 -->|Yes| SKILL[".agents/skills/{name}/SKILL.md"]
     Q2 -->|No| Q3{Applies to a specific TASK?}
-    Q3 -->|Yes| TASKSKILL[".agents/instructions/{name}/SKILL.md\nInvocable via /command"]
+    Q3 -->|Yes| TASKSKILL[".agents/skills/{name}/SKILL.md\nInvocable via /command"]
     Q3 -->|No| Q4{Uses browser or GitHub CLI?}
-    Q4 -->|Yes| TOOL[".agents/tools/{name}/SKILL.md\nBrowser automation or GitHub ops"]
+    Q4 -->|Yes| TOOL[".agents/skills/{name}/SKILL.md\nBrowser automation or GitHub ops"]
     Q4 -->|No| Q5{Must be ENFORCED deterministically?}
     Q5 -->|Yes| HOOK[".agents/hooks/{name}.json\nRuns at agent lifecycle events"]
     Q5 -->|No| Q6{Multi-step WORKFLOW with assets?}
@@ -44,8 +44,8 @@ graph TD
 |--------|-----------|----------|------------------|
 | "All code must have comments" | Core rule | `.agents/skills/generic-conventions/SKILL.md` | Yes (`name`, `description`) |
 | "Python files must use type hints" | Framework skill | `.agents/skills/python-conventions/SKILL.md` | Yes (`name`, `description`) |
-| "Generate test cases for this file" | Task instruction | `.agents/instructions/gen-tests/SKILL.md` | Yes (`name`, `description`) |
-| "Use Playwright to test the UI" | Browser tool | `.agents/tools/playwright-mcp/SKILL.md` | Yes (`name`, `description`) |
+| "Generate test cases for this file" | Task instruction | `.agents/skills/gen-tests/SKILL.md` | Yes (`name`, `description`) |
+| "Use Playwright to test the UI" | Browser tool | `.agents/skills/playwright-mcp/SKILL.md` | Yes (`name`, `description`) |
 | "Block `rm -rf` without approval" | Hook | `.agents/hooks/pre-tool-use.json` | N/A (JSON) |
 | "Full database migration workflow" | Domain skill | `.agents/skills/sql-database/SKILL.md` | Yes (`name`, `description`) |
 
@@ -63,7 +63,7 @@ your-project/
 │   ├── TECH-STACK.md                            ←   Dependencies & version decisions
 │   └── CONVENTIONS.md                           ←   Naming, patterns, file organization
 ├── .agents/
-│   ├── skills/                                  ← Conventions (framework + domain)
+│   ├── skills/                                  ← ALL conventions (45 items)
 │   │   ├── generic-conventions/
 │   │   │   └── SKILL.md                         ←   Fallback for any file type
 │   │   ├── nextjs-conventions/
@@ -86,10 +86,6 @@ your-project/
 │   │   │   └── SKILL.md                         ←   Kubernetes/Helm conventions
 │   │   ├── typescript-standalone/
 │   │   │   └── SKILL.md                         ←   Standalone TypeScript conventions
-│   │   └── ...
-│   ├── instructions/                            ← Task skills (invocable via /command)
-│   │   ├── help/
-│   │   │   └── SKILL.md                         ←   Skill catalog overview
 │   │   ├── skill-load/
 │   │   │   └── SKILL.md                         ←   Session bootstrap protocol
 │   │   ├── repo-context/
@@ -110,9 +106,8 @@ your-project/
 │   │   │   └── SKILL.md                         ←   Write READMEs, API docs, ADRs
 │   │   ├── update-skill-index/
 │   │   │   └── SKILL.md                         ←   Regenerate SKILL-INDEX.md
-│   │   └── thread-auto-context/
-│   │       └── SKILL.md                         ←   Persistent memory
-│   ├── tools/                                   ← Browser & GitHub tools
+│   │   ├── thread-auto-context/
+│   │   │   └── SKILL.md                         ←   Persistent memory
 │   │   ├── chrome-devtools/
 │   │   │   └── SKILL.md                         ←   Browser debugging/screenshots
 │   │   ├── playwright-mcp/
@@ -121,8 +116,13 @@ your-project/
 │   │   │   └── SKILL.md                         ←   GitHub CLI operations
 │   │   ├── github-issues/
 │   │   │   └── SKILL.md                         ←   GitHub issue management
-│   │   └── web-design-reviewer/
-│   │       └── SKILL.md                         ←   UI/UX inspection
+│   │   ├── web-design-reviewer/
+│   │   │   └── SKILL.md                         ←   UI/UX inspection
+│   │   ├── vision-bridge/
+│   │   │   └── SKILL.md                         ←   Vision model bridge
+│   │   ├── onboard-existing-repo/
+│   │   │   └── SKILL.md                         ←   Repo onboarding
+│   │   └── ... (45 total)
 │   ├── hooks/                                   ← Deterministic enforcement (JSON)
 │   │   ├── session-start.json                   ←   Auto-bootstrap on Copilot session start
 │   │   ├── pre-tool-use.json                    ←   Validate before tool calls
@@ -161,11 +161,15 @@ Adding support for a new language or framework (e.g., Ruby, Elixir, Zig):
 
 For task skills (like update-skills, generate-docs) or tools (like chrome-devtools, gh-cli):
 
-1. **Create the directory** in the appropriate location:
-   - Task: `.agents/instructions/{name}/SKILL.md`
-   - Tool: `.agents/tools/{name}/SKILL.md`
+1. **Create the directory** at `.agents/skills/{name}/SKILL.md`.
 
-2. **Use proper frontmatter** (same format as skills).
+2. **Use proper frontmatter** (same format as skills):
+   ```yaml
+   ---
+   name: {name}
+   description: "What this skill does and when to use it"
+   ---
+   ```
 
 3. **For tools**, ensure any MCP or tool references are documented in the SKILL.md.
 
@@ -212,8 +216,8 @@ Skills are the primary mechanism for adding conventions and tasks. Choose the ri
 | Category | Location | Example |
 |----------|----------|---------|
 | Framework/domain convention | `.agents/skills/{name}/` | `.agents/skills/ruby-conventions/SKILL.md` |
-| Task skill (invocable via command) | `.agents/instructions/{name}/` | `.agents/instructions/db-migrate/SKILL.md` |
-| Browser/GitHub tool | `.agents/tools/{name}/` | `.agents/tools/my-browser-tool/SKILL.md` |
+| Task skill (invocable via command) | `.agents/skills/{name}/` | `.agents/skills/db-migrate/SKILL.md` |
+| Browser/GitHub tool | `.agents/skills/{name}/` | `.agents/skills/my-browser-tool/SKILL.md` |
 
 1. **Create the directory** with a `SKILL.md` file:
 

@@ -8,9 +8,7 @@ This project supports **both OpenCode and GitHub Copilot**. Configuration is pla
 | **GitHub Copilot** | `.github/` | `.github/hooks/*.json` | `.vscode/mcp.json` | SDK-based (programmatic) |
 
 **Common foundation** (auto-discovered by both platforms):
-- `.agents/skills/<name>/SKILL.md` — domain conventions
-- `.agents/instructions/<name>/SKILL.md` — procedural guides
-- `.agents/tools/<name>/SKILL.md` — tool references
+- `.agents/skills/<name>/SKILL.md` — ALL skills: conventions, procedural guides, and tool references
 - `AGENTS.md` — this file, read by both as project rules
 
 **MCP Servers available:**
@@ -29,7 +27,7 @@ This project supports **both OpenCode and GitHub Copilot**. Configuration is pla
 
 Before responding to the user's first request:
 1. **Match skills to request** — Check the skill catalog against the user's request and files you might edit
-2. **Load every matching skill** — Read the full `SKILL.md` from `.agents/skills/<name>/`, `.agents/instructions/<name>/`, or `.agents/tools/<name>/`
+2. **Load every matching skill** — Read the full `SKILL.md` from `.agents/skills/<name>/`
 3. **Note the 🔴 HARD RULEs** — These take priority over everything else
 4. **Invoke `/repo-context`** for project identity and `/help` for the full catalog
 
@@ -88,9 +86,8 @@ For the full skill catalog with detailed descriptions, invocation patterns, comm
 
 ### Skill System Instructions
 
-Procedural guides loaded via `opencode.json` → `instructions`:
-- `.agents/instructions/*/SKILL.md` — session init, task execution, diagnosis
-- `.agents/tools/*/SKILL.md` — browser automation, GitHub operations, UI review
+All skills are loaded via `opencode.json` → `instructions`:
+- `.agents/skills/*/SKILL.md` — ALL skills: conventions, task skills, tools
 
 These are loaded automatically by OpenCode. Copilot uses `.github/hooks/*.json`.
 
@@ -124,9 +121,7 @@ These are loaded automatically by OpenCode. Copilot uses `.github/hooks/*.json`.
 ├── .vscode/mcp.json             # VS Code MCP servers
 ├── .agents/
 │   ├── SKILL-CATALOG.md         # Full skill catalog (lazy-loaded)
-│   ├── skills/                  # Domain conventions (shared)
-│   ├── instructions/            # Procedural guides
-│   ├── tools/                   # Tool references
+│   ├── skills/                  # All 45 skills (conventions, tasks, tools)
 │   └── hooks/                   # Legacy ingenium hooks
 └── deploy/                      # Bootstrap payload (mirrors above)
 ```
