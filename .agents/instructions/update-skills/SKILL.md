@@ -311,10 +311,10 @@ Before making any change, understand which layer you're touching:
 .agents/skills/kubernetes/SKILL.md → k8s/helm/chart YAML files
 .agents/skills/typescript-standalone/SKILL.md → .ts/.tsx files (non-Next.js)
 
-.agents/skills/repo-context/SKILL.md → task: project identity and context
-.agents/skills/generate-docs/SKILL.md → task: populate docs/ from codebase
-.agents/skills/write-docs/SKILL.md → task: write READMEs, API docs, ADRs
-.agents/skills/update-skills/SKILL.md → task: create, update, retire skills
+.agents/instructions/repo-context/SKILL.md → task: project identity and context
+.agents/instructions/generate-docs/SKILL.md → task: populate docs/ from codebase
+.agents/instructions/write-docs/SKILL.md → task: write READMEs, API docs, ADRs
+.agents/instructions/update-skills/SKILL.md → task: create, update, retire skills
 
 .agents/hooks/ → lifecycle enforcement
 .agents/scripts/bootstrap.sh → copies skills into target projects

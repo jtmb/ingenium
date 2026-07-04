@@ -9,7 +9,7 @@
 Before responding to the user's first request, complete these 4 steps:
 
 1. **Match skills to request** — Read the quick-reference table below. For each skill, check the "Use when" column against the user's request and the files you might edit.
-2. **Load every matching skill** — Read the full SKILL.md (`.agents/skills/<name>/SKILL.md`) of every skill that applies.
+2. **Load every matching skill** — Read the full SKILL.md from `.agents/skills/<name>/SKILL.md`, `.agents/instructions/<name>/SKILL.md`, or `.agents/tools/<name>/SKILL.md` depending on the category.
 3. **Note the 🔴 HARD RULEs** — Skills use 🔴 to mark mandatory rules. These take priority over everything else.
 4. **Invoke `/repo-context`** for project identity and `/help` for the full catalog.
 
@@ -59,12 +59,13 @@ Before responding to the user's first request, complete these 4 steps:
 
 ## Skill Quick-Reference
 
-### ⚡ Always Loaded
+### ⚡ Always Loaded (`.agents/skills/`)
+
 | Skill | Why |
 |-------|-----|
 | `generic-conventions` | Fallback — docs sync, comments, DRY, security, error handling, git. Applies to EVERYTHING. |
 
-### 🔧 Framework Skills (triggered by file extension)
+### 🔧 Framework Skills — `.agents/skills/` (triggered by file extension)
 
 | Skill | Use when editing |
 |-------|-----------------|
@@ -73,7 +74,7 @@ Before responding to the user's first request, complete these 4 steps:
 | `go-conventions` | `**/*.go` |
 | `rust-conventions` | `**/*.rs` |
 
-### 🧩 Domain Skills (triggered by file path or task type)
+### 🧩 Domain Skills — `.agents/skills/` (triggered by file path or task type)
 
 | Skill | Use when |
 |-------|---------|
@@ -90,35 +91,54 @@ Before responding to the user's first request, complete these 4 steps:
 | `github-actions-hardening` | Reviewing CI/CD security |
 | `github-actions-efficiency` | Auditing CI performance/cost |
 | `postgresql-optimization` | PostgreSQL-specific features, JSONB, arrays |
-| `debugging-patterns` | Diagnosing bugs, bisection |
 | `code-review-checklist` | PR review, code quality audit |
 | `refactoring-recipes` | Improving code structure |
-| `self-correction-patterns` | Recovering from AI mistakes |
-| `skill-load` | 🔴 **Session init** — `/skill-load` injects bootstrap payload |
 | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep |
 | `regex-reference` | Writing or reviewing regular expressions |
 | `git-workflows` | Rebase, bisect, reflog, conventional commits |
 | `error-interpretation` | Understanding compiler/runtime errors |
 | `model-profiles` | Adapting prompts for Qwen/Gemma/DeepSeek |
+
+### 💡 Instructions — `.agents/instructions/` (session init, task execution, diagnosis)
+
+| Skill | Use when |
+|-------|---------|
+| `skill-load` | 🔴 **Session init** — `/skill-load` injects bootstrap payload |
+| `help` | Need a skill overview |
+| `repo-context` | Starting a new session |
+| `debugging-patterns` | Diagnosing bugs, bisection |
+| `self-correction-patterns` | Recovering from AI mistakes |
 | `local-model-commands` | **ALL terminal commands** — no `&`, no infinite-wait |
-| `web-design-reviewer` | UI/UX inspection, responsive/accessibility |
+| `update-skills` | New patterns, deps, or codebase growth — creates/retires skills |
+| `audit-skills` | After any skill change — cross-references all docs |
+| `update-skill-index` | After adding/removing skills |
+| `generate-docs` | Docs are stale or templates are empty |
+| `write-docs` | Need README, API docs, or ADRs |
+| `thread-auto-context` | Persistent memory via Thread MCP |
+
+### 🔧 Tools — `.agents/tools/` (browser automation, GitHub operations, UI review)
+
+| Skill | Use when |
+|-------|---------|
 | `chrome-devtools` | Browser screenshots, performance, network |
-| `github-issues` | Creating/updating GitHub issues |
 | `playwright-mcp` | Browser automation via Playwright |
+| `gh-cli` | GitHub CLI — PRs, issues, releases, search |
+| `github-issues` | Creating/updating GitHub issues |
+| `web-design-reviewer` | UI/UX inspection, responsive/accessibility |
 
 ### 📋 Task Skills (invoke via `/command`)
 
-| Command | Use when |
-|---------|---------|
-| `/skill-load` | 🔴 **FIRST MESSAGE in every session** — injects the skill-system bootstrap payload |
-| `/help` | Need a skill overview |
-| `/repo-context` | Starting a new session |
-| `/update-skills` | New patterns, deps, or codebase growth — creates/retires skills |
-| `/audit-skills` | After any skill change — cross-references all docs |
-| `/update-skill-index` | After adding/removing skills |
-| `/generate-docs` | Docs are stale or templates are empty |
-| `/write-docs` | Need README, API docs, or ADRs |
-| `/create-readme` | Need a README.md for the project |
+| Command | Use when | Location |
+|---------|---------|----------|
+| `/skill-load` | 🔴 **FIRST MESSAGE in every session** — injects the skill-system bootstrap payload | `.agents/instructions/` |
+| `/help` | Need a skill overview | `.agents/instructions/` |
+| `/repo-context` | Starting a new session | `.agents/instructions/` |
+| `/update-skills` | New patterns, deps, or codebase growth — creates/retires skills | `.agents/instructions/` |
+| `/audit-skills` | After any skill change — cross-references all docs | `.agents/instructions/` |
+| `/update-skill-index` | After adding/removing skills | `.agents/instructions/` |
+| `/generate-docs` | Docs are stale or templates are empty | `.agents/instructions/` |
+| `/write-docs` | Need README, API docs, or ADRs | `.agents/instructions/` |
+| `/create-readme` | Need a README.md for the project | `.agents/skills/` (source-only) |
 
 ---
 
@@ -135,6 +155,6 @@ This skill system evolves. **You are responsible for growing it.** Hooks automat
 - **SessionStart**: Loads the abbreviated checklist — match skills, load them, note HARD RULEs
 - **PostToolUse**: Every ~10 tool calls, reminds you to log new patterns to learnings.md and run `/update-skills` if you created new conventions
 
-If you don't invoke these, nothing improves. **Check `.agents/skills/` after every session. Look for ways to improve skills.**
+If you don't invoke these, nothing improves. **Check `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` after every session. Look for ways to improve skills.**
 
 
