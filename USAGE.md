@@ -13,7 +13,7 @@ See **[Getting Started](./README.md#getting-started)** in the README for install
 - **Manual Install** — clone and copy `deploy/`
 - **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
 
-**What you get in every project:** the full `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` (43 items total — 41 after source-only exclusion), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
+**What you get in every project:** the full `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` (43 items total), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
 
 ---
 
@@ -111,7 +111,7 @@ your-project/
 │   │   ├── update-skill-index/
 │   │   │   └── SKILL.md                         ←   Regenerate SKILL-INDEX.md
 │   │   └── thread-auto-context/
-│   │       └── SKILL.md                         ←   Persistent memory (source-only)
+│   │       └── SKILL.md                         ←   Persistent memory
 │   ├── tools/                                   ← Browser & GitHub tools
 │   │   ├── chrome-devtools/
 │   │   │   └── SKILL.md                         ←   Browser debugging/screenshots

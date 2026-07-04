@@ -114,6 +114,7 @@ Before responding to the user's first request, complete these 4 steps:
 | `update-skill-index` | After adding/removing skills |
 | `generate-docs` | Docs are stale or templates are empty |
 | `write-docs` | Need README, API docs, or ADRs |
+| `thread-auto-context` | Persistent memory via Thread MCP |
 
 ### 🔧 Tools — `.agents/tools/` (browser automation, GitHub operations, UI review)
 
@@ -137,7 +138,7 @@ Before responding to the user's first request, complete these 4 steps:
 | `/update-skill-index` | After adding/removing skills | `.agents/instructions/` |
 | `/generate-docs` | Docs are stale or templates are empty | `.agents/instructions/` |
 | `/write-docs` | Need README, API docs, or ADRs | `.agents/instructions/` |
-| `/create-readme` | Need a README.md for the project | `.agents/skills/` (source-only) |
+| `/create-readme` | Need a README.md for the project | `.agents/skills/` |
 
 ---
 

@@ -343,18 +343,16 @@ test_deploy_separation() {
         fail "deploy/.agents has $agent_extra extra item(s)" "should only have skills/, instructions/, tools/, and hooks/"
     fi
 
-    # b) Source-only items should NOT be in deploy/
-    # thread-auto-context lives in instructions/ and is source-only
-    if [[ ! -f "$DEPLOY_INSTRUCTIONS_DIR/thread-auto-context/SKILL.md" ]]; then
-        pass "thread-auto-context correctly absent from deploy/"
+    # b) All items should be present in deploy/ (no source-only)
+    if [[ -f "$DEPLOY_INSTRUCTIONS_DIR/thread-auto-context/SKILL.md" ]]; then
+        pass "thread-auto-context correctly present in deploy/"
     else
-        fail "thread-auto-context leaked into deploy/" "source-only instruction should not be deployed"
+        fail "thread-auto-context missing from deploy/" "all instructions should be deployed"
     fi
-    # create-readme lives in skills/ and is source-only
-    if [[ ! -f "$DEPLOY_SKILLS_DIR/create-readme/SKILL.md" ]]; then
-        pass "create-readme correctly absent from deploy/"
+    if [[ -f "$DEPLOY_SKILLS_DIR/create-readme/SKILL.md" ]]; then
+        pass "create-readme correctly present in deploy/"
     else
-        fail "create-readme leaked into deploy/" "source-only skill should not be deployed"
+        fail "create-readme missing from deploy/" "all skills should be deployed"
     fi
 
     # c) learnings.md (template) SHOULD be in deploy/ for consumer projects
@@ -392,9 +390,8 @@ test_deploy_integrity() {
     local diff_lines
     diff_lines=$(diff "$REPO_ROOT/AGENTS.md" "$DEPLOY_DIR/AGENTS.md" 2>/dev/null | grep -c '^[<>]' || true)
     local source_only_lines
-    source_only_lines=$(diff "$REPO_ROOT/AGENTS.md" "$DEPLOY_DIR/AGENTS.md" 2>/dev/null | grep -c 'thread-auto-context' || true)
-    if [[ "$diff_lines" -eq "$source_only_lines" ]] || [[ "$diff_lines" -eq 0 ]]; then
-        pass "deploy/AGENTS.md matches source (only source-only differences)"
+    if [[ "$diff_lines" -eq 0 ]]; then
+        pass "deploy/AGENTS.md matches source exactly"
     else
         fail "deploy/AGENTS.md differs from source" "files have drifted"
     fi
