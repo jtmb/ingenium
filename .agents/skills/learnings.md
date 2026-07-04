@@ -27,10 +27,23 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 - **Updated**: All 11 changed files committed. 19/19 tests pass.
 - **Classification analysis**: Full audit of all 43 .agents/ items classified into skills (25), instructions/meta (12), tool interfaces (5), data files (1), hooks (3). No directory restructure — skill mechanism works for all types. Hooks are the enforcement layer.
 
+## 2026-07-04 — vision-bridge rewritten: single canonical script, no Playwright in API call
+
+- **Before**: `45f9913`
+- **After**: `f0e85a6`
+- **Problem**: Agents were looping trying to use Playwright to make the vision API call — the old skill had too many methods (Shell, inline Python, Playwright combo) and ambiguous integration sections
+- **Fix**: 
+  - Created `vision_call.py` — standalone script that takes a PNG path arg, base64 encodes, POSTs to LM Studio, prints description
+  - SKILL.md rewritten as concise reference: Step-by-step workflow, ONE command to run
+  - CRYSTAL CLEAR: Playwright is ONLY for CAPTURING screenshots (Step 1b), NEVER for API call (Step 2)
+  - Removed ALL alternative methods, integration sections, and example sessions
+  - Script already on disk — the SKILL.md just tells the model to run it
+- **Test**: `python3 vision_call.py /tmp/test-vision-bridge.png` → correctly described example.com (layout, colors, text, link, no graphics)
+
 ## 2026-07-04 — vision-bridge tested and automated — LM Studio API end-to-end
 
-- **Before**: `f7ebefc` (note: includes 8 model ref fixes + duplicate cleanup)
-- **After**: `[pending commit]`
+- **Before**: `f7ebefc`
+- **After**: `1895ac4`
 - **Test**: Successfully called LM Studio vision API at `http://192.168.0.13:1234/v1/chat/completions` with model `google/gemma-4-12b-qat`
 - **Scenario**: Captured screenshot of `https://example.com` via Playwright -> extracted base64 -> sent via Python urllib with Bearer token -> received detailed description back (layout, colors, text, interactive elements)
 - **Description returned**: Correctly identified Example Domain page, white background, black heading/text, blue "Learn more" link, left-aligned content in upper-left quadrant
@@ -43,7 +56,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
   6. States simplified: Monitoring → Triggered → Calling API → Processing → Complete
 - **API details**: `POST http://192.168.0.13:1234/v1/chat/completions`, Bearer auth, model=`google/gemma-4-12b-qat`, max_tokens=1000, timeout=180s
 - **Token**: Stored as `LM_STUDIO_API_KEY` in `.agents/.lm-studio-env`
-- **Note**: Base64 from Playwright's `page.screenshot()` returns `Result: "..."` wrapper — must strip before sending to API
+- **Note**: Base64 from Playwright's `page.screenshot()` returns `Result: "..."` wrapper — must strip before sending
 
 ## 2026-07-04 — Model reference fix — vision-bridge GPT-4o/Claude → google/gemma-4-12b-qat
 
