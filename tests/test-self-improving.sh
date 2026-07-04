@@ -22,7 +22,12 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKILLS_DIR="$REPO_ROOT/.agents/skills"
+INSTRUCTIONS_DIR="$REPO_ROOT/.agents/instructions"
+TOOLS_DIR="$REPO_ROOT/.agents/tools"
 DEPLOY_DIR="$REPO_ROOT/deploy"
+DEPLOY_SKILLS_DIR="$DEPLOY_DIR/.agents/skills"
+DEPLOY_INSTRUCTIONS_DIR="$DEPLOY_DIR/.agents/instructions"
+DEPLOY_TOOLS_DIR="$DEPLOY_DIR/.agents/tools"
 VERBOSE=false
 PASSED=0
 FAILED=0
@@ -224,10 +229,10 @@ test_skill_count() {
     section "TEST 3 — Skill Enumeration"
 
     local project_skill_count
-    project_skill_count=$(find "$SKILLS_DIR" -maxdepth 2 -name "SKILL.md" | wc -l)
+    project_skill_count=$(( $(find "$SKILLS_DIR" -maxdepth 2 -name "SKILL.md" | wc -l) + $(find "$INSTRUCTIONS_DIR" -maxdepth 2 -name "SKILL.md" | wc -l) + $(find "$TOOLS_DIR" -maxdepth 2 -name "SKILL.md" | wc -l) ))
 
     local deploy_skill_count
-    deploy_skill_count=$(find "$DEPLOY_DIR/.agents/skills" -maxdepth 2 -name "SKILL.md" 2>/dev/null | wc -l)
+    deploy_skill_count=$(( $(find "$DEPLOY_SKILLS_DIR" -maxdepth 2 -name "SKILL.md" 2>/dev/null | wc -l) + $(find "$DEPLOY_INSTRUCTIONS_DIR" -maxdepth 2 -name "SKILL.md" 2>/dev/null | wc -l) + $(find "$DEPLOY_TOOLS_DIR" -maxdepth 2 -name "SKILL.md" 2>/dev/null | wc -l) ))
 
     info "Project skills: $project_skill_count"
     info "Deploy skills:  $deploy_skill_count"
@@ -238,23 +243,46 @@ test_skill_count() {
         fail "No skills found" "expected at least 1"
     fi
 
-    # Source-only skills (project has them, deploy doesn't)
+    # Source-only files (project has them, deploy doesn't)
     local source_only=0
+
+    # Check skills/
     for skill_dir in "$SKILLS_DIR"/*/; do
         local name
         name=$(basename "$skill_dir")
         [[ ! -f "$skill_dir/SKILL.md" ]] && continue
-        if [[ ! -f "$DEPLOY_DIR/.agents/skills/$name/SKILL.md" ]]; then
+        if [[ ! -f "$DEPLOY_SKILLS_DIR/$name/SKILL.md" ]]; then
             source_only=$((source_only + 1))
-            info "$name → source-only (not in deploy/)"
+            info "$name → source-only (not in deploy/.agents/skills/)"
+        fi
+    done
+
+    # Check instructions/
+    for skill_dir in "$INSTRUCTIONS_DIR"/*/; do
+        local name
+        name=$(basename "$skill_dir")
+        [[ ! -f "$skill_dir/SKILL.md" ]] && continue
+        if [[ ! -f "$DEPLOY_INSTRUCTIONS_DIR/$name/SKILL.md" ]]; then
+            source_only=$((source_only + 1))
+            info "$name → source-only (not in deploy/.agents/instructions/)"
+        fi
+    done
+
+    # Check tools/
+    for skill_dir in "$TOOLS_DIR"/*/; do
+        local name
+        name=$(basename "$skill_dir")
+        [[ ! -f "$skill_dir/SKILL.md" ]] && continue
+        if [[ ! -f "$DEPLOY_TOOLS_DIR/$name/SKILL.md" ]]; then
+            source_only=$((source_only + 1))
+            info "$name → source-only (not in deploy/.agents/tools/)"
         fi
     done
 
     if [[ "$source_only" -gt 0 ]]; then
-        pass "$source_only source-only skill(s) correctly excluded from deploy/"
+        pass "$source_only source-only file(s) correctly excluded from deploy/"
     else
-        # It's OK if there are no source-only skills
-        pass "All $project_skill_count skills are in deploy/ (no source-only)"
+        pass "All $project_skill_count files are in deploy/ (no source-only)"
     fi
 }
 
@@ -268,15 +296,26 @@ test_skill_count() {
 test_deploy_separation() {
     section "TEST 4 — Deploy/ Separation Integrity"
 
-    # a) Deploy exists and is skills-only (no extra directories or files)
-    if [[ -d "$REPO_ROOT/deploy/.agents/skills" ]]; then
+    # a) Deploy directories exist
+    if [[ -d "$DEPLOY_SKILLS_DIR" ]]; then
         pass "deploy/.agents/skills exists"
     else
         fail "deploy/.agents/skills is missing" "expected directory in deploy/"
     fi
 
+    if [[ -d "$DEPLOY_INSTRUCTIONS_DIR" ]]; then
+        pass "deploy/.agents/instructions exists"
+    else
+        fail "deploy/.agents/instructions is missing" "expected directory in deploy/"
+    fi
+
+    if [[ -d "$DEPLOY_TOOLS_DIR" ]]; then
+        pass "deploy/.agents/tools exists"
+    else
+        fail "deploy/.agents/tools is missing" "expected directory in deploy/"
+    fi
+
     # Verify no unexpected top-level files in deploy
-    # Allowed: .agents/ and AGENTS.md
     local extra_count=0
     for item in "$DEPLOY_DIR"/*; do
         local name; name=$(basename "$item")
@@ -294,28 +333,32 @@ test_deploy_separation() {
     local agent_extra=0
     for item in "$DEPLOY_DIR/.agents"/*; do
         local name; name=$(basename "$item")
-        if [[ "$name" != "skills" && "$name" != "hooks" ]]; then
+        if [[ "$name" != "skills" && "$name" != "instructions" && "$name" != "tools" && "$name" != "hooks" ]]; then
             agent_extra=$((agent_extra + 1))
         fi
     done
     if [[ "$agent_extra" -eq 0 ]]; then
-        pass "deploy/.agents is clean — only skills/ and hooks/"
+        pass "deploy/.agents is clean — only skills/, instructions/, tools/, and hooks/"
     else
-        fail "deploy/.agents has $agent_extra extra item(s)" "should only have skills/ and hooks/"
+        fail "deploy/.agents has $agent_extra extra item(s)" "should only have skills/, instructions/, tools/, and hooks/"
     fi
 
-    # b) Source-only skills should NOT be in deploy/
-    local SOURCE_ONLY=("create-readme" "thread-auto-context")
-    for skill in "${SOURCE_ONLY[@]}"; do
-        if [[ ! -f "$DEPLOY_DIR/.agents/skills/$skill/SKILL.md" ]]; then
-            pass "$skill correctly absent from deploy/"
-        else
-            fail "$skill leaked into deploy/" "source-only skill should not be deployed"
-        fi
-    done
+    # b) Source-only items should NOT be in deploy/
+    # thread-auto-context lives in instructions/ and is source-only
+    if [[ ! -f "$DEPLOY_INSTRUCTIONS_DIR/thread-auto-context/SKILL.md" ]]; then
+        pass "thread-auto-context correctly absent from deploy/"
+    else
+        fail "thread-auto-context leaked into deploy/" "source-only instruction should not be deployed"
+    fi
+    # create-readme lives in skills/ and is source-only
+    if [[ ! -f "$DEPLOY_SKILLS_DIR/create-readme/SKILL.md" ]]; then
+        pass "create-readme correctly absent from deploy/"
+    else
+        fail "create-readme leaked into deploy/" "source-only skill should not be deployed"
+    fi
 
     # c) learnings.md (template) SHOULD be in deploy/ for consumer projects
-    if [[ -f "$DEPLOY_DIR/.agents/skills/learnings.md" ]]; then
+    if [[ -f "$DEPLOY_SKILLS_DIR/learnings.md" ]]; then
         pass "learnings.md correctly present in deploy/"
     else
         fail "learnings.md missing from deploy/" "consumer projects need a learnings template"
@@ -344,16 +387,23 @@ test_deploy_separation() {
 test_deploy_integrity() {
     section "TEST 5 — Deploy File Integrity (source vs deploy drift)"
 
-    # Check AGENTS.md (only top-level file in deploy/)
-    if diff -q "$REPO_ROOT/AGENTS.md" "$DEPLOY_DIR/AGENTS.md" &>/dev/null; then
-        pass "deploy/AGENTS.md matches source"
+    # Check AGENTS.md — allow known source-only differences (thread-auto-context)
+    # Count actual differing lines (excluding thread-auto-context line)
+    local diff_lines
+    diff_lines=$(diff "$REPO_ROOT/AGENTS.md" "$DEPLOY_DIR/AGENTS.md" 2>/dev/null | grep -c '^[<>]' || true)
+    local source_only_lines
+    source_only_lines=$(diff "$REPO_ROOT/AGENTS.md" "$DEPLOY_DIR/AGENTS.md" 2>/dev/null | grep -c 'thread-auto-context' || true)
+    if [[ "$diff_lines" -eq "$source_only_lines" ]] || [[ "$diff_lines" -eq 0 ]]; then
+        pass "deploy/AGENTS.md matches source (only source-only differences)"
     else
         fail "deploy/AGENTS.md differs from source" "files have drifted"
     fi
 
     # Check all deployed skills match
     local drift_count=0
-    for deploy_skill in "$DEPLOY_DIR/.agents/skills"/*/SKILL.md; do
+
+    # Check skills/
+    for deploy_skill in "$DEPLOY_SKILLS_DIR"/*/SKILL.md; do
         local name
         name=$(basename "$(dirname "$deploy_skill")")
         local source_skill="$SKILLS_DIR/$name/SKILL.md"
@@ -365,10 +415,36 @@ test_deploy_integrity() {
         fi
     done
 
+    # Check instructions/
+    for deploy_skill in "$DEPLOY_INSTRUCTIONS_DIR"/*/SKILL.md; do
+        local name
+        name=$(basename "$(dirname "$deploy_skill")")
+        local source_skill="$INSTRUCTIONS_DIR/$name/SKILL.md"
+        if [[ -f "$source_skill" ]]; then
+            if ! diff -q "$source_skill" "$deploy_skill" &>/dev/null; then
+                info "$name (instructions) has drifted between source and deploy"
+                drift_count=$((drift_count + 1))
+            fi
+        fi
+    done
+
+    # Check tools/
+    for deploy_skill in "$DEPLOY_TOOLS_DIR"/*/SKILL.md; do
+        local name
+        name=$(basename "$(dirname "$deploy_skill")")
+        local source_skill="$TOOLS_DIR/$name/SKILL.md"
+        if [[ -f "$source_skill" ]]; then
+            if ! diff -q "$source_skill" "$deploy_skill" &>/dev/null; then
+                info "$name (tools) has drifted between source and deploy"
+                drift_count=$((drift_count + 1))
+            fi
+        fi
+    done
+
     if [[ "$drift_count" -eq 0 ]]; then
-        pass "All deployed skills match source (0 drifted files)"
+        pass "All deployed files match source (0 drifted files)"
     else
-        fail "$drift_count deployed skill(s) differ from source" "run: cp -r .agents/skills/<name>/SKILL.md deploy/.agents/skills/<name>/"
+        fail "$drift_count deployed file(s) differ from source" "check diff output above"
     fi
 }
 
@@ -380,8 +456,12 @@ test_deploy_integrity() {
 test_frontmatter() {
     section "TEST 6 — Frontmatter Validity"
 
-    local dirs_to_check=("$SKILLS_DIR" "$DEPLOY_DIR/.agents/skills")
-    local label=("project" "deploy")
+    local dirs_to_check=(
+        "$SKILLS_DIR" "$INSTRUCTIONS_DIR" "$TOOLS_DIR"
+        "$DEPLOY_SKILLS_DIR" "$DEPLOY_INSTRUCTIONS_DIR" "$DEPLOY_TOOLS_DIR"
+    )
+    local label=("project-skills" "project-instructions" "project-tools"
+                 "deploy-skills" "deploy-instructions" "deploy-tools")
 
     for i in "${!dirs_to_check[@]}"; do
         local dir="${dirs_to_check[$i]}"

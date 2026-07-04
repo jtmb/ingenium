@@ -14,12 +14,25 @@ Key properties:
 ```
 ingenium/
 ├── .agents/                    ← AI conventions system (the "product")
-│   ├── skills/                 ← 43 skills — each is a SKILL.md with YAML frontmatter
+│   ├── skills/                 ← 26 skills — framework & domain conventions
 │   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
 │   │   ├── {framework}-conventions/ ← nextjs, python, go, rust, typescript-standalone
 │   │   ├── {domain}-skills/       ← containers, kubernetes, api-design, sql-database, shell-scripts
-│   │   ├── {task}-skills/         ← write-docs, generate-docs, update-skills, audit-skills, help
 │   │   └── learnings.md           ← Changelog of all skill additions/retirements
+│   ├── instructions/           ← 12 instructions — task/invocation skills
+│   │   ├── update-skills/        ← Self-improvement pipeline
+│   │   ├── audit-skills/         ← Consistency audit
+│   │   ├── help/                 ← Skill overview
+│   │   ├── skill-load/           ← Session bootstrap
+│   │   ├── repo-context/         ← Project identity
+│   │   ├── {other-instructions}/  ← debugging, docs, recovery, etc.
+│   │   └── thread-auto-context/  ← Persistent memory (source-only)
+│   ├── tools/                  ← 5 tools — browser automation & GitHub operations
+│   │   ├── chrome-devtools/       ← Browser debugging
+│   │   ├── playwright-mcp/        ← Playwright browser automation
+│   │   ├── gh-cli/               ← GitHub CLI operations
+│   │   ├── github-issues/        ← GitHub issue management
+│   │   └── web-design-reviewer/  ← UI/UX inspection
 │   ├── scripts/                ← Bootstrap engine
 │   │   ├── bootstrap.sh        ← Main entry point — scaffolds projects with selected skills
 │   │   └── hook-bootstrap.sh   ← Auto-detection + interactive mode
@@ -44,19 +57,25 @@ ingenium/
 
 ## Key Components
 
-### Skill System (`.agents/skills/`)
+### Skill System (`.agents/skills/`, `.agents/instructions/`, `.agents/tools/`)
 
-The core of the project. Each skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. Skills are categorized into three tiers:
+The core of the project. Each skill/instruction/tool is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. Items are categorized into three tiers across three directories:
+
+| Directory | Count | Purpose |
+|-----------|-------|---------|
+| `.agents/skills/` | 26 | Framework & domain conventions (file-triggered) |
+| `.agents/instructions/` | 12 | Task skills slash-commands, session init, recovery |
+| `.agents/tools/` | 5 | Browser automation & GitHub operations |
+
+**Skills** (`.agents/skills/`) are categorized into sub-tiers:
 
 | Tier | Pattern | Examples | What they do |
 |------|---------|----------|-------------|
 | **Core** | `generic-conventions` | 1 skill | Universal rules — docs, security, error handling, DRY |
 | **Framework** | `*-conventions` | nextjs, python, go, rust, typescript-standalone | Language/framework-specific conventions, build commands, testing |
 | **Domain** | named by topic | containers, kubernetes, api-design, sql-database, shell-scripts, project-structure, useful-tests | Cross-cutting technical domains |
-| **Task** | `/name` invoked | write-docs, generate-docs, update-skills, audit-skills, help, repo-context, create-readme, gh-cli, thread-auto-context, playwright-mcp | Slash-command workflows, multi-step operations |
-| **Pipeline** | single special | agent-pipelines | Autonomous agent loop patterns |
 
-Skills with `description:` containing file-based triggers (e.g., `Use when editing **/*.py files`) are auto-invoked when the AI edits matching files. Task skills are invoked via slash commands or natural language queries.
+**Instructions** (`.agents/instructions/`) and **Tools** (`.agents/tools/`) contain invocable task skills and automation interfaces — see the skill index or run `/help` for the full catalog.
 
 ### Bootstrap Engine (`.agents/scripts/`)
 
@@ -68,10 +87,13 @@ Two bash scripts that scaffold new projects with the skill system:
 ### Deploy Separation (`deploy/`)
 
 A clean mirror containing only what gets deployed to target projects:
-- `deploy/.agents/skills/` — All 39 deployable skills (excludes 3 source-only: create-readme, playwright-mcp, thread-auto-context)
+- `deploy/.agents/skills/` — 25 deployable skills (excludes source-only `create-readme`)
+- `deploy/.agents/instructions/` — 11 deployable instructions (excludes source-only `thread-auto-context`)
+- `deploy/.agents/tools/` — 5 deployable tools (all deployed)
 - `deploy/.agents/hooks/` — All 3 lifecycle hooks (session-start, pre-tool-use, post-tool-use)
 - `deploy/AGENTS.md` — Minimal redirect
-- No scripts, docs, tests, or README — those are source-only
+- `deploy/SKILL-INDEX.md` — Full skill index for target projects
+- No scripts, docs, or tests — those are source-only
 
 The `test-self-improving.sh` suite validates that deploy stays in sync with source (`TEST 5`) and that no source-only files leak in (`TEST 4`).
 
@@ -101,7 +123,7 @@ Hooks live in both source (`.agents/hooks/`) and deploy (`deploy/.agents/hooks/`
 
 ```mermaid
 graph TD
-    A[AI receives task] --> B[AI scans .agents/skills/]
+    A[AI receives task] --> B[AI scans .agents/skills/ + instructions/ + tools/]
     B --> C{What files are involved?}
     C -->|.tsx/.ts in Next.js| D[nextjs-conventions]
     C -->|.py files| E[python-conventions]
@@ -139,7 +161,7 @@ graph TD
 ## Communication Patterns
 
 The project has no runtime communication — it operates entirely at edit time:
-- **AI reads skills** — The AI assistant scans `.agents/skills/` on startup and when file types change
+- **AI reads skills/instructions/tools** — The AI assistant scans `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` on startup and when file types change
 - **AI writes skills** — `update-skills` creates new skill files; `audit-skills` fixes consistency
 - **Bootstrap copies** — `bootstrap.sh` copies `deploy/` contents to target projects
 - **Tests validate** — `test-self-improving.sh` runs as a bash script, not part of the AI loop

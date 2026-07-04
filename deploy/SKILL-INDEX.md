@@ -1,28 +1,28 @@
 # Skill Index — Complete Reference
 
-This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill in `.agents/skills/` is listed here with its description, function, commands, and a link to its full documentation.
+This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill, instruction, and tool in `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` is listed here with its description, function, commands, and a link to its full documentation.
 
-**Total skills: 43**
+**Total: 43 items** (26 skills + 12 instructions + 5 tools)
 
 ---
 
 ## Invocable Task Skills (via `/` command)
 
-| Command | Skill | Description |
-|---------|-------|-------------|
-| `/skill-load` | [skill-load](.agents/skills/skill-load/SKILL.md) | 🔴 Mandatory first command — inject skill-system bootstrap payload, force AGENTS.md + skill loading |
-| `/audit-skills` | [audit-skills](.agents/skills/audit-skills/SKILL.md) | Audit skill→docs consistency, auto-fix discrepancies |
-| `/create-readme` | [create-readme](.agents/skills/create-readme/SKILL.md) | Generate a README.md for the project |
-| `/generate-docs` | [generate-docs](.agents/skills/generate-docs/SKILL.md) | Scan codebase, populate `docs/` templates |
-| `/help` | [help](.agents/skills/help/SKILL.md) | Display all skills, commands, and invocation patterns |
-| `/repo-context` | [repo-context](.agents/skills/repo-context/SKILL.md) | Load project identity, tech stack, conventions |
-| `/update-skill-index` | [update-skill-index](.agents/skills/update-skill-index/SKILL.md) | Regenerate SKILL-INDEX.md from all skill files |
-| `/update-skills` | [update-skills](.agents/skills/update-skills/SKILL.md) | Detect new patterns, create/retire skills |
-| `/write-docs` | [write-docs](.agents/skills/write-docs/SKILL.md) | Write READMEs, API docs, ADRs |
+| Command | Skill | Description | Location |
+|---------|-------|-------------|----------|
+| `/skill-load` | [skill-load](.agents/instructions/skill-load/SKILL.md) | 🔴 Mandatory first command — inject skill-system bootstrap payload, force AGENTS.md + skill loading | `.agents/instructions/` |
+| `/audit-skills` | [audit-skills](.agents/instructions/audit-skills/SKILL.md) | Audit skill→docs consistency, auto-fix discrepancies | `.agents/instructions/` |
+| `/create-readme` | [create-readme](.agents/skills/create-readme/SKILL.md) | Generate a README.md for the project | `.agents/skills/` (source-only) |
+| `/generate-docs` | [generate-docs](.agents/instructions/generate-docs/SKILL.md) | Scan codebase, populate `docs/` templates | `.agents/instructions/` |
+| `/help` | [help](.agents/instructions/help/SKILL.md) | Display all skills, commands, and invocation patterns | `.agents/instructions/` |
+| `/repo-context` | [repo-context](.agents/instructions/repo-context/SKILL.md) | Load project identity, tech stack, conventions | `.agents/instructions/` |
+| `/update-skill-index` | [update-skill-index](.agents/instructions/update-skill-index/SKILL.md) | Regenerate SKILL-INDEX.md from all skill files | `.agents/instructions/` |
+| `/update-skills` | [update-skills](.agents/instructions/update-skills/SKILL.md) | Detect new patterns, create/retire skills | `.agents/instructions/` |
+| `/write-docs` | [write-docs](.agents/instructions/write-docs/SKILL.md) | Write READMEs, API docs, ADRs | `.agents/instructions/` |
 
 ---
 
-## Framework Conventions (loaded when editing matching files)
+## Framework Conventions — `.agents/skills/` (loaded when editing matching files)
 
 | Skill | Triggers on | Key Commands |
 |-------|-------------|--------------|
@@ -33,42 +33,62 @@ This file is the **canonical index** of all skills in this project. It is automa
 
 ---
 
-## Always-Included Domain Skills (cross-cutting, copied to all projects)
+## Domain Skills — `.agents/skills/` (cross-cutting, copied to all projects)
 
 | Skill | Triggers on | Description |
 |-------|-------------|-------------|
 | [agent-pipelines](.agents/skills/agent-pipelines/SKILL.md) | Building AI agent services | Autonomous AI agent pipeline patterns — orchestration, turn-based coordination, state checkpoints, crash recovery, multi-phase build pipelines, containerized agents |
 | [api-design](.agents/skills/api-design/SKILL.md) | `**/{routes,handlers,api,controllers,endpoints}/**/*` | REST/HTTP API design conventions — status codes, error shapes, versioning, auth, pagination, rate limiting, idempotency |
-| [chrome-devtools](.agents/skills/chrome-devtools/SKILL.md) | Browser debugging | Expert-level browser automation, debugging, and performance analysis using Chrome DevTools MCP |
 | [cli-toolkit](.agents/skills/cli-toolkit/SKILL.md) | Shell pipelines, text processing | Concise reference for common CLI tools — jq, curl, sed, awk, find, xargs, grep |
 | [code-review-checklist](.agents/skills/code-review-checklist/SKILL.md) | PR reviews, code audits | Structured code review checklist — security, correctness, performance, readability, testing |
 | [containers](.agents/skills/containers/SKILL.md) | `**/{Dockerfile,Containerfile,docker-compose*,.dockerignore}` | Container conventions — multi-stage builds, non-root users, layer caching, secrets hygiene, HEALTHCHECK, signal handling, docker-compose patterns |
-| [debugging-patterns](.agents/skills/debugging-patterns/SKILL.md) | Bug diagnosis | Systematic debugging methodology — isolation, bisection, log-driven, and stack-trace analysis |
 | [error-interpretation](.agents/skills/error-interpretation/SKILL.md) | Build/runtime/CI failures | Map common error signatures to their actual root causes — null reference, type mismatch, import failure, permission denied, network timeout |
 | [generic-conventions](.agents/skills/generic-conventions/SKILL.md) | No framework-specific skill applies | Fallback coding conventions — definitive core rules (comments, docs, DRY, security, observability, error handling, configuration) |
-| [gh-cli](.agents/skills/gh-cli/SKILL.md) | GitHub operations | GitHub CLI (`gh`) integration — update repo metadata, manage PRs/issues/releases, create gists, search code, query the API |
 | [git-workflows](.agents/skills/git-workflows/SKILL.md) | Git history management | Git workflow patterns beyond the basics — rebase vs merge, bisect, reflog recovery, conventional commits, clean history |
 | [github-actions-efficiency](.agents/skills/github-actions-efficiency/SKILL.md) | CI workflow review | Audit GitHub Actions workflow efficiency and recommend fixes to reduce CI minutes and costs |
 | [github-actions-hardening](.agents/skills/github-actions-hardening/SKILL.md) | CI security review | Security hardening reviewer for GitHub Actions workflow files — script injection, privilege escalation, SHA-pinning, least-privilege permissions |
-| [github-issues](.agents/skills/github-issues/SKILL.md) | Issue management | Create, update, and manage GitHub issues using MCP tools — labels, assignees, milestones, dependencies |
 | [gitignore](.agents/skills/gitignore/SKILL.md) | `.gitignore` files | Git ignore file conventions — patterns, structure, and rules for .gitignore files |
-| [help](.agents/skills/help/SKILL.md) | `/help` or "help" query | **This skill.** Display quick-reference of all skills, commands, and invocation patterns |
 | [kubernetes](.agents/skills/kubernetes/SKILL.md) | `**/{k8s,kubernetes,helm,charts,templates}/**/*.{yaml,yml}` | Kubernetes conventions — security contexts, resource limits, probes, network policies, deployment strategies |
-| [local-model-commands](.agents/skills/local-model-commands/SKILL.md) | Terminal commands with local LLMs | Terminal command safety for local LLMs — never background with `&`, never run infinite-wait commands, use timeout wrappers |
 | [model-profiles](.agents/skills/model-profiles/SKILL.md) | Prompt adaptation, model selection | Model-aware instruction tuning for local LLMs — Qwen, Gemma, and DeepSeek families across 2B–1.6T parameter ranges |
-| [playwright-mcp](.agents/skills/playwright-mcp/SKILL.md) | Browser automation | Browser automation via Playwright MCP — navigate, click, type, snapshot pages |
 | [postgresql-optimization](.agents/skills/postgresql-optimization/SKILL.md) | PostgreSQL development | PostgreSQL-specific development — JSONB, array types, custom types, full-text search, window functions, extensions |
 | [project-structure](.agents/skills/project-structure/SKILL.md) | Creating projects, reorganizing code | Monorepo microservices project structure — service layering (pages, features, domain, infrastructure), naming, boundaries |
 | [refactoring-recipes](.agents/skills/refactoring-recipes/SKILL.md) | Code improvement | Catalog of refactoring patterns with explicit before/after examples — extract method, invert conditional, replace magic number |
 | [regex-reference](.agents/skills/regex-reference/SKILL.md) | Regex writing, review | Regex pattern reference — common patterns, language-specific escaping, catastrophic backtracking prevention |
-| [self-correction-patterns](.agents/skills/self-correction-patterns/SKILL.md) | AI mistake recovery | Patterns for recognizing and recovering from AI mistakes — backtracking triggers, verification loops, assumption checking |
-| [skill-load](.agents/skills/skill-load/SKILL.md) | `/skill-load` first message | 🔴 Mandatory first command — inject skill-system bootstrap payload into prompt, forcing AGENTS.md read and skill matching |
 | [shell-scripts](.agents/skills/shell-scripts/SKILL.md) | `**/*.{sh,bash}` | Shell script conventions — safety flags, quoting, error handling, temporary files, portability |
 | [sql-database](.agents/skills/sql-database/SKILL.md) | `**/*.sql`, migrations | SQL & database conventions — parameterized queries, migration safety, indexing, connection pooling |
-| [thread-auto-context](.agents/skills/thread-auto-context/SKILL.md) | Always-applied, session start/end | Automatic persistent memory via Thread MCP — search context at session start, save decisions/preferences/constraints |
 | [typescript-standalone](.agents/skills/typescript-standalone/SKILL.md) | `**/*.{ts,tsx}` outside Next.js | Standalone TypeScript conventions — strict mode, type safety, error handling, async patterns, Node.js conventions |
 | [useful-tests](.agents/skills/useful-tests/SKILL.md) | `*.test.*`, `*_test.*`, `*.spec.*` | Write tests that catch real bugs — unit, integration, E2E with Playwright, app lifecycle, CI readiness |
-| [web-design-reviewer](.agents/skills/web-design-reviewer/SKILL.md) | UI/UX review | Visual inspection of websites to identify and fix design issues — responsive design, accessibility, layout breakage |
+
+---
+
+## Instructions — `.agents/instructions/` (session init, task execution, diagnosis)
+
+| Skill | Triggers on | Description |
+|-------|-------------|-------------|
+| [debugging-patterns](.agents/instructions/debugging-patterns/SKILL.md) | Bug diagnosis | Systematic debugging methodology — isolation, bisection, log-driven, and stack-trace analysis |
+| [help](.agents/instructions/help/SKILL.md) | `/help` or "help" query | Display quick-reference of all skills, commands, and invocation patterns |
+| [local-model-commands](.agents/instructions/local-model-commands/SKILL.md) | Terminal commands with local LLMs | Terminal command safety for local LLMs — never background with `&`, never run infinite-wait commands, use timeout wrappers |
+| [repo-context](.agents/instructions/repo-context/SKILL.md) | Session start | Load project identity, tech stack, conventions |
+| [self-correction-patterns](.agents/instructions/self-correction-patterns/SKILL.md) | AI mistake recovery | Patterns for recognizing and recovering from AI mistakes — backtracking triggers, verification loops, assumption checking |
+| [skill-load](.agents/instructions/skill-load/SKILL.md) | `/skill-load` first message | 🔴 Mandatory first command — inject skill-system bootstrap payload into prompt, forcing AGENTS.md read and skill matching |
+| [thread-auto-context](.agents/instructions/thread-auto-context/SKILL.md) | Always-applied, session start/end | Automatic persistent memory via Thread MCP — search context at session start, save decisions/preferences/constraints |
+| [update-skills](.agents/instructions/update-skills/SKILL.md) | New patterns, deps, codebase growth | Detect new patterns, create/retire skills — four detection signals (dependency gaps, repeated conventions, missing coverage, stale content) |
+| [update-skill-index](.agents/instructions/update-skill-index/SKILL.md) | After skill changes | Regenerate SKILL-INDEX.md from all skill files |
+| [audit-skills](.agents/instructions/audit-skills/SKILL.md) | After skill changes | Audit skill→docs consistency, auto-fix discrepancies |
+| [generate-docs](.agents/instructions/generate-docs/SKILL.md) | Stale docs | Scan codebase, populate `docs/` templates |
+| [write-docs](.agents/instructions/write-docs/SKILL.md) | Need documentation | Write READMEs, API docs, ADRs |
+
+---
+
+## Tools — `.agents/tools/` (browser automation, GitHub operations, UI review)
+
+| Skill | Triggers on | Description |
+|-------|-------------|-------------|
+| [chrome-devtools](.agents/tools/chrome-devtools/SKILL.md) | Browser debugging | Expert-level browser automation, debugging, and performance analysis using Chrome DevTools MCP |
+| [playwright-mcp](.agents/tools/playwright-mcp/SKILL.md) | Browser automation | Browser automation via Playwright MCP — navigate, click, type, snapshot pages |
+| [gh-cli](.agents/tools/gh-cli/SKILL.md) | GitHub operations | GitHub CLI (`gh`) integration — update repo metadata, manage PRs/issues/releases, create gists, search code, query the API |
+| [github-issues](.agents/tools/github-issues/SKILL.md) | Issue management | Create, update, and manage GitHub issues using MCP tools — labels, assignees, milestones, dependencies |
+| [web-design-reviewer](.agents/tools/web-design-reviewer/SKILL.md) | UI/UX review | Visual inspection of websites to identify and fix design issues — responsive design, accessibility, layout breakage |
 
 ---
 
@@ -109,70 +129,85 @@ This file is the **canonical index** of all skills in this project. It is automa
 | **Create/update skill** | `/update-skills` |
 | **Regenerate skill index** | `/update-skill-index` |
 | **View changelog** | `cat .agents/skills/learnings.md` |
-| **List all skills** | `ls -d .agents/skills/*/ \| sed 's\|.*/\|\|;s\|/\|\|' \| sort` |
+| **List all skills** | `ls -d .agents/skills/*/ .agents/instructions/*/ .agents/tools/*/ \| sed 's\|.*/\|\|;s\|/\|\|' \| sort` |
 | **Check frontmatter** | `head -5 .agents/skills/{name}/SKILL.md` |
+| **Check instruction frontmatter** | `head -5 .agents/instructions/{name}/SKILL.md` |
+| **Check tool frontmatter** | `head -5 .agents/tools/{name}/SKILL.md` |
 | **Regenerate docs** | `/generate-docs` |
 | **Write new docs** | `/write-docs` |
 
 ---
 
-## Skill Links (by directory)
+## Skills — `.agents/skills/` (26)
 
 | # | Directory | File |
 |---|-----------|------|
 | 1 | `agent-pipelines` | [`.agents/skills/agent-pipelines/SKILL.md`](.agents/skills/agent-pipelines/SKILL.md) |
 | 2 | `api-design` | [`.agents/skills/api-design/SKILL.md`](.agents/skills/api-design/SKILL.md) |
-| 3 | `audit-skills` | [`.agents/skills/audit-skills/SKILL.md`](.agents/skills/audit-skills/SKILL.md) |
-| 4 | `chrome-devtools` | [`.agents/skills/chrome-devtools/SKILL.md`](.agents/skills/chrome-devtools/SKILL.md) |
-| 5 | `cli-toolkit` | [`.agents/skills/cli-toolkit/SKILL.md`](.agents/skills/cli-toolkit/SKILL.md) |
-| 6 | `code-review-checklist` | [`.agents/skills/code-review-checklist/SKILL.md`](.agents/skills/code-review-checklist/SKILL.md) |
-| 7 | `containers` | [`.agents/skills/containers/SKILL.md`](.agents/skills/containers/SKILL.md) |
-| 8 | `create-readme` | [`.agents/skills/create-readme/SKILL.md`](.agents/skills/create-readme/SKILL.md) |
-| 9 | `debugging-patterns` | [`.agents/skills/debugging-patterns/SKILL.md`](.agents/skills/debugging-patterns/SKILL.md) |
-| 10 | `error-interpretation` | [`.agents/skills/error-interpretation/SKILL.md`](.agents/skills/error-interpretation/SKILL.md) |
-| 11 | `generate-docs` | [`.agents/skills/generate-docs/SKILL.md`](.agents/skills/generate-docs/SKILL.md) |
-| 12 | `generic-conventions` | [`.agents/skills/generic-conventions/SKILL.md`](.agents/skills/generic-conventions/SKILL.md) |
-| 13 | `gh-cli` | [`.agents/skills/gh-cli/SKILL.md`](.agents/skills/gh-cli/SKILL.md) |
-| 14 | `git-workflows` | [`.agents/skills/git-workflows/SKILL.md`](.agents/skills/git-workflows/SKILL.md) |
-| 15 | `github-actions-efficiency` | [`.agents/skills/github-actions-efficiency/SKILL.md`](.agents/skills/github-actions-efficiency/SKILL.md) |
-| 16 | `github-actions-hardening` | [`.agents/skills/github-actions-hardening/SKILL.md`](.agents/skills/github-actions-hardening/SKILL.md) |
-| 17 | `github-issues` | [`.agents/skills/github-issues/SKILL.md`](.agents/skills/github-issues/SKILL.md) |
-| 18 | `gitignore` | [`.agents/skills/gitignore/SKILL.md`](.agents/skills/gitignore/SKILL.md) |
-| 19 | `go-conventions` | [`.agents/skills/go-conventions/SKILL.md`](.agents/skills/go-conventions/SKILL.md) |
-| 20 | `help` | [`.agents/skills/help/SKILL.md`](.agents/skills/help/SKILL.md) |
-| 21 | `kubernetes` | [`.agents/skills/kubernetes/SKILL.md`](.agents/skills/kubernetes/SKILL.md) |
-| 22 | `local-model-commands` | [`.agents/skills/local-model-commands/SKILL.md`](.agents/skills/local-model-commands/SKILL.md) |
-| 23 | `model-profiles` | [`.agents/skills/model-profiles/SKILL.md`](.agents/skills/model-profiles/SKILL.md) |
-| 24 | `nextjs-conventions` | [`.agents/skills/nextjs-conventions/SKILL.md`](.agents/skills/nextjs-conventions/SKILL.md) |
-| 25 | `playwright-mcp` | [`.agents/skills/playwright-mcp/SKILL.md`](.agents/skills/playwright-mcp/SKILL.md) |
-| 26 | `postgresql-optimization` | [`.agents/skills/postgresql-optimization/SKILL.md`](.agents/skills/postgresql-optimization/SKILL.md) |
-| 27 | `project-structure` | [`.agents/skills/project-structure/SKILL.md`](.agents/skills/project-structure/SKILL.md) |
-| 28 | `python-conventions` | [`.agents/skills/python-conventions/SKILL.md`](.agents/skills/python-conventions/SKILL.md) |
-| 29 | `refactoring-recipes` | [`.agents/skills/refactoring-recipes/SKILL.md`](.agents/skills/refactoring-recipes/SKILL.md) |
-| 30 | `regex-reference` | [`.agents/skills/regex-reference/SKILL.md`](.agents/skills/regex-reference/SKILL.md) |
-| 31 | `repo-context` | [`.agents/skills/repo-context/SKILL.md`](.agents/skills/repo-context/SKILL.md) |
-| 32 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
-| 33 | `self-correction-patterns` | [`.agents/skills/self-correction-patterns/SKILL.md`](.agents/skills/self-correction-patterns/SKILL.md) |
-| 34 | `skill-load` | [`.agents/skills/skill-load/SKILL.md`](.agents/skills/skill-load/SKILL.md) |
-| 35 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
-| 36 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
-| 37 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
-| 38 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
-| 39 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
-| 40 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
-| 41 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
-| 42 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
-| 43 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
+| 3 | `cli-toolkit` | [`.agents/skills/cli-toolkit/SKILL.md`](.agents/skills/cli-toolkit/SKILL.md) |
+| 4 | `code-review-checklist` | [`.agents/skills/code-review-checklist/SKILL.md`](.agents/skills/code-review-checklist/SKILL.md) |
+| 5 | `containers` | [`.agents/skills/containers/SKILL.md`](.agents/skills/containers/SKILL.md) |
+| 6 | `create-readme` | [`.agents/skills/create-readme/SKILL.md`](.agents/skills/create-readme/SKILL.md) |
+| 7 | `error-interpretation` | [`.agents/skills/error-interpretation/SKILL.md`](.agents/skills/error-interpretation/SKILL.md) |
+| 8 | `generic-conventions` | [`.agents/skills/generic-conventions/SKILL.md`](.agents/skills/generic-conventions/SKILL.md) |
+| 9 | `git-workflows` | [`.agents/skills/git-workflows/SKILL.md`](.agents/skills/git-workflows/SKILL.md) |
+| 10 | `github-actions-efficiency` | [`.agents/skills/github-actions-efficiency/SKILL.md`](.agents/skills/github-actions-efficiency/SKILL.md) |
+| 11 | `github-actions-hardening` | [`.agents/skills/github-actions-hardening/SKILL.md`](.agents/skills/github-actions-hardening/SKILL.md) |
+| 12 | `gitignore` | [`.agents/skills/gitignore/SKILL.md`](.agents/skills/gitignore/SKILL.md) |
+| 13 | `go-conventions` | [`.agents/skills/go-conventions/SKILL.md`](.agents/skills/go-conventions/SKILL.md) |
+| 14 | `kubernetes` | [`.agents/skills/kubernetes/SKILL.md`](.agents/skills/kubernetes/SKILL.md) |
+| 15 | `model-profiles` | [`.agents/skills/model-profiles/SKILL.md`](.agents/skills/model-profiles/SKILL.md) |
+| 16 | `nextjs-conventions` | [`.agents/skills/nextjs-conventions/SKILL.md`](.agents/skills/nextjs-conventions/SKILL.md) |
+| 17 | `postgresql-optimization` | [`.agents/skills/postgresql-optimization/SKILL.md`](.agents/skills/postgresql-optimization/SKILL.md) |
+| 18 | `project-structure` | [`.agents/skills/project-structure/SKILL.md`](.agents/skills/project-structure/SKILL.md) |
+| 19 | `python-conventions` | [`.agents/skills/python-conventions/SKILL.md`](.agents/skills/python-conventions/SKILL.md) |
+| 20 | `refactoring-recipes` | [`.agents/skills/refactoring-recipes/SKILL.md`](.agents/skills/refactoring-recipes/SKILL.md) |
+| 21 | `regex-reference` | [`.agents/skills/regex-reference/SKILL.md`](.agents/skills/regex-reference/SKILL.md) |
+| 22 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
+| 23 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
+| 24 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
+| 25 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
+| 26 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
+
+## Instructions — `.agents/instructions/` (12)
+
+| # | Directory | File |
+|---|-----------|------|
+| 1 | `audit-skills` | [`.agents/instructions/audit-skills/SKILL.md`](.agents/instructions/audit-skills/SKILL.md) |
+| 2 | `debugging-patterns` | [`.agents/instructions/debugging-patterns/SKILL.md`](.agents/instructions/debugging-patterns/SKILL.md) |
+| 3 | `generate-docs` | [`.agents/instructions/generate-docs/SKILL.md`](.agents/instructions/generate-docs/SKILL.md) |
+| 4 | `help` | [`.agents/instructions/help/SKILL.md`](.agents/instructions/help/SKILL.md) |
+| 5 | `local-model-commands` | [`.agents/instructions/local-model-commands/SKILL.md`](.agents/instructions/local-model-commands/SKILL.md) |
+| 6 | `repo-context` | [`.agents/instructions/repo-context/SKILL.md`](.agents/instructions/repo-context/SKILL.md) |
+| 7 | `self-correction-patterns` | [`.agents/instructions/self-correction-patterns/SKILL.md`](.agents/instructions/self-correction-patterns/SKILL.md) |
+| 8 | `skill-load` | [`.agents/instructions/skill-load/SKILL.md`](.agents/instructions/skill-load/SKILL.md) |
+| 9 | `thread-auto-context` | [`.agents/instructions/thread-auto-context/SKILL.md`](.agents/instructions/thread-auto-context/SKILL.md) |
+| 10 | `update-skill-index` | [`.agents/instructions/update-skill-index/SKILL.md`](.agents/instructions/update-skill-index/SKILL.md) |
+| 11 | `update-skills` | [`.agents/instructions/update-skills/SKILL.md`](.agents/instructions/update-skills/SKILL.md) |
+| 12 | `write-docs` | [`.agents/instructions/write-docs/SKILL.md`](.agents/instructions/write-docs/SKILL.md) |
+
+## Tools — `.agents/tools/` (5)
+
+| # | Directory | File |
+|---|-----------|------|
+| 1 | `chrome-devtools` | [`.agents/tools/chrome-devtools/SKILL.md`](.agents/tools/chrome-devtools/SKILL.md) |
+| 2 | `gh-cli` | [`.agents/tools/gh-cli/SKILL.md`](.agents/tools/gh-cli/SKILL.md) |
+| 3 | `github-issues` | [`.agents/tools/github-issues/SKILL.md`](.agents/tools/github-issues/SKILL.md) |
+| 4 | `playwright-mcp` | [`.agents/tools/playwright-mcp/SKILL.md`](.agents/tools/playwright-mcp/SKILL.md) |
+| 5 | `web-design-reviewer` | [`.agents/tools/web-design-reviewer/SKILL.md`](.agents/tools/web-design-reviewer/SKILL.md) |
 
 ---
 
 ## Deploy Mirror
 
 The `deploy/` directory mirrors the bootstrap repo for distribution. It contains:
-- `deploy/.agents/skills/` — all deployable skill files
+- `deploy/.agents/skills/` — all deployable skill files (25)
+- `deploy/.agents/instructions/` — deployable instruction files (11, excludes source-only `thread-auto-context`)
+- `deploy/.agents/tools/` — all deployable tool files (5)
+- `deploy/.agents/hooks/` — 3 lifecycle hooks
 - `deploy/AGENTS.md` — skill system overview
 - `deploy/SKILL-INDEX.md` — this index (for target projects)
 
-Skills excluded from deploy: `create-readme`, `playwright-mcp`, `thread-auto-context`.
+Skills excluded from deploy: `create-readme`, `thread-auto-context`.
 
 Learnings included: `deploy/.agents/skills/learnings.md` — fresh template for target project self-improvement logging.

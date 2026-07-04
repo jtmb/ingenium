@@ -12,7 +12,7 @@ This file logs all skill system changes in **this project**. Appended automatica
 
 This project was bootstrapped from [ingenium](https://github.com/jtmb/ingenium) — a self-improving AI conventions system.
 
-- **What you have**: `.agents/skills/` with 25+ mandatory skills covering conventions, safety, testing, and meta-tools. `.agents/hooks/` for automatic session-start/post-tool-use triggers.
+- **What you have**: `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` with 25+ mandatory skills, 11+ instructions, and 5 tools covering conventions, safety, testing, and automation. `.agents/hooks/` for automatic session-start/post-tool-use triggers.
 - **What you should do**: As your project grows, use `/update-skills` to detect new patterns and create project-specific skills. Use `/audit-skills` to keep docs consistent. Log changes below.
 - **Key skills**: `/help` for catalog, `/skill-load` for full loading protocol, `/update-skills` to create new skills, `/audit-skills` for consistency checks, `/repo-context` to load project docs.
 

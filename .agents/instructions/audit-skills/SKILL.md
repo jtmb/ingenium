@@ -242,12 +242,12 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | Skill missing from AGENTS.md | Not applicable — AGENTS.md is a redirect to `/help`. No per-skill rows needed. |
 | Badge count wrong | Update `skills-17%20files` to match actual count |
 | Skill missing from SKILL-INDEX.md | Add entry to appropriate table with description from SKILL.md |
-| SKILL-INDEX.md count wrong | Update `**Total skills: {N}**` to match `ls -d .agents/skills/*/ \| wc -l` |
+| SKILL-INDEX.md count wrong | Update `**Total skills: {N}**` to match `ls -d .agents/skills/*/ .agents/instructions/*/ .agents/tools/*/ \| wc -l` |
 | SKILL-INDEX.md has stale entry | Remove the row for the deleted skill |
 | SKILL-INDEX.md has duplicate entry | Remove the duplicate row |
 | SKILL-INDEX.md updated but deploy/ is stale | `cp SKILL-INDEX.md deploy/SKILL-INDEX.md` |
-| update-skill-index added but deploy/ missing | `cp -r .agents/skills/update-skill-index deploy/.agents/skills/update-skill-index` |
-| Skill in source but missing from deploy/ | `cp -r .agents/skills/{name} deploy/.agents/skills/{name}` and add to bootstrap.sh |
+| update-skill-index added but deploy/ missing | `cp -r .agents/instructions/update-skill-index deploy/.agents/instructions/update-skill-index` |
+| Skill in source but missing from deploy/ | `cp -r .agents/skills/{name} deploy/.agents/skills/{name}` (or instructions/ or tools/ equivalent) and add to bootstrap.sh |
 | Skill in deploy but not in source (orphan) | Remove from deploy/ and remove from bootstrap.sh |
 | Hook missing from source or deploy | Verify `.agents/hooks/{name}.json` exists in both. `cp` from source to deploy if needed. |
 | Hook JSON invalid | Validate JSON: `python3 -m json.tool .agents/hooks/{name}.json` |
