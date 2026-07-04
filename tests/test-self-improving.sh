@@ -294,14 +294,14 @@ test_deploy_separation() {
     local agent_extra=0
     for item in "$DEPLOY_DIR/.agents"/*; do
         local name; name=$(basename "$item")
-        if [[ "$name" != "skills" ]]; then
+        if [[ "$name" != "skills" && "$name" != "hooks" ]]; then
             agent_extra=$((agent_extra + 1))
         fi
     done
     if [[ "$agent_extra" -eq 0 ]]; then
-        pass "deploy/.agents is clean — only skills/"
+        pass "deploy/.agents is clean — only skills/ and hooks/"
     else
-        fail "deploy/.agents has $agent_extra extra item(s)" "should only have skills/"
+        fail "deploy/.agents has $agent_extra extra item(s)" "should only have skills/ and hooks/"
     fi
 
     # b) Source-only skills should NOT be in deploy/
