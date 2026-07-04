@@ -151,7 +151,7 @@ npx playwright test --reporter=list --project=chromium
 - **Always use `trap cleanup EXIT`** — the app server MUST be killed even if tests crash.
 - **Poll health endpoint, not just the port.** Port-open doesn't mean the app is ready to serve.
 - **Timeout with a clear error.** Don't wait forever — 30-60s max, then fail with "App failed to start."
-- **Separate docker-compose for tests.** `docker-compose.test.yml` can use different config (no volumes, different ports, test DB).
+- **Separate test compose file (optional).** `docker-compose.test.yml` can use different config (no volumes, different ports, test DB). For simpler setups, one `docker-compose.yml` at root is sufficient.
 - **Use one script for both local and CI.** CI runs the same script. No "works on my machine" drift.
 
 ---
@@ -392,7 +392,7 @@ Before the agent declares a task complete, it MUST verify:
 ## Integration with Other Skills
 
 - **`playwright-mcp`** — Browser automation for exploration and debugging during development. Not for test automation. Use Playwright test runner (`@playwright/test`) for tests.
-- **`project-structure`** — Tests co-located: `user.test.ts` next to `user.ts`. E2E in `{service}/e2e/`. Test helpers in `{service}/e2e/helpers/`.
+- **`project-structure`** — Integration + E2E tests in `tests/{service}/` at project root. Unit tests co-located next to source. Test helpers in `tests/{service}/helpers/`.
 - **`generic-conventions`** — Lint → type-check → build → test → smoke. Tests are step 4 in the mandatory checklist.
 - **`containers`** — `docker-compose.test.yml` for integration/E2E test stack. HEALTHCHECK for readiness.
 - **`api-design`** — Test-only endpoints under `/api/test/` with `TEST_MODE` guard for seeding data in E2E tests.
@@ -402,17 +402,22 @@ Before the agent declares a task complete, it MUST verify:
 ## Directory Convention
 
 ```
-service/
-├── src/
-│   ├── users.ts
-│   └── users.test.ts          # Unit + integration tests co-located
-├── e2e/
-│   ├── checkout.spec.ts        # Playwright E2E tests
-│   ├── login.spec.ts
-│   └── helpers/
-│       └── api.ts              # API seed helpers for tests
-├── scripts/
-│   └── run-e2e.sh              # App lifecycle: launch → test → teardown
-├── playwright.config.ts        # Playwright configuration
-└── docker-compose.test.yml     # Dockerized test stack (optional)
+project-root/
+├── tests/                       # Root-level test suites, mirroring services
+│   ├── slop-api/
+│   │   ├── checkout.spec.ts     # Playwright E2E tests
+│   │   ├── login.spec.ts
+│   │   └── helpers/
+│   │       └── api.ts           # API seed helpers for tests
+│   └── slop-builder/
+│       └── ...
+├── slop-api/
+│   ├── lib/
+│   │   ├── logger.js
+│   │   └── logger.test.js       # Unit tests co-located with source
+│   └── package.json
+├── docker-compose.yml           # Single compose file for all services
+└── playwright.config.ts         # Root-level Playwright config
 ```
+
+Each service also has its own `vitest.config.js` for unit tests. The root `tests/{service}/` directories hold integration and E2E tests. Co-location (`*.test.ts` next to source) is for unit tests only.
