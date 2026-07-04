@@ -9,6 +9,19 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-04 — Created `onboard-existing-repo` instruction skill
+
+- **Before**: `(not committed yet)`
+- **After**: `(not committed yet)`
+- **Problem**: No way to onboard existing repos to the skill system. `bootstrap.sh` is for fresh scaffolds only. Existing repos with existing code had to manually cherry-pick files from deploy/.
+- **Solution**: Created `.agents/instructions/onboard-existing-repo/SKILL.md` — a 4-phase reusable instruction skill:
+  1. **Parallel Discovery**: 3 subagents (Structure & Stack, CI/CD & Practices, Docs & Gaps) run simultaneously
+  2. **Skill Mapping**: Data-driven cross-reference against bootstrap catalog — only copies skills matching the project's tech stack
+  3. **Apply Bootstrap Payload**: Copies matching skills/instructions/tools/hooks from deploy/, fills docs templates from Phase 1 data, generates .gitignore
+  4. **Verify**: Runs `/audit-skills`, checks for unfilled TODOs, validates hooks JSON, reports gaps to user
+- **Key design decisions**: Never overwrites existing files (unless they're templates with `<!-- TODO -->`), parallel subagents (not sequential), data-driven selection (only applicable skills), self-contained (references `$BOOTSTRAP_REPO` path). NOT added to bootstrap.sh (bootstrap.sh is for fresh scaffolds, this is for existing repos).
+- **Files changed**: Created source + deploy mirror of SKILL.md, updated AGENTS.md (+ deploy mirror), updated SKILL-INDEX.md.
+
 ## 2026-07-04 — Self-improvement loop activation: hooks as enforcement layer
 
 - **Before**: `ba2e9bb`
