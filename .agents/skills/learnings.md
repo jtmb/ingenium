@@ -27,6 +27,15 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 - **Updated**: All 11 changed files committed. 19/19 tests pass.
 - **Classification analysis**: Full audit of all 43 .agents/ items classified into skills (25), instructions/meta (12), tool interfaces (5), data files (1), hooks (3). No directory restructure — skill mechanism works for all types. Hooks are the enforcement layer.
 
+## 2026-07-04 — Model reference fix — vision-bridge GPT-4o/Claude → google/gemma-4-12b-qat
+
+- **Before**: `aee9135`
+- **After**: `81ce5bf`
+- **Fixed**: Updated all `GPT-4o/Claude` references in vision-bridge/SKILL.md (8 locations across source + deploy mirror) to `google/gemma-4-12b-qat` — the user's local LM Studio vision model
+- **Also fixed**: Stale `GPT-4o/Claude` descriptions in AGENTS.md, deploy/AGENTS.md, SKILL-INDEX.md, deploy/SKILL-INDEX.md
+- **Cleaned up**: Removed duplicate skills from `.agents/skills/` (audit-skills, local-model-commands, self-correction-patterns) — these already existed in `.agents/instructions/` and were left untracked after Phase 6 restructure
+- **Audit result**: 0 discrepancies found across all 3 directories, all deploy mirrors match, counts verified (26 skills + 13 instructions + 5 tools = 44)
+
 ## 2026-07-03 — hang/drip-feed detection: `find` in node_modules + hung commands
 
 - **Before**: `894b5ee`

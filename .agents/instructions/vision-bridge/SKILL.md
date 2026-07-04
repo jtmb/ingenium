@@ -1,13 +1,13 @@
 ---
 name: vision-bridge
-description: "🔴 ALWAYS-LOADED — Bridge blind models (DeepSeek, local LLMs) to Copilot's vision-capable models (GPT-4o, Claude). Detects when the model cannot view screenshots/images, emits a structured vision request for the user to paste into a vision model, then processes the returned description. Auto-triggers on: model says 'Can't view screenshots', view_image returns nothing, user says 'look at this', screenshots from playwright-mcp/chrome-devtools, or web-design-reviewer invoked."
+description: "🔴 ALWAYS-LOADED — Bridge blind models (DeepSeek, local LLMs) to a vision-capable model. Detects when the model cannot view screenshots/images, emits a structured vision request for the user to paste into a vision model (e.g., google/gemma-4-12b-qat on LM Studio), then processes the returned description. Auto-triggers on: model says 'Can't view screenshots', view_image returns nothing, user says 'look at this', screenshots from playwright-mcp/chrome-devtools, or web-design-reviewer invoked."
 ---
 
 # Vision Bridge — Blind Model → Vision Model Handoff
 
 ## Purpose
 
-You (the AI model) may lack vision capabilities — you cannot see screenshots, images, or attachments. When this happens, **do not guess, do not silently fail, do not ask the user to describe things themselves.** Instead, use this bridge to get a structured description from a vision-capable model (GPT-4o, Claude) available on the same Copilot instance.
+You (the AI model) may lack vision capabilities — you cannot see screenshots, images, or attachments. When this happens, **do not guess, do not silently fail, do not ask the user to describe things themselves.** Instead, use this bridge to get a structured description from `google/gemma-4-12b-qat` — a local vision-capable model running on LM Studio (http://192.168.0.13:1234).
 
 ## 🔴 When to Trigger — Auto-Detection
 
@@ -55,9 +55,10 @@ When a trigger fires, emit this EXACT template (fill in the bracketed parts):
 ║                                                          ║
 ║  INSTRUCTIONS FOR USER:                                  ║
 ║    1. Copy everything between the ═══ lines              ║
-║    2. Switch model to GPT-4o or Claude                   ║
+║    2. Switch Copilot model to "google/gemma-4-12b-qat"   ║
+║       (your local LM Studio vision model)                 ║
 ║    3. Paste and add: "Describe this image:"              ║
-║    4. Copy the description and switch back               ║
+║    4. Copy the description and switch back to this model ║
 ║    5. Paste the description here                         ║
 ║                                                          ║
 ╚══════════════════════════════════════════════════════════╝
@@ -71,7 +72,7 @@ When a trigger fires, emit this EXACT template (fill in the bracketed parts):
 sequenceDiagram
     participant B as Blind Model (You)
     participant U as User
-    participant V as Vision Model (GPT-4o/Claude)
+    participant V as Vision Model (google/gemma-4-12b-qat)
 
     B->>B: Detects trigger (P0/P1/P2)
     B->>U: Emits Vision Request Template
@@ -115,7 +116,7 @@ The web design reviewer skill **requires vision** for Steps 2 and 4 (Visual Insp
 
 ### view_image tool
 
-The `view_image` tool is designed for vision-capable models. If it returns nothing for you:
+The `view_image` tool is designed for vision-capable models like `google/gemma-4-12b-qat`. If it returns nothing for you:
 
 - **P0 trigger** — bridge immediately
 - Include the exact file path in the template
@@ -152,9 +153,10 @@ Blind Model:
 ║    - Style: colors, fonts, general visual impression     ║
 ║  INSTRUCTIONS FOR USER:                                  ║
 ║    1. Copy everything between the ═══ lines              ║
-║    2. Switch model to GPT-4o or Claude                   ║
+║    2. Switch Copilot model to "google/gemma-4-12b-qat"   ║
+║       (your local LM Studio vision model)                 ║
 ║    3. Paste and add: "Describe this image:"              ║
-║    4. Copy the description and switch back               ║
+║    4. Copy the description and switch back to this model ║
 ║    5. Paste the description here                         ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -190,9 +192,10 @@ Step 2 (Visual Inspection Phase) of the web-design-reviewer workflow."
 ║    - Colors & Fonts: brand consistency check             ║
 ║  INSTRUCTIONS FOR USER:                                  ║
 ║    1. Copy everything between the ═══ lines              ║
-║    2. Switch model to GPT-4o or Claude                   ║
+║    2. Switch Copilot model to "google/gemma-4-12b-qat"   ║
+║       (your local LM Studio vision model)                 ║
 ║    3. Paste and add: "Describe this image:"              ║
-║    4. Copy the description and switch back               ║
+║    4. Copy the description and switch back to this model ║
 ║    5. Paste the description here                         ║
 ╚══════════════════════════════════════════════════════════╝
 
@@ -229,9 +232,10 @@ confirm visually before diagnosing."
 ║    - Other UI elements: alerts, panels, status bars       ║
 ║  INSTRUCTIONS FOR USER:                                  ║
 ║    1. Copy everything between the ═══ lines              ║
-║    2. Switch model to GPT-4o or Claude                   ║
+║    2. Switch Copilot model to "google/gemma-4-12b-qat"   ║
+║       (your local LM Studio vision model)                 ║
 ║    3. Paste and add: "Describe this image:"              ║
-║    4. Copy the description and switch back               ║
+║    4. Copy the description and switch back to this model ║
 ║    5. Paste the description here                         ║
 ╚══════════════════════════════════════════════════════════╝
 
