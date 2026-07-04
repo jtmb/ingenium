@@ -14,7 +14,7 @@ Key properties:
 ```
 ingenium/
 ├── .agents/                    ← AI conventions system (the "product")
-│   ├── skills/                 ← 41 skills — each is a SKILL.md with YAML frontmatter
+│   ├── skills/                 ← 43 skills — each is a SKILL.md with YAML frontmatter
 │   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
 │   │   ├── {framework}-conventions/ ← nextjs, python, go, rust, typescript-standalone
 │   │   ├── {domain}-skills/       ← containers, kubernetes, api-design, sql-database, shell-scripts
@@ -67,9 +67,10 @@ Two bash scripts that scaffold new projects with the skill system:
 ### Deploy Separation (`deploy/`)
 
 A clean mirror containing only what gets deployed to target projects:
-- `deploy/.agents/skills/` — All 36 deployable skills (excludes 4 source-only: create-readme, gh-cli, playwright-mcp, thread-auto-context)
+- `deploy/.agents/skills/` — All 38 deployable skills (excludes 4 source-only: create-readme, gh-cli, playwright-mcp, thread-auto-context)
+- `deploy/.agents/hooks/` — All 3 lifecycle hooks (session-start, pre-tool-use, post-tool-use)
 - `deploy/AGENTS.md` — Minimal redirect
-- No scripts, hooks, docs, tests, or README — those are source-only
+- No scripts, docs, tests, or README — those are source-only
 
 The `test-self-improving.sh` suite validates that deploy stays in sync with source (`TEST 5`) and that no source-only files leak in (`TEST 4`).
 
