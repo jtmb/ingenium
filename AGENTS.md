@@ -124,12 +124,16 @@ Before responding to the user's first request, complete these 4 steps:
 
 ## Self-Improvement — Grow the System
 
-This skill system evolves. **You are responsible for growing it.**
+This skill system evolves. **You are responsible for growing it.** Hooks automatically remind you at session start and periodically during your session.
 
 - **New patterns?** → `/update-skills` detects gaps and creates skills
 - **Changed skills?** → `/audit-skills` keeps docs consistent
 - **Added/removed skills?** → `/update-skill-index` regenerates the index
-- **All changes** → Log to `.agents/skills/learnings.md` with before/after commit hashes
+- **All changes** → Log to `.agents/skills/learnings.md`
+
+**Hook-driven reminders:**
+- **SessionStart**: Loads the abbreviated checklist — match skills, load them, note HARD RULEs
+- **PostToolUse**: Every ~10 tool calls, reminds you to log new patterns to learnings.md and run `/update-skills` if you created new conventions
 
 If you don't invoke these, nothing improves. **Check `.agents/skills/` after every session. Look for ways to improve skills.**
 
