@@ -32,7 +32,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 ## 2026-07-04 — Restructured project-structure, generic-conventions, useful-tests for flat monorepo layout
 
 - **Before**: `2923af4` (feat: add onboard-existing-repo instruction skill)
-- **After**: `(not committed yet)`
+- **After**: `1c66c5e` (refactor: project-structure align with flat root-level monorepo layout)
 - **Trigger**: User showed slop-generator repo with root-level services (slop-api/, slop-builder/, etc.) as preferred structure. Each service has Dockerfile, config/, lib/, scripts/, data/, package.json, vitest.config.js.
 - **Changes**:
   - `project-structure/SKILL.md`: Replaced `services/{name}/` wrapper + four-layer internals (pages/features/domain/infrastructure) → root-level services with config/lib/scripts/data/ layers. Updated description, layout diagram, rules, naming conventions, anti-patterns, testing section, quick reference.
