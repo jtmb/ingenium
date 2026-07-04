@@ -34,6 +34,8 @@ graph LR
     E --> F[Copy rules + docs]
     F --> G[AI follows all rules]
     C -->|Yes| G
+    G --> H[PreToolUse/PostToolUse hooks enforce rules]
+    H --> B
 ```
 
 ## Table of Contents
@@ -153,7 +155,7 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | **Frameworks** | `.agents/skills/{fw}-conventions/SKILL.md` (4 files) | Next.js, Python, Go, Rust — build commands, idioms, project layout |
 | **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (22 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests, Gitignore, GitHub Actions (hardening + efficiency), PostgreSQL, Debugging, Code Review, Refactoring, Self-Correction, CLI Toolkit, Regex, Git Workflows, Error Interpretation, Model Profiles — everything in between |
 | **Docs** | `docs/` (4 files) | Templates the AI fills in as it works — architecture, tech stack, conventions |
-| **Tasks** | `.agents/skills/{name}/SKILL.md` (10 files deployed + 4 source-only) | `generate-docs`, `repo-context`, `write-docs`, `update-skills`, `update-skill-index`, `audit-skills`, `help`, `web-design-reviewer`, `chrome-devtools`, `github-issues` — invocable via `/` slash commands |
+| **Tasks** | `.agents/skills/{name}/SKILL.md` (12 files deployed + 2 source-only) | `generate-docs`, `repo-context`, `write-docs`, `update-skills`, `update-skill-index`, `audit-skills`, `help`, `web-design-reviewer`, `chrome-devtools`, `github-issues`, `gh-cli`, `playwright-mcp` — invocable via `/` slash commands |
 | **Hooks** | `.agents/hooks/` (3 files) | PreToolUse safety checks, SessionStart checklist + bootstrap, PostToolUse periodic reminders |
 | **CI** | `.agents/workflows/ci.yml` (optional) | Matrix CI for lint/build/test — copied if present |
 | **Usage** | `USAGE.md` | Handbook for adding your own skills |
@@ -227,13 +229,14 @@ graph TD
     C -->|Domain-specific file| E[Load domain conventions]
     C -->|Slash command| F[Load task skill]
     C -->|Everything else| G[Load generic-conventions]
-    D --> H[AI follows conventions]
+    D --> H[Hooks enforce deterministic guardrails]
     E --> H
     F --> H
     G --> H
-    H --> I[update-skills detects new patterns]
-    I --> J[Skill system grows with project]
-    J --> B
+    H --> I[AI follows conventions]
+    I --> J[update-skills detects new patterns]
+    J --> K[Skill system grows with project]
+    K --> B
 ```
 
 | Layer | Location | Trigger | Contains |
