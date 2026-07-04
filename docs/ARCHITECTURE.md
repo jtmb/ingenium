@@ -28,7 +28,8 @@ ingenium/
 │   └── test-self-improving.sh  ← Validates update-skills detection pipeline (7 test functions, 20 checks)
 ├── deploy/                     ← Clean mirror for bootstrapping other projects
 │   ├── AGENTS.md               ← Minimal redirect (same as root)
-│   └── .agents/skills/         ← Skills only — no scripts, hooks, docs, or tests
+│   ├── .agents/skills/         ← 41 deployable skills — no scripts, docs, or tests
+│   └── .agents/hooks/          ← 3 lifecycle hooks for deterministic enforcement
 ├── docs/                       ← Project documentation (this directory)
 │   ├── README.md               ← Docs index / map
 │   ├── ARCHITECTURE.md         ← This file — project structure and data flow
@@ -84,6 +85,18 @@ The project detects its own gaps using four signals:
 
 The `test-self-improving.sh` suite (7 test functions, 20 checks) validates all four signals, deploy integrity, frontmatter validity, and file drift.
 
+### Hooks System (`.agents/hooks/`)
+
+Three lifecycle hooks provide deterministic enforcement and self-improvement triggers:
+
+| Hook | When it fires | Purpose |
+|------|--------------|---------|
+| `session-start.json` | Session start | Inject abbreviated checklist, match skills, load them, note 🔴 HARD RULEs |
+| `pre-tool-use.json` | Before every tool call | Validate terminal command safety, check file-scope rules, block dangerous patterns |
+| `post-tool-use.json` | After every ~10 tool calls | Periodic reminder to log new patterns, run `/update-skills`, check for skill gaps |
+
+Hooks live in both source (`.agents/hooks/`) and deploy (`deploy/.agents/hooks/`). They bridge the gap between skills (which are read/interpreted by the AI) and deterministic enforcement (which runs regardless of AI state). The `post-tool-use` hook is the primary driver of the self-improving pipeline — it periodically reminds the AI to detect and create new skills.
+
 ## Data Flow
 
 ```mermaid
@@ -101,7 +114,7 @@ graph TD
     C -->|SQL files| L[sql-database]
     C -->|Test files| M[useful-tests]
     C -->|No match| N[generic-conventions]
-    D --> O[AI follows conventions]
+    D --> O[Hooks enforce deterministic guardrails]
     E --> O
     F --> O
     G --> O
@@ -112,10 +125,15 @@ graph TD
     L --> O
     M --> O
     N --> O
-    O --> P{After edit — check docs?}
-    P -->|Yes| Q[write-docs auto-invoked]
-    P -->|No| R[Task complete]
-    Q --> R
+    O --> P[AI follows conventions]
+    P --> Q{PostToolUse — check patterns?}
+    Q -->|Yes| R[Log new patterns to learnings.md]
+    R --> S[update-skills detects gaps]
+    S --> T{New skill needed?}
+    T -->|Yes| U[Create skill + audit wiring]
+    T -->|No| V[SessionStart re-loads skills]
+    Q -->|No| V
+    U --> V
 ```
 
 ## Communication Patterns
