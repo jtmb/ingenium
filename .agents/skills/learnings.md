@@ -280,3 +280,24 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 - **Reverted**: `tests/test-self-improving.sh` — removed agent drift check, reverted deploy integrity checks
 - **Reverted**: `deploy/` — removed `.github/` mirror, removed manage-agents mirror
 - **Source**: User determined custom agents are out of scope for this project
+
+## 2026-07-17 — audit: extend coverage to hooks, self-learning, and fix doc discrepancies
+
+- **Before**: `7d8e408` (state before audit extension)
+- **After**: `be07dbd`
+- **Fixed**: `docs/CONVENTIONS.md` — Deploy Exclusion Rules: "Three" → "Two", removed playwright-mcp entry
+- **Fixed**: `docs/CONVENTIONS.md` — deploy/ description: "only skills + AGENTS.md" → "skills, hooks, AGENTS.md, and SKILL-INDEX.md"
+- **Fixed**: `USAGE.md` — "(41 skills)" → "(43 skills — 41 after source-only exclusion)"
+- **Fixed**: `docs/ARCHITECTURE.md` — deploy/ directory map: "Skills only — no scripts, hooks, docs, or tests" → split into skills/ and hooks/ entries
+- **Fixed**: `README.md` — task skill count: "(10 files deployed + 4 source-only)" → "(12 files deployed + 2 source-only)"
+- **Fixed**: `README.md` — bootstrap mermaid: added `PreToolUse/PostToolUse hooks enforce rules` feedback loop
+- **Fixed**: `README.md` — architecture mermaid: added `Hooks enforce deterministic guardrails` node before `AI follows conventions`
+- **Fixed**: `docs/ARCHITECTURE.md` — data flow mermaid: replaced linear flow with full self-improvement cycle (hooks → patterns → learnings.md → update-skills → audit → SessionStart reload)
+- **Added**: `docs/ARCHITECTURE.md` — Hooks System section (`.agents/hooks/`) documenting all 3 lifecycle hooks with table
+- **Updated**: `.agents/skills/audit-skills/SKILL.md` — expanded from 8 to 10 checkpoints: added Check 9 (Hooks validity) and Check 10 (Self-learning artifacts)
+- **Updated**: `audit-skills` — added Steps 8-9 to audit procedure (hooks cross-ref, self-learning artifacts); existing Step 8 renumbered to Step 10
+- **Updated**: `audit-skills` — Quick Audit Command: added hooks parity check one-liner
+- **Updated**: `audit-skills` — Auto-Fix table: added 5 new rows for hooks/self-learning issues
+- **Updated**: `audit-skills` — Verification section: added 4 new checks
+- **Synced**: deploy mirror (audit-skills SKILL.md)
+- **Verification**: 18/18 tests pass
