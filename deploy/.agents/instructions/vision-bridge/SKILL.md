@@ -1,6 +1,6 @@
 ---
 name: vision-bridge
-description: "🔴 ALWAYS-LOADED — Bridge blind models (DeepSeek, local LLMs) to a vision-capable model. Detects when the model cannot view screenshots/images, emits a structured vision request for the user to paste into a vision model (e.g., google/gemma-4-12b-qat on LM Studio), then processes the returned description. Auto-triggers on: model says 'Can't view screenshots', view_image returns nothing, user says 'look at this', screenshots from playwright-mcp/chrome-devtools, or web-design-reviewer invoked."
+description: "🔴 ALWAYS-LOADED — Bridge blind models (DeepSeek, local LLMs) to google/gemma-4-12b-qat vision model via LM Studio API. Captures screenshots via Playwright, sends base64 to http://192.168.0.13:1234/v1/chat/completions with Bearer token from .agents/.lm-studio-env, processes returned description. Fully automated — no manual model switching needed. Auto-triggers on: model says 'Can't view screenshots', view_image fails, user says 'look at this', playwright-mcp/chrome-devtools screenshots, web-design-reviewer invoked."
 ---
 
 # Vision Bridge — Blind Model → Vision Model Handoff
@@ -8,6 +8,17 @@ description: "🔴 ALWAYS-LOADED — Bridge blind models (DeepSeek, local LLMs) 
 ## Purpose
 
 You (the AI model) may lack vision capabilities — you cannot see screenshots, images, or attachments. When this happens, **do not guess, do not silently fail, do not ask the user to describe things themselves.** Instead, use this bridge to get a structured description from `google/gemma-4-12b-qat` — a local vision-capable model running on LM Studio (http://192.168.0.13:1234).
+
+## 🔴 LM Studio Vision API — Automated Bridge
+
+**You (the blind model) call the vision API directly.** No manual model switching needed.
+
+| Property | Value |
+|----------|-------|
+| **API Endpoint** | `http://192.168.0.13:1234/v1/chat/completions` |
+| **Model** | `google/gemma-4-12b-qat` |
+| **Auth** | Bearer token from `.agents/.lm-studio-env` (sourced via `source .agents/.lm-studio-env`) |
+| **Token env var** | `LM_STUDIO_API_KEY` |
 
 ## 🔴 When to Trigger — Auto-Detection
 
@@ -30,57 +41,96 @@ You MUST invoke the vision bridge whenever ANY of these triggers fire:
 - Continue the task without visual input
 - Say "I'll proceed based on the DOM snapshot" if visual layout matters
 
-## The Vision Request Template
+## Automated Vision API Call
 
-When a trigger fires, emit this EXACT template (fill in the bracketed parts):
+When a trigger fires, call the vision API directly using the code block below. **Do NOT stop and wait. Do NOT ask the user to switch models.** The blind model stays in control — call the API in parallel.
 
-~~~
-╔══════════════════════════════════════════════════════════╗
-║  VISION BRIDGE — Request for Vision Model               ║
-╠══════════════════════════════════════════════════════════╣
-║                                                          ║
-║  IMAGE PATH: [absolute path to the image file]           ║
-║                                                          ║
-║  CONTEXT: [1-2 sentences about what task I'm doing]      ║
-║                                                          ║
-║  QUESTIONS:                                              ║
-║    1. [Specific question about what to look for]         ║
-║    2. [Another question if needed]                       ║
-║    3. [...more as needed]                                ║
-║                                                          ║
-║  EXPECTED OUTPUT:                                        ║
-║    - Section 1: [e.g., "Layout description"]             ║
-║    - Section 2: [e.g., "Visible elements list"]          ║
-║    - Section 3: [e.g., "Errors or anomalies"]            ║
-║                                                          ║
-║  INSTRUCTIONS FOR USER:                                  ║
-║    1. Copy everything between the ═══ lines              ║
-║    2. Switch Copilot model to "google/gemma-4-12b-qat"   ║
-║       (your local LM Studio vision model)                 ║
-║    3. Paste and add: "Describe this image:"              ║
-║    4. Copy the description and switch back to this model ║
-║    5. Paste the description here                         ║
-║                                                          ║
-╚══════════════════════════════════════════════════════════╝
-~~~
+### Method: Python (preferred — handles JSON serialization of large base64 payloads)
 
-**After emitting the template, STOP and WAIT.** Do not proceed with the task until the user pastes back the vision model's description.
+```python
+import json, urllib.request, base64, os
+
+# Load API token
+env_path = os.path.expanduser("~/repos/gh-llm-bootstrap/.agents/.lm-studio-env")
+with open(env_path) as f:
+    for line in f:
+        if line.startswith("LM_STUDIO_API_KEY"):
+            api_key = line.split("=", 1)[1].strip()
+
+# Read and encode screenshot
+with open("/path/to/screenshot.png", "rb") as f:
+    b64_data = base64.b64encode(f.read()).decode("utf-8")
+
+# Build request
+payload = {
+    "model": "google/gemma-4-12b-qat",
+    "messages": [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "Describe this screenshot in detail: layout, colors, text content, visible elements, and any interactive elements."},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_data}"}}
+        ]
+    }],
+    "max_tokens": 1000
+}
+
+req = urllib.request.Request(
+    "http://192.168.0.13:1234/v1/chat/completions",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+)
+
+with urllib.request.urlopen(req, timeout=180) as resp:
+    result = json.loads(resp.read())
+    description = result["choices"][0]["message"]["content"]
+    print(description)  # Use this in your response
+```
+
+### Method: Shell (for quick calls with small images)
+
+```bash
+source .agents/.lm-studio-env
+B64=$(base64 -w0 /path/to/screenshot.png)
+python3 -c "
+import json, urllib.request
+b64 = '''$B64'''
+payload = {
+    'model': 'google/gemma-4-12b-qat',
+    'messages': [{'role': 'user', 'content': [
+        {'type': 'text', 'text': 'Describe this screenshot in detail.'},
+        {'type': 'image_url', 'image_url': {'url': f'data:image/png;base64,{b64}'}}
+    ]}],
+    'max_tokens': 1000
+}
+req = urllib.request.Request(
+    'http://192.168.0.13:1234/v1/chat/completions',
+    data=json.dumps(payload).encode(),
+    headers={'Content-Type': 'application/json',
+             'Authorization': f'Bearer \$(cat .agents/.lm-studio-env | grep LM_STUDIO_API_KEY | cut -d= -f2)'})
+with urllib.request.urlopen(req, timeout=180) as resp:
+    print(json.loads(resp.read())['choices'][0]['message']['content'])
+"
+```
+
+### When Playwright page is available
+
+If you have a Playwright page handle, capture and analyze in one step using the `run_playwright_code` tool combined with the Python API call.
 
 ## Workflow
 
 ```mermaid
 sequenceDiagram
     participant B as Blind Model (You)
-    participant U as User
-    participant V as Vision Model (google/gemma-4-12b-qat)
+    participant API as LM Studio API (gemma-4-12b-qat)
 
     B->>B: Detects trigger (P0/P1/P2)
-    B->>U: Emits Vision Request Template
-    B->>B: STOPS and waits
-    U->>V: Switches model, pastes request
-    V->>U: Returns structured description
-    U->>B: Switches back, pastes description
+    B->>API: Captures screenshot, sends via HTTP POST
+    API->>B: Returns structured description (JSON)
     B->>B: Processes description, continues task
+    Note over B: No user involvement needed. Fully automated.
 ```
 
 ## Integration with Existing Tools
@@ -118,155 +168,74 @@ The web design reviewer skill **requires vision** for Steps 2 and 4 (Visual Insp
 
 The `view_image` tool is designed for vision-capable models like `google/gemma-4-12b-qat`. If it returns nothing for you:
 
-- **P0 trigger** — bridge immediately
-- Include the exact file path in the template
-- Note that the tool failed for your model
+- **P0 trigger** — bridge immediately via API
+- Use `run_playwright_code` to extract base64 of the image, then pipe to the vision API
 
 ## Example Sessions
 
-### Example 1: "Can't view screenshots" (P0 trigger)
+### Example 1: Screenshot from Playwright (P2 trigger → automated)
 
 ```
-User: Here's a screenshot of the broken layout [attaches screenshot.png]
-
 Blind Model:
-"I can't view screenshots. Let me bridge this to a vision model."
+"I can't view this screenshot. Let me call the vision API directly."
 
-╔══════════════════════════════════════════════════════════╗
-║  VISION BRIDGE — Request for Vision Model               ║
-╠══════════════════════════════════════════════════════════╣
-║  IMAGE PATH: /home/user/project/screenshot.png          ║
-║  CONTEXT: User reports a broken layout on the checkout  ║
-║           page. I need to identify visual problems.      ║
-║  QUESTIONS:                                              ║
-║    1. What layout issues are visible? (overflow,         ║
-║       overlap, misalignment, text clipping)              ║
-║    2. What elements are on the page? (forms, buttons,    ║
-║       navigation, footer)                                ║
-║    3. Are there any visual artifacts, glitches, or       ║
-║       rendering errors?                                  ║
-║    4. What colors and fonts are visible?                 ║
-║  EXPECTED OUTPUT:                                        ║
-║    - Layout: visible structure and positioning issues    ║
-║    - Elements: list of visible components                ║
-║    - Anomalies: any errors, glitches, or artifacts       ║
-║    - Style: colors, fonts, general visual impression     ║
-║  INSTRUCTIONS FOR USER:                                  ║
-║    1. Copy everything between the ═══ lines              ║
-║    2. Switch Copilot model to "google/gemma-4-12b-qat"   ║
-║       (your local LM Studio vision model)                 ║
-║    3. Paste and add: "Describe this image:"              ║
-║    4. Copy the description and switch back to this model ║
-║    5. Paste the description here                         ║
-╚══════════════════════════════════════════════════════════╝
-
-[STOPPED — waiting for vision model description]
+→ Uses run_playwright_code to capture page.screenshot()
+→ Sends base64 to LM Studio vision API
+→ Processes returned description
 ```
 
 ### Example 2: web-design-reviewer integration (P2 trigger)
 
 ```
 Blind Model (running web-design-reviewer Step 2):
-"I've navigated to http://localhost:3000/checkout and captured a screenshot
-at the desktop viewport (1280px). I need visual analysis to complete
-Step 2 (Visual Inspection Phase) of the web-design-reviewer workflow."
-
-╔══════════════════════════════════════════════════════════╗
-║  VISION BRIDGE — Request for Vision Model               ║
-╠══════════════════════════════════════════════════════════╣
-║  IMAGE PATH: /tmp/playwright-screenshots/page-1.png     ║
-║  CONTEXT: Web design review of checkout page at         ║
-║           1280px viewport (desktop). Need to identify    ║
-║           layout, responsive, and accessibility issues.  ║
-║  QUESTIONS:                                              ║
-║    1. Check for element overflow (content outside        ║
-║       parent or viewport)                                ║
-║    2. Check for element overlap (unintended z-index      ║
-║       issues)                                            ║
-║    3. Check alignment (grid/flex items misaligned)       ║
-║    4. Check text clipping (long text not handled)        ║
-║    5. Check spacing consistency (padding/margin gaps)    ║
-║  EXPECTED OUTPUT:                                        ║
-║    - Layout Issues: list each with severity (P1/P2/P3)   ║
-║    - Elements Present: header, nav, main, forms, footer  ║
-║    - Colors & Fonts: brand consistency check             ║
-║  INSTRUCTIONS FOR USER:                                  ║
-║    1. Copy everything between the ═══ lines              ║
-║    2. Switch Copilot model to "google/gemma-4-12b-qat"   ║
-║       (your local LM Studio vision model)                 ║
-║    3. Paste and add: "Describe this image:"              ║
-║    4. Copy the description and switch back to this model ║
-║    5. Paste the description here                         ║
-╚══════════════════════════════════════════════════════════╝
-
-[STOPPED — waiting for vision model description]
+→ Navigates to target URL
+→ Captures screenshot via Playwright
+→ Calls LM Studio vision API with base64
+→ Receives structured description: layout, elements, colors, issues
+→ Continues web-design-reviewer workflow with vision data
 ```
 
 ### Example 3: Terminal rendering artifact (P2 trigger)
 
 ```
-User: [screenshot of terminal with garbage text "555555..." leaking outside]
-
 Blind Model (after read_page shows alert + garbage text):
 "The snapshot shows an alert and garbage text '555555555...' leaking outside
-the terminal. This looks like an xterm.js DOM rendering artifact. I need to
-confirm visually before diagnosing."
+the terminal. Let me confirm visually via the vision API."
 
-╔══════════════════════════════════════════════════════════╗
-║  VISION BRIDGE — Request for Vision Model               ║
-╠══════════════════════════════════════════════════════════╣
-║  IMAGE PATH: /tmp/terminal-artifact.png                 ║
-║  CONTEXT: Terminal emulator showing xterm.js rendering   ║
-║           artifact — garbage text outside container.     ║
-║  QUESTIONS:                                              ║
-║    1. Is "555555..." or similar garbage text visible     ║
-║       OUTSIDE the terminal container boundary?           ║
-║    2. Is there an alert/modal/dialog visible on screen?  ║
-║    3. What is the general layout — terminal position,    ║
-║       surrounding UI elements?                           ║
-║    4. Are there scroll bars, overflow indicators, or     ║
-║       other visual clues about the container size?       ║
-║  EXPECTED OUTPUT:                                        ║
-║    - Container boundaries: where the terminal ends       ║
-║    - Artifact description: what garbage text, where       ║
-║    - Other UI elements: alerts, panels, status bars       ║
-║  INSTRUCTIONS FOR USER:                                  ║
-║    1. Copy everything between the ═══ lines              ║
-║    2. Switch Copilot model to "google/gemma-4-12b-qat"   ║
-║       (your local LM Studio vision model)                 ║
-║    3. Paste and add: "Describe this image:"              ║
-║    4. Copy the description and switch back to this model ║
-║    5. Paste the description here                         ║
-╚══════════════════════════════════════════════════════════╝
-
-[STOPPED — waiting for vision model description]
+→ Captures screenshot via Playwright
+→ Sends to LM Studio vision API with targeted questions:
+   - Is garbage text visible OUTSIDE the terminal boundary?
+   - What is the terminal position and container layout?
+   - Are there overflow indicators?
+→ Processes returned description
+→ Confirms xterm.js artifact, proceeds with diagnosis
 ```
 
 ## Processing the Vision Model's Response
 
-When the user pastes back the vision description:
+When the API returns JSON, extract the `choices[0].message.content` field:
 
 1. **Read it carefully** — the vision model described what it saw
 2. **Map to your task** — extract the answers to your specific questions
 3. **Proceed with confidence** — you now have visual data you couldn't get yourself
-4. **If unclear** — ask targeted follow-up questions in a new vision request (shorter this time)
-5. **Do NOT re-trigger** the full template if the user pastes something that isn't a vision description — just process it normally
+4. **If unclear** — make another API call with refined questions (shorter this time)
+5. **Do NOT fall back to guessing** — if the API fails, retry with a simpler prompt
 
 ## States
 
 | State | What's happening |
 |-------|-----------------|
 | **Monitoring** | No image needs detected, proceed normally |
-| **Triggered** | P0/P1/P2 trigger fired, emit template |
-| **Waiting** | Template emitted, waiting for user to paste description |
-| **Processing** | Description received, extracting answers |
+| **Triggered** | P0/P1/P2 trigger fired |
+| **Calling API** | Sending screenshot to LM Studio vision API |
+| **Processing** | Description received from API, extracting answers |
 | **Complete** | Visual data processed, continuing original task |
 
 ## 🔴 HARD RULES
 
 1. **Never guess image contents.** If you can't see it, bridge it.
 2. **Never silently skip visual steps.** If a skill (like web-design-reviewer) requires vision, announce the bridge.
-3. **Always STOP after emitting the template.** Do not speculate about what the image might show.
-4. **Always fill in specific questions.** Generic "describe this" wastes the vision model's capabilities.
-5. **Always include the absolute image path.** The vision model needs to read the file.
-6. **When the user pastes back a description, accept it as ground truth for visual facts.** Do not second-guess the vision model.
+3. **Never stop and wait for the user.** Call the vision API directly and continue.
+4. **Always include specific questions.** Generic "describe this" wastes the vision model's capabilities.
+5. **When the API returns a description, accept it as ground truth for visual facts.** Do not second-guess the vision model.
+6. **If the API returns an error** (HTTP 400/401/500), note the error and explain to user that LM Studio may not be running.

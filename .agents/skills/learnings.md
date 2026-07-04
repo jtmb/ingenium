@@ -27,6 +27,24 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 - **Updated**: All 11 changed files committed. 19/19 tests pass.
 - **Classification analysis**: Full audit of all 43 .agents/ items classified into skills (25), instructions/meta (12), tool interfaces (5), data files (1), hooks (3). No directory restructure — skill mechanism works for all types. Hooks are the enforcement layer.
 
+## 2026-07-04 — vision-bridge tested and automated — LM Studio API end-to-end
+
+- **Before**: `f7ebefc` (note: includes 8 model ref fixes + duplicate cleanup)
+- **After**: `[pending commit]`
+- **Test**: Successfully called LM Studio vision API at `http://192.168.0.13:1234/v1/chat/completions` with model `google/gemma-4-12b-qat`
+- **Scenario**: Captured screenshot of `https://example.com` via Playwright -> extracted base64 -> sent via Python urllib with Bearer token -> received detailed description back (layout, colors, text, interactive elements)
+- **Description returned**: Correctly identified Example Domain page, white background, black heading/text, blue "Learn more" link, left-aligned content in upper-left quadrant
+- **Automation upgrade**: Replaced entire manual model-switching approach with direct API calls. Key changes:
+  1. Blind model calls vision API directly — no user involvement needed
+  2. Token stored in `.agents/.lm-studio-env` (gitignored, chmod 600)
+  3. Python script block added to SKILL.md for proper JSON/base64 handling
+  4. All "INSTRUCTIONS FOR USER" manual switch steps removed
+  5. HARD RULE #3 changed from "STOP after emitting template" to "Never stop and wait — call API directly"
+  6. States simplified: Monitoring → Triggered → Calling API → Processing → Complete
+- **API details**: `POST http://192.168.0.13:1234/v1/chat/completions`, Bearer auth, model=`google/gemma-4-12b-qat`, max_tokens=1000, timeout=180s
+- **Token**: Stored as `LM_STUDIO_API_KEY` in `.agents/.lm-studio-env`
+- **Note**: Base64 from Playwright's `page.screenshot()` returns `Result: "..."` wrapper — must strip before sending to API
+
 ## 2026-07-04 — Model reference fix — vision-bridge GPT-4o/Claude → google/gemma-4-12b-qat
 
 - **Before**: `aee9135`
