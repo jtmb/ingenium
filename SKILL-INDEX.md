@@ -173,4 +173,6 @@ The `deploy/` directory mirrors the bootstrap repo for distribution. It contains
 - `deploy/AGENTS.md` — skill system overview
 - `deploy/SKILL-INDEX.md` — this index (for target projects)
 
-Skills excluded from deploy: `create-readme`, `gh-cli`, `playwright-mcp`, `thread-auto-context`, and `learnings.md`.
+Skills excluded from deploy: `create-readme`, `gh-cli`, `playwright-mcp`, `thread-auto-context`.
+
+Learnings included: `deploy/.agents/skills/learnings.md` — fresh template for target project self-improvement logging.
