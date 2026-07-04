@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "type": "command",
+        "matcher": {
+          "tool": "*"
+        },
+        "command": "STATE=\"/tmp/copilot-tool-count-$(basename \"$PWD\" 2>/dev/null || echo 'default')\"; touch \"$STATE\"; COUNT=$(head -1 \"$STATE\" 2>/dev/null || echo 0); COUNT=$((COUNT + 1)); printf '%d\\n' \"$COUNT\" > \"$STATE\"; if [ $((COUNT % 10)) -eq 0 ]; then echo \"{\\\"additionalContext\\\":\\\"📋 Session checkpoint: $COUNT tool calls. Remember to log new patterns to .agents/skills/learnings.md. If you created new conventions or patterns, run /update-skills. Docs changed? Run /generate-docs.\\\"}\"; else echo '{}'; fi",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}
