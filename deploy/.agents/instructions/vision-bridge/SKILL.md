@@ -1,66 +1,40 @@
 ---
 name: vision-bridge
-description: "🔴 ALWAYS-LOADED — Bridge blind models to google/gemma-4-12b-qat vision model. ONE COMMAND: python3 /home/brajam/repos/gh-llm-bootstrap/.agents/instructions/vision-bridge/vision_call.py <png-path>. That is the ONLY method. No Playwright. No browser. No base64 inline. Just run that command with a PNG file path."
+description: "🔴 ALWAYS-LOADED — Bridge blind models to google/gemma-4-12b-qat vision model. ONE CURL COMMAND: source .lm-studio-env, write JSON with base64 to temp file, curl -d @file. No Playwright. No browser. Just a file path."
 ---
 
-# 🔴 Vision Bridge — EXACT ONE-SHOT PROCEDURE
+# 🔴 Vision Bridge — EXACTLY ONE CURL COMMAND
 
-## The Problem
-You are blind — you cannot see images. But there is a vision model running at `http://192.168.0.13:1234` that CAN see them. This skill bridges that gap.
+## The problem
+You are blind but a vision model runs at `http://192.168.0.13:1234`. You have a PNG file path (from a failed `view_image`, a Playwright screenshot, or the user). **Run this exact command** — substitute the actual PNG path.
 
-## 🔴 THE ONE AND ONLY METHOD
+## 🔴 THE EXACT COMMAND (copy-paste, just change the path)
 
-A Python script already exists at this absolute path:
-```
-/home/brajam/repos/gh-llm-bootstrap/.agents/instructions/vision-bridge/vision_call.py
-```
-
-**To use it, run this exact command (substitute the PNG path):**
 ```bash
-python3 /home/brajam/repos/gh-llm-bootstrap/.agents/instructions/vision-bridge/vision_call.py /path/to/file.png
+source ~/repos/gh-llm-bootstrap/.agents/.lm-studio-env && printf '{"model":"google/gemma-4-12b-qat","messages":[{"role":"user","content":[{"type":"text","text":"Describe this screenshot in detail: layout, colors, text content, visible elements, interactive elements."},{"type":"image_url","image_url":{"url":"data:image/png;base64,' > /tmp/vp.json && base64 -w0 /path/to/screenshot.png >> /tmp/vp.json && printf '"}}]}],"max_tokens":1000}' >> /tmp/vp.json && curl -s -X POST http://192.168.0.13:1234/v1/chat/completions -H "Content-Type: application/json" -H "Authorization: Bearer $LM_STUDIO_API_KEY" -d @/tmp/vp.json && rm -f /tmp/vp.json
 ```
 
-**The script:**
-1. Reads `LM_STUDIO_API_KEY` from `.agents/.lm-studio-env`
-2. Reads the PNG file, base64 encodes it
-3. POSTs to `http://192.168.0.13:1234/v1/chat/completions` with model `google/gemma-4-12b-qat`
-4. Prints the vision model's description to stdout
+**That's it.** The JSON payload goes to `/tmp/vp.json`, curl POSTs it, the temp file is deleted. The output is the vision model's description.
 
-**You:** Wait for the output. Read the description. Continue your task.
+## 🔴 WHAT YOU DO
 
-## 🔴 DO NOT
+1. Look at your conversation. **Find the PNG file path** — from view_image failure, Playwright screenshot output, or user attachment.
+2. **Replace `/path/to/screenshot.png`** in the command above with your actual path.
+3. **Run the command.** Read the output. Continue your task.
 
-- **Do NOT use Playwright.** The script does NOT need a browser. It reads a FILE and calls an API. No Playwright, no browser, no page.
-- **Do NOT capture a screenshot.** The PNG file should already exist. If you don't have one, find another way or tell the user.
-- **Do NOT inline base64.** Do NOT use curl. Do NOT write your own Python. The script on disk handles everything.
-- **Do NOT reason about image contents.** You can't see it. Use the bridge.
-- **Do NOT ask the user to describe it.** Use the bridge.
+## 🔴 RULES (violate = wrong answer)
 
-## 🔴 IF THE API KEY FILE IS MISSING
+- **DO NOT** use Playwright for the API call. The command above does NOT need a browser.
+- **DO NOT** capture a screenshot. The file already exists.
+- **DO NOT** extract base64 yourself. `base64 -w0` does it.
+- **DO NOT** guess image contents. You're blind. Use the command.
+- **DO NOT** ask user to describe the image. Use the command.
 
-The env file is at `~/repos/gh-llm-bootstrap/.agents/.lm-studio-env`. If it doesn't exist:
+## 🔴 IF API KEY MISSING
 
-1. Use `vscode_askQuestions` — header `"api-key"`, question `"Enter your LM Studio API key (e.g., sk-lm-...). Saved to .agents/.lm-studio-env."`, no options.
-2. Save their answer:
-   ```bash
-   mkdir -p ~/repos/gh-llm-bootstrap/.agents && echo "LM_STUDIO_API_KEY=sk-lm-xxxxx" > ~/repos/gh-llm-bootstrap/.agents/.lm-studio-env && chmod 600 ~/repos/gh-llm-bootstrap/.agents/.lm-studio-env
-   ```
-3. Run `source ~/repos/gh-llm-bootstrap/.agents/.lm-studio-env && echo "$LM_STUDIO_API_KEY" | head -c 10` to verify.
-4. Then run `vision_call.py` above.
+`~/repos/gh-llm-bootstrap/.agents/.lm-studio-env` must exist with `LM_STUDIO_API_KEY=sk-lm-...`. If missing:
 
-## 🔴 ERROR HANDLING
-
-| Script says | What to do |
-|-------------|-----------|
-| `API key file not found` | Run the key-prompt steps above |
-| `File not found: /path/...` | The PNG path is wrong — use the correct absolute path |
-| `API call failed: ...` | Tell user LM Studio may not be running on 192.168.0.13:1234 |
-
-## 🔴 HARD RULES
-
-1. **ONE METHOD ONLY.** The command above. Nothing else.
-2. **NO PLAYWRIGHT.** The vision API call does not use a browser or Playwright.
-3. **NO BASE64 INLINE.** Use the script on disk.
-4. **NO GUESSING.** If you can't see it, bridge it.
-5. **NO STOPPING.** If the command succeeds, use the description and continue.
-6. **NO ASKING THE USER.** Don't ask user to describe images. Use the bridge.
+1. `vscode_askQuestions` header=`"api-key"` question=`"Enter LM Studio API key (sk-lm-...). Saved to .agents/.lm-studio-env."`
+2. Save: `mkdir -p ~/repos/gh-llm-bootstrap/.agents && echo "LM_STUDIO_API_KEY=sk-lm-xxxxx" > ~/repos/gh-llm-bootstrap/.agents/.lm-studio-env && chmod 600 ~/repos/gh-llm-bootstrap/.agents/.lm-studio-env`
+3. Verify: `source ~/repos/gh-llm-bootstrap/.agents/.lm-studio-env && echo "$LM_STUDIO_API_KEY" | head -c 10`
+4. Run the curl command above.
