@@ -67,7 +67,7 @@ Two bash scripts that scaffold new projects with the skill system:
 ### Deploy Separation (`deploy/`)
 
 A clean mirror containing only what gets deployed to target projects:
-- `deploy/.agents/skills/` — All 38 deployable skills (excludes 4 source-only: create-readme, gh-cli, playwright-mcp, thread-auto-context)
+- `deploy/.agents/skills/` — All 39 deployable skills (excludes 3 source-only: create-readme, playwright-mcp, thread-auto-context)
 - `deploy/.agents/hooks/` — All 3 lifecycle hooks (session-start, pre-tool-use, post-tool-use)
 - `deploy/AGENTS.md` — Minimal redirect
 - No scripts, docs, tests, or README — those are source-only

@@ -26,11 +26,10 @@
 
 ### Deploy Exclusion Rules
 
-Four skill directories are source-only (not deployed to target projects):
+Three skill directories are source-only (not deployed to target projects):
 1. `create-readme` — Only used when scaffolding THIS repo
-2. `gh-cli` — GitHub-specific, not relevant to arbitrary projects
-3. `playwright-mcp` — Browser automation, rarely needed in conventions
-4. `thread-auto-context` — Conversation memory, not a code convention
+2. `playwright-mcp` — Browser automation, rarely needed in conventions
+3. `thread-auto-context` — Conversation memory, not a code convention
 
 ## Error Handling
 
