@@ -1,17 +1,37 @@
 # AGENTS.md — Skill System Protocol
 
+This project supports **both OpenCode and GitHub Copilot**. Configuration is platform-specific.
+
+| Platform | Config File | Hooks/Plugins | MCP Servers | Custom Agents |
+|----------|------------|---------------|-------------|---------------|
+| **OpenCode** | `opencode.json` | `.opencode/plugins/*.ts` | `opencode.json` → `mcp` section | `.opencode/agents/*.md` |
+| **GitHub Copilot** | `.github/` | `.github/hooks/*.json` | `.vscode/mcp.json` | SDK-based (programmatic) |
+
+**Common foundation** (auto-discovered by both platforms):
+- `.agents/skills/<name>/SKILL.md` — domain conventions
+- `.agents/instructions/<name>/SKILL.md` — procedural guides
+- `.agents/tools/<name>/SKILL.md` — tool references
+- `AGENTS.md` — this file, read by both as project rules
+
+**MCP Servers available:**
+- **Thread** — persistent memory across sessions. Managed by the `thread-auto-context` instruction skill.
+- **GitHub** — GitHub API access (remote, OAuth). Managed via GitHub skills (`gh-cli`, `github-issues`).
+
+> 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source.
+
+---
+
 ## 🔴 MANDATORY — Load Skills Before Acting
 
-**Before writing code, running a command, or responding to any request, you MUST check which skills apply.** This is not optional. Skills contain 🔴 HARD RULEs that override everything else. Ignoring them produces broken code, hung terminals, and security issues.
+**Before writing code, running a command, or responding to any request, you MUST check which skills apply.** Skills contain 🔴 HARD RULEs that override everything else.
 
 ## 🔴 Session Startup Checklist
 
-Before responding to the user's first request, complete these 4 steps:
-
-1. **Match skills to request** — Read the quick-reference table below. For each skill, check the "Use when" column against the user's request and the files you might edit.
-2. **Load every matching skill** — Read the full SKILL.md from `.agents/skills/<name>/SKILL.md`, `.agents/instructions/<name>/SKILL.md`, or `.agents/tools/<name>/SKILL.md` depending on the category.
-3. **Note the 🔴 HARD RULEs** — Skills use 🔴 to mark mandatory rules. These take priority over everything else.
-4. **Invoke `/repo-context`** for project identity and `/help` for the full catalog.
+Before responding to the user's first request:
+1. **Match skills to request** — Check the skill catalog against the user's request and files you might edit
+2. **Load every matching skill** — Read the full `SKILL.md` from `.agents/skills/<name>/`, `.agents/instructions/<name>/`, or `.agents/tools/<name>/`
+3. **Note the 🔴 HARD RULEs** — These take priority over everything else
+4. **Invoke `/repo-context`** for project identity and `/help` for the full catalog
 
 ## 🔴 Before Every Action — Pre-Flight Check
 
@@ -25,130 +45,58 @@ Before responding to the user's first request, complete these 4 steps:
 | Edit shell scripts | `shell-scripts` — `set -euo pipefail`, quoting |
 | Edit SQL/migrations | `sql-database` — parameterized queries, indexing |
 
-## 🔴 Mandatory Skills
-
-**These are NOT suggestions. You MUST load them before ANY action.**
+## 🔴 Mandatory Skills — Load Before ANY Action
 
 | Skill | Why mandatory |
 |-------|--------------|
-| `generic-conventions` | Comments, docs sync, DRY, security, error handling, git. Applies to EVERYTHING. |
-| `model-profiles` | Know your model's capabilities, context limits, and prompt preferences — adapt accordingly. |
-| `local-model-commands` | **ALL terminal commands** — never `&`, never infinite-wait. |
-| `debugging-patterns` | Systematic debugging — isolation, bisection, log-driven. Do not guess, methodically isolate. |
-| `useful-tests` | Test lifecycle, assertions, CI readiness. Tests must catch real bugs, not pass trivially. |
-| `project-structure` | Layering, naming, boundaries. No `utils/` dirs, no flat `src/`. |
-| `error-interpretation` | Map error signatures to their root cause. Do not chase the wrong fix. |
-| `self-correction-patterns` | Backtracking triggers, verification loops, assumption checking. Do not double down on wrong answers. |
-| `skill-load` | **Session init** — `/skill-load` injects the bootstrap payload. First message, every session. |
-| `api-design` | REST status codes, error shapes, versioning, auth, pagination, rate limiting, idempotency. |
-| `shell-scripts` | `set -euo pipefail`, double-quote all vars, `trap cleanup EXIT`, `mktemp`. |
-| `sql-database` | Parameterized queries only, reversible migrations, indexing, connection pooling. |
-| `typescript-standalone` | Strict tsconfig, type safety, error handling, async patterns, Node.js conventions. |
-| `agent-pipelines` | AI agent orchestration, state checkpoints, crash recovery, multi-phase pipelines. |
-| `gitignore` | Ignore file patterns, structure, rules for `.gitignore`. |
-| `postgresql-optimization` | JSONB, array types, full-text search, window functions, extensions. |
-| `code-review-checklist` | Security, correctness, performance, readability, testing. |
-| `refactoring-recipes` | Extract method, invert conditional, replace magic number — before/after patterns. |
-| `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep — shell pipeline reference. |
-| `regex-reference` | Common patterns, language-specific escaping, catastrophic backtracking prevention. |
-| `git-workflows` | Rebase vs merge, bisect, reflog recovery, conventional commits, clean history. |
-| `web-design-reviewer` | UI/UX inspection, responsive design, accessibility, layout breakage. |
-| `chrome-devtools` | Browser screenshots, performance profiling, network analysis. |
-| `github-issues` | Create, update, manage issues — labels, assignees, milestones, dependencies. |
-| `playwright-mcp` | Browser automation — navigate, click, type, snapshot pages. |
-
-## Skill Quick-Reference
-
-### ⚡ Always Loaded (`.agents/skills/`)
-
-| Skill | Why |
-|-------|-----|
-| `generic-conventions` | Fallback — docs sync, comments, DRY, security, error handling, git. Applies to EVERYTHING. |
-
-### 🔧 Framework Skills — `.agents/skills/` (triggered by file extension)
-
-| Skill | Use when editing |
-|-------|-----------------|
-| `nextjs-conventions` | `**/*.{tsx,ts,jsx,js,css}` in a Next.js project |
-| `python-conventions` | `**/*.py` |
-| `go-conventions` | `**/*.go` |
-| `rust-conventions` | `**/*.rs` |
-
-### 🧩 Domain Skills — `.agents/skills/` (triggered by file path or task type)
-
-| Skill | Use when |
-|-------|---------|
-| `api-design` | Writing routes, handlers, API controllers |
-| `containers` | Dockerfiles, docker-compose, Containerfiles |
-| `kubernetes` | K8s manifests, Helm charts, kustomize |
-| `shell-scripts` | Writing `.sh` or `.bash` files |
-| `sql-database` | SQL queries, migrations, DB code |
-| `typescript-standalone` | TypeScript outside Next.js projects |
-| `project-structure` | Creating projects, adding services, reorganizing |
-| `agent-pipelines` | Building AI agent services, multi-step pipelines |
-| `useful-tests` | Any `*.test.*`, `*_test.*`, `*.spec.*` file |
-| `gitignore` | Creating or editing `.gitignore` |
-| `github-actions-hardening` | Reviewing CI/CD security |
-| `github-actions-efficiency` | Auditing CI performance/cost |
-| `postgresql-optimization` | PostgreSQL-specific features, JSONB, arrays |
-| `code-review-checklist` | PR review, code quality audit |
-| `refactoring-recipes` | Improving code structure |
+| `generic-conventions` | Comments, docs sync, DRY, security, error handling, git |
+| `model-profiles` | Know your model's capabilities, context limits — adapt accordingly |
+| `local-model-commands` | **ALL terminal commands** — never `&`, never infinite-wait |
+| `debugging-patterns` | Systematic debugging — isolation, bisection, log-driven |
+| `useful-tests` | Test lifecycle, assertions, CI readiness |
+| `project-structure` | Layering, naming, boundaries |
+| `error-interpretation` | Map error signatures to root cause |
+| `self-correction-patterns` | Backtracking triggers, verification loops |
+| `skill-load` | **Session init** — `/skill-load` injects bootstrap payload |
+| `api-design` | REST status codes, error shapes, versioning, auth |
+| `shell-scripts` | `set -euo pipefail`, double-quote all vars, `trap cleanup EXIT` |
+| `sql-database` | Parameterized queries, reversible migrations, indexing |
+| `typescript-standalone` | Strict tsconfig, type safety, error handling |
+| `agent-pipelines` | AI agent orchestration, state checkpoints, crash recovery |
+| `gitignore` | Ignore file patterns, structure, rules |
+| `postgresql-optimization` | JSONB, array types, full-text search |
+| `code-review-checklist` | Security, correctness, performance, readability |
+| `refactoring-recipes` | Extract method, invert conditional, before/after patterns |
 | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep |
-| `regex-reference` | Writing or reviewing regular expressions |
-| `git-workflows` | Rebase, bisect, reflog, conventional commits |
-| `error-interpretation` | Understanding compiler/runtime errors |
-| `model-profiles` | Adapting prompts for Qwen/Gemma/DeepSeek |
+| `regex-reference` | Common patterns, catastrophic backtracking prevention |
+| `git-workflows` | Rebase vs merge, bisect, reflog recovery, conventional commits |
+| `web-design-reviewer` | UI/UX inspection, responsive design, accessibility |
+| `chrome-devtools` | Browser screenshots, performance profiling |
+| `github-issues` | Create, update, manage issues |
+| `playwright-mcp` | Browser automation |
 
-### 💡 Instructions — `.agents/instructions/` (session init, task execution, diagnosis)
+---
 
-| Skill | Use when |
-|-------|---------|
-| `skill-load` | 🔴 **Session init** — `/skill-load` injects bootstrap payload |
-| `help` | Need a skill overview |
-| `repo-context` | Starting a new session |
-| `debugging-patterns` | Diagnosing bugs, bisection |
-| `self-correction-patterns` | Recovering from AI mistakes |
-| `local-model-commands` | **ALL terminal commands** — no `&`, no infinite-wait |
-| `update-skills` | New patterns, deps, or codebase growth — creates/retires skills |
-| `audit-skills` | After any skill change — cross-references all docs |
-| `update-skill-index` | After adding/removing skills |
-| `generate-docs` | Docs are stale or templates are empty |
-| `write-docs` | Need README, API docs, or ADRs |
-| `thread-auto-context` | Persistent memory via Thread MCP |
-| `onboard-existing-repo` | 🔴 **Existing repo → skill system** — parallel subagents explore, map findings, apply deploy payload |
-| `vision-bridge` | 🔴 **Blind model → vision model** — auto-detects "Can't view screenshots" and routes images to google/gemma-4-12b-qat |
+## External File Loading — Lazy-Load Pattern
 
-### 🔧 Tools — `.agents/tools/` (browser automation, GitHub operations, UI review)
+When you encounter a `@` file reference below, use your **Read tool** to load it on a **need-to-know basis**. Do NOT preemptively load all references.
 
-| Skill | Use when |
-|-------|---------|
-| `chrome-devtools` | Browser screenshots, performance, network |
-| `playwright-mcp` | Browser automation via Playwright |
-| `gh-cli` | GitHub CLI — PRs, issues, releases, search |
-| `github-issues` | Creating/updating GitHub issues |
-| `web-design-reviewer` | UI/UX inspection, responsive/accessibility |
+### Skill Catalog
 
-### 📋 Task Skills (invoke via `/command`)
+For the full skill catalog with detailed descriptions, invocation patterns, commands, and framework/domain/task skill tables:
+@.agents/SKILL-CATALOG.md
 
-| Command | Use when | Location |
-|---------|---------|----------|
-| `/skill-load` | 🔴 **FIRST MESSAGE in every session** — injects the skill-system bootstrap payload | `.agents/instructions/` |
-| `/help` | Need a skill overview | `.agents/instructions/` |
-| `/repo-context` | Starting a new session | `.agents/instructions/` |
-| `/update-skills` | New patterns, deps, or codebase growth — creates/retires skills | `.agents/instructions/` |
-| `/audit-skills` | After any skill change — cross-references all docs | `.agents/instructions/` |
-| `/update-skill-index` | After adding/removing skills | `.agents/instructions/` |
-| `/generate-docs` | Docs are stale or templates are empty | `.agents/instructions/` |
-| `/write-docs` | Need README, API docs, or ADRs | `.agents/instructions/` |
-| `/create-readme` | Need a README.md for the project | `.agents/skills/` |
-| `/onboard-existing-repo` | Onboard an existing repo to the skill system — parallel subagents explore, map to catalog, apply deploy | `.agents/instructions/` |
-| `/vision-bridge` | 🔴 Blind model needs vision — routes screenshots to google/gemma-4-12b-qat | `.agents/instructions/` |
+### Skill System Instructions
+
+Procedural guides loaded via `opencode.json` → `instructions`:
+- `.agents/instructions/*/SKILL.md` — session init, task execution, diagnosis
+- `.agents/tools/*/SKILL.md` — browser automation, GitHub operations, UI review
+
+These are loaded automatically by OpenCode. Copilot uses `.github/hooks/*.json`.
 
 ---
 
 ## Self-Improvement — Grow the System
-
-This skill system evolves. **You are responsible for growing it.** Hooks automatically remind you at session start and periodically during your session.
 
 - **New patterns?** → `/update-skills` detects gaps and creates skills
 - **Changed skills?** → `/audit-skills` keeps docs consistent
@@ -156,9 +104,29 @@ This skill system evolves. **You are responsible for growing it.** Hooks automat
 - **All changes** → Log to `.agents/skills/learnings.md`
 
 **Hook-driven reminders:**
+- **OpenCode**: `.opencode/plugins/*.ts` fires `session.created`, `tool.execute.before`, `tool.execute.after`
+- **Copilot**: `.github/hooks/*.json` fires `sessionStart`, `preToolUse`, `postToolUse`
 - **SessionStart**: Loads the abbreviated checklist — match skills, load them, note HARD RULEs
-- **PostToolUse**: Every ~10 tool calls, reminds you to log new patterns to learnings.md and run `/update-skills` if you created new conventions
+- **PostToolUse**: Every ~10 tool calls, reminds you to log new patterns to learnings.md
 
-If you don't invoke these, nothing improves. **Check `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` after every session. Look for ways to improve skills.**
+---
 
+## Repository Structure
 
+```
+.
+├── AGENTS.md                    # Project rules (OpenCode + Copilot)
+├── opencode.json                # OpenCode configuration
+├── .opencode/
+│   ├── agents/*.md              # OpenCode custom agent definitions
+│   └── plugins/*.ts             # OpenCode hook plugins
+├── .github/hooks/*.json         # GitHub Copilot hooks
+├── .vscode/mcp.json             # VS Code MCP servers
+├── .agents/
+│   ├── SKILL-CATALOG.md         # Full skill catalog (lazy-loaded)
+│   ├── skills/                  # Domain conventions (shared)
+│   ├── instructions/            # Procedural guides
+│   ├── tools/                   # Tool references
+│   └── hooks/                   # Legacy ingenium hooks
+└── deploy/                      # Bootstrap payload (mirrors above)
+```
