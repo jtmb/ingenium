@@ -12,7 +12,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 |---------|-------|-------------|----------|
 | `/skill-load` | [skill-load](.agents/instructions/skill-load/SKILL.md) | 🔴 Mandatory first command — inject skill-system bootstrap payload, force AGENTS.md + skill loading | `.agents/instructions/` |
 | `/audit-skills` | [audit-skills](.agents/instructions/audit-skills/SKILL.md) | Audit skill→docs consistency, auto-fix discrepancies | `.agents/instructions/` |
-| `/create-readme` | [create-readme](.agents/skills/create-readme/SKILL.md) | Generate a README.md for the project | `.agents/skills/` (source-only) |
+| `/create-readme` | [create-readme](.agents/skills/create-readme/SKILL.md) | Generate a README.md for the project | `.agents/skills/` |
 | `/generate-docs` | [generate-docs](.agents/instructions/generate-docs/SKILL.md) | Scan codebase, populate `docs/` templates | `.agents/instructions/` |
 | `/help` | [help](.agents/instructions/help/SKILL.md) | Display all skills, commands, and invocation patterns | `.agents/instructions/` |
 | `/repo-context` | [repo-context](.agents/instructions/repo-context/SKILL.md) | Load project identity, tech stack, conventions | `.agents/instructions/` |
@@ -202,12 +202,10 @@ This file is the **canonical index** of all skills in this project. It is automa
 
 The `deploy/` directory mirrors the bootstrap repo for distribution. It contains:
 - `deploy/.agents/skills/` — all deployable skill files (25)
-- `deploy/.agents/instructions/` — deployable instruction files (11, excludes source-only `thread-auto-context`)
+- `deploy/.agents/instructions/` — deployable instruction files (12)
 - `deploy/.agents/tools/` — all deployable tool files (5)
 - `deploy/.agents/hooks/` — 3 lifecycle hooks
 - `deploy/AGENTS.md` — skill system overview
 - `deploy/SKILL-INDEX.md` — this index (for target projects)
-
-Skills excluded from deploy: `create-readme`, `thread-auto-context`.
 
 Learnings included: `deploy/.agents/skills/learnings.md` — fresh template for target project self-improvement logging.

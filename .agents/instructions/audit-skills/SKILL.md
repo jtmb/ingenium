@@ -101,7 +101,7 @@ The audit checks 10 integration points. Every skill should appear in ALL of them
 | **5. AGENTS.md index** | `AGENTS.md` | Points to `/help` — no stale references to deleted skills or docs |
 | **6. USAGE.md** | `USAGE.md` → skill listings, directory trees | Skill appears in tree diagrams and reference tables |
 | **7. SKILL-INDEX.md** | `SKILL-INDEX.md` (repo root) | Skill is listed in the correct table, total count matches `ls -d .agents/skills/*/ \| wc -l` |
-| **8. Deploy mirror** | `deploy/.agents/skills/` vs `.agents/skills/` | Every non-source-only skill in source has a matching directory in deploy, and deploy has no orphans |
+| **8. Deploy mirror** | `deploy/.agents/skills/` vs `.agents/skills/` | Every skill in source has a matching directory in deploy, and deploy has no orphans |
 | **9. Hooks validity** | `.agents/hooks/` (source + deploy) + doc references | Every lifecycle hook has a matching JSON file in both source and deploy. JSON is valid. Hooks documented in README.md architecture table and ARCHITECTURE.md. |
 | **10. Self-learning artifacts** | `learnings.md`, AGENTS.md self-improvement section, deploy mirror | learnings.md exists in source. Self-improvement section in AGENTS.md references hooks. Deploy has fresh learnings.md template. PostToolUse hook references self-improvement. |
 

@@ -7,7 +7,7 @@
 Key properties:
 - **Zero runtime dependencies** — pure Markdown + YAML + shell scripts
 - **Self-improving** — an `update-skills` detection pipeline identifies gaps and auto-creates skills
-- **Deployable** — a `deploy/` mirror strips source-only files for clean project bootstrapping
+- **Deployable** — a `deploy/` mirror for clean project bootstrapping
 
 ## Directory Map
 
@@ -26,7 +26,7 @@ ingenium/
 │   │   ├── skill-load/           ← Session bootstrap
 │   │   ├── repo-context/         ← Project identity
 │   │   ├── {other-instructions}/  ← debugging, docs, recovery, etc.
-│   │   └── thread-auto-context/  ← Persistent memory (source-only)
+│   │   └── thread-auto-context/  ← Persistent memory
 │   ├── tools/                  ← 5 tools — browser automation & GitHub operations
 │   │   ├── chrome-devtools/       ← Browser debugging
 │   │   ├── playwright-mcp/        ← Playwright browser automation
@@ -87,13 +87,13 @@ Two bash scripts that scaffold new projects with the skill system:
 ### Deploy Separation (`deploy/`)
 
 A clean mirror containing only what gets deployed to target projects:
-- `deploy/.agents/skills/` — 25 deployable skills (excludes source-only `create-readme`)
-- `deploy/.agents/instructions/` — 11 deployable instructions (excludes source-only `thread-auto-context`)
+- `deploy/.agents/skills/` — 26 deployable skills
+- `deploy/.agents/instructions/` — 12 deployable instructions
 - `deploy/.agents/tools/` — 5 deployable tools (all deployed)
 - `deploy/.agents/hooks/` — All 3 lifecycle hooks (session-start, pre-tool-use, post-tool-use)
 - `deploy/AGENTS.md` — Minimal redirect
 - `deploy/SKILL-INDEX.md` — Full skill index for target projects
-- No scripts, docs, or tests — those are source-only
+- No scripts, docs, or tests
 
 The `test-self-improving.sh` suite validates that deploy stays in sync with source (`TEST 5`) and that no source-only files leak in (`TEST 4`).
 

@@ -21,14 +21,8 @@
 - **Link to docs, don't duplicate.** Skills reference `docs/ARCHITECTURE.md` etc. instead of copying doc content.
 - **`deploy/` is a clean mirror.** It contains skills/, instructions/, tools/, hooks/, `AGENTS.md`, and `SKILL-INDEX.md`. No scripts, tests, docs, or README. The source repo is the source of truth; deploy is an output.
 - **`tests/` lives at project root** alongside `docs/`, not inside `.agents/`. Tests validate the skill system but are not part of it.
-- **`learnings.md` lives in `.agents/skills/`** — it's source-only (excluded from deploy) because it's a development artifact, not a deployable convention.
+- **`learnings.md` lives in `.agents/skills/`** — it's a development artifact, not a deployable convention.
 - **YAML frontmatter is always between `---` fences** on lines 1 and the line before Markdown content. No tabs (spaces only). Colons in descriptions must be inside quotes.
-
-### Deploy Exclusion Rules
-
-Two items are source-only (not deployed to target projects):
-1. `create-readme` (`.agents/skills/`) — Only used when scaffolding THIS repo
-2. `thread-auto-context` (`.agents/instructions/`) — Conversation memory, not a code convention
 
 ## Error Handling
 
