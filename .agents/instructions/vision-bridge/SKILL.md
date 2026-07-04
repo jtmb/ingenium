@@ -20,6 +20,31 @@ You (the AI model) may lack vision capabilities — you cannot see screenshots, 
 | **Auth** | Bearer token from `.agents/.lm-studio-env` (sourced via `source .agents/.lm-studio-env`) |
 | **Token env var** | `LM_STUDIO_API_KEY` |
 
+## 🔴 API Key Not Found — Prompt the User
+
+If `.agents/.lm-studio-env` does not exist (first run, new clone, or key rotation):
+
+1. **Use `vscode_askQuestions`** to ask the user for their LM Studio API key.
+   - Header: `"api-key"`
+   - Question: `"Enter your LM Studio API key (e.g., sk-lm-...). It will be saved to .agents/.lm-studio-env for future use."`
+   - Do NOT offer options — this is a freeform text input.
+2. **Save the key** immediately after receiving it:
+   ```bash
+   mkdir -p /home/brajam/repos/gh-llm-bootstrap/.agents
+   cat > /home/brajam/repos/gh-llm-bootstrap/.agents/.lm-studio-env << 'EOF'
+LM_STUDIO_API_KEY=sk-lm-xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+EOF
+   chmod 600 /home/brajam/repos/gh-llm-bootstrap/.agents/.lm-studio-env
+   ```
+   (Substitute the actual key the user provided.)
+3. **Verify** the file was written correctly:
+   ```bash
+   source /home/brajam/repos/gh-llm-bootstrap/.agents/.lm-studio-env && echo "$LM_STUDIO_API_KEY" | head -c 10
+   ```
+4. **Proceed** with the normal API call flow below.
+
+If `vscode_askQuestions` is not available or the user doesn't provide a key, fall back to asking the user to paste it into the terminal (using `run_in_terminal` with `read -s`).
+
 ## 🔴 When to Trigger — Auto-Detection
 
 You MUST invoke the vision bridge whenever ANY of these triggers fire:
@@ -48,14 +73,21 @@ When a trigger fires, call the vision API directly using the code block below. *
 ### Method: Python (preferred — handles JSON serialization of large base64 payloads)
 
 ```python
-import json, urllib.request, base64, os
+import json, urllib.request, base64, os, sys
 
 # Load API token
 env_path = os.path.expanduser("~/repos/gh-llm-bootstrap/.agents/.lm-studio-env")
-with open(env_path) as f:
-    for line in f:
-        if line.startswith("LM_STUDIO_API_KEY"):
-            api_key = line.split("=", 1)[1].strip()
+try:
+    with open(env_path) as f:
+        api_key = None
+        for line in f:
+            if line.startswith("LM_STUDIO_API_KEY"):
+                api_key = line.split("=", 1)[1].strip()
+        if not api_key:
+            raise ValueError("API key not found in env file")
+except (FileNotFoundError, ValueError):
+    print("ERROR: API key not found. Prompt the user via vscode_askQuestions.")
+    sys.exit(1)
 
 # Read and encode screenshot
 with open("/path/to/screenshot.png", "rb") as f:
@@ -227,6 +259,7 @@ When the API returns JSON, extract the `choices[0].message.content` field:
 |-------|-----------------|
 | **Monitoring** | No image needs detected, proceed normally |
 | **Triggered** | P0/P1/P2 trigger fired |
+| **Prompting for Key** | `.agents/.lm-studio-env` missing — asking user for API key via `vscode_askQuestions` |
 | **Calling API** | Sending screenshot to LM Studio vision API |
 | **Processing** | Description received from API, extracting answers |
 | **Complete** | Visual data processed, continuing original task |
@@ -238,4 +271,5 @@ When the API returns JSON, extract the `choices[0].message.content` field:
 3. **Never stop and wait for the user.** Call the vision API directly and continue.
 4. **Always include specific questions.** Generic "describe this" wastes the vision model's capabilities.
 5. **When the API returns a description, accept it as ground truth for visual facts.** Do not second-guess the vision model.
-6. **If the API returns an error** (HTTP 400/401/500), note the error and explain to user that LM Studio may not be running.
+6. **If the API key file is missing** (`.agents/.lm-studio-env` not found or empty), use `vscode_askQuestions` to prompt the user for their key, save it, and proceed.
+7. **If the API returns an error** (HTTP 400/401/500), note the error and explain to user that LM Studio may not be running.
