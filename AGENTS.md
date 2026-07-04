@@ -115,6 +115,7 @@ Before responding to the user's first request, complete these 4 steps:
 | `generate-docs` | Docs are stale or templates are empty |
 | `write-docs` | Need README, API docs, or ADRs |
 | `thread-auto-context` | Persistent memory via Thread MCP |
+| `vision-bridge` | 🔴 **Blind model → vision model** — auto-detects "Can't view screenshots" and routes images to GPT-4o/Claude |
 
 ### 🔧 Tools — `.agents/tools/` (browser automation, GitHub operations, UI review)
 
@@ -139,6 +140,7 @@ Before responding to the user's first request, complete these 4 steps:
 | `/generate-docs` | Docs are stale or templates are empty | `.agents/instructions/` |
 | `/write-docs` | Need README, API docs, or ADRs | `.agents/instructions/` |
 | `/create-readme` | Need a README.md for the project | `.agents/skills/` |
+| `/vision-bridge` | 🔴 Blind model needs vision — routes screenshots to GPT-4o/Claude | `.agents/instructions/` |
 
 ---
 
