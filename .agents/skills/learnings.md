@@ -301,3 +301,33 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 - **Updated**: `audit-skills` — Verification section: added 4 new checks
 - **Synced**: deploy mirror (audit-skills SKILL.md)
 - **Verification**: 18/18 tests pass
+
+## 2026-07-04 — Phase 6: Split .agents/skills/ into skills/, instructions/, tools/
+
+**Type**: refactor
+**Commit**: `3198737`
+**Before**: `e9fed9b`
+
+Split the flat `.agents/skills/` directory into three specialized directories:
+- `.agents/skills/` (26 items) — framework & domain conventions (file-triggered)
+- `.agents/instructions/` (12 items) — task skills, session init, recovery (slash-command)
+- `.agents/tools/` (5 items) — browser automation & GitHub operations
+
+Moves executed via `git mv` for history preservation (source) and `cp` + `rm` (deploy mirror):
+- **Moved to instructions/**: audit-skills, debugging-patterns, generate-docs, help, local-model-commands, repo-context, self-correction-patterns, skill-load, thread-auto-context, update-skill-index, update-skills, write-docs
+- **Moved to tools/**: chrome-devtools, playwright-mcp, gh-cli, github-issues, web-design-reviewer
+- **Deploy mirror**: 11 instructions (excludes source-only thread-auto-context), 5 tools
+
+Documentation updated:
+- AGENTS.md (source + deploy) — 3-directory awareness, 5-quick-reference tables with dir annotations, Task Skills with Location column, Self-Improvement section mentions all 3 dirs
+- SKILL-INDEX.md (source + deploy) — restructured with 3 separate tables (Skills 26, Instructions 12, Tools 5), updated deploy mirror section, maintenance commands per directory
+- bootstrap.sh — 16 path updates to FILES array + instructions/ and tools/ .gitignore
+- Cross-references: update-skills/SKILL.md (4 paths), audit-skills/SKILL.md (count cmd, deploy cp paths)
+- tests/test-self-improving.sh — TEST 3 counts all 3 dirs, TEST 4 allows instructions+tools in deploy check, TEST 5 checks all 3 dirs for drift, TEST 6 checks frontmatter in all 3 dirs, AGENTS.md diff tolerates source-only diffs
+- ARCHITECTURE.md — directory map, skill categories, deploy section, data flow mermaid
+- CONVENTIONS.md — file organization, deploy exclusion rules
+- USAGE.md — decision tree mermaid, directory structure, Quick Reference, Add New Skill guide
+- README.md — badge, intro, What Gets Bootstrapped, Task Skills tables, architecture mermaid + table
+- deploy/.agents/skills/learnings.md — mentions 3-directory structure
+
+**Verification**: 25/25 tests pass
