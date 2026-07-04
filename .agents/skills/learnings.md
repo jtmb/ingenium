@@ -9,6 +9,24 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ---
 
+## 2026-07-04 — Self-improvement loop activation: hooks as enforcement layer
+
+- **Before**: `ba2e9bb`
+- **After**: `78e132a`
+- **Problem**: The self-improvement loop (learnings.md logging, update-skills, audit-skills) was completely dead in target repos. Six specific failures: (1) PostToolUse hook was an empty stub `echo '{"continue": true}'`, (2) SessionStart hook was a silent no-op when AGENTS.md existed, (3) deploy/.agents/hooks/ didn't exist at all — hooks never reached target repos, (4) update-skills/audit-skills/update-skill-index were optional-tier and never invoked, (5) deploy/learnings.md was copied as static bootstrap history with meaningless commit hashes, (6) AGENTS.md self-improvement section was passive aspirational text.
+- **Root cause**: Hooks were designed as the enforcement layer but never utilized. Skills define rules, hooks enforce them — but every hook was either an empty stub, a no-op, or missing from deploy entirely.
+- **Fixed**:
+  1. **`post-tool-use.json`**: Rewrote from empty stub to periodic reminder. Uses a session counter file at `.agents/.session-state`. Every ~10 tool calls, injects a systemMessage reminding the model to log new patterns to learnings.md and run /update-skills.
+  2. **`session-start.json`**: Now injects an abbreviated skill-loading checklist (4-step protocol) even when AGENTS.md exists. Resets session counter. No longer a silent no-op.
+  3. **`pre-tool-use.json`**: Added safety check — warns before terminal commands targeting node_modules, .git, dist, build, .next, target, __pycache__, venv directories.
+  4. **`deploy/.agents/hooks/`**: Created directory and copied all 3 hook JSON files. This was the critical gap — hooks never reached target repos because the deploy mirror had no hooks directory.
+  5. **`bootstrap.sh`**: Changed hook deploy tier from `optional` to `always`. Promoted update-skills, audit-skills, update-skill-index from `optional` to `always`.
+  6. **`deploy/.agents/skills/learnings.md`**: Replaced static bootstrap history with a fresh template containing bootstrap info and explicit model instructions (when to log, what format, key skills reference).
+  7. **`AGENTS.md` + `deploy/AGENTS.md`**: Enhanced self-improvement section to reference hook-driven reminders (SessionStart checklist, PostToolUse periodic prompts).
+  8. **`tests/test-self-improving.sh`**: Fixed test 4e to allow `hooks/` directory alongside `skills/` in deploy/.agents/.
+- **Updated**: All 11 changed files committed. 19/19 tests pass.
+- **Classification analysis**: Full audit of all 43 .agents/ items classified into skills (25), instructions/meta (12), tool interfaces (5), data files (1), hooks (3). No directory restructure — skill mechanism works for all types. Hooks are the enforcement layer.
+
 ## 2026-07-03 — hang/drip-feed detection: `find` in node_modules + hung commands
 
 - **Before**: `894b5ee`
