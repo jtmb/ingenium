@@ -30,7 +30,7 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 ## 2026-07-04 — Model reference fix — vision-bridge GPT-4o/Claude → google/gemma-4-12b-qat
 
 - **Before**: `aee9135`
-- **After**: `81ce5bf`
+- **After**: `d1a6a2d` (audit fix), `c68cb87` (hash finalize)
 - **Fixed**: Updated all `GPT-4o/Claude` references in vision-bridge/SKILL.md (8 locations across source + deploy mirror) to `google/gemma-4-12b-qat` — the user's local LM Studio vision model
 - **Also fixed**: Stale `GPT-4o/Claude` descriptions in AGENTS.md, deploy/AGENTS.md, SKILL-INDEX.md, deploy/SKILL-INDEX.md
 - **Cleaned up**: Removed duplicate skills from `.agents/skills/` (audit-skills, local-model-commands, self-correction-patterns) — these already existed in `.agents/instructions/` and were left untracked after Phase 6 restructure
