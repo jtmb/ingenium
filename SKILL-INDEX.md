@@ -2,7 +2,7 @@
 
 This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill, instruction, and tool in `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` is listed here with its description, function, commands, and a link to its full documentation.
 
-**Total: 44 items** (26 skills + 13 instructions + 5 tools)
+**Total: 45 items** (26 skills + 14 instructions + 5 tools)
 
 ---
 
@@ -19,6 +19,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | `/update-skill-index` | [update-skill-index](.agents/instructions/update-skill-index/SKILL.md) | Regenerate SKILL-INDEX.md from all skill files | `.agents/instructions/` |
 | `/update-skills` | [update-skills](.agents/instructions/update-skills/SKILL.md) | Detect new patterns, create/retire skills | `.agents/instructions/` |
 | `/write-docs` | [write-docs](.agents/instructions/write-docs/SKILL.md) | Write READMEs, API docs, ADRs | `.agents/instructions/` |
+| `/onboard-existing-repo` | [onboard-existing-repo](.agents/instructions/onboard-existing-repo/SKILL.md) | Onboard existing repo to skill system — parallel subagents explore structure/CI/docs, map findings to applicable skills, copy deploy payload | `.agents/instructions/` |
 | `/vision-bridge` | [vision-bridge](.agents/instructions/vision-bridge/SKILL.md) | 🔴 Blind model → vision model bridge — auto-detects "Can't view screenshots" and routes images to google/gemma-4-12b-qat | `.agents/instructions/` |
 
 ---
@@ -170,7 +171,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | 25 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
 | 26 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
 
-## Instructions — `.agents/instructions/` (12)
+## Instructions — `.agents/instructions/` (14)
 
 | # | Directory | File |
 |---|-----------|------|
@@ -179,13 +180,15 @@ This file is the **canonical index** of all skills in this project. It is automa
 | 3 | `generate-docs` | [`.agents/instructions/generate-docs/SKILL.md`](.agents/instructions/generate-docs/SKILL.md) |
 | 4 | `help` | [`.agents/instructions/help/SKILL.md`](.agents/instructions/help/SKILL.md) |
 | 5 | `local-model-commands` | [`.agents/instructions/local-model-commands/SKILL.md`](.agents/instructions/local-model-commands/SKILL.md) |
-| 6 | `repo-context` | [`.agents/instructions/repo-context/SKILL.md`](.agents/instructions/repo-context/SKILL.md) |
-| 7 | `self-correction-patterns` | [`.agents/instructions/self-correction-patterns/SKILL.md`](.agents/instructions/self-correction-patterns/SKILL.md) |
-| 8 | `skill-load` | [`.agents/instructions/skill-load/SKILL.md`](.agents/instructions/skill-load/SKILL.md) |
-| 9 | `thread-auto-context` | [`.agents/instructions/thread-auto-context/SKILL.md`](.agents/instructions/thread-auto-context/SKILL.md) |
-| 10 | `update-skill-index` | [`.agents/instructions/update-skill-index/SKILL.md`](.agents/instructions/update-skill-index/SKILL.md) |
-| 11 | `update-skills` | [`.agents/instructions/update-skills/SKILL.md`](.agents/instructions/update-skills/SKILL.md) |
-| 12 | `write-docs` | [`.agents/instructions/write-docs/SKILL.md`](.agents/instructions/write-docs/SKILL.md) |
+| 6 | `onboard-existing-repo` | [`.agents/instructions/onboard-existing-repo/SKILL.md`](.agents/instructions/onboard-existing-repo/SKILL.md) |
+| 7 | `repo-context` | [`.agents/instructions/repo-context/SKILL.md`](.agents/instructions/repo-context/SKILL.md) |
+| 8 | `self-correction-patterns` | [`.agents/instructions/self-correction-patterns/SKILL.md`](.agents/instructions/self-correction-patterns/SKILL.md) |
+| 9 | `skill-load` | [`.agents/instructions/skill-load/SKILL.md`](.agents/instructions/skill-load/SKILL.md) |
+| 10 | `thread-auto-context` | [`.agents/instructions/thread-auto-context/SKILL.md`](.agents/instructions/thread-auto-context/SKILL.md) |
+| 11 | `update-skill-index` | [`.agents/instructions/update-skill-index/SKILL.md`](.agents/instructions/update-skill-index/SKILL.md) |
+| 12 | `update-skills` | [`.agents/instructions/update-skills/SKILL.md`](.agents/instructions/update-skills/SKILL.md) |
+| 13 | `vision-bridge` | [`.agents/instructions/vision-bridge/SKILL.md`](.agents/instructions/vision-bridge/SKILL.md) |
+| 14 | `write-docs` | [`.agents/instructions/write-docs/SKILL.md`](.agents/instructions/write-docs/SKILL.md) |
 
 ## Tools — `.agents/tools/` (5)
 
