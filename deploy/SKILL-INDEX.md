@@ -2,7 +2,7 @@
 
 This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill, instruction, and tool in `.agents/skills/`, `.agents/instructions/`, and `.agents/tools/` is listed here with its description, function, commands, and a link to its full documentation.
 
-**Total: 43 items** (26 skills + 12 instructions + 5 tools)
+**Total: 44 items** (26 skills + 13 instructions + 5 tools)
 
 ---
 
@@ -19,6 +19,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | `/update-skill-index` | [update-skill-index](.agents/instructions/update-skill-index/SKILL.md) | Regenerate SKILL-INDEX.md from all skill files | `.agents/instructions/` |
 | `/update-skills` | [update-skills](.agents/instructions/update-skills/SKILL.md) | Detect new patterns, create/retire skills | `.agents/instructions/` |
 | `/write-docs` | [write-docs](.agents/instructions/write-docs/SKILL.md) | Write READMEs, API docs, ADRs | `.agents/instructions/` |
+| `/vision-bridge` | [vision-bridge](.agents/instructions/vision-bridge/SKILL.md) | 🔴 Blind model → vision model bridge — auto-detects "Can't view screenshots" and routes images to GPT-4o/Claude | `.agents/instructions/` |
 
 ---
 

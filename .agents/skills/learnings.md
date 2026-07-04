@@ -331,3 +331,39 @@ Documentation updated:
 - deploy/.agents/skills/learnings.md — mentions 3-directory structure
 
 **Verification**: 25/25 tests pass
+
+## 2026-07-04 — Removed source-only, added vision-bridge (df3f493)
+
+### Source-only removal
+
+Previously, two skills were "source-only" (not deployed): `create-readme` (`.agents/skills/`) and `thread-auto-context` (`.agents/instructions/`). Both are now deployed to all target projects.
+
+- **Deployed**: create-readme → `deploy/.agents/skills/create-readme/SKILL.md`, thread-auto-context → `deploy/.agents/instructions/thread-auto-context/SKILL.md`
+- **All 43 items now deploy**. Removed the concept of "source-only" from the entire system.
+
+### Documentation changes for source-only removal
+
+- AGENTS.md — removed `(source-only)` from create-readme row; added thread-auto-context to deploy instructions table
+- SKILL-INDEX.md — removed `(source-only)` from create-readme row; bumped instructions count 11→12; removed "Skills excluded from deploy" line
+- README.md — `(11 deployed + 1 source-only)` → `(12 deployed)`; added `thread-auto-context` to listed instructions
+- USAGE.md — `(41 after source-only exclusion)` → `(43 items total)`; removed `(source-only)` from directory tree
+- ARCHITECTURE.md — removed `(source-only)` annotations; updated deploy counts: 26 skills + 12 instructions
+- CONVENTIONS.md — removed entire "Deploy Exclusion Rules" section
+- audit-skills (source + deploy) — `Every non-source-only skill` → `Every skill`
+- test-self-improving.sh — TEST 4 now expects files PRESENT (not absent); TEST 5 no longer tolerates source-only diffs
+
+### Vision Bridge — blind model → vision model handoff
+
+Created `vision-bridge` instruction skill. Blind models (DeepSeek, local LLMs) that say "Can't view screenshots" now emit a structured vision request template instead of guessing or silently failing.
+
+- **Auto-detection triggers**: model says "Can't view screenshots" (P0), `view_image` fails (P0), user says "look at this screenshot" (P1), screenshots from playwright-mcp/chrome-devtools (P2), web-design-reviewer invoked (P2)
+- **Workflow**: detect trigger → emit structured template with image path, questions, context → STOP and wait → user switches to GPT-4o/Claude → pastes → vision model describes → switches back → pastes → blind model continues
+- **Integration**: playwright-mcp screenshots, chrome-devtools screenshots, web-design-reviewer Steps 2 + 4, `view_image` failures
+- **HARD RULES**: Never guess image contents, never silently skip visual steps, always fill specific questions, always include absolute path
+
+### Registration
+
+- AGENTS.md — always-loaded instructions table + task skills table
+- SKILL-INDEX.md — invocable task skills table, total count: 43 → 44
+- deploy/ — full mirror sync
+- **Verification**: 25/25 tests pass, 44 skills detected, 0 source-only, 0 drifted files
