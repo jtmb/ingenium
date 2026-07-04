@@ -127,7 +127,7 @@ Invoke this skill when working on files that don't match any framework-specific 
 - **Avoid circular dependencies.** If module A imports B and B imports A, restructure into a shared module C.
 - **Index files are for re-exporting, not logic.** `index.ts` / `__init__.py` / `mod.rs` should export the public API — not contain business logic.
 - **Configuration lives in one place.** No scattered `process.env` / `os.environ` calls across the codebase.
-- **For multi-service repos, use the `project-structure` skill** — it defines the `services/{name}/` layout with `pages/`, `features/`, `domain/`, `infrastructure/` layers.
+- **For multi-service repos, use the `project-structure` skill** — it defines the flat root-level services layout with `config/`, `lib/`, `scripts/`, `data/` per service.
 
 ## Configuration
 

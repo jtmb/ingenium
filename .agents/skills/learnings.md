@@ -11,8 +11,8 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 
 ## 2026-07-04 — Created `onboard-existing-repo` instruction skill
 
-- **Before**: `(not committed yet)`
-- **After**: `(not committed yet)`
+- **Before**: `910ecf2` (fix: vision-bridge now ONE curl command)
+- **After**: `2923af4` (feat: add onboard-existing-repo instruction skill)
 - **Problem**: No way to onboard existing repos to the skill system. `bootstrap.sh` is for fresh scaffolds only. Existing repos with existing code had to manually cherry-pick files from deploy/.
 - **Solution**: Created `.agents/instructions/onboard-existing-repo/SKILL.md` — a 4-phase reusable instruction skill:
   1. **Parallel Discovery**: 3 subagents (Structure & Stack, CI/CD & Practices, Docs & Gaps) run simultaneously
@@ -28,6 +28,17 @@ Entries before 2026-07-02-audit-fix use legacy `**Commit**:` format — going fo
 - **After**: `78e132a`
 - **Problem**: The self-improvement loop (learnings.md logging, update-skills, audit-skills) was completely dead in target repos. Six specific failures: (1) PostToolUse hook was an empty stub `echo '{"continue": true}'`, (2) SessionStart hook was a silent no-op when AGENTS.md existed, (3) deploy/.agents/hooks/ didn't exist at all — hooks never reached target repos, (4) update-skills/audit-skills/update-skill-index were optional-tier and never invoked, (5) deploy/learnings.md was copied as static bootstrap history with meaningless commit hashes, (6) AGENTS.md self-improvement section was passive aspirational text.
 - **Root cause**: Hooks were designed as the enforcement layer but never utilized. Skills define rules, hooks enforce them — but every hook was either an empty stub, a no-op, or missing from deploy entirely.
+
+## 2026-07-04 — Restructured project-structure, generic-conventions, useful-tests for flat monorepo layout
+
+- **Before**: `2923af4` (feat: add onboard-existing-repo instruction skill)
+- **After**: `(not committed yet)`
+- **Trigger**: User showed slop-generator repo with root-level services (slop-api/, slop-builder/, etc.) as preferred structure. Each service has Dockerfile, config/, lib/, scripts/, data/, package.json, vitest.config.js.
+- **Changes**:
+  - `project-structure/SKILL.md`: Replaced `services/{name}/` wrapper + four-layer internals (pages/features/domain/infrastructure) → root-level services with config/lib/scripts/data/ layers. Updated description, layout diagram, rules, naming conventions, anti-patterns, testing section, quick reference.
+  - `generic-conventions/SKILL.md`: Updated project-structure reference from `services/{name}/` with four layers → flat root-level layout with config/lib/scripts/data/.
+  - `useful-tests/SKILL.md`: Changed `{service}/e2e/` test location pattern → `tests/{service}/` at root. Updated directory convention diagram. Updated integration references from project-structure.
+  - All mirrored to deploy/.
 - **Fixed**:
   1. **`post-tool-use.json`**: Rewrote from empty stub to periodic reminder. Uses a session counter file at `.agents/.session-state`. Every ~10 tool calls, injects a systemMessage reminding the model to log new patterns to learnings.md and run /update-skills.
   2. **`session-start.json`**: Now injects an abbreviated skill-loading checklist (4-step protocol) even when AGENTS.md exists. Resets session counter. No longer a silent no-op.
