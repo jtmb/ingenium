@@ -90,7 +90,7 @@ grep -B5 "<agent-name> (agent)" .agents/skills/learnings.md
 
 ## What Gets Audited
 
-The audit checks 8 integration points. Every skill should appear in ALL of them (or have a valid reason not to).
+The audit checks 10 integration points. Every skill should appear in ALL of them (or have a valid reason not to).
 
 | Check | File(s) | What "correct" looks like |
 |-------|---------|--------------------------|
@@ -102,6 +102,8 @@ The audit checks 8 integration points. Every skill should appear in ALL of them 
 | **6. USAGE.md** | `USAGE.md` → skill listings, directory trees | Skill appears in tree diagrams and reference tables |
 | **7. SKILL-INDEX.md** | `SKILL-INDEX.md` (repo root) | Skill is listed in the correct table, total count matches `ls -d .agents/skills/*/ \| wc -l` |
 | **8. Deploy mirror** | `deploy/.agents/skills/` vs `.agents/skills/` | Every non-source-only skill in source has a matching directory in deploy, and deploy has no orphans |
+| **9. Hooks validity** | `.agents/hooks/` (source + deploy) + doc references | Every lifecycle hook has a matching JSON file in both source and deploy. JSON is valid. Hooks documented in README.md architecture table and ARCHITECTURE.md. |
+| **10. Self-learning artifacts** | `learnings.md`, AGENTS.md self-improvement section, deploy mirror | learnings.md exists in source. Self-improvement section in AGENTS.md references hooks. Deploy has fresh learnings.md template. PostToolUse hook references self-improvement. |
 
 ---
 
@@ -185,7 +187,45 @@ Compare the directory list against `SKILL-INDEX.md` at the repo root:
 
 **Fix**: If SKILL-INDEX.md is stale, run `/update-skill-index` to regenerate it, or manually update the specific entries.
 
-### Step 8 — Auto-Fix, Commit, and Log
+### Step 8 — Cross-Reference Hooks
+
+Check the hooks directory in both source and deploy:
+
+```bash
+# List hooks in source
+ls .agents/hooks/*.json 2>/dev/null | sort
+# List hooks in deploy
+ls deploy/.agents/hooks/*.json 2>/dev/null | sort
+```
+
+- Every lifecycle hook in source must have a matching file in deploy
+- Each hook JSON must be valid (use `python3 -m json.tool` to validate)
+- Every hook must be documented in the README.md architecture table (Enforcement row) and ARCHITECTURE.md (Hooks System section)
+- The `post-tool-use` hook must reference self-improvement (logging patterns, `/update-skills`)
+- No orphan hooks in deploy that don't exist in source
+
+**Fix**: If a hook is missing from deploy, copy from source. If JSON is invalid, fix the syntax. If documentation is missing, add to README.md and ARCHITECTURE.md.
+
+### Step 9 — Cross-Reference Self-Learning Artifacts
+
+Verify the self-improvement pipeline is properly wired:
+
+```bash
+# Check learnings.md exists in source
+cat .agents/skills/learnings.md | head -3
+# Check deploy has a learnings.md template
+cat deploy/.agents/skills/learnings.md | head -3
+```
+
+- `.agents/skills/learnings.md` must exist and have at least one entry with Before/After hashes
+- `deploy/.agents/skills/learnings.md` must exist (can be a fresh template for target repos)
+- AGENTS.md must have a "Self-Improvement — Grow the System" section that references hooks
+- The `post-tool-use` hook file must contain references to logging patterns or `/update-skills`
+- Source-only skills (create-readme, thread-auto-context) must NOT appear in deploy/
+
+**Fix**: If learnings.md is missing, create it with the template format. If AGENTS.md lacks self-improvement section, add it. If deploy is missing learnings.md, copy from source or create placeholder.
+
+### Step 10 — Auto-Fix, Commit, and Log
 
 When the audit finds issues, **fix them immediately**. Then commit and log.
 
@@ -209,6 +249,11 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 | update-skill-index added but deploy/ missing | `cp -r .agents/skills/update-skill-index deploy/.agents/skills/update-skill-index` |
 | Skill in source but missing from deploy/ | `cp -r .agents/skills/{name} deploy/.agents/skills/{name}` and add to bootstrap.sh |
 | Skill in deploy but not in source (orphan) | Remove from deploy/ and remove from bootstrap.sh |
+| Hook missing from source or deploy | Verify `.agents/hooks/{name}.json` exists in both. `cp` from source to deploy if needed. |
+| Hook JSON invalid | Validate JSON: `python3 -m json.tool .agents/hooks/{name}.json` |
+| Hook not documented in README/ARCHITECTURE | Add to README architecture table Enforcement row and ARCHITECTURE.md Hooks System section |
+| Self-learning artifacts missing | Ensure learnings.md exists in `.agents/skills/`, AGENTS.md has self-improvement section, deploy has fresh learnings.md template |
+| Deploy learnings.md stale | `cp .agents/skills/learnings.md deploy/.agents/skills/learnings.md` (or deploy template placeholder) |
 
 **After applying fixes, always commit-before + commit-after and log both hashes:**
 
@@ -256,6 +301,11 @@ echo "=== Skills in deploy but not in source (orphans) ==="
 comm -13 \
   <(for d in .agents/skills/*/; do basename "$d"; done | sort) \
   <(for d in deploy/.agents/skills/*/; do basename "$d"; done | sort)
+
+echo "=== Hooks parity check ==="
+diff <(ls .agents/hooks/*.json 2>/dev/null | xargs -I{} basename {} | sort) \
+     <(ls deploy/.agents/hooks/*.json 2>/dev/null | xargs -I{} basename {} | sort) \
+  && echo "✓ Hooks in sync" || echo "✗ Hooks out of sync"
 ```
 
 ---
@@ -274,3 +324,7 @@ comm -13 \
 - README.md badge count matches `ls -d .agents/skills/*/ | wc -l`
 - `grep -c '|\.agents/skills/.*|\.agents/skills/' .agents/scripts/bootstrap.sh` matches expected count
 - Mermaid diagram has one node per domain skill
+- Hooks parity: `diff <(ls .agents/hooks/*.json) <(ls deploy/.agents/hooks/*.json)` — zero differences
+- Self-learning: learnings.md exists in both source and deploy, AGENTS.md has "Self-Improvement — Grow the System" section
+- Source-only exclusion: only `create-readme` and `thread-auto-context` are missing from deploy/
+- `README.md` `"(12 files deployed + 2 source-only)"` matches actual task skill distribution

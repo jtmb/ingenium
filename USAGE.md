@@ -13,7 +13,7 @@ See **[Getting Started](./README.md#getting-started)** in the README for install
 - **Manual Install** — clone and copy `deploy/`
 - **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
 
-**What you get in every project:** the full `.agents/skills/` library (41 skills), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
+**What you get in every project:** the full `.agents/skills/` library (43 skills — 41 after source-only exclusion), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
 
 ---
 

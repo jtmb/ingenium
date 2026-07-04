@@ -19,17 +19,16 @@
 - **One concern per skill.** Each `.agents/skills/{name}/` contains exactly one `SKILL.md`. No bundling — testing rules and styling rules go in separate skills.
 - **Each SKILL.md is self-contained.** It should reference other skills by name (e.g., "See `generic-conventions`") rather than duplicating their content.
 - **Link to docs, don't duplicate.** Skills reference `docs/ARCHITECTURE.md` etc. instead of copying doc content.
-- **`deploy/` is a clean mirror.** It contains only skills + `AGENTS.md`. No scripts, hooks, tests, docs, or README. The source repo is the source of truth; deploy is an output.
+- **`deploy/` is a clean mirror.** It contains skills, hooks, `AGENTS.md`, and `SKILL-INDEX.md`. No scripts, tests, docs, or README. The source repo is the source of truth; deploy is an output.
 - **`tests/` lives at project root** alongside `docs/`, not inside `.agents/`. Tests validate the skill system but are not part of it.
 - **`learnings.md` lives in `.agents/skills/`** — it's source-only (excluded from deploy) because it's a development artifact, not a deployable convention.
 - **YAML frontmatter is always between `---` fences** on lines 1 and the line before Markdown content. No tabs (spaces only). Colons in descriptions must be inside quotes.
 
 ### Deploy Exclusion Rules
 
-Three skill directories are source-only (not deployed to target projects):
+Two skill directories are source-only (not deployed to target projects):
 1. `create-readme` — Only used when scaffolding THIS repo
-2. `playwright-mcp` — Browser automation, rarely needed in conventions
-3. `thread-auto-context` — Conversation memory, not a code convention
+2. `thread-auto-context` — Conversation memory, not a code convention
 
 ## Error Handling
 
