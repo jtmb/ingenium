@@ -12,7 +12,7 @@ This directory is the project's knowledge base. It is maintained by both humans 
 
 | Doc | Covers | When to Update |
 |-----|--------|---------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Project structure, key components, skill system, deploy separation, data flow, bootstrap flow | New skills, moved directories, changed bootstrap logic, new top-level components |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Project structure, key components, skill system, deploy separation, plugin system, data flow, bootstrap flow | New skills, moved directories, changed bootstrap logic, new plugins, new top-level components |
 | [TECH-STACK.md](./TECH-STACK.md) | Languages, tools, test infrastructure, dependency policy | New tooling, changed test framework, dependency changes |
 | [CONVENTIONS.md](./CONVENTIONS.md) | Naming patterns, file organization, error handling, git practices, code style, YAML frontmatter rules | New conventions, changed naming rules, new file patterns |
 

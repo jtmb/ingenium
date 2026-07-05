@@ -16,8 +16,8 @@
   "mcp": {
     "thread": {
       "type": "local",
-      "command": ["$HOME/.thread-bridge/.venv/bin/python", "-m", "thread_bridge.bridge"],
-      "cwd": "$HOME/.thread-bridge",
+      "command": ["/home/brajam/.thread-bridge/.venv/bin/python", "-m", "thread_bridge.bridge"],
+      "cwd": "/home/brajam/.thread-bridge",
       "enabled": true,
       "environment": {
         "THREAD_SERVER_URL": "http://localhost:5000",
