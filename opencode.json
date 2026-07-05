@@ -1,9 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
-    ".agents/skills/generic-conventions/SKILL.md",
-    ".agents/skills/repo-context/SKILL.md",
-    ".agents/skills/model-profiles/SKILL.md"
+    ".agents/instructions/*/SKILL.md",
+    ".agents/tools/*/SKILL.md"
   ],
   "permission": {
     "read": "allow",
@@ -13,17 +12,24 @@
     "glob": "allow",
     "list": "allow"
   },
+  "agent": {
+    "build": {
+      "model": "claude-sonnet-4-20250514",
+      "temperature": 0.3,
+      "prompt": "You are an expert software engineer. Follow the project's AGENTS.md for skill loading protocol. Always load relevant skills before writing code."
+    }
+  },
   "mcp": {
     "thread": {
       "type": "local",
       "command": ["/home/brajam/.thread-bridge/.venv/bin/python", "-m", "thread_bridge.bridge"],
       "cwd": "/home/brajam/.thread-bridge",
       "enabled": true,
-      "environment": {
+      "env": {
         "THREAD_SERVER_URL": "http://localhost:5000",
         "THREAD_DEFAULT_SESSION": "gh-llm-bootstrap",
         "THREAD_REQUEST_TIMEOUT": "10",
-        "THREAD_API_TOKEN": "eyJhbGciOiJIUzI1NiIsInR5cCI6IlRIUkVBRCJ9.eyJzdWIiOiJhZG1pbiIsImlhdCI6MTc4MzIwODEwMH0.QDI4WTeyPVngwpXRdSUuzXYplyhK6KvWJiyhRCfEdc0"
+        "THREAD_API_TOKEN": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkRIUkVBRCJ9.eyJzdWIiOiJhZG1pbiIsImlhdCI6MTc4MjgzNzMyNH0.vv24wZFZIOj6cqlqi82p_xRTXgiXOGOjG4cvraclL70"
       }
     }
   }
