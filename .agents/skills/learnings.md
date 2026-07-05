@@ -30,3 +30,11 @@
 - **Removed**: `agent.build` block from `opencode.json` (both source and deploy)
 - **Updated**: `AGENTS.md` and `deploy/AGENTS.md` — added Custom Agents table documenting all 6 custom agents
 - **Pipeline**: `ingenium-build` (primary) → delegates to `ingenium-explore` (code search) and `ingenium-scout` (Thread RAG). Users can also `@`-mention subagents directly.
+
+## 2026-07-04 — Reduce startup instructions + global LM Studio provider
+
+- **Before**: `7cd4429`
+- **After**: (pending commit)
+- **Changed**: `opencode.json` `instructions` — reduced from `.agents/skills/*/SKILL.md` (all 45 skills) to 3 core skills only: `generic-conventions`, `repo-context`, `model-profiles`. All other skills available on-demand via `skill` tool.
+- **Added**: Global provider config at `~/.config/opencode/opencode.jsonc` — LM Studio with base URL `http://192.168.0.13:1234/v1` and 7 models.
+- **Bridged killed**: Old Thread bridge process (Jun 30) with stale token killed. OpenCode restart needed for MCP tools to reconnect with new token.
