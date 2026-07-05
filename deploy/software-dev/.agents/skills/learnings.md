@@ -94,3 +94,13 @@
   4. **update-skills/SKILL.md** — Expanded learnings template from 4 fields to 6 fields (Commit, Before, Category, Changes, Why). Added Signal 5 — Unlogged Changes detection. Added grep filtering examples.
   5. **`.agents/hooks/post-tool-use.json`** — Added learnings reminder every 5 tool calls. Changed from silent counter to proactive checkpoint prompt.
 - **Why**: Audit revealed no agent references learnings.md — zero matches in agent files. The only logging path was via /update-skills Step 5 which was never triggered. Scope was too narrow (only skill add/remove). No enforcement mechanism existed.
+
+## 2026-07-05 — Orchestrator pipeline adherence: always-visible delegation primer + anti-pattern enforcement
+
+- **Commit**: `2138b85`
+- **Category**: agent | config
+- **Changes**: 3 structural fixes to prevent orchestrator from ignoring delegation rules:
+  1. **Created `.agents/skills/orchestrator-primer/SKILL.md`** — 12-line always-visible delegation directive. Added to `opencode.json` `instructions` array (first position) so it's injected into EVERY system prompt, not just read once at session start. The primer is short enough to stay in context always.
+  2. **Restructured `ingenium-orchestrator.md`** — moved 🔴 delegation rule from line 42 to absolute top (line 40). Added ⚡ PRE-ACTION GATE that forces the agent to check "should I delegate?" before EVERY tool use. Added 🔴 Anti-Patterns table with 7 common violation patterns (grep directly, write directly, read directly, speed excuse, size excuse, etc.). Narrowed bash exception to ONLY: git add/commit/push/rev-parse and test verification. Added 🔴 Periodic Self-Audit every 5 tool calls.
+  3. **All 3 deploy targets synced** — primer + orchestrator + opencode.json updated for software-dev, dev-ops, sec-ops.
+- **Why**: Analysis showed 3 systemic failures: (a) agent instructions read once at session start, forgotten after 10+ turns, (b) bash exception loophole let the agent rationalize any work as "just a command", (c) no reinforcement mechanism existed. Putting the primer in `opencode.json` instructions ensures the delegation rule is visible on EVERY turn, not just session start.
