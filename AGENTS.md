@@ -95,14 +95,16 @@ These are loaded automatically by OpenCode. Copilot uses `.github/hooks/*.json`.
 
 Custom agents are defined in `.opencode/agents/*.md` and auto-discovered by OpenCode:
 
-| Agent | Type | Purpose |
-|-------|------|---------|
-| `ingenium-build` | Primary | Full tool access. Delegates searches to @ingenium-explore and context lookups to @ingenium-scout. |
-| `ingenium-explore` | Subagent | Fast read-only codebase exploration — grep, glob, find. Invoke via `@ingenium-explore`. |
-| `ingenium-scout` | Subagent | Thread/RAG persistent memory — searches past context, saves decisions. Invoke via `@ingenium-scout`. |
-| `code-reviewer` | Subagent | Read-only code review — security, correctness, performance, readability. Invoke via `@code-reviewer`. |
-| `docs-writer` | Subagent | Creates and updates documentation — README, API docs, ADRs. Invoke via `@docs-writer`. |
-| `security-auditor` | Subagent | Security audit — vulnerabilities, insecure patterns, compliance. Invoke via `@security-auditor`. |
+| Agent | Type | Model | Purpose |
+|-------|------|-------|---------|
+| `ingenium-planner` | Primary | DeepSeek V4 Pro | Mastermind — analyzes codebase, delegates research to subagents, produces execution plans. Read-only. |
+| `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Executor — takes plans and drives them to completion. Launches subagents, writes code, runs commands. Full R/W. |
+| `ingenium-explore` | Subagent | DeepSeek V4 Flash | Fast read-only codebase exploration — grep, glob, find. Max reasoning effort. Invoke via `@ingenium-explore`. |
+| `ingenium-explore-zen` | Subagent | qwopus 3.5 9B Coder | Fast read-only codebase exploration via local LM Studio. Invoke via `@ingenium-explore-zen`. |
+| `ingenium-scout` | Subagent | qwopus 3.5 9B Coder | Thread/RAG persistent memory — searches past context, saves decisions. Invoke via `@ingenium-scout`. |
+| `ingenium-review` | Subagent | DeepSeek V4 Flash (Zen) | Code review + test authoring. Writes tests with `useful-tests` skill. Invoke via `@ingenium-review`. |
+| `ingenium-docs` | Subagent | DeepSeek V4 Flash (Zen) | Documentation + skill management — README, API docs, ADRs, skill updates. Invoke via `@ingenium-docs`. |
+| `security-auditor` | Subagent | *(default)* | Security audit — vulnerabilities, insecure patterns, compliance. Invoke via `@security-auditor`. |
 
 ---
 
