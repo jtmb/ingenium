@@ -81,3 +81,16 @@
   - **.gitignore**: Expanded from 2 patterns to 12 with secrets patterns (*.pem, *.key, .env*), dependency dirs (node_modules/, __pycache__/), OS files.
   - **onboard-existing-repo/SKILL.md**: Replaced hardcoded /home/brajam paths with generic references.
   - **deploy/**: USAGE.md added (was missing — broke bootstrap.sh). hook-bootstrap.sh deployed. All mirrors synced with zero drift. Tests pass: 17/17.
+
+## 2026-07-05 — Learning system overhaul: embed as 🔴 HARD RULE, expand scope, add hook enforcement
+
+- **Commit**: `75ba68b`
+- **Before**: (this is the snapshot after earlier bugfixes — first entry to use the new template format)
+- **Category**: config | skill | agent | hook
+- **Changes**: 5 systemic fixes to make the learning system enforceable by agents:
+  1. **generic-conventions/SKILL.md** — Added new 🔴 HARD RULE "Learnings Must Be Logged After EVERY Change" with comprehensive trigger table (10 categories: skill, agent, hook, plugin, deploy, config, migration, architecture, bug, pattern). Mandates workflow: commit → capture hash → append entry → sync deploy.
+  2. **ingenium-orchestrator.md** — Added `learnings.md` row to the documentation trigger table, making it a required spawn-@ingenium-docs action.
+  3. **ingenium-docs.md** — Added `learnings.md` row to the trigger table, so docs agent knows it must write learnings entries.
+  4. **update-skills/SKILL.md** — Expanded learnings template from 4 fields to 6 fields (Commit, Before, Category, Changes, Why). Added Signal 5 — Unlogged Changes detection. Added grep filtering examples.
+  5. **`.agents/hooks/post-tool-use.json`** — Added learnings reminder every 5 tool calls. Changed from silent counter to proactive checkpoint prompt.
+- **Why**: Audit revealed no agent references learnings.md — zero matches in agent files. The only logging path was via /update-skills Step 5 which was never triggered. Scope was too narrow (only skill add/remove). No enforcement mechanism existed.
