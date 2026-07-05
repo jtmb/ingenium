@@ -1,8 +1,9 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
-    ".agents/instructions/*/SKILL.md",
-    ".agents/tools/*/SKILL.md"
+    ".agents/skills/generic-conventions/SKILL.md",
+    ".agents/skills/repo-context/SKILL.md",
+    ".agents/skills/model-profiles/SKILL.md"
   ],
   "permission": {
     "read": "allow",
@@ -12,22 +13,15 @@
     "glob": "allow",
     "list": "allow"
   },
-  "agent": {
-    "build": {
-      "model": "claude-sonnet-4-20250514",
-      "temperature": 0.3,
-      "prompt": "You are an expert software engineer. Follow the project's AGENTS.md for skill loading protocol. Always load relevant skills before writing code."
-    }
-  },
   "mcp": {
     "thread": {
       "type": "local",
-      "command": ["<WORKSPACE_ROOT>/.thread-bridge/.venv/bin/python", "-m", "thread_bridge.bridge"],
-      "cwd": "<WORKSPACE_ROOT>/.thread-bridge",
+      "command": ["<THREAD_BRIDGE_PATH>/.venv/bin/python", "-m", "thread_bridge.bridge"],
+      "cwd": "<THREAD_BRIDGE_PATH>",
       "enabled": true,
-      "env": {
+      "environment": {
         "THREAD_SERVER_URL": "http://localhost:5000",
-        "THREAD_DEFAULT_SESSION": "<WORKSPACE_BASENAME>",
+        "THREAD_DEFAULT_SESSION": "gh-llm-bootstrap",
         "THREAD_REQUEST_TIMEOUT": "10",
         "THREAD_API_TOKEN": "<YOUR_THREAD_API_TOKEN>"
       }
