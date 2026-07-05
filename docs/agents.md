@@ -54,7 +54,7 @@ User Request
 
 ## Subagent Invocation
 
-Primary agents invoke subagents via the Task tool. All subagents can also be invoked directly via `@` mention.
+Primary agents invoke subagents via the Task tool automatically — you don't need to do anything special. All subagents can also be invoked directly via `@` mention.
 
 | Subagent | `@` mention | Typical use |
 |----------|-------------|-------------|
@@ -64,3 +64,62 @@ Primary agents invoke subagents via the Task tool. All subagents can also be inv
 | ingenium-review | `@ingenium-review` | Code review + write tests |
 | ingenium-docs | `@ingenium-docs` | Write docs, update skills |
 | security-auditor | `@security-auditor` | Security vulnerability audit |
+
+## How to Use the Pipeline
+
+### Switching Primary Agents
+
+You have **two primary agents** — switch between them with the **Tab** key:
+
+| Primary | Tab to | Use when you want to... |
+|---------|--------|------------------------|
+| **ingenium-planner** | Tab | Analyze, research, produce a plan. Read-only — no accidental edits. |
+| **ingenium-orchestrator** | Tab | Execute the plan. Full write access, runs commands, drives changes home. |
+
+### Typical Workflow
+
+```
+1. Tab → ingenium-planner
+   You: "Plan the addition of OAuth to the API"
+   Planner: auto-invokes @ingenium-explore, @ingenium-scout for research
+            returns a step-by-step plan
+
+2. Tab → ingenium-orchestrator  
+   You: "Execute that plan"
+   Orchestrator: auto-invokes subagents as needed:
+     • @ingenium-explore      — finds relevant files
+     • @ingenium-review       — writes tests
+     • @ingenium-docs         — updates documentation
+     • @ingenium-scout        — saves decisions to Thread
+   Writes code, runs commands, commits, verifies
+```
+
+### Manual Subagent Invocation
+
+At any time, you can `@`-mention a subagent directly:
+
+```
+@ingenium-explore find all API route definitions
+@ingenium-scout search Thread for past decisions about rate limiting
+@ingenium-review review the changes in src/auth/
+@ingenium-docs update the API docs for the new endpoints
+@ingenium-explore-zen search for all .py files that import requests
+@security-auditor audit the auth flow for vulnerabilities
+```
+
+This opens a child session. Navigate with:
+- **Right** → cycle to next child session
+- **Left** → cycle to previous child session
+- **Up** → return to parent session
+
+### Automatic Delegation
+
+Both primary agents will automatically decide when to invoke subagents. You don't need to prompt for it — just describe the task. The Task tool delegates to the right subagent based on the agent's description.
+
+**Examples:**
+
+| You say... | Planner auto-delegates | Orchestrator auto-delegates |
+|------------|----------------------|---------------------------|
+| "Add rate limiting to auth routes" | explore (find routes), scout (past context) | explore, review (tests), docs, scout (save) |
+| "Refactor the payment module" | explore (find files), scout (past decisions) | explore, review (tests), docs, scout (save) |
+| "Audit the repo for security issues" | security-auditor, explore | security-auditor, explore, scout (save) |
