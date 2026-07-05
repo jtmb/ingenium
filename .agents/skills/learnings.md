@@ -60,7 +60,7 @@
 
 ## 2026-07-04 — Agent usage docs + Thread session summary saved
 
-- **After**: (pending commit)
+- **After**: `a4e9eb4`
 - Updated `docs/agents.md` with "How to Use the Pipeline" section covering Tab switching, auto-delegation, and @-mention usage
 - Saved comprehensive session summary to Thread entry #24 (tags: summary, session, agents, config, mcp)
 - Synced deploy/ mirror

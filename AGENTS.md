@@ -8,7 +8,9 @@ This project supports **both OpenCode and GitHub Copilot**. Configuration is pla
 | **GitHub Copilot** | `.github/` | `.github/hooks/*.json` | `.vscode/mcp.json` | SDK-based (programmatic) |
 
 **Common foundation** (auto-discovered by both platforms):
-- `.agents/skills/<name>/SKILL.md` — ALL skills: conventions, procedural guides, and tool references
+- `.agents/skills/<name>/SKILL.md` — domain conventions
+- `.agents/instructions/<name>/SKILL.md` — procedural guides
+- `.agents/tools/<name>/SKILL.md` — tool references
 - `AGENTS.md` — this file, read by both as project rules
 
 **MCP Servers available:**
@@ -27,7 +29,7 @@ This project supports **both OpenCode and GitHub Copilot**. Configuration is pla
 
 Before responding to the user's first request:
 1. **Match skills to request** — Check the skill catalog against the user's request and files you might edit
-2. **Load every matching skill** — Read the full `SKILL.md` from `.agents/skills/<name>/`
+2. **Load every matching skill** — Read the full `SKILL.md` from `.agents/skills/<name>/`, `.agents/instructions/<name>/`, or `.agents/tools/<name>/`
 3. **Note the 🔴 HARD RULEs** — These take priority over everything else
 4. **Invoke `/repo-context`** for project identity and `/help` for the full catalog
 
@@ -86,25 +88,11 @@ For the full skill catalog with detailed descriptions, invocation patterns, comm
 
 ### Skill System Instructions
 
-All skills are loaded via `opencode.json` → `instructions`:
-- `.agents/skills/*/SKILL.md` — ALL skills: conventions, task skills, tools
+Procedural guides loaded via `opencode.json` → `instructions`:
+- `.agents/instructions/*/SKILL.md` — session init, task execution, diagnosis
+- `.agents/tools/*/SKILL.md` — browser automation, GitHub operations, UI review
 
 These are loaded automatically by OpenCode. Copilot uses `.github/hooks/*.json`.
-
-### Custom Agents
-
-Custom agents are defined in `.opencode/agents/*.md` and auto-discovered by OpenCode:
-
-| Agent | Type | Model | Purpose |
-|-------|------|-------|---------|
-| `ingenium-planner` | Primary | DeepSeek V4 Pro | Mastermind — analyzes codebase, delegates research to subagents, produces execution plans. Read-only. |
-| `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Executor — takes plans and drives them to completion. Launches subagents, writes code, runs commands. Full R/W. |
-| `ingenium-explore` | Subagent | DeepSeek V4 Flash | Fast read-only codebase exploration — grep, glob, find. Max reasoning effort. Invoke via `@ingenium-explore`. |
-| `ingenium-explore-zen` | Subagent | qwopus 3.5 9B Coder | Fast read-only codebase exploration via local LM Studio. Invoke via `@ingenium-explore-zen`. |
-| `ingenium-scout` | Subagent | qwopus 3.5 9B Coder | Thread/RAG persistent memory — searches past context, saves decisions. Invoke via `@ingenium-scout`. |
-| `ingenium-review` | Subagent | DeepSeek V4 Flash (Zen) | Code review + test authoring. Writes tests with `useful-tests` skill. Invoke via `@ingenium-review`. |
-| `ingenium-docs` | Subagent | DeepSeek V4 Flash (Zen) | Documentation + skill management — README, API docs, ADRs, skill updates. Invoke via `@ingenium-docs`. |
-| `security-auditor` | Subagent | *(default)* | Security audit — vulnerabilities, insecure patterns, compliance. Invoke via `@security-auditor`. |
 
 ---
 
@@ -136,7 +124,9 @@ Custom agents are defined in `.opencode/agents/*.md` and auto-discovered by Open
 ├── .vscode/mcp.json             # VS Code MCP servers
 ├── .agents/
 │   ├── SKILL-CATALOG.md         # Full skill catalog (lazy-loaded)
-│   ├── skills/                  # All 45 skills (conventions, tasks, tools)
+│   ├── skills/                  # Domain conventions (shared)
+│   ├── instructions/            # Procedural guides
+│   ├── tools/                   # Tool references
 │   └── hooks/                   # Legacy ingenium hooks
 └── deploy/                      # Bootstrap payload (mirrors above)
 ```
