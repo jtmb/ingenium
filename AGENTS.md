@@ -91,6 +91,19 @@ All skills are loaded via `opencode.json` → `instructions`:
 
 These are loaded automatically by OpenCode. Copilot uses `.github/hooks/*.json`.
 
+### Custom Agents
+
+Custom agents are defined in `.opencode/agents/*.md` and auto-discovered by OpenCode:
+
+| Agent | Type | Purpose |
+|-------|------|---------|
+| `ingenium-build` | Primary | Full tool access. Delegates searches to @ingenium-explore and context lookups to @ingenium-scout. |
+| `ingenium-explore` | Subagent | Fast read-only codebase exploration — grep, glob, find. Invoke via `@ingenium-explore`. |
+| `ingenium-scout` | Subagent | Thread/RAG persistent memory — searches past context, saves decisions. Invoke via `@ingenium-scout`. |
+| `code-reviewer` | Subagent | Read-only code review — security, correctness, performance, readability. Invoke via `@code-reviewer`. |
+| `docs-writer` | Subagent | Creates and updates documentation — README, API docs, ADRs. Invoke via `@docs-writer`. |
+| `security-auditor` | Subagent | Security audit — vulnerabilities, insecure patterns, compliance. Invoke via `@security-auditor`. |
+
 ---
 
 ## Self-Improvement — Grow the System
