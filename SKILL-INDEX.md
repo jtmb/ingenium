@@ -2,7 +2,7 @@
 
 This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill in `.agents/skills/` is listed here with its description, function, commands, and a link to its full documentation.
 
-**Total: 45 items** (all in `.agents/skills/`)
+**Total: 46 items** (all in `.agents/skills/`)
 
 ---
 
@@ -142,7 +142,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 
 ---
 
-## Skills — `.agents/skills/` (45)
+## Skills — `.agents/skills/` (46)
 
 | # | Directory | File |
 |---|-----------|------|
@@ -197,7 +197,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 ## Deploy Mirror
 
 The `deploy/` directory mirrors the bootstrap repo for distribution. It contains:
-- `deploy/.agents/skills/` — all deployable skill files (45)
+- `deploy/.agents/skills/` — all deployable skill files (46)
 - `deploy/.agents/hooks/` — 3 lifecycle hooks
 - `deploy/.github/hooks/` — 3 Copilot hooks
 - `deploy/AGENTS.md` — skill system overview

@@ -1,6 +1,6 @@
 # AGENTS.md — Skill System Protocol for gh-llm-bootstrap
 
-This is the **bootstrap source repo** for the Ingenium skill system. The `deploy/` directory is the payload that gets copied to target projects via `bootstrap.sh`. Skills live in `.agents/skills/` — all 45 are deployed. Edit source files here, then sync to `deploy/`.
+This is the **bootstrap source repo** for the Ingenium skill system. The `deploy/` directory is the payload that gets copied to target projects via `bootstrap.sh`. Skills live in `.agents/skills/` — all 46 are deployed. Edit source files here, then sync to `deploy/`.
 
 ## Agent Pipeline (this repo only)
 
@@ -14,7 +14,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 | `ingenium-scout` | Subagent | qwopus (LM Studio) | Read-only | Thread/RAG context — search past decisions |
 | `ingenium-qa` | Subagent | V4 Flash (Zen free) | Write tests | Code review + test authoring |
 | `ingenium-docs` | Subagent | V4 Flash (Zen free) | Write docs | Documentation + skill updates |
-| `security-auditor` | Subagent | V4 Flash | Bash + read-only | Security audit + git-history leak scanning |
+| `ingenium-security-auditor` | Subagent | V4 Flash | Bash + read-only | Security audit + git-history leak scanning |
 | `ingenium-software-engineer` | Subagent | V4 Flash (Zen free) | Read-only | Design review, implementation analysis, technical recommendations |
 
 **Workflow**: Tab to planner for research/planning → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
@@ -99,7 +99,7 @@ Tests: dependency gap detection, missing coverage, skill count consistency, depl
 ├── .opencode/agents/*.md       # OpenCode custom agent definitions (8 agents)
 ├── .agents/
 │   ├── SKILL-CATALOG.md        # Full skill catalog (lazy-loaded)
-│   ├── skills/                 # All 45 skills — domain conventions + instructions + tools
+│   ├── skills/                 # All 46 skills — domain conventions + instructions + tools
 │   │   └── learnings.md        # Changelog with before/after commit hashes
 │   └── scripts/                # Bootstrap engine (bootstrap.sh, hook-bootstrap.sh)
 ├── tests/
