@@ -12,6 +12,8 @@
 | **Hook files** | `{lifecycle-event}.json` | `session-start.json`, `pre-tool-use.json` |
 | **Agent files** | `{name}.agent.md` | `code-reviewer.agent.md` |
 | **Doc files** | `UPPERCASE-WITH-DASHES.md` | `ARCHITECTURE.md`, `TECH-STACK.md`, `CONVENTIONS.md` |
+| **Plugin files** | `{lifecycle-event}.ts` | `session-start.ts`, `pre-tool-use.ts`, `post-tool-use.ts` |
+| **Plugin config** | `tsconfig.json` | `strict: true` with additional strict flags |
 | **Learnings entries** | ISO date + topic | `## 2026-07-02 — always-read-agents removed` |
 
 ## File Organization
@@ -56,6 +58,17 @@
 - `$()` for command substitution, never backticks
 - Quote all variable expansions: `"$var"` not `$var`
 - `printf` for formatted output, not `echo -e`
+
+### TypeScript (Plugins)
+
+- `import type { Plugin } from "@opencode-ai/plugin"` for plugin SDK imports (type-only imports)
+- `const plugin: Plugin = async () => ({ "hook.name": async (...) => { } })` factory function pattern
+- All hook parameters are explicitly typed: `input: { tool: string; sessionID: string; callID: string }`, `_input`, `_output`
+- Use `_` prefix for unused parameters (TypeScript `noUnusedLocals` / `noUnusedParameters` flags enforce this)
+- Null-safe access with `??` operator: `input.args?.join(" ") ?? ""`
+- tsconfig must include `strict: true`, `noUncheckedIndexedAccess`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `noUnusedLocals`, `noUnusedParameters`
+- Target `ES2022` with `NodeNext` module resolution for ESM compatibility
+- Export default the plugin object: `export default plugin`
 
 ### Markdown
 

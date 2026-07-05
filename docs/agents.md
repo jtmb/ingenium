@@ -14,7 +14,7 @@ Eight agents total: 2 primary, 6 subagents. The **planner** analyzes and produce
 | **ingenium-scout** | Subagent | `lmstudio/qwopus3.5-9b-coder` | LM Studio | Read-only | Thread/RAG persistent memory |
 | **ingenium-qa** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Write tests | Code review + test authoring |
 | **ingenium-docs** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Write docs | Documentation + skill updates |
-| **security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only | Security audit + git-history leak scanning |
+| **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only | Security audit + git-history leak scanning |
 | **ingenium-software-engineer** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read-only | Design review, implementation analysis, technical recommendations |
 
 ## Workflow
@@ -47,7 +47,7 @@ User Request
 | Resource | Agents | Count |
 |----------|--------|-------|
 | DeepSeek V4 Pro (API) | `ingenium-planner` | 1 |
-| DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `security-auditor` | 3 |
+| DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor` | 3 |
 | DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-qa`, `ingenium-docs`, `ingenium-software-engineer` | 3 |
 | qwopus 3.5 9B Coder (LM Studio) | `ingenium-scout` | 1 |
 
@@ -59,7 +59,7 @@ Primary agents invoke subagents via the Task tool automatically — you don't ne
 |----------|-------------|--------|-----------|
 | ingenium-explore | `@ingenium-explore` | Read-only | ✅ planner + orchestrator |
 | ingenium-scout | `@ingenium-scout` | Read-only | ✅ planner + orchestrator |
-| security-auditor | `@security-auditor` | Bash + read-only | ✅ planner + orchestrator |
+| ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | ✅ planner + orchestrator |
 | ingenium-qa | `@ingenium-qa` | Write tests | ❌ orchestrator only |
 | ingenium-docs | `@ingenium-docs` | Write docs | ❌ orchestrator only |
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read-only | ❌ orchestrator only |
@@ -101,7 +101,7 @@ At any time, you can `@`-mention a subagent directly:
 ```
 @ingenium-explore find all API route definitions
 @ingenium-scout search Thread for past decisions about rate limiting
-@security-auditor audit the auth flow for vulnerabilities
+@ingenium-security-auditor audit the auth flow for vulnerabilities
 ```
 
 This opens a child session. Navigate with:
@@ -119,4 +119,4 @@ Both primary agents will automatically decide when to invoke subagents. You don'
 |------------|----------------------|---------------------------|
 | "Add rate limiting to auth routes" | explore (find routes), scout (past context) | explore, review (tests), docs, scout (save) |
 | "Refactor the payment module" | explore (find files), scout (past decisions) | explore, review (tests), docs, scout (save) |
-| "Audit the repo for security issues" | security-auditor, explore | security-auditor, explore, scout (save) |
+| "Audit the repo for security issues" | ingenium-security-auditor, explore | ingenium-security-auditor, explore, scout (save) |
