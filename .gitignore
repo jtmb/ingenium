@@ -1,2 +1,25 @@
+# ── Environment / Secrets ─────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+*.cred
+*.credential
+
+# ── AI-generated files ────────────────────────────────────
+.agents/skills/*/SKILL.md.bak
+
+# ── Dependencies ──────────────────────────────────────────
+node_modules/
+__pycache__/
+*.pyc
+
+# ── OS Files ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env
 .vscode

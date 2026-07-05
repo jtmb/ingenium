@@ -1,113 +1,91 @@
-# AGENTS.md — Skill System Protocol
+# AGENTS.md — Skill System Protocol for gh-llm-bootstrap
 
-This project supports **both OpenCode and GitHub Copilot**. Configuration is platform-specific.
+This is the **bootstrap source repo** for the Ingenium skill system. The `deploy/` directory is the payload that gets copied to target projects via `bootstrap.sh`. Skills live in `.agents/skills/` — all 45 are deployed. Edit source files here, then sync to `deploy/`.
 
-| Platform | Config File | Hooks/Plugins | MCP Servers | Custom Agents |
-|----------|------------|---------------|-------------|---------------|
-| **OpenCode** | `opencode.json` | `.opencode/plugins/*.ts` | `opencode.json` → `mcp` section | `.opencode/agents/*.md` |
-| **GitHub Copilot** | `.github/` | `.github/hooks/*.json` | `.vscode/mcp.json` | SDK-based (programmatic) |
+## Agent Pipeline (this repo only)
 
-**Common foundation** (auto-discovered by both platforms):
-- `.agents/skills/<name>/SKILL.md` — domain conventions
-- `.agents/instructions/<name>/SKILL.md` — procedural guides
-- `.agents/tools/<name>/SKILL.md` — tool references
-- `AGENTS.md` — this file, read by both as project rules
+Two primary agents, five subagents. Full architecture: `docs/agents.md`.
 
-**MCP Servers available:**
-- **Thread** — persistent memory across sessions. Managed by the `thread-auto-context` instruction skill.
-- **GitHub** — GitHub API access (remote, OAuth). Managed via GitHub skills (`gh-cli`, `github-issues`).
+| Agent | Type | Model | Access | Purpose |
+|-------|------|-------|--------|---------|
+| `ingenium-planner` | Primary | DeepSeek V4 Pro | Read-only | Mastermind — researches, plans, delegates to subagents |
+| `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Full R/W | Executor — writes code, runs commands, drives work |
+| `ingenium-explore` | Subagent | V4 Flash | Read-only | Codebase search (paid, max reasoning) |
+| `ingenium-explore-zen` | Subagent | qwopus (LM Studio) | Read-only | Codebase search (local) |
+| `ingenium-scout` | Subagent | qwopus (LM Studio) | Read-only | Thread/RAG context — search past decisions |
+| `ingenium-review` | Subagent | V4 Flash (Zen free) | Write tests | Code review + test authoring |
+| `ingenium-docs` | Subagent | V4 Flash (Zen free) | Write docs | Documentation + skill updates |
+| `security-auditor` | Subagent | (default) | Bash + read-only | Security audit + git-history leak scanning |
 
-> 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source.
+**Workflow**: Tab to planner for research/planning → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
+
+## Platform Support
+
+| Platform | Config | Custom Agents |
+|----------|--------|---------------|
+| **OpenCode** | `opencode.json` | `.opencode/agents/*.md` — 8 agents defined |
+| **GitHub Copilot** | `.github/` | SDK-based (programmatic) |
+
+**MCP Servers**: Thread (persistent memory, managed by `thread-auto-context` skill) | GitHub (remote OAuth, via `gh-cli` / `github-issues`)
+
+> 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
 
 ---
 
 ## 🔴 MANDATORY — Load Skills Before Acting
 
-**Before writing code, running a command, or responding to any request, you MUST check which skills apply.** Skills contain 🔴 HARD RULEs that override everything else.
+**Before writing code, running a command, or responding to any request, you MUST load matching skills.** Skills contain 🔴 HARD RULEs that override everything else.
 
-## 🔴 Session Startup Checklist
+### Session Startup
+1. **Match skills** — Check the catalog against the request and files you might edit
+2. **Load matching skills** — Read `.agents/skills/<name>/SKILL.md` for each match
+3. **Note 🔴 HARD RULEs** — These take priority over everything else
+4. **Run `/repo-context`** for project identity
 
-Before responding to the user's first request:
-1. **Match skills to request** — Check the skill catalog against the user's request and files you might edit
-2. **Load every matching skill** — Read the full `SKILL.md` from `.agents/skills/<name>/`, `.agents/instructions/<name>/`, or `.agents/tools/<name>/`
-3. **Note the 🔴 HARD RULEs** — These take priority over everything else
-4. **Invoke `/repo-context`** for project identity and `/help` for the full catalog
-
-## 🔴 Before Every Action — Pre-Flight Check
+### Pre-Flight Check
 
 | You're about to... | Check this skill |
 |-------------------|-----------------|
-| Edit a source file | Framework skill for that file type (`.py` → `python-conventions`, `.go` → `go-conventions`, `.rs` → `rust-conventions`, `.tsx` → `nextjs-conventions`, `.ts` outside Next → `typescript-standalone`) |
-| Run a terminal command | `local-model-commands` — **never use `&`, never infinite-wait** |
-| Create a new file/service | `project-structure` — layering, naming, boundaries |
-| Write/run tests | `useful-tests` — lifecycle, assertions, CI readiness |
+| Edit a source file | Framework skill (`nextjs`, `python`, `go`, `rust`, `typescript-standalone`) |
+| Run a terminal command | `local-model-commands` — **no `&`, no infinite-wait** |
+| Create a new file/service | `project-structure` |
+| Write/run tests | `useful-tests` |
 | Edit Docker/K8s | `containers` / `kubernetes` |
-| Edit shell scripts | `shell-scripts` — `set -euo pipefail`, quoting |
-| Edit SQL/migrations | `sql-database` — parameterized queries, indexing |
+| Edit shell scripts | `shell-scripts` — `set -euo pipefail` |
 
-## 🔴 Mandatory Skills — Load Before ANY Action
+### Mandatory Skills (load before ANY action)
 
-| Skill | Why mandatory |
-|-------|--------------|
-| `generic-conventions` | Comments, docs sync, DRY, security, error handling, git |
-| `model-profiles` | Know your model's capabilities, context limits — adapt accordingly |
-| `local-model-commands` | **ALL terminal commands** — never `&`, never infinite-wait |
-| `debugging-patterns` | Systematic debugging — isolation, bisection, log-driven |
-| `useful-tests` | Test lifecycle, assertions, CI readiness |
-| `project-structure` | Layering, naming, boundaries |
-| `error-interpretation` | Map error signatures to root cause |
-| `self-correction-patterns` | Backtracking triggers, verification loops |
-| `skill-load` | **Session init** — `/skill-load` injects bootstrap payload |
-| `api-design` | REST status codes, error shapes, versioning, auth |
-| `shell-scripts` | `set -euo pipefail`, double-quote all vars, `trap cleanup EXIT` |
-| `sql-database` | Parameterized queries, reversible migrations, indexing |
-| `typescript-standalone` | Strict tsconfig, type safety, error handling |
-| `agent-pipelines` | AI agent orchestration, state checkpoints, crash recovery |
-| `gitignore` | Ignore file patterns, structure, rules |
-| `postgresql-optimization` | JSONB, array types, full-text search |
-| `code-review-checklist` | Security, correctness, performance, readability |
-| `refactoring-recipes` | Extract method, invert conditional, before/after patterns |
-| `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep |
-| `regex-reference` | Common patterns, catastrophic backtracking prevention |
-| `git-workflows` | Rebase vs merge, bisect, reflog recovery, conventional commits |
-| `web-design-reviewer` | UI/UX inspection, responsive design, accessibility |
-| `chrome-devtools` | Browser screenshots, performance profiling |
-| `github-issues` | Create, update, manage issues |
-| `playwright-mcp` | Browser automation |
+`generic-conventions` `model-profiles` `local-model-commands` `debugging-patterns` `useful-tests` `project-structure` `error-interpretation` `self-correction-patterns` `skill-load` `api-design` `shell-scripts` `sql-database` `typescript-standalone` `agent-pipelines` `gitignore` `postgresql-optimization` `code-review-checklist` `refactoring-recipes` `cli-toolkit` `regex-reference` `git-workflows` `web-design-reviewer` `chrome-devtools` `github-issues` `playwright-mcp`
 
 ---
 
-## External File Loading — Lazy-Load Pattern
+## Lazy-Load Pattern
 
-When you encounter a `@` file reference below, use your **Read tool** to load it on a **need-to-know basis**. Do NOT preemptively load all references.
+Use `@.agents/SKILL-CATALOG.md` for the full catalog with invocation patterns and framework/domain/task tables. Load on demand — do not preload.
 
-### Skill Catalog
-
-For the full skill catalog with detailed descriptions, invocation patterns, commands, and framework/domain/task skill tables:
-@.agents/SKILL-CATALOG.md
-
-### Skill System Instructions
-
-Procedural guides loaded via `opencode.json` → `instructions`:
-- `.agents/instructions/*/SKILL.md` — session init, task execution, diagnosis
-- `.agents/tools/*/SKILL.md` — browser automation, GitHub operations, UI review
-
-These are loaded automatically by OpenCode. Copilot uses `.github/hooks/*.json`.
+`opencode.json` loads 3 core skills automatically: `generic-conventions`, `repo-context`, `model-profiles`. All others load via the `skill` tool when matched.
 
 ---
 
-## Self-Improvement — Grow the System
+## Self-Improvement
 
-- **New patterns?** → `/update-skills` detects gaps and creates skills
-- **Changed skills?** → `/audit-skills` keeps docs consistent
-- **Added/removed skills?** → `/update-skill-index` regenerates the index
-- **All changes** → Log to `.agents/skills/learnings.md`
+| Command | Action |
+|---------|--------|
+| `/update-skills` | Detects gaps and creates/retires skills |
+| `/audit-skills` | Cross-references skills against README, bootstrap.sh, mermaid |
+| `/update-skill-index` | Regenerates `SKILL-INDEX.md` from all skill files |
+| All changes | Log to `.agents/skills/learnings.md` with before/after commit hashes |
 
-**Hook-driven reminders:**
-- **OpenCode**: `.opencode/plugins/*.ts` fires `session.created`, `tool.execute.before`, `tool.execute.after`
-- **Copilot**: `.github/hooks/*.json` fires `sessionStart`, `preToolUse`, `postToolUse`
-- **SessionStart**: Loads the abbreviated checklist — match skills, load them, note HARD RULEs
-- **PostToolUse**: Every ~10 tool calls, reminds you to log new patterns to learnings.md
+---
+
+## Testing
+
+```bash
+bash tests/test-self-improving.sh        # all 7 tests
+bash tests/test-self-improving.sh -v     # verbose output
+```
+
+Tests: dependency gap detection, missing coverage, skill count consistency, deploy integrity, frontmatter validity, deploy separation.
 
 ---
 
@@ -115,18 +93,23 @@ These are loaded automatically by OpenCode. Copilot uses `.github/hooks/*.json`.
 
 ```
 .
-├── AGENTS.md                    # Project rules (OpenCode + Copilot)
-├── opencode.json                # OpenCode configuration
-├── .opencode/
-│   ├── agents/*.md              # OpenCode custom agent definitions
-│   └── plugins/*.ts             # OpenCode hook plugins
-├── .github/hooks/*.json         # GitHub Copilot hooks
-├── .vscode/mcp.json             # VS Code MCP servers
+├── AGENTS.md                   # This file — project rules
+├── opencode.json               # OpenCode configuration
+├── USAGE.md                    # Skill system handbook
+├── .opencode/agents/*.md       # OpenCode custom agent definitions (8 agents)
 ├── .agents/
-│   ├── SKILL-CATALOG.md         # Full skill catalog (lazy-loaded)
-│   ├── skills/                  # Domain conventions (shared)
-│   ├── instructions/            # Procedural guides
-│   ├── tools/                   # Tool references
-│   └── hooks/                   # Legacy ingenium hooks
-└── deploy/                      # Bootstrap payload (mirrors above)
+│   ├── SKILL-CATALOG.md        # Full skill catalog (lazy-loaded)
+│   ├── skills/                 # All 45 skills — domain conventions + instructions + tools
+│   │   └── learnings.md        # Changelog with before/after commit hashes
+│   └── scripts/                # Bootstrap engine (bootstrap.sh, hook-bootstrap.sh)
+├── tests/
+│   └── test-self-improving.sh  # Detection pipeline tests
+├── docs/                       # Project documentation
+│   ├── agents.md               # Agent architecture reference
+│   ├── ARCHITECTURE.md         # Project structure and data flow
+│   └── ...                     # TECH-STACK.md, CONVENTIONS.md
+└── deploy/                     # Bootstrap payload (mirrors source)
+    ├── AGENTS.md               # Same file — copied to target projects
+    ├── opencode.json           # Deploy version with <PLACEHOLDER> tokens
+    └── .agents/skills/         # Deployable skills (no scripts, no tests)
 ```
