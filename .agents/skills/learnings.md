@@ -19,3 +19,14 @@
   - **opencode.json**: Updated `instructions` glob from `[".agents/instructions/*/SKILL.md", ".agents/tools/*/SKILL.md"]` to `[".agents/skills/*/SKILL.md"]`.
   - **Deploy mirror**: All deploy files synced to match source changes.
 - **All source/docs in sync**: 45 skills, frontmatter valid, hooks valid JSON, deploy mirrors match.
+
+## 2026-07-04 — Create ingenium agent pipeline (build + explore + scout)
+
+- **Commit**: `6daca03`
+- **Added**:
+  - `.opencode/agents/ingenium-build.md` — Primary agent replaces broken `agent.build` in `opencode.json`. Has `permission.task` to delegate to both subagents. Moved to markdown so all agents are in `.opencode/agents/`.
+  - `.opencode/agents/ingenium-explore.md` — Read-only subagent for fast codebase searches (grep, glob, find). No edit/write. Delegated by `ingenium-build` via Task tool or invoked via `@ingenium-explore`.
+  - `.opencode/agents/ingenium-scout.md` — Thread/RAG subagent with `thread_*` MCP tool permissions. Reads past context, saves decisions, searches via Thread API. Invoked via `@ingenium-scout`.
+- **Removed**: `agent.build` block from `opencode.json` (both source and deploy)
+- **Updated**: `AGENTS.md` and `deploy/AGENTS.md` — added Custom Agents table documenting all 6 custom agents
+- **Pipeline**: `ingenium-build` (primary) → delegates to `ingenium-explore` (code search) and `ingenium-scout` (Thread RAG). Users can also `@`-mention subagents directly.
