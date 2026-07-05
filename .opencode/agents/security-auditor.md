@@ -2,6 +2,8 @@
 name: security-auditor
 description: "Security audit agent. Reviews code for vulnerabilities, insecure patterns, and compliance issues. When infractions are found, automatically scans git history and queries GitHub secret scanning for past leaks."
 mode: subagent
+model: deepseek/deepseek-v4-flash
+reasoningEffort: "high"
 permission:
   edit: deny
   bash: allow
@@ -15,6 +17,9 @@ skills:
   - containers
   - kubernetes
   - gh-cli
+  - git-workflows              # Rebase, bisect, reflog for history scanning
+  - github-issues              # Creates issues for confirmed leaks
+  - debugging-patterns         # Root cause analysis for security bugs
 ---
 
 # Security Auditor
