@@ -64,3 +64,20 @@
 - Updated `docs/agents.md` with "How to Use the Pipeline" section covering Tab switching, auto-delegation, and @-mention usage
 - Saved comprehensive session summary to Thread entry #24 (tags: summary, session, agents, config, mcp)
 - Synced deploy/ mirror
+
+## 2026-07-04 — AGENTS.md rewrite, security-auditor upgrade, stale path audit
+
+- **Before**: `503c06e` (snapshot before fixes)
+- **After**: `15d4541`
+- **Fixed**: 14 discrepancies found and fixed
+  - **AGENTS.md**: Rewritten with agent pipeline table, testing commands, source-repo identity. All stale `.agents/instructions/` and `.agents/tools/` references removed.
+  - **security-auditor agent**: Upgraded from 2 skills to 9 (added code-review-checklist, gitignore, shell-scripts, api-design, containers, kubernetes, gh-cli). Added commit-history leak scanning behavior (git log -p -S for secrets, gh api for GitHub secret scanning, auto-creates GitHub issues for confirmed leaks).
+  - **opencode.json**: Redacted hardcoded THREAD_API_TOKEN → placeholder. Fixed instructions glob to 3 core skills. Removed stale agent.build block. Fixed env → environment key.
+  - **SKILL-CATALOG.md**: Merged stale Instructions/Tools sections into single `.agents/skills/` table. Removed all .agents/instructions/ and .agents/tools/ path references.
+  - **bootstrap.sh**: Fixed 12 stale paths from .agents/instructions/ and .agents/tools/ to .agents/skills/. Removed stale .gitignore entries for non-existent directories.
+  - **hook-bootstrap.sh**: Added missing `set -e` (was set -uo pipefail).
+  - **docs/ARCHITECTURE.md**: Updated directory map, skill counts, removed instructions/tools sections. Updated mermaid diagram.
+  - **tests/test-self-improving.sh**: Removed INSTRUCTIONS_DIR and TOOLS_DIR references. Updated frontmatter, deploy separation, and drift tests for single-skills-dir structure.
+  - **.gitignore**: Expanded from 2 patterns to 12 with secrets patterns (*.pem, *.key, .env*), dependency dirs (node_modules/, __pycache__/), OS files.
+  - **onboard-existing-repo/SKILL.md**: Replaced hardcoded /home/brajam paths with generic references.
+  - **deploy/**: USAGE.md added (was missing — broke bootstrap.sh). hook-bootstrap.sh deployed. All mirrors synced with zero drift. Tests pass: 17/17.
