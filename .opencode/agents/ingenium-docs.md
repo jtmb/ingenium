@@ -10,6 +10,10 @@ skills:
   - generate-docs
   - update-skills
   - update-skill-index
+  - audit-skills                # Cross-references skills against docs
+  - create-readme               # README.md creation templates
+  - mermaid                     # Mandatory diagrams in all documentation
+  - lm-studio                   # LM Studio documentation and setup guides
   - generic-conventions
 ---
 

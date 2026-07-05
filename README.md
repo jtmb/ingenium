@@ -224,7 +224,7 @@ All skills live in `.agents/skills/`:
 | `github-issues` | `/github-issues` — create/update/manage issues, labels, milestones, dependencies |
 | `web-design-reviewer` | `/web-design-reviewer` — inspect websites for responsive, accessibility, and layout issues |
 | `onboard-existing-repo` | `/onboard-existing-repo` — onboard an existing repo to the skill system |
-| `vision-bridge` | `/vision-bridge` — bridge blind models to vision model |
+| `lm-studio` | `/lm-studio` — LM Studio local inference, vision bridge, model management |
 | `create-readme` | `/create-readme` — create a README.md file for the project **(source only, not deployed)** |
 
 ## Architecture — Skill System
