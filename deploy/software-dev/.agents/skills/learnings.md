@@ -104,3 +104,14 @@
   2. **Restructured `ingenium-orchestrator.md`** — moved 🔴 delegation rule from line 42 to absolute top (line 40). Added ⚡ PRE-ACTION GATE that forces the agent to check "should I delegate?" before EVERY tool use. Added 🔴 Anti-Patterns table with 7 common violation patterns (grep directly, write directly, read directly, speed excuse, size excuse, etc.). Narrowed bash exception to ONLY: git add/commit/push/rev-parse and test verification. Added 🔴 Periodic Self-Audit every 5 tool calls.
   3. **All 3 deploy targets synced** — primer + orchestrator + opencode.json updated for software-dev, dev-ops, sec-ops.
 - **Why**: Analysis showed 3 systemic failures: (a) agent instructions read once at session start, forgotten after 10+ turns, (b) bash exception loophole let the agent rationalize any work as "just a command", (c) no reinforcement mechanism existed. Putting the primer in `opencode.json` instructions ensures the delegation rule is visible on EVERY turn, not just session start.
+
+## 2026-07-05 — Code writing delegated to @ingenium-software-engineer, QA reserved for review+testing
+
+- **Commit**: `e85c2ae`
+- **Category**: agent | config
+- **Changes**: 
+  1. **ingenium-software-engineer.md** — Upgraded from read-only (`edit: deny, write: deny`) to full implementation agent (`edit: allow, write: allow`). Removed "Do NOT edit files — provide recommendations only" constraint. Updated description to "Principal-level software engineering implementation." Added write-appropriate skills (typescript-standalone, python-conventions, go-conventions, rust-conventions, nextjs-conventions, git-workflows, mermaid). Added delegation capability for `@ingenium-scout` and `@ingenium-explore` for research needs. Added implementation process (plan → implement → self-verify → return). Clarified: writes production code, tests go to QA.
+  2. **orchestrator-primer/SKILL.md** — Changed code writing row from `@ingenium-qa` → `@ingenium-software-engineer`. Added explicit QA row for review + testing.
+  3. **ingenium-orchestrator.md** — Updated delegation table: added "Write code, implement features" → `@ingenium-software-engineer`. Changed anti-patterns (write/edit tool) from QA → software-engineer. Changed forbidden bash patterns (sed/awk/cp/mv) from QA → software-engineer. QA keeps: code review, test authoring.
+  4. **All deploy targets synced** — software-dev, dev-ops, sec-ops.
+- **Why**: User explicitly directed that orchestrator should never write code directly — all code writing goes to @ingenium-software-engineer. The previous permission model prevented this (software-engineer was read-only, code writing was incorrectly routed to QA).
