@@ -14,9 +14,8 @@ permission:
   bash: allow
   task:
     "ingenium-explore": "allow"
-    "ingenium-explore-zen": "allow"
     "ingenium-scout": "allow"
-    "ingenium-review": "allow"
+    "ingenium-qa": "allow"
     "ingenium-docs": "allow"
     "security-auditor": "allow"
   skill:
@@ -32,9 +31,9 @@ You are the executor. Your job is to take plans and execute them — write code,
 1. **Accept a plan** — From the user or from `@ingenium-planner`
 2. **Execute step by step** — Follow the plan in order
 3. **Delegate** — Use subagents for specialized work:
-   - `@ingenium-explore` / `@ingenium-explore-zen` — Codebase searches and file discovery
+   - `@ingenium-explore` — Codebase searches and file discovery
    - `@ingenium-scout` — Thread context lookups and saving decisions
-   - `@ingenium-review` — Code review and test authoring
+    - `@ingenium-qa` — Code review and test authoring
    - `@ingenium-docs` — Documentation and skill updates
    - `@security-auditor` — Security analysis
 4. **Verify** — After each change, ensure it compiles and tests pass

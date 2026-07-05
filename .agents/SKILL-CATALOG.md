@@ -52,10 +52,11 @@
 | `audit-skills` | After any skill change — cross-references all docs |
 | `update-skill-index` | After adding/removing skills |
 | `generate-docs` | Docs are stale or templates are empty |
+| `mermaid` | Mermaid diagrams — mandatory visuals in ALL documentation (architecture, data-flow, lifecycle, process) |
 | `write-docs` | Need README, API docs, or ADRs |
 | `thread-auto-context` | Persistent memory via Thread MCP |
 | `onboard-existing-repo` | 🔴 **Existing repo → skill system** — parallel subagents explore, map findings, apply deploy payload |
-| `vision-bridge` | 🔴 **Blind model → vision model** — routes images to google/gemma-4-12b-qat |
+| `lm-studio` | 🔴 LM Studio local inference — server mgmt, vision bridge, model lifecycle, API reference |
 | `chrome-devtools` | Browser screenshots, performance, network |
 | `playwright-mcp` | Browser automation via Playwright |
 | `gh-cli` | GitHub CLI — PRs, issues, releases, search |
@@ -77,4 +78,4 @@
 | `/write-docs` | Need README, API docs, or ADRs |
 | `/create-readme` | Need a README.md for the project |
 | `/onboard-existing-repo` | Onboard an existing repo to the skill system — parallel subagents explore, map to catalog, apply deploy |
-| `/vision-bridge` | 🔴 Blind model needs vision — routes screenshots to google/gemma-4-12b-qat |
+| `/lm-studio` | 🔴 LM Studio — local inference, vision bridge, model management |

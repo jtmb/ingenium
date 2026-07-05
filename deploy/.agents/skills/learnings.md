@@ -43,7 +43,6 @@
 - **Added**:
   - `ingenium-planner.md` — Primary, V4 Pro, read-only. Mastermind that plans and delegates research.
   - `ingenium-orchestrator.md` — Primary, V4 Flash (paid), full R/W. Executor that launches all subagents.
-  - `ingenium-explore-zen.md` — Subagent, qwopus (LM Studio). Read-only codebase exploration.
 - **Renamed**:
   - `code-reviewer.md` → `ingenium-review.md` (Zen Flash, edit: allow, +useful-tests skill)
   - `docs-writer.md` → `ingenium-docs.md` (Zen Flash, +update-skills +update-skill-index)
@@ -52,8 +51,9 @@
 - **Updated**: `ingenium-scout.md` (+model qwopus)
 - **Created**: `docs/agents.md` — full agent architecture doc with table, workflow diagram, compute split
 - **Updated**: `AGENTS.md` — new 7-agent custom agents table
+- **Deleted**: `ingenium-explore-zen.md` — subagent removed, folded into `ingenium-explore`
 - **Deploy mirror**: All files synced
-- **Compute split**: V4 Pro (planner) | V4 Flash API (orchestrator, explore) | Zen Flash free (review, docs) | qwopus (explore-zen, scout)
+- **Compute split**: V4 Pro (planner) | V4 Flash API (orchestrator, explore) | Zen Flash free (review, docs) | qwopus (scout)
 - **Changed**: `opencode.json` `instructions` — reduced from `.agents/skills/*/SKILL.md` (all 45 skills) to 3 core skills only: `generic-conventions`, `repo-context`, `model-profiles`. All other skills available on-demand via `skill` tool.
 - **Added**: Global provider config at `~/.config/opencode/opencode.jsonc` — LM Studio with base URL `http://192.168.0.13:1234/v1` and 7 models.
 - **Bridged killed**: Old Thread bridge process (Jun 30) with stale token killed. OpenCode restart needed for MCP tools to reconnect with new token.

@@ -118,7 +118,7 @@ your-project/
 │   │   │   └── SKILL.md                         ←   GitHub issue management
 │   │   ├── web-design-reviewer/
 │   │   │   └── SKILL.md                         ←   UI/UX inspection
-│   │   ├── vision-bridge/
+│   │   ├── lm-studio/
 │   │   │   └── SKILL.md                         ←   Vision model bridge
 │   │   ├── onboard-existing-repo/
 │   │   │   └── SKILL.md                         ←   Repo onboarding

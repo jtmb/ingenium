@@ -186,7 +186,7 @@ Collect reports from all 3 subagents, then cross-reference against the bootstrap
 - `update-skill-index` — index regeneration
 - `generate-docs` — doc generation
 - `write-docs` — doc writing
-- `vision-bridge` — 🔴 vision capability
+- `lm-studio` — 🔴 LM Studio local inference, vision bridge
 - `thread-auto-context` — session memory
 
 **Tools (if project has browser/UI/API surface):**
@@ -239,7 +239,7 @@ Always copy all these instructions (they're the session management layer):
 ```bash
 for instr in skill-load help repo-context debugging-patterns self-correction-patterns \
              local-model-commands update-skills audit-skills update-skill-index \
-             generate-docs write-docs vision-bridge thread-auto-context; do
+             generate-docs write-docs lm-studio thread-auto-context; do
   cp -r "$BOOTSTRAP_REPO/deploy/.agents/instructions/$instr/" ".agents/instructions/$instr/"
 done
 ```

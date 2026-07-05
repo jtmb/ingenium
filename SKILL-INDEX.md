@@ -20,7 +20,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | `/update-skills` | [update-skills](.agents/skills/update-skills/SKILL.md) | Detect new patterns, create/retire skills | `.agents/skills/` |
 | `/write-docs` | [write-docs](.agents/skills/write-docs/SKILL.md) | Write READMEs, API docs, ADRs | `.agents/skills/` |
 | `/onboard-existing-repo` | [onboard-existing-repo](.agents/skills/onboard-existing-repo/SKILL.md) | Onboard existing repo to skill system — parallel subagents explore structure/CI/docs, map findings to applicable skills, copy deploy payload | `.agents/skills/` |
-| `/vision-bridge` | [vision-bridge](.agents/skills/vision-bridge/SKILL.md) | 🔴 Blind model → vision model bridge — auto-detects "Can't view screenshots" and routes images to google/gemma-4-12b-qat | `.agents/skills/` |
+| `/lm-studio` | [lm-studio](.agents/skills/lm-studio/SKILL.md) | 🔴 LM Studio local inference — server mgmt, vision bridge, model lifecycle, API reference | `.agents/skills/` |
 | `/debugging-patterns` | [debugging-patterns](.agents/skills/debugging-patterns/SKILL.md) | Systematic debugging workflow | `.agents/skills/` |
 | `/self-correction-patterns` | [self-correction-patterns](.agents/skills/self-correction-patterns/SKILL.md) | AI recovery from mistakes | `.agents/skills/` |
 | `/local-model-commands` | [local-model-commands](.agents/skills/local-model-commands/SKILL.md) | Terminal safety for local LLMs | `.agents/skills/` |
@@ -94,7 +94,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | [generate-docs](.agents/skills/generate-docs/SKILL.md) | Stale docs | Scan codebase, populate `docs/` templates |
 | [write-docs](.agents/skills/write-docs/SKILL.md) | Need documentation | Write READMEs, API docs, ADRs |
 | [onboard-existing-repo](.agents/skills/onboard-existing-repo/SKILL.md) | Onboarding repo | Onboard an existing repository to the skill system |
-| [vision-bridge](.agents/skills/vision-bridge/SKILL.md) | Blind model needs vision | Bridge blind models to google/gemma-4-12b-qat vision model |
+| [lm-studio](.agents/skills/lm-studio/SKILL.md) | Local LM Studio server | LM Studio inference, vision bridge, model lifecycle |
 
 ---
 
@@ -188,7 +188,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | 40 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
 | 41 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
 | 42 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
-| 43 | `vision-bridge` | [`.agents/skills/vision-bridge/SKILL.md`](.agents/skills/vision-bridge/SKILL.md) |
+| 43 | `lm-studio` | [`.agents/skills/lm-studio/SKILL.md`](.agents/skills/lm-studio/SKILL.md) |
 | 44 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
 | 45 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
 
