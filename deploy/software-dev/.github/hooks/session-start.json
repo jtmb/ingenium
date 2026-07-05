@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "command": "echo '{\"additionalContext\":\"🔴 SESSION START — Skill Loading Checklist\\n1. Match skills to task — read AGENTS.md Quick-Reference table\\n2. Load every matching skill from .agents/skills/<name>/SKILL.md\\n3. Note all 🔴 HARD RULEs — they override everything\\n4. Check .agents/skills/learnings.md for recent changes\\n💡 Tip: Use /skill-load for the full loading protocol. Use /help for the skill catalog.\"}'",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

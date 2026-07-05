@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".agents/skills/generic-conventions/SKILL.md",
+    ".agents/skills/repo-context/SKILL.md",
+    ".agents/skills/model-profiles/SKILL.md"
+  ],
+  "permission": {
+    "read": "allow",
+    "edit": "ask",
+    "bash": "allow",
+    "grep": "allow",
+    "glob": "allow",
+    "list": "allow"
+  },
+  "mcp": {
+    "thread": {
+      "type": "local",
+      "command": ["<THREAD_BRIDGE_PATH>/.venv/bin/python", "-m", "thread_bridge.bridge"],
+      "cwd": "<THREAD_BRIDGE_PATH>",
+      "enabled": true,
+      "environment": {
+        "THREAD_SERVER_URL": "http://localhost:5000",
+        "THREAD_DEFAULT_SESSION": "sec-ops-{workspace_basename}",
+        "THREAD_REQUEST_TIMEOUT": "10",
+        "THREAD_API_TOKEN": "<YOUR_THREAD_API_TOKEN>"
+      }
+    }
+  }
+}
