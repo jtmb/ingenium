@@ -13,7 +13,7 @@ description: "Onboard an existing repository to the ingenium skill system. Launc
 - **Always run `/audit-skills` after applying** to verify consistency
 - **Always update AGENTS.md skill catalog** to only list actually-copied skills
 - **Never modify existing source code** — this skill adds `.agents/` and `docs/` only
-- **Ask the user for `$BOOTSTRAP_REPO` path** if it's not provided — default: `/home/brajam/repos/gh-llm-bootstrap`
+- **Ask the user for `$BOOTSTRAP_REPO` path** if it's not provided — default: path to local clone of `jtmb/ingenium`
 
 ## When to Use
 
@@ -373,4 +373,4 @@ Provide a summary:
 | Hook bootstrap script | `$BOOTSTRAP_REPO/deploy/.agents/scripts/hook-bootstrap.sh` |
 | CI workflow | `$BOOTSTRAP_REPO/deploy/.agents/workflows/ci.yml` |
 
-Default `$BOOTSTRAP_REPO`: `/home/brajam/repos/gh-llm-bootstrap`
+Default `$BOOTSTRAP_REPO`: path to local clone of `jtmb/ingenium`

@@ -7,7 +7,7 @@ description: "Patterns for recognizing and recovering from AI mistakes — backt
 
 ## When to Use
 
-- The user says "that didn't work" or "that's wrong"
+- The user says "that didn't work" or "that's wrong", "you are stuck in a loop"
 - The model notices its output contradicts a constraint it was given earlier
 - The same line of reasoning has been tried twice without progress
 - A test or CI pipeline failed after the model applied a change
