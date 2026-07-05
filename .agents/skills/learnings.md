@@ -34,7 +34,7 @@
 ## 2026-07-04 — Reduce startup instructions + global LM Studio provider
 
 - **Before**: `7cd4429`
-- **After**: (pending commit)
+- **After**: `771bec7`
 - **Changed**: `opencode.json` `instructions` — reduced from `.agents/skills/*/SKILL.md` (all 45 skills) to 3 core skills only: `generic-conventions`, `repo-context`, `model-profiles`. All other skills available on-demand via `skill` tool.
 - **Added**: Global provider config at `~/.config/opencode/opencode.jsonc` — LM Studio with base URL `http://192.168.0.13:1234/v1` and 7 models.
 - **Bridged killed**: Old Thread bridge process (Jun 30) with stale token killed. OpenCode restart needed for MCP tools to reconnect with new token.

@@ -19,11 +19,11 @@
       "command": ["<WORKSPACE_ROOT>/.thread-bridge/.venv/bin/python", "-m", "thread_bridge.bridge"],
       "cwd": "<WORKSPACE_ROOT>/.thread-bridge",
       "enabled": true,
-      "env": {
+      "environment": {
         "THREAD_SERVER_URL": "http://localhost:5000",
-        "THREAD_DEFAULT_SESSION": "<WORKSPACE_BASENAME>",
+        "THREAD_DEFAULT_SESSION": "gh-llm-bootstrap",
         "THREAD_REQUEST_TIMEOUT": "10",
-        "THREAD_API_TOKEN": "<YOUR_THREAD_API_TOKEN>"
+        "THREAD_API_TOKEN": "eyJhbGciOiJIUzI1NiIsInR5cCI6IlRIUkVBRCJ9.eyJzdWIiOiJhZG1pbiIsImlhdCI6MTc4MzIwODEwMH0.QDI4WTeyPVngwpXRdSUuzXYplyhK6KvWJiyhRCfEdc0"
       }
     }
   }
