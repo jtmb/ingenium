@@ -11,11 +11,11 @@ Eight agents total: 2 primary, 6 subagents. The **planner** analyzes and produce
 | **ingenium-planner** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | Mastermind — analyzes, delegates research, produces execution plan |
 | **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-flash` | DeepSeek API | Full R/W | Executor — launches subs, writes code, runs commands |
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Codebase search (paid Flash, max reasoning) |
-| **ingenium-explore-zen** | Subagent | `lmstudio/qwopus3.5-9b-coder` | LM Studio | Read-only | Codebase search (local model) |
 | **ingenium-scout** | Subagent | `lmstudio/qwopus3.5-9b-coder` | LM Studio | Read-only | Thread/RAG persistent memory |
-| **ingenium-review** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Write tests | Code review + test authoring |
+| **ingenium-qa** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Write tests | Code review + test authoring |
 | **ingenium-docs** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Write docs | Documentation + skill updates |
-| **security-auditor** | Subagent | *(default)* | *(default)* | Read-only | Security audit |
+| **security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only | Security audit + git-history leak scanning |
+| **ingenium-software-engineer** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read-only | Design review, implementation analysis, technical recommendations |
 
 ## Workflow
 
@@ -27,7 +27,6 @@ User Request
 │  @ingenium-planner  (DeepSeek V4 Pro)                 │
 │  • Reads codebase via @ingenium-explore                 │
 │  • Checks Thread via @ingenium-scout                     │
-│  • Requests reviews via @ingenium-review                 │
 │  • Produces detailed plan                              │
 └──────────────────────┬───────────────────────────────┘
     │
@@ -48,22 +47,22 @@ User Request
 | Resource | Agents | Count |
 |----------|--------|-------|
 | DeepSeek V4 Pro (API) | `ingenium-planner` | 1 |
-| DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore` | 2 |
-| DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-review`, `ingenium-docs` | 2 |
-| qwopus 3.5 9B Coder (LM Studio) | `ingenium-explore-zen`, `ingenium-scout` | 2 |
+| DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `security-auditor` | 3 |
+| DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-qa`, `ingenium-docs`, `ingenium-software-engineer` | 3 |
+| qwopus 3.5 9B Coder (LM Studio) | `ingenium-scout` | 1 |
 
 ## Subagent Invocation
 
 Primary agents invoke subagents via the Task tool automatically — you don't need to do anything special. All subagents can also be invoked directly via `@` mention.
 
-| Subagent | `@` mention | Typical use |
-|----------|-------------|-------------|
-| ingenium-explore | `@ingenium-explore` | Search codebase for files, patterns, definitions |
-| ingenium-explore-zen | `@ingenium-explore-zen` | Same as above, local qwopus model |
-| ingenium-scout | `@ingenium-scout` | Thread/RAG context lookups and saves |
-| ingenium-review | `@ingenium-review` | Code review + write tests |
-| ingenium-docs | `@ingenium-docs` | Write docs, update skills |
-| security-auditor | `@security-auditor` | Security vulnerability audit |
+| Subagent | `@` mention | Access | Read-only |
+|----------|-------------|--------|-----------|
+| ingenium-explore | `@ingenium-explore` | Read-only | ✅ planner + orchestrator |
+| ingenium-scout | `@ingenium-scout` | Read-only | ✅ planner + orchestrator |
+| security-auditor | `@security-auditor` | Bash + read-only | ✅ planner + orchestrator |
+| ingenium-qa | `@ingenium-qa` | Write tests | ❌ orchestrator only |
+| ingenium-docs | `@ingenium-docs` | Write docs | ❌ orchestrator only |
+| ingenium-software-engineer | `@ingenium-software-engineer` | Read-only | ❌ orchestrator only |
 
 ## How to Use the Pipeline
 
@@ -88,9 +87,10 @@ You have **two primary agents** — switch between them with the **Tab** key:
    You: "Execute that plan"
    Orchestrator: auto-invokes subagents as needed:
      • @ingenium-explore      — finds relevant files
-     • @ingenium-review       — writes tests
-     • @ingenium-docs         — updates documentation
-     • @ingenium-scout        — saves decisions to Thread
+      • @ingenium-qa       — writes tests
+      • @ingenium-docs         — updates documentation
+      • @ingenium-software-engineer — design review, implementation analysis
+      • @ingenium-scout        — saves decisions to Thread
    Writes code, runs commands, commits, verifies
 ```
 
@@ -101,9 +101,6 @@ At any time, you can `@`-mention a subagent directly:
 ```
 @ingenium-explore find all API route definitions
 @ingenium-scout search Thread for past decisions about rate limiting
-@ingenium-review review the changes in src/auth/
-@ingenium-docs update the API docs for the new endpoints
-@ingenium-explore-zen search for all .py files that import requests
 @security-auditor audit the auth flow for vulnerabilities
 ```
 

@@ -4,18 +4,18 @@ This is the **bootstrap source repo** for the Ingenium skill system. The `deploy
 
 ## Agent Pipeline (this repo only)
 
-Two primary agents, five subagents. Full architecture: `docs/agents.md`.
+Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 
 | Agent | Type | Model | Access | Purpose |
 |-------|------|-------|--------|---------|
 | `ingenium-planner` | Primary | DeepSeek V4 Pro | Read-only | Mastermind — researches, plans, delegates to subagents |
 | `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Full R/W | Executor — writes code, runs commands, drives work |
 | `ingenium-explore` | Subagent | V4 Flash | Read-only | Codebase search (paid, max reasoning) |
-| `ingenium-explore-zen` | Subagent | qwopus (LM Studio) | Read-only | Codebase search (local) |
 | `ingenium-scout` | Subagent | qwopus (LM Studio) | Read-only | Thread/RAG context — search past decisions |
-| `ingenium-review` | Subagent | V4 Flash (Zen free) | Write tests | Code review + test authoring |
+| `ingenium-qa` | Subagent | V4 Flash (Zen free) | Write tests | Code review + test authoring |
 | `ingenium-docs` | Subagent | V4 Flash (Zen free) | Write docs | Documentation + skill updates |
-| `security-auditor` | Subagent | (default) | Bash + read-only | Security audit + git-history leak scanning |
+| `security-auditor` | Subagent | V4 Flash | Bash + read-only | Security audit + git-history leak scanning |
+| `ingenium-software-engineer` | Subagent | V4 Flash (Zen free) | Read-only | Design review, implementation analysis, technical recommendations |
 
 **Workflow**: Tab to planner for research/planning → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
 

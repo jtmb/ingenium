@@ -7,12 +7,12 @@ import json, urllib.request, base64, os, sys
 
 # --- Config ---
 API_URL = "http://192.168.0.13:1234/v1/chat/completions"
-MODEL = "google/gemma-4-12b-qat"
-ENV_PATH = os.path.expanduser("~/repos/gh-llm-bootstrap/.agents/.lm-studio-env")
+MODEL = os.environ.get("LM_STUDIO_VISION_MODEL", "google/gemma-4-12b-qat")  # ← override via env var
+ENV_PATH = os.path.expanduser("~/.lm-studio-env")
 
 # --- Load API key ---
 if not os.path.exists(ENV_PATH):
-    print("ERROR: API key file not found. Use vscode_askQuestions to prompt user for key.")
+    print("ERROR: API key file not found at ~/.lm-studio-env")
     sys.exit(1)
 with open(ENV_PATH) as f:
     api_key = None

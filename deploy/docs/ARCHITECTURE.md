@@ -70,7 +70,7 @@ Two bash scripts that scaffold new projects with the skill system:
 
 ### Agent Pipeline (`.opencode/agents/`)
 
-8 custom agents defined for OpenCode: 2 primary (planner + orchestrator) and 6 subagents (explore, explore-zen, scout, review, docs, security-auditor). See `docs/agents.md` for full architecture.
+8 custom agents defined for OpenCode: 2 primary (planner + orchestrator) and 6 subagents (explore, scout, review, docs, security-auditor, software-engineer). See `docs/agents.md` for full architecture.
 
 ### Deploy Separation (`deploy/`)
 
