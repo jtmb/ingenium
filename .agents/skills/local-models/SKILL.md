@@ -256,7 +256,7 @@ If the answer to "Will this command exit on its own?" is "I don't know," run it 
 
 ### 🔴 MCP Tool Call Verification Rules (Mandatory)
 
-**Before claiming success on ANY MCP tool call, you MUST verify the actual response.** This is the #1 failure pattern. When a command fails silently or returns an error, you must:
+**Before claiming success on ANY MCP tool call, you MUST verify the actual response.** This is the #1 failure pattern across all skills. When a command fails silently or returns an error, you must:
 1. Parse the full JSON response (even if it's an error object)  
 2. Check for specific error patterns before declaring completion  
 3. If no output appears, assume MCP server is unreachable and ask user to verify  
@@ -276,7 +276,7 @@ If the answer to "Will this command exit on its own?" is "I don't know," run it 
 # ✅ Good - always verify server is reachable first
 curl -s http://localhost:5000/api/v1/health || echo "Server not running, cannot proceed"
 
-# ❌ Bad - no health check before calling Thread tools
+# ❌ Bad - no health check before calling MCP tools
 thread_thread_read_entries --limit 3  # This will fail silently or hang
 ```
 
@@ -284,7 +284,7 @@ thread_thread_read_entries --limit 3  # This will fail silently or hang
 
 | Error signature | Meaning | Fix |
 |-----------------|---------|-----|
-| `command not found` | MCP server binary not in PATH, wrong config path, or server crashed | Check `.vscode/mcp.json` has valid `THREAD_SERVER_URL`, restart Thread with health check |
+| `command not found` | MCP server binary not in PATH, wrong config path, or server crashed | Check MCP config file (`.vscode/mcp.json`, `.config/opencode/`) has valid provider entry; restart the MCP server with health check |
 | `connection refused` | Server process died (OOM killed, crash loop) or firewall blocking port 5000 | Run `curl http://localhost:5000/api/v1/health`; if no response, restart server |
 | HTTP 401 unauthorized | Missing API token in MCP config (`~/.lm-studio-env` not sourced correctly) | Source `.vscode/mcp.json` or check for `THREAD_API_TOKEN` environment variable |
 | HTTP 503 Service Unavailable | Server running but model not loaded, GPU out of memory | Check LM Studio UI, unload unused models, verify model is in `/v1/models` response |
@@ -301,13 +301,11 @@ thread_thread_read_entries --limit 3
 thread_thread_read_entries --limit 3
 /bin/bash: line 1: thread_thread_read_entries: command not found
 ```
-**Error:** MCP server is not reachable at `http://localhost:5000`. The Thread bridge binary is missing or the config path in `.vscode/mcp.json` is incorrect. Please verify:
+**Error:** MCP server is not reachable at `http://localhost:5000`. The Thread bridge binary path in your MCP config is incorrect or the server hasn't been started. Please verify:
 
 1. Thread server is running (health check): `curl http://localhost:5000/api/v1/health`
-2. MCP config file exists and has valid `THREAD_SERVER_URL`: cat your global MCP config location  
-3. The bridge binary is installed or can be downloaded from the repo
-
-**For this specific case:** Your Thread server may not have been started yet, OR you need to verify that the MCP provider was registered in `.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`. The "command not found" error means the bridge binary path or executable isn't available.
+2. MCP config file exists and has valid provider entry: cat your global MCP config location  
+3. The bridge binary path in `.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` points to the correct Python executable
 
 **The pattern:** Always check for errors BEFORE saying "success". If a bash command returns non-zero exit code, parse stderr/stdout and display the actual message to the user. Never assume "no output = success".
 
