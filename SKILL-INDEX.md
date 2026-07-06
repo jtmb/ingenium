@@ -71,7 +71,6 @@ This file is the **canonical index** of all skills in this project. It is automa
 | [gh-cli](.agents/skills/gh-cli/SKILL.md) | GitHub operations | >- |
 | [kaban-board](.agents/skills/kaban-board/SKILL.md) | Kaban terminal Kanban board | Terminal Kanban board for AI agents — install npm package, configure MCP server in OpenCode, manage tasks via CLI or TUI. Use when managing task boards, tracking work across agents, or setting up the Kaban MCP server. |
 | [web-design-reviewer](.agents/skills/web-design-reviewer/SKILL.md) | UI/UX review | 'This skill enables visual inspection of websites running locally or remotely to identify and fix design issues. Triggers on requests like review website design, check the UI, fix the layout, find design problems. Detects issues with responsive design, accessibility, visual consistency, and layout breakage, then performs fixes at the source code level.' |
-| [kaban-board](.agents/skills/kaban-board/SKILL.md) | Kaban terminal Kanban board | Terminal Kanban board for AI agents — install npm package, configure MCP server in OpenCode, manage tasks via CLI or TUI. Use when managing task boards, tracking work across agents, or setting up the Kaban MCP server. |
 | [wsl-cleanup](.agents/skills/wsl-cleanup/SKILL.md) | WSL disk cleanup, system maintenance | WSL2 Ubuntu system maintenance and disk cleanup — Docker prune, apt/pip/npm caches, journalctl vacuum, temp file cleanup, snap revisions, model caches. 🔴 Never touches $HOME/repos. Use when disk space is low or routine maintenance is needed. |
 
 ---
