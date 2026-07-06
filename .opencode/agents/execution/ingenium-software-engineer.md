@@ -30,7 +30,7 @@ skills:
   - lm-studio
   - shell-scripts
   - local-model-commands
-  - git-workflows
+  - kaban-board
   - mermaid
   - typescript-standalone
   - python-conventions
