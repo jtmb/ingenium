@@ -92,7 +92,66 @@ Plugins bridge the gap between skills (AI-interpreted) and deterministic guardra
 
 ### Agent Pipeline (`.opencode/agents/`)
 
-8 custom agents defined for OpenCode in role-nested directories: `primary/` (planner, orchestrator), `execution/` (software-engineer, qa, docs), `research/` (explore, scout), `security/` (security-auditor). The orchestrator NEVER writes code directly — it delegates all implementation to @ingenium-software-engineer (now with read/write permissions). See `docs/agents.md` for full architecture.
+8 custom agents defined for OpenCode in role-nested directories: `primary/` (planner, orchestrator), `execution/` (software-engineer, qa, docs), `research/` (explore, scout), `security/` (security-auditor). The orchestrator NEVER writes code directly — it delegates all implementation to @ingenium-software-engineer (now with read/write permissions). The orchestrator uses a kaban board for structured work tracking: tasks flow from `todo` → `in-progress` → `review` → `done` via kaban MCP tools. See `docs/agents.md` for full architecture.
+
+### Kaban Board in the Agent Pipeline
+
+The kaban board is the central work tracking hub connecting the scrum master, orchestrator, and subagents. Tasks flow through a structured lifecycle:
+
+```mermaid
+flowchart TB
+    subgraph Scrum["📋 Scrum Agent — Populate Board"]
+        A1["kaban_add_task_checked<br/>Create tasks in todo"]
+        A2["kaban_add_dependency<br/>Set ordering constraints"]
+        A1 --> A2
+    end
+
+    subgraph Orchestrator["⚡ Orchestrator — Execute Board"]
+        B1["kaban_get_next_task<br/>Read next work item"]
+        B1 --> B2["kaban_move_task in-progress<br/>Claim task"]
+        B2 --> B3["Spawn subagent<br/>Implement / Review / Doc"]
+        B3 --> B4["kaban_move_task review<br/>Move to review column"]
+        B4 --> B5["kaban_complete_task done<br/>Mark complete"]
+    end
+
+    subgraph Subagents["🔧 Subagents — Do Work"]
+        C1["@ingenium-software-engineer<br/>Writes code + tests"]
+        C2["@ingenium-qa<br/>Reviews + verifies"]
+        C3["@ingenium-docs<br/>Updates docs + learnings"]
+    end
+
+    subgraph Closure["🗄️ Closure — Archive"]
+        D1["kaban_archive_tasks<br/>Archive completed"]
+        D2["kaban_export_markdown<br/>Export board state"]
+        D1 --> D2
+    end
+
+    Scrum --> Orchestrator
+    B2 --> C1
+    B2 --> C2
+    B2 --> C3
+    C1 --> B4
+    C2 --> B4
+    C3 --> B4
+    B5 --> Closure
+```
+
+**Data Flow:**
+
+1. **Scrum Agent** — After producing a plan, calls `kaban_add_task_checked` for each work unit, assigning `assignedTo` to the appropriate subagent (explore, software-engineer, qa, docs, security-auditor). Calls `kaban_add_dependency` to enforce ordering constraints (e.g., implementation before review). All tasks land in the `todo` column.
+2. **Orchestrator** — Reads the next task via `kaban_get_next_task`, which returns the highest-priority task with resolved dependencies. Also marks the task as `in_progress` in `todowrite` for in-session OpenCode visibility. Moves the task to `in-progress` via `kaban_move_task <id> in-progress`, then spawns the assigned subagent.
+3. **Subagent** — Completes the assigned work (implementation, review, documentation). Returns results to the orchestrator.
+4. **Orchestrator (cont.)** — Moves the task to `review` via `kaban_move_task <id> review` and marks it as `pending` (for QA review) in `todowrite`. Spawns @ingenium-qa for verification. After QA approves, calls `kaban_complete_task <id>` and marks `completed` in `todowrite`.
+5. **Session End** — Orchestrator calls `kaban_archive_tasks` to archive all completed tasks and `kaban_export_markdown` to produce a board summary for the learnings log. The `todowrite` state is ephemeral — kaban is the authoritative permanent record.
+
+**Tool Access:**
+
+| Agent | Kaban Tools | Todowrite |
+|-------|-------------|-----------|
+| `ingenium-scrum` | `kaban_add_task_checked`, `kaban_add_dependency`, `kaban_status`, `kaban_init` | — |
+| `ingenium-orchestrator` | `kaban_get_next_task`, `kaban_move_task`, `kaban_complete_task`, `kaban_archive_tasks`, `kaban_export_markdown`, `kaban_status`, `kaban_list_tasks` | `todo: allow` (mirror at each transition) |
+
+The board is the authoritative state. `todowrite` is a secondary mirror for in-session OpenCode visibility — the orchestrator updates it at each kaban transition (`get-next-task`, `move-to-in-progress`, `move-to-review`, `complete`). The anti-patterns table includes "forgot to update todowrite" to ensure both are kept in sync. See `docs/agents.md` for the full agent lifecycle and `kaban-board/SKILL.md` for the complete MCP tool reference.
 
 ### Deploy Separation (`deploy/`)
 
@@ -114,6 +173,28 @@ The project detects its own gaps using four signals:
 4. **Stale content** — skill references wrong versions or deleted paths
 
 The `test-self-improving.sh` suite (7 test functions, 20 checks) validates all four signals, deploy integrity, frontmatter validity, and file drift.
+
+### Model Configuration (`.agents/models.yaml`)
+
+Model assignments for all agents are centralized in `.agents/models.yaml`, the human-editable source of truth. This file defines:
+
+| Section | Content | Example |
+|---------|---------|---------|
+| **Model aliases** | Short names mapping to full provider/model strings | `fast: deepseek/deepseek-v4-flash` |
+| **Agent assignments** | Per-agent model selection using aliases | `ingenium-scrum: premium` |
+| **Reasoning effort** | Per-agent `reasoningEffort` override | `ingenium-scrum: xhigh` |
+
+The model hierarchy uses three tiers:
+
+| Tier | Alias | Model | Active Params | Use case |
+|------|-------|-------|---------------|----------|
+| Budget | `fast` | `deepseek/deepseek-v4-flash` | 13B | Code search, documentation, simple fixes |
+| Standard | `capable` | `deepseek/deepseek-v4-flash` | 13B | Default implementation, QA review, orchestration |
+| Premium | `premium` | `deepseek/deepseek-v4-pro` | 49B | Deep reasoning, complex refactoring, architecture |
+
+The multi-model software engineer variants (`-fast`, default, `-premium`) are defined here with their respective aliases and reasoning efforts. All three share the same agent definition file skill sets — the differentiation is purely in model capability and reasoning budget.
+
+**Convention**: Changes must be made to `.agents/models.yaml` first, then propagated to each agent's `.md` frontmatter `model:` field. The model configuration is NOT auto-read by OpenCode — it is a human coordination artifact.
 
 ### Thread Persistent Memory
 
