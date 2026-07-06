@@ -418,5 +418,25 @@
   7. Created `.opencode/agents/execution/ingenium-software-engineer-premium.md` (deepseek-v4-pro, xhigh)
   8. Updated orchestrator delegation table with model tier guidance
   9. Created `.agents/models.yaml` centralized model config convention
-  10. Fixed 4 QA bugs: in_progress column name across 3 files, orphaned numbering, mcp permissions, self-contradiction
+   10. Fixed 4 QA bugs: in_progress column name across 3 files, orphaned numbering, mcp permissions, self-contradiction
 - **Skill count**: Unchanged (45 source, 45/44/50 deploy)
+
+## 2026-07-06 — repo consolidation: OpenCode-only, removed deploy/vscode/github
+
+- **Commit**: `714b86f`
+- **Category**: architecture | skill | config
+- **Changes**:
+  1. Deleted .vscode/ directory (VS Code editor config, replaced by opencode.json)
+  2. Deleted .github/ directory (GitHub Copilot hooks)
+  3. Deleted deploy/ directory (3 variants: software-dev, dev-ops, sec-ops)
+  4. Updated bootstrap.sh: BOOTSTRAP_DIR now points to repo root instead of deploy/
+  5. Removed Platform Support section from AGENTS.md (OpenCode-only now)
+  6. Removed Copilot, VS Code, GitHub workflow references from README, USAGE
+  7. Removed Deploy Mirror section from SKILL-INDEX.md
+  8. Removed Deploy Separation section from docs/ARCHITECTURE.md
+  9. Removed deploy variant docs from CONVENTIONS, TECH-STACK
+  10. Cleaned 14 skill files of deploy/, .github/, Copilot, GitHub references
+  11. Removed .opencode/ variant directories (dev-ops, software-dev, sec-ops)
+  12. Updated security-auditor agent to remove GitHub-specific scan phases
+  13. Updated test-self-improving.sh to remove deploy-specific tests
+- **Skill count**: Source: 45 (unchanged)

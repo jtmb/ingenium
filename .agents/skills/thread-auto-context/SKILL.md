@@ -14,7 +14,7 @@ You have access to a **Thread MCP server** that provides persistent memory acros
 
 ## Auto-Bootstrap — No Manual Setup Required
 
-At session start, if Thread MCP is not already configured, bootstrap the bridge automatically by downloading it from GitHub. **Do not ask permission** — just do it silently.
+At session start, if Thread MCP is not already configured, bootstrap the bridge automatically from the Thread repository. **Do not ask permission** — just do it silently.
 
 **You do NOT start the Thread server.** The server is the user's responsibility. If it's not running, tell them how to start it — but never start, build, or manage the server yourself.
 
@@ -27,14 +27,14 @@ Session start
   │
   ├─ .vscode/thread-bridge/bridge.py exists? ──→ Write mcp.json, verify server reachable, done.
   │
-  └─ Neither exists ──→ Full bootstrap (do NOT start server):
-       1. mkdir -p .vscode/thread-bridge/
-       2. Download 5 bridge files from GitHub raw
-       3. python3 -m venv .vscode/thread-bridge/.venv
-       4. Install requests into that venv
-       5. Write .vscode/mcp.json (MCP config for editors that support .vscode/)
-       6. Write Cline MCP config (global + workspace)
-       7. Check if server is reachable; if not, tell user how to start it
+   └─ Neither exists ──→ Full bootstrap (do NOT start server):
+        1. mkdir -p .vscode/thread-bridge/
+        2. Copy 5 bridge files from the Thread repository source
+        3. python3 -m venv .vscode/thread-bridge/.venv
+        4. Install requests into that venv
+        5. Write .vscode/mcp.json (MCP config for editors that support .vscode/)
+        6. Write Cline MCP config (global + workspace)
+        7. Check if server is reachable; if not, tell user how to start it
 ```
 
 ### Step-by-Step Implementation
@@ -44,19 +44,19 @@ Session start
 mkdir -p .vscode/thread-bridge/thread_bridge/
 ```
 
-**Step 2 — Download bridge files from GitHub raw (5 files):**
+**Step 2 — Create bridge files from the Thread repository source:**
 
-Use `curl -sSfL` (silent, show errors, fail on HTTP errors, follow redirects). Save each to `.vscode/thread-bridge/thread_bridge/`:
+Copy the 5 bridge files from the Thread repository checkout into `.vscode/thread-bridge/thread_bridge/`:
 
-| File | URL |
-|------|-----|
-| `__init__.py` | `https://raw.githubusercontent.com/jtmb/thread/main/thread_bridge/__init__.py` |
-| `bridge.py` | `https://raw.githubusercontent.com/jtmb/thread/main/thread_bridge/bridge.py` |
-| `client.py` | `https://raw.githubusercontent.com/jtmb/thread/main/thread_bridge/client.py` |
-| `config.py` | `https://raw.githubusercontent.com/jtmb/thread/main/thread_bridge/config.py` |
-| `requirements.txt` | `https://raw.githubusercontent.com/jtmb/thread/main/thread_bridge/requirements.txt` |
+| File | Source |
+|------|--------|
+| `__init__.py` | `thread_bridge/__init__.py` |
+| `bridge.py` | `thread_bridge/bridge.py` |
+| `client.py` | `thread_bridge/client.py` |
+| `config.py` | `thread_bridge/config.py` |
+| `requirements.txt` | `thread_bridge/requirements.txt` |
 
-Run all 5 downloads in parallel. If any fail, retry once. If still failing, tell the user: "Couldn't download Thread bridge from GitHub — check network or GitHub access."
+The files live in the Thread project source at the paths listed above. Copy them from the local clone, or download from the Thread repository using your platform's standard file retrieval. If any file is missing, tell the user: "Couldn't find Thread bridge source files — check that the Thread repository is available."
 
 **Step 3 — Create venv and install dependencies:**
 ```bash
@@ -175,7 +175,7 @@ After EVERY code change (write/edit/delete/refactor), IMMEDIATELY save context b
 > - Create or update a documentation file? → `thread_upload_file` NOW. Tags: `["reference", "docs"]`. Priority 4.
 
 > **Session ending soon?** → Run the full export workflow below in "At Session End — MANDATORY EXPORT". Do NOT just save a summary — save decisions, git state, and output the import prompt.
-**If you call task_complete and haven't saved context since your last code change, you have violated this rule.** The `.github/instructions/thread-auto-context.instructions.md` instruction fires before every edit and will remind you.
+**If you call task_complete and haven't saved context since your last code change, you have violated this rule.**
 
 ### Storage Monitoring
 
@@ -193,7 +193,7 @@ This prevents silent failures from disk-full conditions on resource-constrained 
 
 #### 🔴 HARD RULE — Full Transcript Export Required
 
-**At session end, you MUST write the full conversation transcript to a file and upload it to Thread. This is not optional. This applies to ALL sessions — OpenCode, Copilot, Cline, or any other platform.**
+**At session end, you MUST write the full conversation transcript to a file and upload it to Thread. This is not optional. This applies to ALL sessions running in OpenCode.**
 
 **Workflow:**
 1. Compose a markdown transcript covering every turn of the conversation — user's intent, assistant's actions, key decisions, file manifest, commit hashes, and any important context
@@ -229,20 +229,6 @@ This prevents silent failures from disk-full conditions on resource-constrained 
 5. **Check for prior exports first** — Before creating, run `thread_search` with `"export" AND "opencode"`. If entries already exist, update them via `thread_update_entry` rather than creating duplicates.
 
 **This is NOT optional. If you reach session end and have not saved context — especially the full transcript — you have violated the protocol.**
-
-### Uploading Copilot Conversation Transcripts
-
-At session end (or when the user asks), upload the current Copilot conversation transcript automatically:
-
-1. **Locate the transcript** — Use the path `{{VSCODE_TARGET_SESSION_LOG}}`. This is a `.jsonl` file that grows in real-time as the conversation proceeds. VS Code provides this path automatically — just substitute the variable.
-
-2. **Upload with auto-tracking** — Run `thread_upload_file` on that path with `session` set to the current workspace name (run `basename "$PWD"`). Tags: `["transcript", "copilot", "conversation"]`. Priority: 3.
-
-3. **Incremental uploads are automatic** — The server tracks the byte offset per `(session, filename)` in the `file_uploads` table. Every subsequent upload of the same file only imports new lines that were added since the last upload. No manual offset management needed — just upload the same path each time and the server deduplicates.
-
-4. **Search past transcripts** — When starting a new conversation, use `thread_search` with `"copilot" AND "transcript"` to find what was discussed in prior Copilot sessions for this workspace. This gives continuity across conversations.
-
-**Why this works:** Copilot transcript files are append-only JSONL — they grow as you chat. The byte-offset tracking means each upload picks up exactly where the last one left off. No duplicates, no manual cleanup.
 
 ### Uploading Cline Conversation Transcripts
 

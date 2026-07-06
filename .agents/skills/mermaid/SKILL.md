@@ -82,7 +82,7 @@ graph LR
     P[slop-planner] -->|POST ideas| A[slop-api]
     A -->|GET random| B[slop-builder]
     A -->|JWT auth| C[Consumers]
-    B -->|push| GH[GitHub]
+    B -->|push| D[Repository]
     A -->|read/write| DB[(PostgreSQL)]
 ```
 

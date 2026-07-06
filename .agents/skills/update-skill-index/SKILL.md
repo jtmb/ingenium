@@ -15,7 +15,7 @@ description: "Regenerate SKILL-INDEX.md from all skill SKILL.md files — keeps 
 
 ## Core Principle — Auto-Regenerate
 
-**This skill auto-invokes after any change to the skill system** (`.agents/skills/`, `deploy/.agents/skills/`). When a skill is added, removed, or renamed, regenerate SKILL-INDEX.md immediately. Do not wait for the user to ask.
+**This skill auto-invokes after any change to the skill system** (`.agents/skills/`). When a skill is added, removed, or renamed, regenerate SKILL-INDEX.md immediately. Do not wait for the user to ask.
 
 ## Procedure
 
@@ -58,25 +58,9 @@ Write the full `SKILL-INDEX.md` to the repo root. The format is:
 7. **Infrastructure commands**
 8. **Skill System Maintenance table**
 9. **Skill Links table** — numbered directory listing with links to each SKILL.md
-10. **Deploy Mirror note**
-
 ### Step 4 — Update the Total Count
 
 The header says `**Total skills: {N}**`. Count equals the number of skill directories. Update this number.
-
-### Step 5 — Sync Deploy
-
-Copy the updated `SKILL-INDEX.md` to the deploy mirror:
-
-```bash
-cp SKILL-INDEX.md deploy/SKILL-INDEX.md
-```
-
-If new skills were added, also sync their SKILL.md to the deploy mirror:
-
-```bash
-cp .agents/skills/{name}/SKILL.md deploy/.agents/skills/{name}/SKILL.md
-```
 
 ## Commands
 

@@ -25,7 +25,6 @@ Invoke this skill when working on files that don't match any framework-specific 
 |-------------|-----------------|
 | `.agents/skills/*/SKILL.md` (skill added/removed/changed) | `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/README.md` |
 | `.agents/scripts/` (bootstrap or hooks changed) | `docs/ARCHITECTURE.md` |
-| `deploy/` (structure or files changed) | `docs/ARCHITECTURE.md` |
 | `tests/` (test infra changed) | `docs/TECH-STACK.md` |
 | `README.md`, `USAGE.md`, `AGENTS.md` (project root docs) | `docs/README.md` |
 
@@ -50,9 +49,7 @@ Invoke this skill when working on files that don't match any framework-specific 
 | `.opencode/agents/*.md` (new, modified, deleted) | Agent name, role, permission changes |
 | `.agents/hooks/*.json` (new, modified) | Hook event, trigger change |
 | `.opencode/plugins/*` (new, modified) | Plugin name, lifecycle hook, behavior change |
-| `deploy/` (restructured, new target added) | Deploy structure change, new target domain |
-| `opencode.json`, `.vscode/mcp.json` (config changed) | Config key changed, session name, model assignment |
-| `.github/instructions/`, `.github/skills/` (migrated) | Migration from Copilot format to OpenCode |
+| `opencode.json` (config changed) | Config key changed, session name, model assignment |
 | Architecture decisions, subagent mandates | Decision made, rationale, constraints discovered |
 | Bug fix with non-obvious root cause | Root cause, fix approach, prevention strategy |
 | Pattern or convention discovered | Pattern description, where it applies, files affected |
@@ -61,12 +58,11 @@ Invoke this skill when working on files that don't match any framework-specific 
 1. Finish and commit the code change (commit first so you have a hash)
 2. Run `git rev-parse --short HEAD` to capture the commit hash
 3. Append to `.agents/skills/learnings.md` with:
-   - Date and short topic heading (e.g., `## 2026-07-05 — sec-ops/deploy-target-conversion`)
-   - Category tag
-   - Commit hash(es) (before and/or after)
-   - What changed and why (2-5 bullet points)
-   - Any related files or decisions
-4. If you changed deploy/ sources, also log to `deploy/.agents/skills/learnings.md`
+    - Date and short topic heading
+    - Category tag
+    - Commit hash(es) (before and/or after)
+    - What changed and why (2-5 bullet points)
+    - Any related files or decisions
 
 **The entry format should be:**
 
@@ -75,7 +71,7 @@ Invoke this skill when working on files that don't match any framework-specific 
 
 - **Commit**: `{short-hash}` (after)
 - **Before**: `{short-hash}` (if reverting, snapshot before)
-- **Category**: skill | agent | hook | plugin | deploy | config | architecture | bug | pattern
+- **Category**: skill | agent | hook | plugin | config | architecture | bug | pattern
 - **Changes**: {one-line summary of what changed}
 - **Why**: {what triggered this change}
 ```

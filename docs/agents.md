@@ -78,7 +78,7 @@ flowchart TB
 | 6 | **Security audit** | Sensitive changes | Orchestrator → **Security-Auditor** | Scans for secrets, auth issues, CI vulnerabilities |
 | 7 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/, logs to learnings.md — mandatory, never skipped |
 | 8 | **Commit** | All subagents done | Orchestrator (bash) | `git add/commit/push` — the ONLY bash the orchestrator runs |
-| 9 | **Learnings** | After commit | Orchestrator → **Docs** | Captures hash, appends to learnings.md, syncs deploy |
+| 9 | **Learnings** | After commit | Orchestrator → **Docs** | Captures hash, appends to learnings.md |
 
 ---
 
@@ -336,7 +336,6 @@ Model assignments are centralized in `.agents/models.yaml` — the human-editabl
 |--------------|------------------|
 | `.agents/skills/*/SKILL.md` | `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/README.md` |
 | `.agents/scripts/` | `docs/ARCHITECTURE.md` |
-| `deploy/` (structure/files) | `docs/ARCHITECTURE.md` |
 | `tests/` (test infra) | `docs/TECH-STACK.md` |
 | `README.md`, `USAGE.md`, `AGENTS.md` | `docs/README.md` |
 | `.opencode/agents/*.md` | `docs/agents.md`, `docs/ARCHITECTURE.md` |
@@ -356,8 +355,7 @@ Model assignments are centralized in `.agents/models.yaml` — the human-editabl
 |-------|--------|-------|
 | 1. Audit | Review code for vulnerabilities, secrets, insecure patterns | `read`, `grep`, `glob` |
 | 2. Git history scan | `git log -p -S "<secret>"` for leaked secrets in history | `bash` |
-| 3. GitHub scan | `gh api` for GitHub secret scanning results | `bash` |
-| 4. Report | Findings with severity, commit hashes, remediation | `write` |
+| 3. Report | Findings with severity, commit hashes, remediation | `write` |
 
 ---
 
