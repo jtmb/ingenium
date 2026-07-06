@@ -290,3 +290,31 @@
   7. Synced to all 3 deploy variants
 - **Before**: `4964b68`
 - **Why**: User wanted the ability to point the skill at any documentation website (not site-specific logic) and have it crawl/ingest all pages into Thread for reference. Test sites: docs.github.com, nextjs.org/docs.
+
+## 2026-07-05 — doc-import-workflow-test-nextjs
+
+- **Commit**: `1b14e1a` (after)
+- **Before**: `1b14e1a` (no code changes, this is a test run)
+- **Category**: pattern
+- **Changes**: Tested the new "Uploading Documentation Websites to Thread" workflow from thread-auto-context/SKILL.md against https://nextjs.org/docs
+- **Findings**:
+  - Discovery: `/docs/llms.txt` found 260 doc URLs (Method A preferred). `/docs/sitemap.md` found 418 URLs (Method C). Sitemap.xml had 469 doc URLs (Method B, more granular)
+  - Best fetch strategy: `Accept: text/markdown` header returns clean LLM-optimized markdown for every page. `.md` suffix works identically. Both produce ~22KB per average page with full frontmatter (version, lastUpdated, docs_index)
+  - `thread_upload_file` with `##` heading-split correctly chunked the 5-page (2287-line) combined file into 59 entries
+  - All 4 fetch strategies work for Next.js docs: HTML alternate link, .md suffix, Accept header, webfetch markdown
+  - Rate limiting: 1-2s jitter was sufficient, no 429s encountered
+- **Files**: `/tmp/opencode/nextjs-doc-urls.txt`, `/tmp/opencode/site-docs-nextjs.md`
+- **thread_search bug**: FTS5 `AND` operator and negation `-` queries return HTTP 500. Workaround: use quoted space-separated terms instead. Filed as `jtmb/thread#1`.
+
+## 2026-07-05 — gh-cli: best-practices issue reporting template + jtmb/thread#1
+
+- **Commit**: `0d2d05d` (after)
+- **Before**: `aa6db52`
+- **Category**: skill
+- **Changes**:
+  1. Created `.agents/skills/gh-cli/templates/issue-report.md` — 10-section template (Summary, Type checkboxes, Environment table, Steps, Expected vs Actual, Debugging Data table, Impact, Workaround, Context)
+  2. Updated `.agents/skills/gh-cli/SKILL.md` Issues section: 🔴 HARD RULE requiring template for all issues, filing sections for bug/feature using `gh api` (supports `type` param), quick commands for trivial items, cross-reference to `github-issues` skill
+  3. Registered template in `.agents/scripts/bootstrap.sh` as `optional` deploy
+  4. Synced template + SKILL.md to all 3 deploy variants
+  5. Filed `https://github.com/jtmb/thread/issues/1` with full reproduction data using the new template (3 failing query variants with request IDs, 2 working variants, environment, impact analysis, workaround)
+- **Skill audit**: `gh-cli` stays independent. Covers 5 domains beyond issues (PRs, releases, gists, search, raw API). `alwaysApply: true` foundation. `github-issues` adds deep issue management when triggered. Cross-reference added from `gh-cli` → `github-issues`.
