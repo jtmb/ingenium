@@ -684,3 +684,11 @@ if '<title>404' in verify_after.stdout: print(f"✓ Verified deleted (HTTP 404)"
 - `error-interpretation` — Understanding HTTP 401 vs success in DELETE operations  
 - `local-models` — Always verify API authentication and parse responses properly  
 
+
+## 2026-07-06 — kaban-board permanent install method
+
+- **After**: `5c0be6f`
+- **Before**: `089dce6`
+- **Category**: skill
+- **Changes**: Added permanent installation section to kaban-board SKILL.md — wrapper script in ~/.local/bin/ + built files in ~/.local/share/kaban/ to survive WSL reboot
+- **Why**: Source build in /tmp/ wiped on reboot, npm link depended on ephemeral fnm path
