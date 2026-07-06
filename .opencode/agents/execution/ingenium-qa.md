@@ -6,6 +6,8 @@ model: opencode/deepseek-v4-flash-free
 permission:
   edit: allow
   bash: deny
+  task:
+    "*": "deny"                           # No subagent delegation allowed
 skills:
   - code-review-checklist
   - useful-tests

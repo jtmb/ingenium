@@ -14,6 +14,8 @@ permission:
   write: deny
   websearch: allow
   webfetch: allow
+  task:
+    "*": "deny"                           # No subagent delegation allowed
   skill:
     "*": "allow"
 ---

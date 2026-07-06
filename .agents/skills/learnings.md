@@ -1,3 +1,10 @@
+## 2026-07-06 — Add `"*": "deny"` to all agent task permission blocks
+
+- **Commit**: `22f4b2c` (after)
+- **Category**: security | config
+- **Changes**: Added `"*": "deny"` as first entry in `task:` permission blocks for 6 agent files that lacked them: ingenium-docs, ingenium-plan-file, ingenium-qa, ingenium-explore, ingenium-scout, ingenium-security-auditor. The 5 agents that already had `"*": "deny"` were already correct (ingenium-software-engineer, engineer-fast, engineer-premium, orchestrator, scrum).
+- **Why**: Prevents subagent leakage (OpenCode issue #6527) — ensures only explicitly listed agents are accessible via the `task` tool, and agents without any task permissions cannot spawn subagents.
+
 ## 2026-07-06 — Remove stale sec-ops/ directory
 
 - **Commit**: `35efa0a` (after)
@@ -448,3 +455,15 @@
   12. Updated security-auditor agent to remove GitHub-specific scan phases
   13. Updated test-self-improving.sh to remove deploy-specific tests
 - **Skill count**: Source: 45 (unchanged)
+
+## 2026-07-06 — 🔴 CRITICAL: added "*": "deny" to all agent task permission blocks
+
+- **Commit**: `b1b9bf4`
+- **Category**: security | agent
+- **Changes**:
+  1. Added "\*": "deny" as first entry in every agent's task: permission block
+  2. Without this, any mode: subagent agent leaks into every agent's task tool picker
+  3. This is a known OpenCode issue (#6527) — plan mode bypassed via subagents
+  4. Fixed in: scrum, orchestrator, software-engineer (all 3 variants)
+- **Files**: 5 agent files modified (scrum, orchestrator, software-engineer, software-engineer-fast, software-engineer-premium)
+- **Why**: Critical permission bug — missing `"*": "deny"` meant any `mode: subagent` agent leaked into every agent's task tool picker, allowing plan-mode bypass via subagents
