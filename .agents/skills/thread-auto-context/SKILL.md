@@ -33,30 +33,29 @@ When making actions that require external context (MCP servers available, API ke
 ```
 Session start
   │
-  ├─ .vscode/mcp.json has servers.thread? ──→ Done. Skip setup.
+  ├─ opencode.jsonc has "thread" provider? ──→ Done. Skip setup.
   │
-  ├─ .vscode/thread-bridge/bridge.py exists? ──→ Write mcp.json, verify server reachable, done.
+  ├─ ~/.config/opencode/bridge/thread_bridge/ exists? ──→ Add to opencode config, verify server reachable, done.
   │
    └─ Neither exists ──→ Full bootstrap (do NOT start server):
-        1. mkdir -p .vscode/thread-bridge/
+        1. mkdir -p ~/.config/opencode/bridge/thread_bridge/
         2. Copy 5 bridge files from the Thread repository source
-        3. python3 -m venv .vscode/thread-bridge/.venv
+        3. python3 -m venv ~/.config/opencode/bridge/thread_bridge/.venv
         4. Install requests into that venv
-        5. Write .vscode/mcp.json (MCP config for editors that support .vscode/)
-        6. Write Cline MCP config (global + workspace)
-        7. Check if server is reachable; if not, tell user how to start it
+        5. Add "thread" provider to opencode.jsonc (or .json)
+        6. Verify server is reachable; if not, tell user how to start it
 ```
 
 ### Step-by-Step Implementation
 
-**Step 1 — Create directory:**
+**Step 1 — Create OpenCode bridge directory:**
 ```bash
-mkdir -p .vscode/thread-bridge/thread_bridge/
+mkdir -p ~/.config/opencode/bridge/thread_bridge/
 ```
 
 **Step 2 — Create bridge files from the Thread repository source:**
 
-Copy the 5 bridge files from the Thread repository checkout into `.vscode/thread-bridge/thread_bridge/`:
+Copy the 5 bridge files from the Thread repository checkout into `~/.config/opencode/bridge/thread_bridge/`:
 
 | File | Source |
 |------|--------|
@@ -70,46 +69,39 @@ The files live in the Thread project source at the paths listed above. Copy them
 
 **Step 3 — Create venv and install dependencies:**
 ```bash
-python3 -m venv .vscode/thread-bridge/.venv
-.vscode/thread-bridge/.venv/bin/pip install requests>=2.31
+python3 -m venv ~/.config/opencode/bridge/thread_bridge/.venv
+~/.config/opencode/bridge/thread_bridge/.venv/bin/pip install requests>=2.31
 ```
 
 Use `python3` (system Python). If `python3` is not found, try `python`. On Windows, use `python` and `.venv\Scripts\pip.exe`.
 
-**Step 4 — Write `.vscode/mcp.json`:**
+**Step 4 — Add Thread to OpenCode configuration:**
 
-Build the absolute path to the workspace root (where `.vscode/` lives). Write:
+OpenCode uses a centralized provider registry via `opencode.jsonc` (or similar file in `.config/opencode/`). Add the Thread MCP server as a new provider:
 
 ```json
 {
-  "servers": {
+  "provider": {
+    "lmstudio": { ... },
     "thread": {
-      "type": "stdio",
-      "command": "<WORKSPACE_ROOT>/.vscode/thread-bridge/.venv/bin/python",
-      "args": ["-m", "thread_bridge.bridge"],
-      "cwd": "<WORKSPACE_ROOT>/.vscode/thread-bridge",
-      "env": {
-        "THREAD_SERVER_URL": "http://localhost:5000",
-        "THREAD_DEFAULT_SESSION": "<WORKSPACE_BASENAME>",
-        "THREAD_REQUEST_TIMEOUT": "10"
-      }
+      "npm": "@opencode-ai/thread-mcp",
+      "name": "Thread Context Server (local)",
+      "options": {
+        "baseURL": "http://localhost:5000"
+      },
+      "models": {}
     }
-  },
-  "inputs": []
+  }
 }
 ```
 
-Replace `<WORKSPACE_ROOT>` with the absolute path and `<WORKSPACE_BASENAME>` with the last component of the workspace path (e.g., `thread` from `/home/user/repos/thread`). Run `pwd` or `basename "$PWD"` to determine it.
+This registers Thread as an available MCP server globally for all OpenCode sessions. The bridge will be spawned when you first call a Thread tool.
 
-If `.vscode/mcp.json` already exists (with other servers), merge `servers.thread` into the existing `servers` — don't overwrite other servers. Keep existing `inputs`.
+On Windows, use the same structure — set `baseURL` to `"http://localhost:5000"` or your local server address.
 
-On Windows, the command path is `<WORKSPACE_ROOT>/.vscode/thread-bridge/.venv/Scripts/python.exe`.
+**Step 5 — Verify OpenCode MCP server is reachable:**
 
-**Step 5 — Verify server reachability (do NOT start server):**
-
-```bash
-curl -s http://localhost:5000/api/v1/health
-```
+OpenCode uses its own internal discovery mechanism. After adding the Thread provider to `opencode.jsonc`, verify by calling any Thread MCP tool (e.g., `thread_read_entries`). The bridge process will start automatically when a tool call is made.
 
 If `{"status":"ok",...}` returns — server is running. Done.
 
@@ -118,40 +110,29 @@ If connection refused or timeout, tell the user:
 > `docker run -d --name thread-server -p 5000:5000 -v thread_data:/app/data --restart unless-stopped thread-server`  
 > Or clone and run: `git clone https://github.com/jtmb/thread && cd thread && docker compose up -d`
 
-**Step 6 — Write Cline MCP config (if Cline extension is present):**
+**Step 6 — Add Thread to OpenCode's provider registry:**
 
-Check if Cline's global settings directory exists:
-```bash
-ls ~/.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json 2>/dev/null
-```
-
-If found, merge the Thread server into it. Read the file, add `"thread"` to `mcpServers`, and write back. Same config shape as the `.vscode/mcp.json` server block but the top-level key is `mcpServers` (not `servers`):
+Edit `~/.config/opencode/opencode.jsonc` (or similar file) and add a new "thread" provider:
 
 ```json
 {
-  "mcpServers": {
+  "provider": {
+    "lmstudio": { ... },
     "thread": {
-      "type": "stdio",
-      "command": "<WORKSPACE_ROOT>/.vscode/thread-bridge/.venv/bin/python",
-      "args": ["-m", "thread_bridge.bridge"],
-      "cwd": "<WORKSPACE_ROOT>/.vscode/thread-bridge",
-      "env": {
-        "THREAD_SERVER_URL": "http://localhost:5000",
-        "THREAD_DEFAULT_SESSION": "<WORKSPACE_BASENAME>",
-        "THREAD_REQUEST_TIMEOUT": "10"
-      }
+      "npm": "@opencode-ai/thread-mcp",
+      "name": "Thread Context Server (local)",
+      "options": {
+        "baseURL": "http://localhost:5000"
+      },
+      "models": {}
     }
   }
 }
 ```
 
-Preserve any other servers already in `mcpServers` — merge, don't overwrite.
+**Important:** The OpenCode MCP server is registered globally via `opencode.jsonc` in the user's home config directory. Do NOT create separate workspace-level files — Thread registration happens once and applies to all OpenCode sessions.
 
-Also write a workspace-level fallback at `.cline/mcp.json` (same content). This file lives at the workspace root and Cline merges it with the global config.
-
-If Cline's directory doesn't exist, just write `.cline/mcp.json` at the workspace root — Cline will use it when the extension is installed later.
-
-**Important:** The `.cline/mcp.json` workspace config goes at the workspace root (e.g., `/home/user/repos/thread/.cline/mcp.json`). Do NOT put it inside `.vscode/` or `.clinerules/`.
+If you want a different session name per project, set `THREAD_DEFAULT_SESSION` in this provider's env options (e.g., `"THREAD_DEFAULT_SESSION": "my-project"`).
 
 ## Automatic Behavior
 
@@ -165,11 +146,10 @@ If Cline's directory doesn't exist, just write `.cline/mcp.json` at the workspac
 I created `thread-dev` when `thread` was already configured — that was the bug. Don't do that.
 
 ### At Session Start
-1. Read `.vscode/mcp.json` — note the `THREAD_DEFAULT_SESSION` value in `env`
-2. If `.vscode/mcp.json` just got created (bootstrap), the bridge will auto-create the session on the first tool call. Skip to search.
-3. If already configured: call `thread_read_entries` with `sort: "desc"`, `limit: 10` to see recent entries
-4. Search past context relevant to the user's first question using `thread_search`
-5. Summarize the most relevant entries before answering
+1. Check if OpenCode is running (`$OPENCODE` env var or `.opencode/` directory)
+2. If already configured (opencode.jsonc has "thread" provider): call `thread_read_entries` with `sort: "desc"`, `limit: 10` to see recent entries
+3. Search past context relevant to the user's first question using `thread_search`
+4. Summarize the most relevant entries before answering
 
 ### During the Session — MANDATORY CHECKLIST
 
@@ -240,18 +220,7 @@ This prevents silent failures from disk-full conditions on resource-constrained 
 
 **This is NOT optional. If you reach session end and have not saved context — especially the full transcript — you have violated the protocol.**
 
-### Uploading Cline Conversation Transcripts
-
-When the user mentions Cline or at session end, upload Cline conversations automatically:
-
-1. **Find Cline sessions** — List `~/.cline/data/sessions/`. For each `{id}/` directory, read `{id}/{id}.json` (the session metadata).
-2. **Filter by workspace** — Only upload sessions whose `workspace_root` matches the current VS Code workspace root. If no `workspace_root` match, skip.
-3. **Upload metadata as entry** — Run `thread_create_entry` with the session's `prompt`, `model`, `started_at`, and `status`. Tags: `["cline", "metadata"]`. Priority: 4.
-4. **Upload messages as chunks** — Run `thread_upload_file` on `~/.cline/data/sessions/{id}/{id}.messages.json`. Tags: `["transcript", "cline", "conversation"]`. Priority: 3. The chunker extracts text, tool_use, and tool_result content blocks (thinking blocks are skipped).
-
-**Discovery command:** `ls ~/.cline/data/sessions/` then read `{id}/{id}.json` for each subdirectory to check `workspace_root`.
-
-### Uploading OpenCode Session Context — `/export`
+### OpenCode Session Export — `/export`
 
 When the user runs `/export` or says "export context", or at session end while running in OpenCode, capture the full session state and save it to Thread.
 
@@ -704,11 +673,13 @@ matching `TARGET_TAG`, and deletes them one by one.
 
 **Requirements:** `requests` library, `THREAD_API_TOKEN` env var.
 
-### VS Code Integration
-Once `.vscode/mcp.json` is written, the VS Code MCP extension automatically detects the config change and spawns the bridge process. No manual reload needed. If Thread tools don't appear within ~15 seconds, run the VS Code command `Developer: Reload Window`.
+### OpenCode Integration
+Once `opencode.jsonc` is updated with the "thread" provider, OpenCode automatically detects the configuration change and spawns the bridge process when needed (first Thread tool call). If Thread tools don't appear within ~15 seconds, check that:
+- The opencode server is running (`curl http://localhost:5000/api/v1/health`)  
+- The `.config/opencode/bridge/thread_bridge` directory exists with the 5 bridge files  
+- Reload the OpenCode connection (usually a VS Code "Reload Window" or similar restart)
 
-### Cline Integration
-Once the Cline MCP config is written (global settings and/or `.cline/mcp.json`), the user must **reload the Cline extension** for it to pick up the new server. Tell the user: "Reload the Cline extension (or the window) to activate the Thread MCP server." The Cline extension does NOT auto-detect config file changes — reload is manual.
+The OpenCode MCP provider system handles server lifecycle automatically — no manual reload of extensions needed.
 
 ## Session Names
 
