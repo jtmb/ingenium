@@ -33,13 +33,11 @@
 | `useful-tests` | Any `*.test.*`, `*_test.*`, `*.spec.*` file |
 | `gitignore` | Creating or editing `.gitignore` |
 | `github-actions-hardening` | Reviewing CI/CD security |
-| `github-actions-efficiency` | Auditing CI performance/cost |
 | `postgresql-optimization` | PostgreSQL-specific features, JSONB, arrays |
 | `code-review-checklist` | PR review, code quality audit |
 | `refactoring-recipes` | Improving code structure |
 | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep |
 | `regex-reference` | Writing or reviewing regular expressions |
-| `git-workflows` | Rebase, bisect, reflog, conventional commits |
 | `error-interpretation` | Understanding compiler/runtime errors |
 | `model-profiles` | Adapting prompts for Qwen/Gemma/DeepSeek |
 | `debugging-patterns` | Systematic debugging — bisection, log-driven, isolation |
@@ -60,7 +58,6 @@
 | `chrome-devtools` | Browser screenshots, performance, network |
 | `playwright-mcp` | Browser automation via Playwright |
 | `gh-cli` | GitHub CLI — PRs, issues, releases, search |
-| `github-issues` | Creating/updating GitHub issues |
 | `web-design-reviewer` | UI/UX inspection, responsive/accessibility |
 | `wsl-cleanup` | WSL2 disk cleanup — Docker prune, apt/pip/npm caches, journal vacuum, temp/tmp, snap revisions, model caches. 🔴 Excludes $HOME/repos |
 | `kaban-board` | Terminal Kanban board for AI agents — install, MCP server setup, CLI tasks, TUI navigation |
