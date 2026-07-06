@@ -189,7 +189,19 @@ This prevents silent failures from disk-full conditions on resource-constrained 
 
 ### At Session End — MANDATORY EXPORT
 
-**When the user says "thanks", "done", "that's all", "that worked", or similar wrap-up phrases, you MUST do ALL of the following:**
+**When the user says "thanks", "done", "that's all", "that worked", or similar wrap-up phrases, you MUST do ALL of the following.**
+
+#### 🔴 HARD RULE — Full Transcript Export Required
+
+**At session end, you MUST write the full conversation transcript to a file and upload it to Thread. This is not optional. This applies to ALL sessions — OpenCode, Copilot, Cline, or any other platform.**
+
+**Workflow:**
+1. Compose a markdown transcript covering every turn of the conversation — user's intent, assistant's actions, key decisions, file manifest, commit hashes, and any important context
+2. Write it to `/tmp/opencode/session-{YYYY-MM-DD}-transcript.md`
+3. Call `thread_upload_file` on that path with Tags: `["export", "transcript", "full-session"]`. Priority: 9.
+4. Then proceed with the remaining steps below
+
+**This ensures every session is fully recoverable from Thread even if the platform's own chat history is lost.**
 
 1. **Save session summary** — `thread_create_entry` with the session's key changes, decisions, and outcomes. Priority: 7. Tags: `["export", "session-state", "opencode"]`.
 
@@ -204,6 +216,7 @@ This prevents silent failures from disk-full conditions on resource-constrained 
    Session: {workspace-name}
 
    Entries created/updated:
+   0. Full Transcript — tags: ["export", "transcript", "full-session"]
    1. Session Summary — tags: ["export", "session-state", "opencode"]
    2. Decisions — tags: ["export", "decisions", "opencode"]
    3. Git State — tags: ["export", "git-status", "opencode"]
@@ -215,7 +228,7 @@ This prevents silent failures from disk-full conditions on resource-constrained 
 
 5. **Check for prior exports first** — Before creating, run `thread_search` with `"export" AND "opencode"`. If entries already exist, update them via `thread_update_entry` rather than creating duplicates.
 
-**This is NOT optional. If you reach session end and have not saved context, you have violated the protocol.**
+**This is NOT optional. If you reach session end and have not saved context — especially the full transcript — you have violated the protocol.**
 
 ### Uploading Copilot Conversation Transcripts
 
@@ -359,6 +372,8 @@ Once the Cline MCP config is written (global settings and/or `.cline/mcp.json`),
 - `summary` — session summaries
 - `export` — `/export` snapshots of git state, decisions, and counts
 - `reference` — documentation, spec links, API references
+- `transcript` — full conversation transcript exports
+- `full-session` — complete session context dumps
 - Project-specific tags as appropriate
 
 ## Never
