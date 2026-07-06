@@ -268,7 +268,7 @@ clean_docker() {
 # ── clean_docker_aggressive — docker system prune -a --volumes (⚠️ extra caution) ──
 # ALSO removes all unused images (not just dangling), all stopped containers
 clean_docker_aggressive() {
-    local name="Docker aggressive prune (all unused images)"
+    local name="Docker aggressive prune"
     if ! command -v docker &>/dev/null; then
         warn "Docker not installed. Skipping ${name}."
         return 0
@@ -779,7 +779,8 @@ clean_snap() {
     local snap_cache="/var/lib/snapd/cache"
     if [[ -d "$snap_cache" ]]; then
         local cache_size
-        cache_size=$(du -sh "$snap_cache" 2>/dev/null | cut -f1 || echo "unknown")
+        cache_size=$(du -sh "$snap_cache" 2>/dev/null | cut -f1) || true
+        if [[ -z "$cache_size" ]]; then cache_size="unknown"; fi
         log "Snap cache directory size: ${cache_size}"
     fi
 
@@ -882,7 +883,8 @@ clean_model_caches() {
     log "Found ${#cache_labels[@]} model cache location(s):"
     for i in "${!cache_labels[@]}"; do
         local size
-        size=$(du -sh "${cache_paths[$i]}" 2>/dev/null | cut -f1 || echo "unknown")
+        size=$(du -sh "${cache_paths[$i]}" 2>/dev/null | cut -f1) || true
+        if [[ -z "$size" ]]; then size="unknown"; fi
         echo "  • ${cache_labels[$i]}: ${cache_paths[$i]} (${size})"
     done
     echo ""
@@ -912,7 +914,8 @@ clean_model_caches() {
         fi
 
         local size
-        size=$(du -sh "$path" 2>/dev/null | cut -f1 || echo "?")
+        size=$(du -sh "$path" 2>/dev/null | cut -f1) || true
+        if [[ -z "$size" ]]; then size="?"; fi
         echo ""
         if ! confirm "  Clean ${label} cache (${size}) at ${path}?"; then
             log "  Skipped ${label}."
