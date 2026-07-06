@@ -21,7 +21,7 @@ models:
 
 agents:
   primary:
-    ingenium-scrum:            premium    # Planning needs deep reasoning
+    ingenium-planner:            premium    # Planning needs deep reasoning
     ingenium-orchestrator:     capable    # Coordination needs speed
 
   execution:
@@ -42,7 +42,7 @@ agents:
 # ── Reasoning Effort Overrides ───────────────────────
 
 reasoning:
-  ingenium-scrum:                        xhigh
+  ingenium-planner:                        xhigh
   ingenium-orchestrator:                 high
   ingenium-software-engineer:            high
   ingenium-software-engineer-fast:       medium

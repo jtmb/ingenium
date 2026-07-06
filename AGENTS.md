@@ -1,6 +1,6 @@
 # AGENTS.md — Skill System Protocol for gh-llm-bootstrap
 
-This is the **bootstrap source repo** for the Ingenium skill system. Skills live in `.agents/skills/` — all 45 are deployed via `bootstrap.sh` from the repo root. Edit source files here.
+This is the **bootstrap source repo** for the Ingenium skill system. Skills live in `.agents/skills/` — all 43 are deployed via `bootstrap.sh` from the repo root. Edit source files here.
 
 ## Agent Pipeline (this repo only)
 
@@ -8,7 +8,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 
 | Agent | Type | Model | Access | Purpose |
 |-------|------|-------|--------|---------|
-| `ingenium-scrum` | Primary | DeepSeek V4 Pro | Read-only | Scrum master — plans sprints, decomposes feature requests, populates kaban board |
+| `ingenium-planner` | Primary | DeepSeek V4 Pro | Read-only | Planner — plans sprints, decomposes feature requests, populates kaban board |
 | `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Full R/W | Executor — writes code, runs commands, drives work |
 | `ingenium-explore` | Subagent | V4 Flash | Read-only | Codebase search (paid, max reasoning) |
 | `ingenium-scout` | Subagent | qwopus (LM Studio) | Read-only | Thread/RAG context — search past decisions |
@@ -17,7 +17,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 | `ingenium-security-auditor` | Subagent | V4 Flash | Bash + read-only | Security audit + git-history leak scanning |
 | `ingenium-software-engineer` | Subagent | V4 Flash (Zen free) | Read-only | Design review, implementation analysis, technical recommendations |
 
-**Workflow**: Tab to scrum master for sprint planning/research → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
+**Workflow**: Tab to planner for sprint planning/research → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
 
 > 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
 
@@ -38,7 +38,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 | You're about to... | Check this skill |
 |-------------------|-----------------|
 | Edit a source file | Framework skill (`nextjs`, `python`, `go`, `rust`, `typescript-standalone`) |
-| Run a terminal command | `local-model-commands` — **no `&`, no infinite-wait** |
+| Run a terminal command | `local-models` — **no `&`, no infinite-wait** |
 | Create a new file/service | `project-structure` |
 | Write/run tests | `useful-tests` |
 | Edit Docker/K8s | `containers` / `kubernetes` |
@@ -46,7 +46,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 
 ### Mandatory Skills (load before ANY action)
 
-`generic-conventions` `model-profiles` `local-model-commands` `debugging-patterns` `useful-tests` `project-structure` `error-interpretation` `self-correction-patterns` `skill-load` `api-design` `shell-scripts` `sql-database` `typescript-standalone` `agent-pipelines` `gitignore` `postgresql-optimization` `code-review-checklist` `refactoring-recipes` `cli-toolkit` `regex-reference` `web-design-reviewer` `chrome-devtools` `playwright-mcp`
+`generic-conventions` `local-models` `debugging-patterns` `useful-tests` `project-structure` `error-interpretation` `self-correction-patterns` `skill-load` `api-design` `shell-scripts` `sql-database` `typescript-standalone` `agent-pipelines` `gitignore` `postgresql-optimization` `code-review-checklist` `refactoring-recipes` `cli-toolkit` `regex-reference` `web-design-reviewer` `chrome-devtools` `playwright-mcp`
 
 ---
 
@@ -54,7 +54,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 
 Use `@.agents/SKILL-CATALOG.md` for the full catalog with invocation patterns and framework/domain/task tables. Load on demand — do not preload.
 
-`opencode.json` loads 3 core skills automatically: `generic-conventions`, `repo-context`, `model-profiles`. All others load via the `skill` tool when matched.
+`opencode.json` loads 3 core skills automatically: `generic-conventions`, `repo-context`, `local-models`. All others load via the `skill` tool when matched.
 
 ---
 
