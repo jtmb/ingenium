@@ -1,3 +1,11 @@
+## 2026-07-06 — Remove stale sec-ops/ directory
+
+- **Commit**: `35efa0a` (after)
+- **Category**: cleanup
+- **Changes**: Removed `sec-ops/` directory — an orphaned variant structure containing stale agent definitions (ingenium-docs, ingenium-qa, ingenium-explore, ingenium-scout, ingenium-security-auditor under `execution/`, `research/`, `security/` subdirectories).
+- **Audit results**: Four grep searches confirmed zero stale references to `software-dev`, `dev-ops`, `deploy/`, `Copilot`, or `.github/` patterns across source files.
+- **Why**: Leftover from old variant structure that had been superseded by the main `.opencode/agents/` layout.
+
 ## 2026-07-04 — Thread bootstrap + OpenCode doc compliance
 
 - **Thread bootstrap** — Updated `.vscode/mcp.json` `THREAD_DEFAULT_SESSION` from `"default"` to `"gh-llm-bootstrap"`. Created root `opencode.json` with `mcp.thread` entry. Verified server reachable.
