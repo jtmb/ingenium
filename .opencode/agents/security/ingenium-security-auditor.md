@@ -7,6 +7,8 @@ reasoningEffort: "high"
 permission:
   edit: deny
   bash: allow
+  task:
+    "*": "deny"                           # No subagent delegation allowed
 skills:
   - code-review-checklist
   - generic-conventions

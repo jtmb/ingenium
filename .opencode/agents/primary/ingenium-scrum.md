@@ -13,6 +13,7 @@ permission:
   write: deny
   bash: deny
   task:
+    "*": "deny"                           # 🔴 Catch-all deny — prevents execution agent leakage
     "ingenium-explore": "allow"
     "ingenium-scout": "allow"
     "ingenium-security-auditor": "allow"

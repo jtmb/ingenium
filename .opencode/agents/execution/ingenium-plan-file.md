@@ -7,6 +7,8 @@ permission:
   read: allow
   write: allow
   edit: allow
+  task:
+    "*": "deny"                           # No subagent delegation allowed
 skills: []
 ---
 

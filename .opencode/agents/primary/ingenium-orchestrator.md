@@ -14,6 +14,7 @@ permission:
   list: allow
   bash: allow
   task:
+    "*": "deny"                           # 🔴 Catch-all deny — explicit allow list only
     "ingenium-explore": "allow"
     "ingenium-scout": "allow"
     "ingenium-qa": "allow"
