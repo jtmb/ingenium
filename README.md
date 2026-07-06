@@ -184,6 +184,10 @@ graph TD
     L --> B
 ```
 
+**Agent pipeline** — 11 custom OpenCode agents (2 primary, 9 subagents) with **planner-is-read-only** architecture. The planner (`@ingenium-planner`) ONLY spawns research agents (explore, scout, security-auditor) and populates the kaban board. The orchestrator (`@ingenium-orchestrator`) executes plans via **kaban board integration** — tasks flow from `todo` → `in-progress` → `review` → `done` with kaban MCP tools. All agents have explicit permissions with `"*": "deny"` on task blocks. See [`docs/agents.md`](docs/agents.md) for the full agent architecture.
+
+**Multi-model software engineer** — Three tiers: `-fast` (V4 Flash, medium reasoning), default (V4 Flash, high), `-premium` (V4 Pro, xhigh). Model assignments centralized in `.agents/models.yaml`.
+
 | Layer | Location | Trigger | Contains |
 |-------|----------|---------|----------|
 | **Core** | `.agents/skills/generic-conventions/SKILL.md` | File-type match | Docs sync, code comments, testing, DRY — framework-agnostic |

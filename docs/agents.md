@@ -2,7 +2,7 @@
 
 ## Overview
 
-Nine agents total: 2 primary, 7 subagents. The **planner** researches and produces plans (read-only), populating the kaban board with tasks. The **orchestrator** coordinates execution — it NEVER writes code directly, always delegating to subagents. Six specialized subagents handle search, context, implementation, review, documentation, and security.
+Eleven agents total: 2 primary, 9 subagents. The **planner** researches and produces plans (read-only), populating the kaban board with tasks. The planner ONLY spawns research subagents (explore, scout, security-auditor) — it never executes work directly. The **orchestrator** coordinates execution — it NEVER writes code directly, always delegating to subagents. Nine specialized subagents handle search, context, implementation (3 tiers), review, documentation, plan management, and security.
 
 ```mermaid
 flowchart TB
@@ -59,10 +59,12 @@ flowchart TB
 | **ingenium-plan-file** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (plan.md only) | Single-purpose — manages `plan.md` at project root. Created/updated/deleted only by planner instruction |
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `lmstudio/qwopus3.5-9b-coder` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
-| **ingenium-software-engineer** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read/Write | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
+| **ingenium-software-engineer** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read/Write (`edit: allow, write: allow`) | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
+| **ingenium-software-engineer-fast** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
+| **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes, performance-critical code |
 | **ingenium-qa** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Edit (`edit: allow`) | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code |
-| **ingenium-docs** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Write docs | Documentation + skill updates + learnings.md entries |
-| **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only | Security audit + git-history leak scanning |
+| **ingenium-docs** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates + learnings.md entries |
+| **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | Security audit + git-history leak scanning |
 
 ---
 
@@ -155,7 +157,7 @@ flowchart LR
 | **Access** | Read-only |
 | **Invoked by** | User (Tab key) |
 | **Triggers** | User request: "Plan X", "Analyze Y", "Research Z" |
-| **Can spawn** | `@ingenium-explore`, `@ingenium-scout`, `@ingenium-security-auditor`, `@ingenium-docs`, `@ingenium-plan-file` |
+| **Can spawn** | `@ingenium-explore`, `@ingenium-scout`, `@ingenium-security-auditor` (research agents only) |
 
 | Phase | Action | Delegates to |
 |-------|--------|-------------|
@@ -175,6 +177,7 @@ flowchart LR
 The `question` tool is used for structured choice questions; freeform text for open-ended ones. The agent waits for user responses before proceeding — no research happens before probe completion.
 
 **Planner HARD RULEs:**
+- 🔴 **You Are a Planner, NOT an Executor** — You ONLY spawn READ-ONLY research agents (explore, scout, security-auditor). You NEVER write code, edit files, or run implementation agents.
 - 🔴 Never search code, grep, or glob directly — always delegate to explore
 - 🔴 Never access general subagent or circumvent read-only restrictions
 - 🔴 **Ask Before You Plan** — Never spawn research subagents without first asking clarifying questions. Ambiguous requests must be resolved before delegation
@@ -191,7 +194,7 @@ The `question` tool is used for structured choice questions; freeform text for o
 | **Access** | Full R/W |
 | **Invoked by** | User (Tab key) |
 | **Triggers** | User: "Execute", "Go ahead", "Implement", or provides a plan |
-| **Can spawn** | ALL 9 subagents (explore, scout, security-auditor, software-engineer, software-engineer-fast, software-engineer-premium, qa, docs, plan-file) |
+| **Can spawn** | ALL 9 subagents (explore, scout, security-auditor, software-engineer, software-engineer-fast, software-engineer-premium, qa, docs, plan-file) plus the Multi-Model software engineer variants (fast, premium) |
 | **Direct bash** | ONLY: `git add/commit/push`, `git rev-parse`, test/build verification |
 
 | Phase | Action | Delegates to |
@@ -317,7 +320,7 @@ Model assignments are centralized in `.agents/models.yaml` — the human-editabl
 | Property | Value |
 |----------|-------|
 | **Model** | DeepSeek V4 Flash (OpenCode Zen free) |
-| **Access** | Write docs (`edit: allow`) |
+| **Access** | Edit + Write (`edit: allow, write: allow, bash: deny`) |
 | **Invoked by** | Orchestrator only |
 | **Triggers** | 🔴 After EVERY code change (mandatory, never skipped) |
 
@@ -347,7 +350,7 @@ Model assignments are centralized in `.agents/models.yaml` — the human-editabl
 | Property | Value |
 |----------|-------|
 | **Model** | DeepSeek V4 Flash |
-| **Access** | Bash + read-only |
+| **Access** | Bash + read-only (`write: deny`) |
 | **Invoked by** | Planner, Orchestrator, or user `@` mention |
 | **Triggers** | "Audit X", "Check for secrets", "Security review of Y" |
 
@@ -431,7 +434,7 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Read/Write | orchestrator only |
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |
 | ingenium-qa | `@ingenium-qa` | Edit (`edit: allow`) | orchestrator only |
-| ingenium-docs | `@ingenium-docs` | Write docs | orchestrator only |
+| ingenium-docs | `@ingenium-docs` | Edit + Write (`edit: allow, write: allow, bash: deny`) | orchestrator only |
 | ingenium-plan-file | `@ingenium-plan-file` | Read/Write (plan.md only) | planner only |
 
 ## How to Use the Pipeline
