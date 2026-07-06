@@ -41,7 +41,7 @@
 - **Before**: `23293cb`
 - **After**: `c7aebc4`
 - **Added**:
-  - `ingenium-planner.md` — Primary, V4 Pro, read-only. Mastermind that plans and delegates research.
+  - `ingenium-scrum.md` — Primary, V4 Pro, read-only. Scrum master that plans sprints and populates kaban board.
   - `ingenium-orchestrator.md` — Primary, V4 Flash (paid), full R/W. Executor that launches all subagents.
 - **Renamed**:
   - `code-reviewer.md` → `ingenium-review.md` (Zen Flash, edit: allow, +useful-tests skill)
@@ -369,4 +369,54 @@
   3. Demoted npx/npm methods to second-tier with broken-note caveat
   4. Added full **§2 Post-Installation Verification** section with 10-test smoke suite covering: init, add (flags: -c, -a, -D), list (--column filter, --json), move+assign, done+status, archive+search, empty column edge case, re-init idempotency, TUI launch
   5. Switched MCP config from `["npx", "-y", ...]` to `["kaban", "mcp"]` with caveat note
-  6. Synced to all 3 deploy variants
+   6. Synced to all 3 deploy variants
+
+## 2026-07-06 — kaban-integrated agent pipeline
+
+- **Commit**: (will be added after commit)
+- **Category**: agent | skill | architecture
+- **Changes**:
+  1. Renamed `ingenium-planner` → `ingenium-scrum` — scrum master agent with kaban board population
+  2. Added kaban-board skill and 5 MCP tools to scrum agent (add_task, add_task_checked, add_dependency, status, init)
+  3. Added 🔴 HARD RULE to scrum: plan tasks go on kaban board with subagent assignments
+  4. Added FEATURE REQUEST → KABAN TASK FLOW section to scrum agent
+  5. Added kaban-board skill to orchestrator, added 10-step kaban workflow section
+  6. Deprecated todowrite as primary work tracker — kaban is authoritative
+  7. Added kaban tracking column to orchestrator-primer delegation table + HARD RULE #4
+  8. Added kaban-board cross-reference to agent-pipelines SKILL.md (pipeline → column mapping)
+  9. Updated docs/agents.md and docs/ARCHITECTURE.md with kaban flow
+  10. Synced all changes to deploy variants (software-dev, dev-ops, sec-ops)
+- **Files changed**: 28+ files across source and deploy variants
+- **Skill count**: Unchanged (45 source, 45/44/50 deploy)
+
+## 2026-07-06 — todowrite mirror alongside kaban board workflow
+
+- **Commit**: `867c7bd` (after)
+- **Category**: agent | config
+- **Changes**: Updated `ingenium-orchestrator.md` with todowrite mirror integration:
+  1. **Permission block**: Added `todo: allow` to YAML frontmatter (line 8) so the tool is permitted for use.
+  2. **Kaban Workflow steps updated** (4 steps modified):
+     - Step 1: Added "call todowrite to add it as in_progress" after kaban_get_next_task
+     - Step 3: Added "Update todowrite to mark in_progress" after kaban_move_task
+     - Step 6: Added "Mark the task as pending (for QA review) in todowrite" after kaban_move_task review
+     - Step 7: Added "Mark completed in todowrite" after kaban_complete_task
+  3. **Anti-Patterns table**: Added "I forgot to update todowrite" row — wrong behavior: only updating kaban, not todowrite. Correct: update BOTH at each transition.
+  4. **Deploy sync**: Copied to all 3 deploy variants (software-dev, dev-ops, sec-ops).
+- **Why**: The orchestrator was only updating kaban but never touching todowrite, making work invisible in OpenCode's native todo UI. Adding todowrite calls as mirrors at each transition point ensures dual-visibility without adding steps.
+
+## 2026-07-06 — agent pipeline improvements: probing, todowrite, multi-model
+
+- **Commit**: (to be added after commit — docs update for Phases 0-2)
+- **Category**: agent | skill | architecture
+- **Changes**:
+  1. Added §1.5 "Probe" step to scrum agent (9 required questions, validation checks, question tool)
+  2. Added 🔴 HARD RULE "Ask Before You Plan" to scrum agent
+  3. Added "Risks" as required plan section with template (likelihood/impact/mitigation)
+  4. Added `todo: allow` permission to orchestrator + todowrite mirror in all 4 workflow transitions
+  5. Added anti-patterns row: "forgot to update todowrite"
+  6. Created `.opencode/agents/execution/ingenium-software-engineer-fast.md` (deepseek-v4-flash, medium)
+  7. Created `.opencode/agents/execution/ingenium-software-engineer-premium.md` (deepseek-v4-pro, xhigh)
+  8. Updated orchestrator delegation table with model tier guidance
+  9. Created `.agents/models.yaml` centralized model config convention
+  10. Fixed 4 QA bugs: in_progress column name across 3 files, orphaned numbering, mcp permissions, self-contradiction
+- **Skill count**: Unchanged (45 source, 45/44/50 deploy)
