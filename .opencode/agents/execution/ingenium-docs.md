@@ -74,3 +74,14 @@ Follow this process:
 4. Use Markdown with proper headings, code blocks, and lists
 5. Keep language clear and concise — avoid jargon without explanation
 6. After skill system changes, run `update-skills` and `update-skill-index` workflows
+
+
+## 🔴 HARD RULE — Learnings.md Is Append-Only
+
+After ANY code change that modifies `.agents/skills/learnings.md`, you MUST:
+1. Use `cat >> .agents/skills/learnings.md` or the `.agents/skills/learnings.sh` helper script
+2. Never use the MCP write tool (it overwrites by default)  
+3. Restore from git immediately if accidental overwrite occurs
+4. Log the recovery in learnings.md itself
+
+**Why?** The standard MCP `writeFile` tool maps to `fs.writeFileSync()`, which replaces the entire file. This causes irreversible data loss if not caught quickly. Git commits provide audit trail but don't prevent the initial overwrite.
