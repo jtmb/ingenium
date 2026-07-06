@@ -333,6 +333,347 @@ If none match, this is NOT an OpenCode session — do NOT export. If it IS an Op
 
 **Works with ongoing sessions:** The export captures the current state even if the session isn't complete. Multiple exports across the same session are fine — each one saves the cumulative state.
 
+### Uploading Documentation Websites to Thread
+
+**When to trigger:**
+- User says "index these docs", "upload documentation to Thread", "crawl this site", "ingest these docs"
+- User provides a URL containing `/docs/`, `/documentation/`, `/learn/`, `/reference/`, `/api/`, or similar doc paths and asks to save to Thread
+- User provides a specific doc site root URL (e.g., `https://docs.example.com`) and wants all pages in Thread
+
+**Site-agnostic design:** This workflow contains NO site-specific selectors, API paths, or parsing rules. It discovers and fetches using universal standards: `robots.txt`, XML sitemaps, `llms.txt`, HTML `<link>` tags, content negotiation, `.md` suffix probing, and generic `<article>`/`<main>` extraction. It works with any documentation framework — Docusaurus, Starlight, Fumadocs, Nextra, Mintlify, MkDocs, ReadTheDocs, GitBook, or custom.
+
+#### 🔴 HARD RULE — Safety Constraints
+
+1. **Never scrape auth-gated content** — If a page returns 401/403 or redirects to a login page, skip it. Do NOT attempt credential-based access.
+2. **Respect `robots.txt`** — Read `/robots.txt` at the site root. If `Crawl-delay: N` is present, wait `N+1` seconds between requests. Respect `Disallow` rules.
+3. **Rate-limit aggressively** — Add 1-2s jitter (`sleep $((1 + RANDOM % 2))`) between every page fetch. On 429 responses, back off exponentially (2s, 4s, 8s, max 30s). Never exceed 200 pages without user confirmation.
+4. **No site-specific code** — DO NOT hardcode patterns like `github.com/en/free-pro-team@latest` or `nextjs.org/docs/app`. Everything must be discovered dynamically from the target site.
+5. **Prioritize native markdown over HTML** — Always try API-based markdown endpoints, `.md` suffixes, and `llms.txt` before falling back to HTML extraction. Clean markdown is more reliable and produces better chunks.
+
+#### Phase 1 — Discovery: Build the URL List
+
+Try these discovery methods in strict order. Stop when one succeeds (returns 10+ valid doc URLs).
+
+**Method A — `/llms.txt` (preferred)**
+
+Check `https://{site}/llms.txt` and `https://{site}/.well-known/llms.txt`. Parse the markdown list format:
+
+```bash
+# Fetch llms.txt
+curl -sSfL "https://example.com/llms.txt" 2>/dev/null || curl -sSfL "https://example.com/.well-known/llms.txt"
+
+# Extract all links — lines starting with "- [" containing (url)
+# Format: - [Title](url): Description
+# Use grep to extract URLs
+curl -sSfL "https://example.com/llms.txt" 2>/dev/null | grep -oP '(?<=\()https?://[^)]+' || true
+```
+
+If successful, parse the URLs. Filter to doc paths. Deduplicate.
+
+**Method B — XML sitemaps**
+
+Check `/robots.txt` for `Sitemap:` directives, then check common sitemap paths:
+
+```bash
+# Check robots.txt for Sitemap directives
+curl -sSfL "https://example.com/robots.txt" 2>/dev/null | grep -i '^Sitemap:' | sed 's/^Sitemap:\s*//i' || true
+
+# Check standard sitemap paths
+for path in /sitemap.xml /sitemap_index.xml /sitemaps/sitemap.xml; do
+  curl -sSfL "https://example.com${path}" -o "/tmp/opencode/sitemap-$(basename ${path})" 2>/dev/null && break
+done
+
+# Parse sitemap XML — extract all <loc> entries
+# For sitemap indexes, recurse into child sitemaps
+python3 -c "
+import xml.etree.ElementTree as ET, sys
+def extract(f):
+    tree = ET.parse(f)
+    root = tree.getroot()
+    ns = {'s': 'http://www.sitemaps.org/schemas/sitemap/0.9'}
+    locs = root.findall('.//s:loc', ns) or root.findall('.//loc')
+    for l in locs:
+        url = l.text.strip()
+        if url.endswith('.xml'):  # child sitemap index
+            import urllib.request
+            resp = urllib.request.urlopen(url)
+            extract(resp)
+        else:
+            print(url)
+extract('/tmp/opencode/sitemap.xml')
+" 2>/dev/null || true
+```
+
+Filter URLs to the doc section: keep paths containing `/docs/`, `/en/`, `/documentation/`, `/learn/`, `/reference/`, `/api/`, or matching the entry point's path prefix.
+
+**Method C — Sitemap markdown index**
+
+Some sites (Next.js, Mintlify) serve a human-readable sitemap in markdown:
+
+```bash
+curl -sSfL "https://example.com/docs/sitemap.md" 2>/dev/null || curl -sSfL "https://example.com/sitemap.md" 2>/dev/null
+```
+
+Parse links the same way as `llms.txt`.
+
+**Method D — API-based discovery**
+
+Check for API endpoints that list pages. Use by probing known patterns:
+
+```bash
+# GitHub Docs pattern
+curl -sSfL "https://docs.github.com/api/pagelist/en/free-pro-team@latest" 2>/dev/null
+
+# Generic — check <head> for alternate link patterns
+webfetch "https://docs.example.com/en" | grep -oP 'rel="alternate"[^>]*href="[^"]*"' | grep -oP 'href="([^"]+)"' | head -20
+```
+
+**Method E — Recursive navigation crawl (last resort)**
+
+If no sitemap or API exists, `webfetch` the entry page and extract all internal links:
+
+1. `webfetch("https://example.com/docs")` with `format: "html"`
+2. Extract all `<a href="...">` links pointing to the same domain
+3. Filter to doc paths (same prefix as entry point)
+4. Recursively follow discovered pages up to depth 2
+5. Stop when no new pages found or 200 page limit reached
+
+**Post-discovery:** Save the URL list for dedup and progress tracking.
+
+```bash
+# Save URL list to file
+wc -l /tmp/opencode/doc-urls.txt
+head -5 /tmp/opencode/doc-urls.txt
+```
+
+#### Phase 2 — Fetch Content (per URL, markdown-first)
+
+For each URL in the list, try content fetch strategies in this order:
+
+**Strategy 1 — API markdown endpoint (GitHub Docs pattern)**
+
+```bash
+# Check for <link rel="alternate" type="text/markdown"> in page <head>
+# Fetch HTML head, extract the markdown API URL
+page_html=$(webfetch "${url}" format:"html" 2>/dev/null)
+md_url=$(echo "$page_html" | grep -oP 'type="text/markdown"[^>]*href="([^"]+)"' | grep -oP 'href="([^"]+)"' | sed 's/href="//;s/"//' | head -1)
+
+if [ -n "$md_url" ]; then
+  # Handle relative URLs
+  full_md_url="${url}${md_url}"  # or use proper URL resolution
+  content=$(webfetch "${full_md_url}" format:"text" 2>/dev/null)
+fi
+```
+
+**Strategy 2 — `.md` suffix (Next.js Docs pattern)**
+
+```bash
+md_content=$(webfetch "${url}.md" format:"markdown" 2>/dev/null)
+has_content=$(echo "$md_content" | wc -c)
+# If content is non-trivial and not an error page, use it
+```
+
+**Strategy 3 — `Accept: text/markdown` content negotiation (Next.js pattern)**
+
+This requires `curl` with a custom `Accept` header:
+
+```bash
+content=$(curl -sSfL -H "Accept: text/markdown" "${url}" 2>/dev/null)
+# If content starts with # (markdown heading), it's valid markdown
+```
+
+**Strategy 4 — Fetch with `webfetch` default markdown conversion**
+
+```bash
+content=$(webfetch "${url}" format:"markdown" 2>/dev/null)
+```
+
+**Strategy 5 — HTML extraction fallback**
+
+```bash
+# Fetch as HTML and extract readable content
+html=$(webfetch "${url}" format:"html" 2>/dev/null)
+
+# Extract <article> or <main> or fallback to entire body
+clean_html=$(echo "$html" | python3 -c "
+import sys, re
+html = sys.stdin.read()
+# Extract article or main content
+for tag in ['article', 'main', '[role=main]', 'body']:
+    match = re.search(rf'<{tag}[^>]*>(.*?)</{tag}>', html, re.DOTALL)
+    if match:
+        sys.stdout.write(match.group(1))
+        sys.exit(0)
+sys.stdout.write(html)
+" 2>/dev/null)
+
+# Remove nav, header, footer, aside, script, style
+clean_html=$(echo "$clean_html" | python3 -c "
+import sys, re
+html = sys.stdin.read()
+for tag in ['nav', 'header', 'footer', 'aside', 'script', 'style', 'noscript']:
+    html = re.sub(rf'<{tag}[^>]*>.*?</{tag}>', '', html, flags=re.DOTALL)
+sys.stdout.write(html)
+")
+
+# Convert headings to markdown format (h1→#, h2→##, etc.)
+clean_html=$(echo "$clean_html" | python3 -c "
+import sys, re
+html = sys.stdin.read()
+for i in range(6, 0, -1):
+    html = re.sub(rf'<h{i}[^>]*>(.*?)</h{i}>', '#' * i + r' \1', html, flags=re.DOTALL)
+sys.stdout.write(html)
+")
+
+content=$(webfetch format:"text" 2>/dev/null <<< "$clean_html")
+```
+
+**After each page fetch,** append to the combined markdown file:
+
+```bash
+# Append page content with heading anchor
+{
+  echo ""
+  echo "## ${page_title:-Untitled}"
+  echo ""
+  echo "_Source: ${url}_"
+  echo ""
+  echo "${content}"
+} >> /tmp/opencode/site-docs-${site_name}.md
+
+# Track progress
+echo "Fetched ${current}/${total}: ${url}"
+sleep $((1 + RANDOM % 2))  # Polite delay
+```
+
+#### Phase 3 — Upload to Thread
+
+**Option A — Combined markdown file (recommended for 50+ pages)**
+
+Write all pages to a single markdown file with `## Title` per page, then upload in one call:
+
+```bash
+# Upload the combined file — server chunks by ## headings
+thread_upload_file \
+  file_path:"/tmp/opencode/site-docs-${site_name}.md" \
+  tags:"docs-import,${site_name_tag}" \
+  priority:5
+```
+
+Each `##` heading becomes one Thread entry. The `_Source: URL_` line after each heading ensures every entry traces back to its source.
+
+**Option B — Bulk entries (recommended for <50 pages with per-entry control)**
+
+For smaller sites where you want per-entry tags or priorities:
+
+```bash
+# Collect entries in batches of 100
+entries_batch=()
+while IFS= read -r page; do
+  # Fetch content (try markdown-first strategies)
+  content=$(webfetch "${page}" format:"markdown" 2>/dev/null)
+  title=$(echo "$content" | head -1 | sed 's/^# //')
+  
+  entries_batch+=("{\"content\": \"# ${title}\n\n_Source: ${page}_\n\n${content}\", \"priority\": 5, \"tags\": [\"docs-import\", \"${site_name_tag}\"]}")
+  
+  if [ ${#entries_batch[@]} -ge 100 ]; then
+    # Flush batch
+    thread_bulk_create_entries entries:"[${entries_batch[*]}]"
+    entries_batch=()
+  fi
+done < /tmp/opencode/doc-urls.txt
+
+# Flush remaining
+if [ ${#entries_batch[@]} -gt 0 ]; then
+  thread_bulk_create_entries entries:"[${entries_batch[*]}]"
+fi
+```
+
+**Option C — Per-page entries (recommended for <20 pages or high-value pages)**
+
+For carefully curated imports where each page deserves attention:
+
+```bash
+while IFS= read -r page; do
+  content=$(webfetch "${page}" format:"markdown" 2>/dev/null)
+  title=$(echo "$content" | head -1 | sed 's/^# //')
+  
+  thread_create_entry \
+    content:"# ${title}\n\n_Source: ${page}_\n\n${content}" \
+    tags:"[\"docs-import\", \"${site_name_tag}\"]" \
+    priority:5
+done < /tmp/opencode/doc-urls.txt
+```
+
+#### Phase 4 — Verify and Report
+
+After upload, verify the results and report to the user:
+
+```bash
+# Report summary
+echo "=== Documentation Import Complete ==="
+echo "Site: ${site_url}"
+echo "Pages found: ${total_discovered}"
+echo "Pages fetched: ${total_fetched}"
+echo "Entries created: ${entries_created}"
+echo "Upload method: ${method_used}"
+echo "Tags: docs-import, ${site_name_tag}"
+
+# Check Thread for the new entries
+thread_search query:"docs-import AND ${site_name_tag}" limit:3
+```
+
+#### Complete Workflow Example
+
+The full pipeline chained together for a single invocation:
+
+```bash
+# ADAPT DISCOVERY METHOD based on what the site supports
+# (try methods A→E in order as described above)
+
+SITE="docs.github.com"
+SITE_NAME="github-docs"
+BASE="https://${SITE}/en"
+
+# Step 1 — URL discovery (try llms.txt first)
+DISCOVERY=$(curl -sSfL "https://${SITE}/llms.txt" 2>/dev/null && echo "llms" \
+  || curl -sSfL "https://${SITE}/sitemap.xml" 2>/dev/null && echo "sitemap" \
+  || echo "crawl")
+
+# Step 2 — Fetch each page (webfetch markdown)
+# Step 3 — Append to combined file
+# Step 4 — thread_upload_file
+# Step 5 — Report
+
+echo "Discovery method: ${DISCOVERY}"
+```
+
+#### Tag Convention for Doc Imports
+
+| Tag | Value | Example |
+|-----|-------|---------|
+| `docs-import` | Fixed — identifies this as a doc website import | `docs-import` |
+| `{site-name}` | Site-specific — lowercase, hyphenated, domain-derived | `github-docs`, `nextjs-docs` |
+| `{version-or-locale}` | Optional — version or language of the imported docs | `en`, `free-pro-team`, `v16` |
+
+#### Priority Guidelines for Doc Imports
+
+| Priority | Use Case |
+|----------|----------|
+| 7-8 | Foundational docs (API reference, architecture guides) |
+| 5-6 | Tutorials, how-to guides, general documentation |
+| 3-4 | Release notes, changelogs, peripheral pages |
+| 0-2 | Auto-generated low-signal pages (redirect stubs, TOC-only pages) |
+
+#### When to NOT Use This Workflow
+
+- Auth-gated or private documentation (login required)
+- Sites that explicitly block crawlers in `robots.txt` via `Disallow: /`
+- Multimedia-only sites (no text content to extract)
+- PDF-only documentation (no HTML/markdown version)
+- Sites exceeding 500 pages — warn the user and ask for a sub-path filter
+- The same site was already imported — check `thread_search` with `"docs-import" AND "{site-tag}"` first
+
 ### After Creating or Updating Documentation Files
 
 When you create or modify documentation files (`.md`, `.txt`, `.json`, `.jsonl`), keep Thread entries in sync:
@@ -374,6 +715,7 @@ Once the Cline MCP config is written (global settings and/or `.cline/mcp.json`),
 - `reference` — documentation, spec links, API references
 - `transcript` — full conversation transcript exports
 - `full-session` — complete session context dumps
+- `docs-import` — documentation website imports (see "Uploading Documentation Websites to Thread")
 - Project-specific tags as appropriate
 
 ## Never
