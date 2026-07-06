@@ -406,7 +406,7 @@
 
 ## 2026-07-06 — agent pipeline improvements: probing, todowrite, multi-model
 
-- **Commit**: (to be added after commit — docs update for Phases 0-2)
+- **Commit**: 60797d4
 - **Category**: agent | skill | architecture
 - **Changes**:
   1. Added §1.5 "Probe" step to scrum agent (9 required questions, validation checks, question tool)
