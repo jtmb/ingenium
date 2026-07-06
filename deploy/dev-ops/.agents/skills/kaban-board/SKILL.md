@@ -131,29 +131,44 @@ For VS Code / Cline / Claude Desktop integration:
 |---------|-------------|---------|
 | `kaban init` | Initialize a new board | `kaban init --name "Sprint 1"` |
 | `kaban add <title>` | Add a new task | `kaban add "Fix auth bug" -c todo -a claude -D "OAuth2 token refresh broken"` |
-| `kaban list` | List tasks with filters | `kaban list --column in-progress` |
-| `kaban move <id> [column]` | Move task to column | `kaban move abc123 in-progress --assign claude` |
+| `kaban list` | List tasks with filters | `kaban list --column in-progress --json` |
+| `kaban move <id> [column]` | Move task to column | `kaban move abc123 in-progress --agent claude` |
 | `kaban assign <id> [agent]` | Assign or unassign agent | `kaban assign abc123 claude` |
+| `kaban edit <id>` | Edit a task | `kaban edit abc123 --title "New title" --description "Updated desc"` |
 | `kaban done <id>` | Mark task as completed | `kaban done abc123` |
+| `kaban delete <id>` | Delete a task | `kaban delete abc123` |
+| `kaban get <id>` | View task details | `kaban get abc123` |
+| `kaban next` | Get highest-priority task | `kaban next` |
 | `kaban status` | Show board summary | `kaban status` |
-| `kaban search <query>` | Full-text search archived tasks | `kaban search "auth bug"` |
+| `kaban schema [name]` | Output JSON schemas for AI agents | `kaban schema` |
+| `kaban audit` | View audit log history | `kaban audit` |
+| `kaban stats` | Board and archive statistics | `kaban stats` |
+| `kaban search <query>` | Full-text search tasks | `kaban search "auth bug"` |
 | `kaban archive` | Archive all completed tasks | `kaban archive` |
 | `kaban restore <id>` | Restore task from archive | `kaban restore abc123` |
 | `kaban purge` | Permanently delete archived tasks | `kaban purge` |
 | `kaban reset` | Delete ALL tasks (destructive) | `kaban reset` |
+| `kaban export` | Export board to markdown | `kaban export` |
+| `kaban import <file>` | Import tasks from markdown | `kaban import tasks.md` |
+| `kaban sync` | Sync from stdin (TodoWrite format) | `echo '{"todos":[...]}' \| kaban sync` |
 | `kaban tui` | Launch interactive TUI | `kaban tui` |
 | `kaban mcp` | Start MCP server for agents | `kaban mcp` |
-| `kaban hook install` | Install TodoWrite sync hook | `kaban hook install` |
+| `kaban hook` | Manage TodoWrite sync hook | `kaban hook install` |
 
 ### Common flags
 
 | Flag | Used with | Description |
 |------|-----------|-------------|
 | `-c, --column <name>` | add, list | Target column (backlog, todo, in-progress, review, done) |
-| `-a, --assign <agent>` | add, move, assign | Assign to an agent or user |
+| `-a, --agent <agent>` | add | Agent creating the task |
+| `-A, --assign [agent]` | move | Assign task to agent (defaults to current agent) |
 | `-D, --description <text>` | add | Task description or details |
-| `-p, --priority <low|medium|high>` | add, update | Task priority |
-| `--json` | list, status, search | Output as JSON for programmatic use |
+| `-d, --depends-on <ids>` | add | Comma-separated task IDs this depends on |
+| `-t, --title <title>` | edit | New task title |
+| `-l, --labels <labels>` | edit | Comma-separated labels |
+| `--due <date>` | edit | Due date (natural language) |
+| `-f, --force` | add, move | Skip duplicate/WIP limit checks |
+| `--json` | list, status, search, add | Output as JSON for programmatic use |
 
 ## 4. MCP Tools Reference
 
@@ -164,22 +179,33 @@ When the kaban MCP server is running (via `kaban mcp` or configured in OpenCode)
 | `kaban_init` | Initialize a new board with optional name and columns |
 | `kaban_add_task` | Add a new task to the board |
 | `kaban_add_task_checked` | Add a task with duplicate detection to avoid duplicates |
-| `kaban_get_task` | Get full details of a specific task by ID |
-| `kaban_list_tasks` | List tasks with optional column, agent, and status filters |
+| `kaban_assign_task` | Assign or unassign an agent to a task |
+| `kaban_complete_task` | Mark a task as completed (moves to Done column) |
 | `kaban_move_task` | Move a task to a different column and optionally reassign |
 | `kaban_update_task` | Update task properties (title, description, priority, column) |
+| `kaban_get_task` | Get full details of a specific task by ID |
+| `kaban_get_next_task` | Get the next highest-priority unassigned task |
+| `kaban_get_task_history` | View audit history for a specific task |
+| `kaban_list_tasks` | List tasks with optional column, agent, and status filters |
 | `kaban_delete_task` | Delete a task from the board |
-| `kaban_complete_task` | Mark a task as completed (moves to Done column) |
 | `kaban_status` | Get board summary with counts per column |
-| `kaban_archive_tasks` | Archive completed or stale tasks |
-| `kaban_search_archive` | Full-text search across all archived tasks |
-| `kaban_restore_task` | Restore a task from the archive back to the board |
-| `kaban_purge_archive` | Permanently delete all archived tasks (destructive) |
-| `kaban_reset_board` | Delete ALL tasks on the board (destructive) |
-| `kaban_archive_stats` | Get statistics about archived tasks |
 | `kaban_add_dependency` | Add a dependency between two tasks (task A blocks task B) |
 | `kaban_remove_dependency` | Remove a dependency between two tasks |
 | `kaban_check_dependencies` | Check if all dependencies for a task are resolved |
+| `kaban_add_link` | Link a task to an external resource (URL, file, issue) |
+| `kaban_remove_link` | Remove a link from a task |
+| `kaban_get_links` | Get all links for a task |
+| `kaban_archive_tasks` | Archive completed or stale tasks |
+| `kaban_search_archive` | Full-text search across all archived tasks |
+| `kaban_restore_task` | Restore a task from the archive back to the board |
+| `kaban_archive_stats` | Get statistics about archived tasks |
+| `kaban_purge_archive` | Permanently delete all archived tasks (destructive) |
+| `kaban_reset_board` | Delete ALL tasks on the board (destructive) |
+| `kaban_export_markdown` | Export the board to markdown format |
+| `kaban_import_markdown` | Import tasks from a markdown file |
+| `kaban_get_audit_history` | Retrieve the full board audit log |
+| `kaban_score_tasks` | Score and rank tasks by priority and urgency |
+| `kaban_wins` | Log, list, and celebrate wins (accomplishments) |
 
 ## 5. TUI Keyboard Shortcuts
 

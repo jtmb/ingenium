@@ -20,6 +20,9 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+# ── Kaban board (local state) ─────────────────────────────
+.kaban/
+
 # ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env
 .vscode
