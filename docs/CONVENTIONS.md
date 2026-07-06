@@ -22,7 +22,7 @@
 - **One concern per skill.** Each `.agents/skills/{name}/` contains exactly one `SKILL.md`. No bundling — testing rules and styling rules go in separate skills.
 - **Each SKILL.md is self-contained.** It should reference other skills by name (e.g., "See `generic-conventions`") rather than duplicating their content.
 - **Link to docs, don't duplicate.** Skills reference `docs/ARCHITECTURE.md` etc. instead of copying doc content.
-- **`deploy/` has 3 domain variants: `software-dev/` (general engineering), `dev-ops/` (K8s operations), `sec-ops/` (penetration testing). Each variant contains skills/, hooks/, agents/, plugins/, docs/, and config files. The source repo (`.agents/`, `.opencode/`) is the truth; deploy is an output.
+- **Skills live in `.agents/skills/` at repo root. `bootstrap.sh` deploys from the repo root to target projects.
 - **`tests/` lives at project root** alongside `docs/`, not inside `.agents/`. Tests validate the skill system but are not part of it.
 - **`learnings.md` lives in `.agents/skills/`** — it's a development artifact, not a deployable convention.
 - **YAML frontmatter is always between `---` fences** on lines 1 and the line before Markdown content. No tabs (spaces only). Colons in descriptions must be inside quotes.

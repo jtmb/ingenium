@@ -33,7 +33,7 @@ Never mix concerns during a single read-through. Forcing the brain to switch bet
 - [ ] Are authentication checks applied at the right layer, not just hidden in the UI?
 - [ ] Is authorization checked for every operation, not just the first one in a request?
 - [ ] Are file paths constructed safely (no path traversal via `../` or symlinks)?
-- [ ] Are dependencies scanned for known vulnerabilities? See `github-actions-hardening` for CI-specific checks.
+- [ ] Are dependencies scanned for known vulnerabilities?
 - [ ] Are secrets managed through a vault / environment, not hardcoded?
 
 ## Lens 2 — Correctness

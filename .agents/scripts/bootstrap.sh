@@ -14,7 +14,7 @@ PROJECT_NAME=""
 DRY_RUN=false
 INTERACTIVE=false
 AUTO_MODE=false
-BOOTSTRAP_DIR="$(cd "$(dirname "$0")/../../deploy" && pwd)"
+BOOTSTRAP_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # ── Supported frameworks ──────────────────────────────────
 VALID_FRAMEWORKS=("nextjs" "python" "go" "rust" "generic")

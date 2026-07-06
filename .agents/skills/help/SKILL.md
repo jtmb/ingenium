@@ -66,7 +66,7 @@ When invoked, display this entire file as the response. It is the canonical inde
 | Skill | Trigger / Command | What it does |
 |-------|-------------------|--------------|
 | `audit-skills` | `/audit-skills` | Cross-reference audit: skills dir ↔ README ↔ mermaid ↔ bootstrap.sh ↔ AGENTS.md ↔ USAGE.md. Auto-fixes + commits + logs to learnings. Quick audit: `comm -23 <(ls -d .agents/skills/*/ ...) <(grep -oP '\.agents/skills/...' bootstrap.sh)` |
-| `create-readme` | `/create-readme` | Review project, generate GFM README with Quick Start, Usage, Configuration, Architecture link |
+| `create-readme` | `/create-readme` | Review project, generate Markdown README with Quick Start, Usage, Configuration, Architecture link |
 | `generate-docs` | `/generate-docs` | Scan codebase → populate `docs/ARCHITECTURE.md`, `TECH-STACK.md`, `CONVENTIONS.md` |
 | `gh-cli` | GitHub operations | `gh auth status`, `gh pr list/create/view/merge`, `gh issue list/create/close`, `gh release create`, `gh gist create`, `gh search repos/issues`, `gh api` |
 | `repo-context` | `/repo-context` | Read `docs/README.md` → `ARCHITECTURE.md` → `TECH-STACK.md` → `CONVENTIONS.md` → framework skills → generic-conventions |

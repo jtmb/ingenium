@@ -33,7 +33,7 @@ Invoke this skill to generate project documentation from templates. Useful after
 - Observe naming patterns across the codebase
 - Identify file organization conventions
 - Note error handling patterns
-- Document git and PR conventions if `.github/` or contributing docs exist
+- Document git and PR conventions if contributing docs exist
 
 ## Output Format
 

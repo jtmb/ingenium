@@ -41,10 +41,7 @@ graph LR
 ## Table of Contents
 
 - [Getting Started](#getting-started)
-  - [Quick Install (one-liner)](#quick-install-one-liner)
-  - [Auto-Bootstrap (set up the hook)](#auto-bootstrap-set-up-the-hook)
   - [Manual Install](#manual-install)
-  - [Manual Bootstrap (with framework detection)](#manual-bootstrap-with-framework-detection)
 - [Self-Improving AI](#self-improving-ai-skills-that-grow-with-your-project)
 - [What Gets Bootstrapped](#what-gets-bootstrapped)
 - [Coverage — Every File Type Has Rules](#coverage-every-file-type-has-rules)
@@ -56,77 +53,22 @@ graph LR
 
 There are several ways to add Ingenium to your project, depending on how much automation you want.
 
-### Quick Install (one-liner)
-
-For any project, run this from the project root:
-
-```bash
-curl -fsSL https://github.com/jtmb/ingenium/archive/refs/heads/main.tar.gz | tar -xz --strip=2 -C . ingenium-main/deploy/
-```
-
-This downloads the `deploy/` folder — `.agents/skills/`, `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — directly into your project. Your AI assistant picks them up automatically.
-
-> **What you get:** The full `.agents/skills/` library, `AGENTS.md` (skill index), `SKILL-INDEX.md` (reference), and `docs/` templates. Framework-specific skills and hooks are available as optional extras.
-
-### Auto-Bootstrap (set up the hook)
-
-For automatic bootstrapping across all your projects, set up a one-time hook. AI coding assistants that support the `.agents/` convention (e.g., VS Code Copilot, Cline) read hooks from their hook directory. For VS Code Copilot, hooks live at `~/.copilot/hooks/` (global, applies to every project):
-
-**`~/.copilot/hooks/trigger-bootstrap.json`**
-
-```json
-{
-    "hooks": {
-        "SessionStart": [
-            {
-                "type": "command",
-                "command": "if [ ! -f AGENTS.md ]; then curl -fsSL https://raw.githubusercontent.com/jtmb/ingenium/main/.agents/scripts/hook-bootstrap.sh | bash; fi"
-            }
-        ]
-    }
-}
-```
-
-Once the hook is in place:
-
-1. Open any project in your AI-supporting editor
-2. Start an AI chat
-3. The hook auto-detects the framework (Next.js, Python, Go, Rust, or generic) and bootstraps the project
-4. The AI follows all rules automatically — doc sync, code comments, testing, DRY
-
-**You never run the bootstrap scripts directly again.** The hook handles it.
-
-> **Where hooks live (VS Code Copilot):** `~/.copilot/hooks/*.json` — NOT in `settings.json`. This is VS Code Copilot's global hooks directory. Other AI assistants may use different hook locations. Each `.json` file registers one or more lifecycle hooks (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`).
-
-> **What happens?** `.agents/scripts/hook-bootstrap.sh` caches this repo in `~/.cache/ingenium/`, auto-detects the framework from `package.json` / `pyproject.toml` / `go.mod` / `Cargo.toml`, and calls `.agents/scripts/bootstrap.sh --auto --framework <detected> /path/to/your/project`.
-
 ### Manual Install
 
-If you prefer to copy the files by hand:
+Clone the repo and run the bootstrap script from the project root:
 
 ```bash
 git clone --depth 1 https://github.com/jtmb/ingenium.git
-cp -r ingenium/deploy/. /path/to/your-project/
+./ingenium/bootstrap.sh /path/to/your-project
 ```
 
-This places everything from `deploy/` into your project root — the same contents as the one-liner above. Works offline and gives you full control over what lands.
-
-### Manual Bootstrap (with framework detection)
-
-For a smarter setup that detects your framework and copies only the relevant skills:
+For non-interactive CI use with explicit framework selection:
 
 ```bash
-git clone --depth 1 https://github.com/jtmb/ingenium.git
-./ingenium/.agents/scripts/bootstrap.sh --framework python /path/to/your-project
+./ingenium/.agents/scripts/bootstrap.sh --auto --framework nextjs /path/to/your-project
 ```
 
-Or for non-interactive CI use:
-
-```bash
-./.agents/scripts/bootstrap.sh --auto --framework nextjs /path/to/your-project
-```
-
-This runs the full bootstrap pipeline: deploys the skill system, selects framework-specific conventions, seeds docs templates, and copies hooks.
+This runs the full bootstrap pipeline: deploys the skill system with framework-specific conventions and seeds docs templates.
 
 ## Self-Improving AI — Skills That Grow With Your Project
 
@@ -153,7 +95,7 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | **Core rules** | `.agents/skills/generic-conventions/SKILL.md` | The definitive 13-section reference: comments, docs, testing, DRY, security, error handling, config, naming |
 | **Project structure** | `.agents/skills/project-structure/SKILL.md` | Monorepo layout, service layering (pages/features/domain/infrastructure), naming, boundaries |
 | **Frameworks** | `.agents/skills/{fw}-conventions/SKILL.md` (4 files) | Next.js, Python, Go, Rust — build commands, idioms, project layout |
-| **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (20 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests, Gitignore, GitHub Actions (hardening + efficiency), PostgreSQL, Code Review, Refactoring, CLI Toolkit, Regex, Git Workflows, Error Interpretation, Model Profiles, Local Model Commands |
+| **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (20 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests, Gitignore, PostgreSQL, Code Review, Refactoring, CLI Toolkit, Regex, Git Workflows, Error Interpretation, Model Profiles, Local Model Commands |
 | **Docs** | `docs/` (4 files) | Templates the AI fills in as it works — architecture, tech stack, conventions |
 | **Instructions & Tools** | `.agents/skills/{name}/SKILL.md` (19 files) | All task skills, browser automation, and GitHub operations — invocable via `/` commands or on-demand by file type |
 | **Hooks** | `.agents/hooks/` (3 files) | PreToolUse safety checks, SessionStart checklist + bootstrap, PostToolUse periodic reminders |
@@ -221,7 +163,7 @@ All skills live in `.agents/skills/`:
 | `web-design-reviewer` | `/web-design-reviewer` — inspect websites for responsive, accessibility, and layout issues |
 | `onboard-existing-repo` | `/onboard-existing-repo` — onboard an existing repo to the skill system |
 | `lm-studio` | `/lm-studio` — LM Studio local inference, vision bridge, model management |
-| `create-readme` | `/create-readme` — create a README.md file for the project **(source only, not deployed)** |
+| `create-readme` | `/create-readme` — create a README.md file for the project |
 
 ## Architecture — Skill System
 

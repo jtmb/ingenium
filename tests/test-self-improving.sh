@@ -9,10 +9,6 @@
 #   3. Missing coverage (file types not covered by any skill)
 #   4. Stale content (skill references wrong version)
 #
-# Also validates the deploy/ separation:
-#   5. Deploy files match their source counterparts
-#   6. No source-only files leaked into deploy/
-#
 # Usage:
 #   tests/test-self-improving.sh           # run all tests
 #   tests/test-self-improving.sh --verbose  # detailed output
@@ -22,8 +18,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SKILLS_DIR="$REPO_ROOT/.agents/skills"
-DEPLOY_DIR="$REPO_ROOT/deploy"
-DEPLOY_SKILLS_DIR="$DEPLOY_DIR/.agents/skills"
 VERBOSE=false
 PASSED=0
 FAILED=0
@@ -227,206 +221,56 @@ test_skill_count() {
     local project_skill_count
     project_skill_count=$(find "$SKILLS_DIR" -maxdepth 2 -name "SKILL.md" | wc -l)
 
-    local deploy_skill_count
-    deploy_skill_count=$(find "$DEPLOY_SKILLS_DIR" -maxdepth 2 -name "SKILL.md" 2>/dev/null | wc -l)
-
     info "Project skills: $project_skill_count"
-    info "Deploy skills:  $deploy_skill_count"
 
     if [[ "$project_skill_count" -gt 0 ]]; then
         pass "Project has $project_skill_count skills (detection can enumerate)"
     else
         fail "No skills found" "expected at least 1"
     fi
-
-    # Source-only files (project has them, deploy doesn't)
-    local source_only=0
-
-    # Check skills/
-    for skill_dir in "$SKILLS_DIR"/*/; do
-        local name
-        name=$(basename "$skill_dir")
-        [[ ! -f "$skill_dir/SKILL.md" ]] && continue
-        if [[ ! -f "$DEPLOY_SKILLS_DIR/$name/SKILL.md" ]]; then
-            source_only=$((source_only + 1))
-            info "$name → source-only (not in deploy/.agents/skills/)"
-        fi
-    done
-
-    if [[ "$source_only" -gt 0 ]]; then
-        pass "$source_only source-only file(s) correctly excluded from deploy/"
-    else
-        pass "All $project_skill_count files are in deploy/ (no source-only)"
-    fi
 }
 
 # ═══════════════════════════════════════════════════════════
-# TEST 4 — Deploy Separation Integrity
-# Ensures the deploy/ folder:
-#   a) Contains all required files
-#   b) Has no source-only files leaked in
-#   c) bootstrap.sh BOOTSTRAP_DIR points to deploy/
-# ═══════════════════════════════════════════════════════════
-test_deploy_separation() {
-    section "TEST 4 — Deploy/ Separation Integrity"
-
-    # a) Deploy directories exist
-    if [[ -d "$DEPLOY_SKILLS_DIR" ]]; then
-        pass "deploy/.agents/skills exists"
-    else
-        fail "deploy/.agents/skills is missing" "expected directory in deploy/"
-    fi
-
-    # Verify no unexpected top-level files in deploy
-    local extra_count=0
-    for item in "$DEPLOY_DIR"/*; do
-        local name; name=$(basename "$item")
-        if [[ "$name" != ".agents" && "$name" != "AGENTS.md" && "$name" != "SKILL-INDEX.md" && "$name" != "USAGE.md" && "$name" != "opencode.json" && "$name" != "docs" ]]; then
-            extra_count=$((extra_count + 1))
-        fi
-    done
-    if [[ "$extra_count" -eq 0 ]]; then
-        pass "deploy/ is clean — only .agents/, AGENTS.md, SKILL-INDEX.md, USAGE.md, opencode.json, and docs/"
-    else
-        fail "deploy/ has $extra_count unexpected top-level item(s)" "should only have deploy payload items"
-    fi
-
-    # Verify only expected dirs inside deploy/.agents
-    local agent_extra=0
-    for item in "$DEPLOY_DIR/.agents"/*; do
-        local name; name=$(basename "$item")
-        if [[ "$name" != "skills" && "$name" != "hooks" && "$name" != "scripts" && "$name" != "SKILL-CATALOG.md" ]]; then
-            agent_extra=$((agent_extra + 1))
-        fi
-    done
-    if [[ "$agent_extra" -eq 0 ]]; then
-        pass "deploy/.agents is clean — only skills/, hooks/, scripts/, and SKILL-CATALOG.md"
-    else
-        fail "deploy/.agents has $agent_extra extra item(s)" "should only have deploy payload items"
-    fi
-
-    # b) All items should be present in deploy/
-    if [[ -f "$DEPLOY_SKILLS_DIR/create-readme/SKILL.md" ]]; then
-        pass "create-readme correctly present in deploy/"
-    else
-        fail "create-readme missing from deploy/" "all skills should be deployed"
-    fi
-
-    # c) learnings.md (template) SHOULD be in deploy/ for consumer projects
-    if [[ -f "$DEPLOY_SKILLS_DIR/learnings.md" ]]; then
-        pass "learnings.md correctly present in deploy/"
-    else
-        fail "learnings.md missing from deploy/" "consumer projects need a learnings template"
-    fi
-
-    # d) bootstrap.sh (source-only) uses deploy/ as BOOTSTRAP_DIR
-    if grep -q 'BOOTSTRAP_DIR=.*deploy' "$REPO_ROOT/.agents/scripts/bootstrap.sh"; then
-        pass "bootstrap.sh BOOTSTRAP_DIR points to deploy/"
-    else
-        fail "bootstrap.sh BOOTSTRAP_DIR does not point to deploy/" "expected deploy/ reference"
-    fi
-
-    # e) Deprecated source path — ensure bootstrap.sh doesn't reference old repo-root paths
-    if ! grep -qE 'BOOTSTRAP_DIR.*\.\.\/\.\.\"' "$REPO_ROOT/.agents/scripts/bootstrap.sh"; then
-        pass "bootstrap.sh no longer references repo root directly"
-    else
-        fail "bootstrap.sh still has old BOOTSTRAP_DIR" "expected /../../deploy pattern"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 5 — Deploy File Integrity
-# Ensures files in deploy/ are byte-identical to their source
-# counterparts (no drift).
-# ═══════════════════════════════════════════════════════════
-test_deploy_integrity() {
-    section "TEST 5 — Deploy File Integrity (source vs deploy drift)"
-
-    # Check AGENTS.md — allow known source-only differences (thread-auto-context)
-    # Count actual differing lines (excluding thread-auto-context line)
-    local diff_lines
-    diff_lines=$(diff "$REPO_ROOT/AGENTS.md" "$DEPLOY_DIR/AGENTS.md" 2>/dev/null | grep -c '^[<>]' || true)
-    local source_only_lines
-    if [[ "$diff_lines" -eq 0 ]]; then
-        pass "deploy/AGENTS.md matches source exactly"
-    else
-        fail "deploy/AGENTS.md differs from source" "files have drifted"
-    fi
-
-    # Check all deployed skills match
-    local drift_count=0
-
-    # Check all deployed skills match source
-    for deploy_skill in "$DEPLOY_SKILLS_DIR"/*/SKILL.md; do
-        local name
-        name=$(basename "$(dirname "$deploy_skill")")
-        local source_skill="$SKILLS_DIR/$name/SKILL.md"
-        if [[ -f "$source_skill" ]]; then
-            if ! diff -q "$source_skill" "$deploy_skill" &>/dev/null; then
-                info "$name has drifted between source and deploy"
-                drift_count=$((drift_count + 1))
-            fi
-        fi
-    done
-
-    if [[ "$drift_count" -eq 0 ]]; then
-        pass "All deployed files match source (0 drifted files)"
-    else
-        fail "$drift_count deployed file(s) differ from source" "check diff output above"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 6 — Frontmatter Validity
-# Every skill (project + deploy) must have valid frontmatter
-# with name matching folder.
+# TEST 4 — Frontmatter Validity
+# Every skill must have valid frontmatter with name matching
+# folder.
 # ═══════════════════════════════════════════════════════════
 test_frontmatter() {
-    section "TEST 6 — Frontmatter Validity"
+    section "TEST 4 — Frontmatter Validity"
 
-    local dirs_to_check=(
-        "$SKILLS_DIR"
-        "$DEPLOY_SKILLS_DIR"
-    )
-    local label=("project-skills" "deploy-skills")
+    local dir="$SKILLS_DIR"
 
-    for i in "${!dirs_to_check[@]}"; do
-        local dir="${dirs_to_check[$i]}"
-        local lbl="${label[$i]}"
-        [[ ! -d "$dir" ]] && continue
+    for skill_file in "$dir"/*/SKILL.md; do
+        [[ ! -f "$skill_file" ]] && continue
+        local folder_name
+        folder_name=$(basename "$(dirname "$skill_file")")
 
-        for skill_file in "$dir"/*/SKILL.md; do
-            [[ ! -f "$skill_file" ]] && continue
-            local folder_name
-            folder_name=$(basename "$(dirname "$skill_file")")
+        # Check opening fence
+        if [[ "$(head -1 "$skill_file")" == "---" ]]; then
+            :
+        else
+            fail "$folder_name missing opening frontmatter fence" ""
+            continue
+        fi
 
-            # Check opening fence
-            if [[ "$(head -1 "$skill_file")" == "---" ]]; then
-                :
-            else
-                fail "$lbl/$folder_name missing opening frontmatter fence" ""
-                continue
-            fi
-
-            # Check name field
-            local fm_name
-            fm_name=$(grep "^name:" "$skill_file" | head -1 | sed 's/^name: *//')
-            if [[ "$fm_name" == "$folder_name" ]]; then
-                :
-            else
-                fail "$lbl/$folder_name name mismatch" "folder=$folder_name, frontmatter=$fm_name"
-            fi
-        done
+        # Check name field
+        local fm_name
+        fm_name=$(grep "^name:" "$skill_file" | head -1 | sed 's/^name: *//')
+        if [[ "$fm_name" == "$folder_name" ]]; then
+            :
+        else
+            fail "$folder_name name mismatch" "folder=$folder_name, frontmatter=$fm_name"
+        fi
     done
     pass "Frontmatter valid in all skills"
 }
 
 # ═══════════════════════════════════════════════════════════
-# TEST 7 — Manual Verification Guide
+# TEST 5 — Manual Verification Guide
 # Prints instructions for testing the AI agent itself.
 # ═══════════════════════════════════════════════════════════
 test_manual_guide() {
-    section "TEST 7 — Manual AI Agent Verification Guide"
+    section "TEST 5 — Manual AI Agent Verification Guide"
 
     echo ""
     echo "  The tests above validate the detection MECHANISM."
@@ -471,8 +315,6 @@ main() {
     test_frontmatter
     test_dependency_gaps
     test_missing_coverage
-    test_deploy_separation
-    test_deploy_integrity
     test_manual_guide
 
     echo ""

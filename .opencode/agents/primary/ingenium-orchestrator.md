@@ -148,7 +148,6 @@ These are violations the orchestrator commonly commits. **You MUST recognize and
 |---|---|
 | `.agents/skills/*/SKILL.md` (skill added/removed/changed) | `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/README.md` |
 | `.agents/scripts/` (bootstrap or hooks changed) | `docs/ARCHITECTURE.md` |
-| `deploy/` (structure or files changed) | `docs/ARCHITECTURE.md` |
 | `tests/` (test infra changed) | `docs/TECH-STACK.md` |
 | `README.md`, `USAGE.md`, `AGENTS.md` (project root docs) | `docs/README.md` |
 | `.opencode/agents/*.md` (agent definitions changed) | `docs/agents.md`, `docs/ARCHITECTURE.md` |

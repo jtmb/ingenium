@@ -162,13 +162,13 @@ done
 curl http://localhost:3000
 ```
 
-### Pattern 4 — Use `run_in_terminal` Tool Mode Correctly
+### Pattern 4 — Use Built-in Terminal Tooling Correctly
 
-When using a VS Code agent with `run_in_terminal`, use `mode=sync` for all one-shot commands. Only use `mode=async` for servers/watchers — and the tool handles the backgrounding correctly. The LLM should NOT append `&` on top of the tool's built-in mode handling.
+When using a terminal tool that supports sync/async modes, use sync mode for all one-shot commands. Only use async mode for servers/watchers — the tool handles the backgrounding correctly. The LLM should NOT append `&` on top of the tool's built-in mode handling.
 
 ```bash
 # ✅ Good — the tool handles backgrounding, you just run the command
-# (run_in_terminal with mode=async)
+# (async mode)
 npx next dev --turbopack
 
 # ❌ Bad — double-backgrounding breaks tool feedback
