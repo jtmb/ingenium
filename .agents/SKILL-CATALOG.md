@@ -63,6 +63,7 @@
 | `github-issues` | Creating/updating GitHub issues |
 | `web-design-reviewer` | UI/UX inspection, responsive/accessibility |
 | `wsl-cleanup` | WSL2 disk cleanup — Docker prune, apt/pip/npm caches, journal vacuum, temp/tmp, snap revisions, model caches. 🔴 Excludes $HOME/repos |
+| `kaban-board` | Terminal Kanban board for AI agents — install, MCP server setup, CLI tasks, TUI navigation |
 | `create-readme` | Need a README.md for the project |
 
 ## 📋 Task Skills (invoke via `/command`)

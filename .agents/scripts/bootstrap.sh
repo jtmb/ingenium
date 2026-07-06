@@ -177,6 +177,7 @@ declare -a FILES=(
     ".agents/skills/gh-cli/SKILL.md|.agents/skills/gh-cli/SKILL.md|optional"
     ".agents/skills/gh-cli/templates/issue-report.md|.agents/skills/gh-cli/templates/issue-report.md|optional"
     ".agents/skills/github-issues/SKILL.md|.agents/skills/github-issues/SKILL.md|optional"
+    ".agents/skills/kaban-board/SKILL.md|.agents/skills/kaban-board/SKILL.md|optional"
     ".agents/skills/wsl-cleanup/SKILL.md|.agents/skills/wsl-cleanup/SKILL.md|always"
     ".agents/skills/wsl-cleanup/scripts/wsl-cleanup.sh|.agents/skills/wsl-cleanup/scripts/wsl-cleanup.sh|optional"
     ".agents/skills/learnings.md|.agents/skills/learnings.md|always"
