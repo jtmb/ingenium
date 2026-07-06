@@ -4,170 +4,107 @@
 
 | What | Convention | Example |
 |------|-----------|---------|
-| Engagement directories | kebab-case, `{target-domain}` | `example-com/`, `internal-network/` |
-| Evidence files | `{tool}-{target}-{timestamp}.{ext}` | `nmap-example-com-20260705.xml` |
-| PoC scripts | snake_case, descriptive | `sql_injection_login.py` |
-| Skill files | kebab-case, one topic per skill | `network-pentest/`, `web-app-scan/` |
-| Agent definition files | `ingenium-{role}.md` | `ingenium-security-engineer.md` |
-| Agent mentions | `@ingenium-{role}` | `@ingenium-security-engineer` |
-| Documentation files | SCREAMING_CAPS.md | `ARCHITECTURE.md`, `CONVENTIONS.md` |
+| **Skill directories** | `{name}-conventions` for frameworks, `{verb}-{noun}` for tasks | `nextjs-conventions`, `update-skills`, `write-docs` |
+| **Skill frontmatter `name`** | MUST match directory name exactly | `name: nextjs-conventions` in `.agents/skills/nextjs-conventions/SKILL.md` |
+| **Skill frontmatter `description`** | Keyword-rich, one sentence, includes triggers | `"Use when editing **/*.py files. Covers type hints, pytest, ..."` |
+| **Bootstrap scripts** | `{purpose}.sh` or `{purpose}-{sub}.sh` | `bootstrap.sh`, `hook-bootstrap.sh` |
+| **Test scripts** | `test-{what}.sh` | `test-self-improving.sh` |
+| **Hook files** | `{lifecycle-event}.json` | `session-start.json`, `pre-tool-use.json` |
+| **Agent files** | `ingenium-{role}.md` | `ingenium-orchestrator.md`, `ingenium-software-engineer.md` |
+| **Agent directory structure** | Nested by role | `primary/`, `execution/`, `research/`, `security/` |
+| **Doc files** | `UPPERCASE-WITH-DASHES.md` | `ARCHITECTURE.md`, `TECH-STACK.md`, `CONVENTIONS.md` |
+| **Plugin files** | `{lifecycle-event}.ts` | `session-start.ts`, `pre-tool-use.ts`, `post-tool-use.ts` |
+| **Plugin config** | `tsconfig.json` | `strict: true` with additional strict flags |
+| **Learnings entries** | ISO date + topic | `## 2026-07-02 — always-read-agents removed` |
 
 ## File Organization
 
-```
-sec-ops/
-├── .agents/
-│   ├── skills/             # 54 skill directories (44 universal + 10 pentest)
-│   ├── hooks/              # 3 lifecycle hooks (JSON)
-│   └── scripts/            # Bootstrap scripts
-├── .opencode/
-│   ├── agents/             # 8 agent definitions (markdown)
-│   └── plugins/            # 4 TypeScript lifecycle plugins
-├── docs/
-│   └── engagements/        # Engagement evidence and reports (created per engagement)
-│       └── {target}/
-│           ├── recon.md
-│           ├── enumeration.md
-│           ├── vulnerabilities.md
-│           ├── exploitation.md
-│           └── report.md
-└── evidence/               # Raw tool output and collected artifacts
-    └── {target}/
-        ├── nmap/
-        ├── dns/
-        ├── web/
-        └── exploits/
-```
-
-## Ethical Guidelines
-
-### Core Principles
-1. **Authorized Testing Only** — Never scan, enumerate, or exploit any target without explicit written authorization
-2. **No Denial of Service** — No commands that cause service disruption, resource exhaustion, or system crashes. This includes: aggressive `nmap` timing flags (`-T5`), masscan with excessive rates, hydra without rate limiting
-3. **No Data Destruction** — Never modify, delete, or corrupt target data. Read-only exploitation where possible
-4. **Minimum Necessary Access** — If exploitation is authorized, access the minimum necessary to prove impact
-5. **Stop on Unexpected Findings** — If you encounter unexpected production systems, PII, or sensitive data outside scope — stop immediately and notify the user
-6. **Chain of Custody** — All evidence must be timestamped, labelled with target, and preserved in its original format
-
-### Scope Validation Checklist
-Before every engagement phase:
-- [ ] Target IP/hostname confirmed with user
-- [ ] Target is within authorized scope
-- [ ] No production/live systems if testing is labeled as "staging"
-- [ ] Testing window confirmed with user
-- [ ] Rate limits and timing constraints confirmed
-- [ ] Exploitation (if any) explicitly authorized
-
-## Safety Boundaries
-
-Tools and commands are categorized into three tiers:
-
-### Tier 1: Auto-Approved (Safe Reconnaissance & Enumeration)
-These tools are passive or minimally intrusive and can be run without additional approval:
-- DNS enumeration: `dig`, `nslookup`, `host`, `dnsrecon` (with caution)
-- Port scanning: `nmap -sS -sV` (no `-T5`, no aggressive timing)
-- Technology detection: `whatweb`, `wappalyzer`
-- SSL/TLS checking: `testssl.sh`, `openssl s_client`
-- WHOIS lookups, certificate transparency queries
-- Ping sweeps with limited parallelism
-
-### Tier 2: Needs Approval (Intrusive Enumeration & Assessment)
-These tools are more intrusive and require user confirmation before running:
-- Directory enumeration: `ffuf`, `gobuster`, `dirb`
-- Vulnerability scanners: `nikto`, `nmap --script vuln`
-- SQL injection detection: `sqlmap` (in detection mode only)
-- Brute force (non-destructive): `hydra` (with rate limiting, account lockout checks)
-- Web spidering and crawling
-- Version-specific vulnerability checks
-
-### Tier 3: Never Allowed
-These commands must NEVER be run in any engagement:
-- Any Denial of Service tool or technique (`hping3 --flood`, `slowloris`, `LOIC`)
-- Data destruction or modification (`DROP TABLE`, `rm -rf`, `dd if=/dev/zero`)
-- Zero-day exploitation without explicit separate authorization
-- Social engineering or phishing
-- Physical security attacks
-- Attacks on infrastructure you do not own or have written permission to test
-- Any command with `--drop`, `--delete`, `--destroy`, or equivalent flags
-
-## Tool Acquisition Patterns
-
-1. **Check before installing** — Use `which`, `command -v`, or `dpkg -l` to verify the tool exists
-2. **Prefer apt packages** — `sudo apt update && sudo apt install -y <tool>`
-3. **Use pipx for Python tools** — `pipx install <tool>` to avoid polluting system Python
-4. **GitHub releases for Go/Rust tools** — Download prebuilt binaries when apt is outdated
-5. **Document installations** — Track what's installed and where in the engagement notes
-
-## Evidence Management
-
-### What to Save
-- Raw tool output (STDOUT/STDERR) — save complete, not summarized
-- Screenshots of web interfaces and exploit results
-- Network captures (PCAP) when relevant
-- Commands used with exact flags and timestamps
-- False positive indicators and context
-
-### Evidence Format
-- Evidence files: `{tool}-{target}-{YYYYMMDD-HHMMSS}.{format}`
-- Use `.txt` for text output, `.xml` for structured output, `.pcap` for captures
-- Evidence directory mirrors engagement phases
-
-### Evidence Verification
-- Always verify false positives before reporting
-- Run findings through `@ingenium-security-engineer` for review
-- Correlate findings across tools (e.g., port scan + service scan + banner grab)
-- Never report unverified findings
+- **One concern per skill.** Each `.agents/skills/{name}/` contains exactly one `SKILL.md`. No bundling — testing rules and styling rules go in separate skills.
+- **Each SKILL.md is self-contained.** It should reference other skills by name (e.g., "See `generic-conventions`") rather than duplicating their content.
+- **Link to docs, don't duplicate.** Skills reference `docs/ARCHITECTURE.md` etc. instead of copying doc content.
+- **`deploy/` has 3 domain variants: `software-dev/` (general engineering), `dev-ops/` (K8s operations), `sec-ops/` (penetration testing). Each variant contains skills/, hooks/, agents/, plugins/, docs/, and config files. The source repo (`.agents/`, `.opencode/`) is the truth; deploy is an output.
+- **`tests/` lives at project root** alongside `docs/`, not inside `.agents/`. Tests validate the skill system but are not part of it.
+- **`learnings.md` lives in `.agents/skills/`** — it's a development artifact, not a deployable convention.
+- **YAML frontmatter is always between `---` fences** on lines 1 and the line before Markdown content. No tabs (spaces only). Colons in descriptions must be inside quotes.
 
 ## Error Handling
 
-| Error | Handling |
-|-------|----------|
-| Tool not found | Attempt installation via apt/pipx/go install. If fails, suggest alternative tool from the same domain skill |
-| Permission denied | Check sudo requirements. Flag in findings if target blocks the tool |
-| Rate limiting triggered | Reduce parallelism (-t flag), increase delays (--delay), switch to passive techniques |
-| Scope violation detected | Stop immediately. Notify user. Log the finding without further action |
-| Target timeout | Note in findings, try alternative approaches (different port, different protocol) |
-| False positive detected | Document why it's false (contradicting evidence, lack of exploitability) |
+- **Bash scripts** use `set -euo pipefail` at the top of every script.
+- **`inherit_errexit` is ON by default in bash 5.x** — subshells inherit `set -e`, so `$(grep ... | wc -l)` kills the script when grep finds nothing. Fix: `$( { grep ... || true; } | wc -l)`.
+- **Test failures are explicit** — `test-self-improving.sh` prints `✓ PASS` or `✗ FAIL` with clear descriptions. No silent failures.
+- **Frontmatter errors are silent** — bad YAML doesn't throw errors, it just means the skill won't load. The test suite catches these.
 
-## Stage-Gating
+## Thread / Export Conventions
 
-**Do not skip phases.** Each phase depends on the output of the previous phase:
-
-| Phase | Prerequisites | Gate check |
-|-------|---------------|------------|
-| 1. Reconnaissance | Target domain/IP | — |
-| 2. Enumeration | Completed recon (open ports, services identified) | Clear network map exists |
-| 3. Vulnerability Assessment | Completed enumeration (service versions, configuration) | Service details documented |
-| 4. Exploitation | Identified exploitable vulnerabilities | Vulnerability report reviewed, authorization confirmed |
-| 5. Reporting | Completed exploitation or determined not exploitable | All evidence collected, false positives identified |
-
-To skip a phase (e.g., going straight to exploitation from a CVE), you MUST:
-1. Document why the phase is being skipped
-2. Have direct evidence that justifies the skip
-3. Get user confirmation
+- **Full transcript export is mandatory at session end** — the AI MUST write a comprehensive markdown transcript to `/tmp/opencode/session-{YYYY-MM-DD}-transcript.md` and upload it to Thread via `thread_upload_file` with Tags: `["export", "transcript", "full-session"]`, Priority: 9.
+- **This is a 🔴 HARD RULE** in the `thread-auto-context` skill — not optional, not deferrable.
+- **Export order**: transcript → session summary → decisions → git state. The transcript is step 0.
+- **Tag conventions**: use `export` + `transcript` + `full-session` for transcripts, `export` + `session-state` for summaries, `export` + `decisions` for decision logs, `export` + `git-status` for git state.
+- **No duplicates**: before creating entries, search `"export" AND "opencode"` and update existing entries rather than creating new ones.
+- **OpenCode detection**: check `$OPENCODE`, `opencode.json`, or `.opencode/` before exporting. Skip if not in OpenCode.
 
 ## Git Practices
 
-- **Branch naming**: `engagement/{target}-{phase}` (e.g., `engagement/example-com-recon`)
-- **Commit messages**: Conventional Commits: `{phase}({target}): {finding summary}`
-- **Evidence commits**: Every finding gets its own commit with clear message
-- **No secrets in commits**: Never commit real target credentials, session tokens, or exploitation output
-- **Tag significant findings**: `git tag finding-{target}-{cve-id}` for important vulnerabilities
+- **Conventional Commits**: `type(scope): description` format.
+  - `feat:` — new skill or feature
+  - `refactor:` — restructuring without behavior change
+  - `fix:` — bug fix
+  - `docs:` — documentation only
+  - `chore:` — maintenance (test updates, config changes)
+- **Atomic commits**: One logical change per commit. Moving tests/ to root is one commit; updating 5 docs is another.
+- **Every commit gets a learnings entry** if it changes skills, agents, hooks, plugins, deploy structure, config, architecture decisions, bug fixes, or discovered patterns.
+- **Learnings entries include the commit hash**: `**Commit**: \`f2557f0\`` — verified by `git rev-parse --short HEAD`.
+- **Branch naming**: `feature/description`, `fix/description`, `refactor/description`.
 
-## Code Style (PoC Scripts)
+## Code Style
 
-- **Language**: Python 3 for PoC scripts (preferred for readability and library availability)
-- **Error handling**: `try/except` with meaningful error messages, never silent failures
-- **Configuration**: Target URL/IP as script argument or environment variable — never hardcoded
-- **Output**: Machine-parseable output (JSON) with human-readable summary
-- **Safety**: Always include a `--dry-run` or `--check` mode
-- **Cleanup**: Release resources, close connections, clean up temporary files on exit
-- **Rate limiting**: Include `time.sleep()` or other throttling in enumeration scripts
+### Bash Scripts
 
-## Logging
+- `#!/usr/bin/env bash` shebang
+- `set -euo pipefail` at line 2
+- Functions use lowercase with underscores: `check_skill_count()`
+- Variables: `UPPERCASE` for constants/globals, `lowercase` for locals
+- `[[ ]]` for conditionals, never `[ ]`
+- `$()` for command substitution, never backticks
+- Quote all variable expansions: `"$var"` not `$var`
+- `printf` for formatted output, not `echo -e`
 
-- **Phase-level logging**: Timestamp, phase name, target, tool used, exit code
-- **Finding-level logging**: Timestamp, target, port/service, vulnerability class, severity, evidence path
-- **Error logging**: Tool errors, unexpected responses, scope boundary hits
-- **Format**: Plain-text log files in the engagement evidence directory
-- **No sensitive data**: Never log real credentials, session tokens, or PII
+### TypeScript (Plugins)
+
+- `import type { Plugin } from "@opencode-ai/plugin"` for plugin SDK imports (type-only imports)
+- `const plugin: Plugin = async () => ({ "hook.name": async (...) => { } })` factory function pattern
+- All hook parameters are explicitly typed: `input: { tool: string; sessionID: string; callID: string }`, `_input`, `_output`
+- Use `_` prefix for unused parameters (TypeScript `noUnusedLocals` / `noUnusedParameters` flags enforce this)
+- Null-safe access with `??` operator: `input.args?.join(" ") ?? ""`
+- tsconfig must include `strict: true`, `noUncheckedIndexedAccess`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `noUnusedLocals`, `noUnusedParameters`
+- Target `ES2022` with `NodeNext` module resolution for ESM compatibility
+- Export default the plugin object: `export default plugin`
+
+### Markdown
+
+- ATX-style headers (`#`, `##`) with space after `#`
+- Fenced code blocks with language tag: ` ```bash `
+- Tables aligned with pipes, not forced to column-align
+- Links use reference style only for repeated URLs
+- Mermaid diagrams in ` ```mermaid ` fenced blocks
+
+### YAML Frontmatter
+
+```yaml
+---
+name: skill-name
+description: "One sentence. Keyword-rich. Includes when to invoke."
+---
+```
+- `name` must match the parent directory name
+- `description` must be one sentence, quoted if it contains colons
+- Opening `---` on line 1, closing `---` immediately before body text
+- Spaces only (no tabs), UTF-8 encoding
+
+## Orchestration Rules
+
+- **Orchestrator NEVER writes code directly.** ALL code writing is delegated to @ingenium-software-engineer.
+- **Orchestrator uses bash ONLY for:** git add/commit/push, git rev-parse, and test/build verification after subagents finish.
+- **Every tool call passes the Pre-Action Gate:** "Should a subagent do this?"
+- **After every change, @ingenium-docs is spawned** — mandatory, never optional.
+- **Every 5 tool calls, a Periodic Self-Audit runs** — checking if delegation rules were followed.
