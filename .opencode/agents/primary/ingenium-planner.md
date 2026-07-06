@@ -131,12 +131,10 @@ Before delegating ANY research, you MUST validate your understanding with the us
 
 **Use the `question` tool** for structured questions when the user needs to pick from options. For open-ended questions, use freeform text.
 
-2. **Delegate to subagents** — Spawn 2-4 subagents in parallel for research:
-    - `@ingenium-explore` #1 — Search codebase for relevant files, patterns, and structure
-    - `@ingenium-explore` #2 — Search codebase for related code, dependencies, and test patterns
+2. **Delegate to subagents** — Spawn subagents as needed for research:
+    - `@ingenium-explore` — Search codebase for relevant files, patterns, structure, dependencies
     - `@ingenium-scout` — Check Thread for past decisions, preferences, and context
     - `@ingenium-security-auditor` — Security analysis of the affected area (if relevant)
-    - `@ingenium-explore` — Review existing docs structure to understand documentation needs
 3. **Analyze** — Read the files subagents identified (you may `read` specific files). Synthesize findings. Identify affected files, risks, dependencies.
 4. **Plan** — Produce a step-by-step plan with:
     - Files to create, modify, or delete

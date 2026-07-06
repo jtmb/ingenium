@@ -2,26 +2,6 @@
 
 This is the **bootstrap source repo** for the Ingenium skill system. Skills live in `.agents/skills/` — all 44 are deployed via `bootstrap.sh` from the repo root. Edit source files here.
 
-## Agent Pipeline (this repo only)
-
-Two primary agents, nine subagents. Full architecture: `docs/agents.md`.
-
-| Agent | Type | Model | Access | Purpose |
-|-------|------|-------|--------|---------|
-| `ingenium-planner` | Primary | DeepSeek V4 Pro | Read-only | Planner — plans sprints, decomposes feature requests, populates kaban board. Spawns ONLY research agents (explore, scout, security-auditor). |
-| `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Full R/W | Executor — delegates to subagents, NEVER writes code directly. |
-| `ingenium-explore` | Subagent | V4 Flash | Read-only | Codebase search (paid, max reasoning) |
-| `ingenium-scout` | Subagent | qwopus (LM Studio) | Read-only | Thread/RAG context — search past decisions |
-| `ingenium-qa` | Subagent | V4 Flash (Zen free) | Edit (`edit: allow`) | Code review + test verification |
-| `ingenium-docs` | Subagent | V4 Flash (Zen free) | Edit + Write (`edit: allow, write: allow`) | Documentation + skill updates |
-| `ingenium-security-auditor` | Subagent | V4 Flash | Bash + read-only (`write: deny`) | Security audit + git-history leak scanning |
-| `ingenium-software-engineer` | Subagent | V4 Flash (Zen free) | Read/Write (`edit: allow, write: allow`) | Implementation, refactoring, bug fixes, design review |
-| `ingenium-software-engineer-fast` | Subagent | V4 Flash (Zen free) | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring |
-| `ingenium-software-engineer-premium` | Subagent | V4 Pro (paid) | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes |
-| `ingenium-plan-file` | Subagent | V4 Flash (Zen free) | Read/Write (plan.md only) | Manages `plan.md` — created/updated/deleted by planner |
-
-**Workflow**: Tab to planner for sprint planning/research → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
-
 > 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
 
 ---
@@ -47,21 +27,13 @@ Two primary agents, nine subagents. Full architecture: `docs/agents.md`.
 | Edit Docker/K8s | `containers` / `kubernetes` |
 | Edit shell scripts | `shell-scripts` — `set -euo pipefail` |
 
-### Mandatory Skills (load before ANY action)
+### 🔴 MANDATORY Skills (load before ANY action)
 
-`generic-conventions` `local-models` `debugging-patterns` `useful-tests` `project-structure` `error-interpretation` `self-correction-patterns` `skill-load` `api-design` `shell-scripts` `sql-database` `typescript-standalone` `agent-pipelines` `gitignore` `postgresql-optimization` `code-review-checklist` `refactoring-recipes` `cli-toolkit` `regex-reference` `web-design-reviewer` `chrome-devtools` `playwright-mcp`
+`generic-conventions` `local-models` `debugging-patterns` `useful-tests` `project-structure` `error-interpretation` `self-correction-patterns` `skill-load` `api-design` `shell-scripts` `sql-database` `typescript-standalone` `agent-pipelines` `gitignore` `postgresql-optimization` `code-review-checklist` `refactoring-recipes` `cli-toolkit` `regex-reference` `web-design-reviewer` `playwright-mcp` `thread-auto-context` `update-skills` `help`
 
----
+### 🔴 MANDATORY — Self-Improvement
 
-## Lazy-Load Pattern
-
-Use `@.agents/SKILL-CATALOG.md` for the full catalog with invocation patterns and framework/domain/task tables. Load on demand — do not preload.
-
-`opencode.json` loads 3 core skills automatically: `generic-conventions`, `repo-context`, `local-models`. All others load via the `skill` tool when matched.
-
----
-
-## Self-Improvement
+After ANY code change, you MUST run the applicable self-improvement commands:
 
 | Command | Action |
 |---------|--------|
@@ -69,6 +41,8 @@ Use `@.agents/SKILL-CATALOG.md` for the full catalog with invocation patterns an
 | `/audit-skills` | Cross-references skills against README, bootstrap.sh, mermaid |
 | `/update-skill-index` | Regenerates `SKILL-INDEX.md` from all skill files |
 | All changes | Log to `.agents/skills/learnings.md` with before/after commit hashes |
+
+These are not optional. Skip none of them.
 
 ---
 
