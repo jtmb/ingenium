@@ -194,3 +194,15 @@
   4. **Synced** to 3 deploy destinations.
 - **Before**: `6c13ef0`
 - **Why**: Users need a way to carry context across OpenCode sessions. The export workflow now always runs at session end and outputs a copyable prompt that can be used to import context in the next chat.
+
+## 2026-07-05 — SE tool preference: write/edit over bash for file ops
+
+- **Commit**: `0f89840`
+- **Category**: agent | config
+- **Changes**:
+  1. **Added 🔴 HARD RULE — Use Write/Edit Tools, Never Bash For Files** with tool-usage mapping table (write for create, edit for modify, bash for verification only)
+  2. **Process step 3**: Updated to explicitly reference `write` and `edit` tools, bans bash for file creation/editing
+  3. **Process step 4**: Updated to restrict bash to verification only, directs fixes via write/edit
+  4. **Synced** to 6 destinations (all copies show 3 matches for "NEVER use bash")
+- **Before**: `efa1bff`
+- **Why**: Models default to bash (`echo >`, `cat >`, `sed`) for file operations even though write/edit tools are available. This causes escaping issues and is error-prone. The write/edit tools are purpose-built for code authoring.
