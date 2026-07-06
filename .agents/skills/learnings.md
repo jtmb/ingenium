@@ -332,3 +332,17 @@
   6. Synced skill + docs to all 3 deploy variants
   7. Uploaded Kaban README from GitHub to Thread (entries 181-192, 12 chunks, tags: docs-import, kaban-board, readme)
 - **Skill count**: Source: 49, software-dev: 49, dev-ops: 49, sec-ops: 54
+
+## 2026-07-05 — removed 4 redundant skills (audit cleanup)
+
+- **Commit**: `8e0334c` (after)
+- **Category**: skill
+- **Changes**: Removed 4 redundant skills and cleaned up all references:
+  1. `git-workflows` — redundant with `gh-cli` (which covers all GitHub/Git operations)
+  2. `github-actions-efficiency` — too narrow (CI cost optimization only), removed with 4 reference files
+  3. `github-actions-hardening` — too narrow (CI security only), removed with 5 reference files
+  4. `github-issues` — redundant with `gh-cli` (issue creation via template + gh api), removed with 7 reference files
+  5. Cleaned up: bootstrap.sh (4 entries), SKILL-CATALOG.md (4 entries), SKILL-INDEX.md (renumbered 49→45), AGENTS.md, README.md, USAGE.md, docs/ARCHITECTURE.md, gh-cli cross-reference
+  6. Removed from all 3 deploy variants (12 skill dirs + 16 reference files + 16 docs copies)
+  7. Deploy SKILL-INDEX.md, CATALOG, and variant AGENTS/USAGE/ARCHITECTURE synced
+- **Skill count**: Source: 45, software-dev: 45, dev-ops: 44, sec-ops: 50
