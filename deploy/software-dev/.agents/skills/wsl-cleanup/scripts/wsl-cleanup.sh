@@ -6,7 +6,7 @@
 # yarn, systemd journals, temp files, trash, snap, and model caches.
 #
 # Every destructive step requires explicit user confirmation. The script NEVER
-# touches $HOME/repos or any subdirectory (HARD RULE).
+# touches $HOME/repos, /mnt, or any subdirectory (HARD RULE).
 #
 # Usage: ./wsl-cleanup.sh [--dry-run] [--allow-root]
 # ──────────────────────────────────────────────────────────────────────────────
@@ -16,6 +16,7 @@ set -euo pipefail
 readonly SCRIPT_VERSION="1.0.0"
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly REPOS_DIR="${HOME}/repos"
+readonly MNT_DIR="/mnt"
 
 # ── Global State ──
 DRY_RUN=false
@@ -59,7 +60,7 @@ ${BLD}Options:${RST}
 
 ${BLD}Safety guarantees:${RST}
     • Every destructive step requires explicit [y/N] confirmation
-    • The script NEVER touches \${HOME}/repos or any subdirectory (HARD RULE)
+    • The script NEVER touches \${HOME}/repos, /mnt, or any subdirectory (HARD RULE)
     • Tool presence is checked before every operation — missing tools are skipped
     • Running as root is blocked unless --allow-root is passed
     • Dry-run mode previews operations without executing them
@@ -135,15 +136,21 @@ human_readable() {
     fi
 }
 
-# ── check_repos_exclusion — Verify a path is NOT inside $REPOS_DIR ──
+# ── check_exclusions — Verify a path is NOT inside $REPOS_DIR or /mnt ──
 # Returns 0 if safe, 1 if blocked. MUST be called before every filesystem op.
-check_repos_exclusion() {
+check_exclusions() {
     local target
     target="$(realpath "$1" 2>/dev/null || echo "$1")"
+    # Check $HOME/repos
     local repos_real
     repos_real="$(realpath "$REPOS_DIR" 2>/dev/null || echo "$REPOS_DIR")"
     if [[ "$target" == "$repos_real"* ]]; then
         error "BLOCKED: $1 is inside ${REPOS_DIR} — this is a HARD RULE violation. Skipping."
+        return 1
+    fi
+    # Check /mnt (WSL Windows drive mounts)
+    if [[ "$target" == "$MNT_DIR" || "$target" == "$MNT_DIR/"* ]]; then
+        error "BLOCKED: $1 is inside ${MNT_DIR} (Windows drive mount) — this is a HARD RULE violation. Skipping."
         return 1
     fi
     return 0
@@ -708,8 +715,8 @@ clean_trash() {
     fi
 
     # Validate path safety
-    if ! check_repos_exclusion "$trash_dir"; then
-        error "Trash directory failed repos exclusion check. Skipping."
+    if ! check_exclusions "$trash_dir"; then
+        error "Trash directory failed exclusion check (repos/mnt). Skipping."
         record_result "$name" 0
         return 0
     fi
@@ -903,8 +910,8 @@ clean_model_caches() {
         if [[ -z "$path" || ! -d "$path" ]]; then
             continue
         fi
-        if ! check_repos_exclusion "$path"; then
-            error "  ${label} cache at ${path} blocked by repos exclusion. Skipping."
+        if ! check_exclusions "$path"; then
+            error "  ${label} cache at ${path} blocked by exclusion check (repos/mnt). Skipping."
             continue
         fi
         # Also verify path is not the root or home directory
@@ -1081,6 +1088,7 @@ main() {
     log "  User: ${USER} (EUID: ${EUID})"
     log "  Home: ${HOME}"
     log "  Repos: ${REPOS_DIR} ${BLD}(PROTECTED — will not be touched by any operation)${RST}"
+    log "  MNT:   ${MNT_DIR} ${BLD}(PROTECTED — will not be touched by any operation)${RST}"
     echo ""
 
     log "Initial disk usage:"
