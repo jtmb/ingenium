@@ -136,4 +136,24 @@ pipx ensurepath
 
 # Python PoC dependencies
 pipx install requests beautifulsoup4
-```
+
+## Bootstrap Key Integrations
+
+The Ingenium bootstrap system integrates with the following services:
+
+| Integration | Purpose | Configured by |
+|-------------|---------|---------------|
+| **Thread MCP** | Persistent memory via local MCP server | `.vscode/mcp.json` or `opencode.json` `mcp.thread` |
+| **LM Studio** | Local model inference for `ingenium-scout` (qwopus) | `~/.config/opencode/opencode.jsonc` provider config |
+| **OpenCode Zen** | Free-tier model pool for execution subagents | `opencode.json` model assignments |
+| **DeepSeek API** | Paid model pool for planner + orchestrator + explore + security-auditor | `opencode.json` model assignments |
+
+## Deploy Variants
+
+The deploy/ directory has 3 independent target variants, each with its own skills, agents, and docs:
+
+| Variant | Domain | Skills | Key Agents |
+|---------|--------|--------|------------|
+| `software-dev/` | General software engineering | 46 universal + 1 primer (47 total) | planner, orchestrator, software-engineer, qa, docs, explore, scout, security-auditor |
+| `dev-ops/` | Kubernetes cluster operations | 42 universal + 4 K8s + 1 primer (47 total) | planner, orchestrator, infrastructure-engineer, qa, docs, explore, scout, security-auditor |
+| `sec-ops/` | Security penetration testing | 43 universal + 10 pentest + 1 primer (54 total) | planner, orchestrator, security-engineer, qa, docs, explore, scout, security-auditor |

@@ -115,3 +115,21 @@
   3. **ingenium-orchestrator.md** — Updated delegation table: added "Write code, implement features" → `@ingenium-software-engineer`. Changed anti-patterns (write/edit tool) from QA → software-engineer. Changed forbidden bash patterns (sed/awk/cp/mv) from QA → software-engineer. QA keeps: code review, test authoring.
   4. **All deploy targets synced** — software-dev, dev-ops, sec-ops.
 - **Why**: User explicitly directed that orchestrator should never write code directly — all code writing goes to @ingenium-software-engineer. The previous permission model prevented this (software-engineer was read-only, code writing was incorrectly routed to QA).
+
+## 2026-07-05 — docs-stale-content-fixes
+
+- **Commit**: `pending`
+- **Category**: docs | config | architecture
+- **Changes**: Applied 12 targeted fixes to `docs/ARCHITECTURE.md` (7 items) and `docs/CONVENTIONS.md` (5 items):
+  1. Skill count 46→47, added `orchestrator-primer/` to directory tree
+  2. Added `.opencode/agents/` role-nested sub-structure (primary/, execution/, research/, security/)
+  3. Updated deploy section to 3 domain variants (software-dev, dev-ops, sec-ops)
+  4. Updated agent pipeline paragraph with role-nested directories and orchestrator delegation rules
+  5. Changed hooks frequency from every 10→5 calls with delegation pattern reminders
+  6. Broadened learnings.md description to cover all change categories
+  7. Added Orchestration Rules section to CONVENTIONS.md
+  8. Updated agent file naming convention from `{name}.agent.md` to `ingenium-{role}.md`
+  9. Removed obsolete `.agents/instructions/` and `.agents/tools/` references
+  10. Broadened learnings entry trigger to include agents, hooks, plugins, deploy, config, architecture, bugs, patterns
+  11. Updated deploy description with 3 domain variants
+- **Synced**: All 3 deploy targets (software-dev, dev-ops, sec-ops); created new `deploy/software-dev/docs/CONVENTIONS.md`

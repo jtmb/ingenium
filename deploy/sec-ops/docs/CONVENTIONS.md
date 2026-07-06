@@ -17,7 +17,7 @@
 ```
 sec-ops/
 ├── .agents/
-│   ├── skills/             # 53 skill directories (43 universal + 10 pentest)
+│   ├── skills/             # 54 skill directories (44 universal + 10 pentest)
 │   ├── hooks/              # 3 lifecycle hooks (JSON)
 │   └── scripts/            # Bootstrap scripts
 ├── .opencode/
