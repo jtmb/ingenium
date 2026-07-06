@@ -93,9 +93,33 @@ python server.py        # blocking servers
 nginx -g 'daemon off;'  # foreground server
 ```
 
-### NEVER Search `node_modules` or Build Output Directories
+### 🔴 NEVER Search `node_modules` or Build Output Directories
 
 Running `find` or `grep` in `node_modules`, `.git`, `dist`, `build`, `.next`, `target`, `__pycache__`, `venv`, or `.venv` produces massive output (50K–500K files) and hangs the terminal.
+
+**Why:** This is a pattern of making assumptions about where code exists without verification first. The same mistake happens everywhere:
+- Assuming a server is running → no health check before curl
+- Assuming an MCP server is available → no config lookup  
+- Assuming a key/token location → no global config check
+- Assuming documentation paths exist → no robots.txt or sitemap probe
+
+**The Fix:** Always verify BEFORE acting. Check what's actually there first:
+1. Look at `.vscode/mcp.json` — does `thread` server already exist? Don't bootstrap if it does
+2. Call `curl http://localhost:5000/api/v1/health` — is Thread reachable? If not, don't assume you'll fix it later  
+3. Check global MCP config location for existing tokens/configs — don't guess paths or keys
+
+### NEVER Make Assumptions Without Checking References First
+
+**This is the #1 failure pattern across all skills.** Before doing ANY action that requires external context (server running, MCP available, API key exists), verify it actually exists:
+
+| You want to... | Don't assume — check first |
+|----------------|----------------------------|
+| Use Thread MCP tools | Check `.vscode/mcp.json` for `servers.thread` + `THREAD_SERVER_URL` env var |
+| Call LM Studio `/v1/models` | First verify server is reachable at configured base URL (don't assume port 1234) |
+| Use OpenAI-compatible tool calls | Verify the model exists on the server, don't just send a request hoping it works |
+| Read env vars from config files | Look in global MCP config location — don't guess paths or key names |
+
+**The pattern:** "Verify → Act" not "Act and hope it worked."
 
 ```bash
 # ❌ NEVER DO THIS — scans 50,000+ files, hangs terminal
