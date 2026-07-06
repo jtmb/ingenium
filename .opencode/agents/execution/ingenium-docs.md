@@ -4,9 +4,17 @@ description: "Documentation and skill management agent. Creates and updates READ
 mode: subagent
 model: opencode/deepseek-v4-flash-free
 permission:
+  read: allow
+  edit: allow
+  write: allow
   bash: deny
+  glob: allow
+  grep: allow
+  list: allow
   task:
     "*": "deny"                           # No subagent delegation allowed
+  skill:
+    "*": "allow"
 skills:
   - write-docs
   - generate-docs
@@ -15,7 +23,7 @@ skills:
   - audit-skills                # Cross-references skills against docs
   - create-readme               # README.md creation templates
   - mermaid                     # Mandatory diagrams in all documentation
-  - lm-studio                   # LM Studio documentation and setup guides
+  - local-models                # Model profiles, terminal safety, LM Studio API reference
   - generic-conventions
 ---
 

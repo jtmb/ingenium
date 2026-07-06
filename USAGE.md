@@ -11,7 +11,7 @@ See **[Getting Started](./README.md#getting-started)** in the README for install
 - **Manual Install** — clone and run `bootstrap.sh`
 - **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
 
-**What you get in every project:** the full `.agents/skills/` (45 items total), `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — all auto-detected to match your framework.
+**What you get in every project:** the full `.agents/skills/` (43 items total), `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — all auto-detected to match your framework.
 
 ---
 
@@ -94,8 +94,9 @@ your-project/
 │   │   │   └── SKILL.md                         ←   Consistency audit
 │   │   ├── debugging-patterns/
 │   │   │   └── SKILL.md                         ←   Systematic debugging
-│   │   ├── local-model-commands/
-│   │   │   └── SKILL.md                         ←   Terminal safety for local LLMs
+│   │   ├── local-models/
+│   │   │   ├── SKILL.md                         ←   Model profiles, terminal safety, LM Studio API
+│   │   │   └── scripts/vision_call.py           ←   Vision bridge script
 │   │   ├── self-correction-patterns/
 │   │   │   └── SKILL.md                         ←   AI recovery patterns
 │   │   ├── generate-docs/
@@ -114,11 +115,9 @@ your-project/
 │   │   │   └── SKILL.md                         ←   GitHub CLI operations
 │   │   ├── web-design-reviewer/
 │   │   │   └── SKILL.md                         ←   UI/UX inspection
-│   │   ├── lm-studio/
-│   │   │   └── SKILL.md                         ←   Vision model bridge
 │   │   ├── onboard-existing-repo/
 │   │   │   └── SKILL.md                         ←   Repo onboarding
-│   │   └── ... (49 total)
+│   │   └── ... (43 total)
 │   ├── hooks/                                   ← Deterministic enforcement (JSON)
 │   │   ├── session-start.json                   ←   Auto-bootstrap on session start
 │   │   ├── pre-tool-use.json                    ←   Validate before tool calls
