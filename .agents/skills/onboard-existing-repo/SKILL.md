@@ -142,22 +142,20 @@ Collect reports from all 3 subagents, then cross-reference against the bootstrap
 
 ### Data-Driven Skill Selection
 
-| Discovery Signal | Applicable Skills | Deploy Source |
-|-----------------|-------------------|---------------|
-| `*.py` files or `pyproject.toml`/`setup.py` | `python-conventions` | `deploy/.agents/skills/python-conventions/` |
-| `*.go` files or `go.mod` | `go-conventions` | `deploy/.agents/skills/go-conventions/` |
-| `*.rs` files or `Cargo.toml` | `rust-conventions` | `deploy/.agents/skills/rust-conventions/` |
-| `*.tsx` + `next.config.*` or `next` in package.json | `nextjs-conventions` | `deploy/.agents/skills/nextjs-conventions/` |
-| `Dockerfile` or `compose.yaml` | `containers` | `deploy/.agents/skills/containers/` |
-| `*.sh` or `*.bash` files | `shell-scripts` | `deploy/.agents/skills/shell-scripts/` |
-| `*.sql` files or `migrations/` dir | `sql-database` | `deploy/.agents/skills/sql-database/` |
-| `.github/workflows/` exists | `github-actions-hardening`, `github-actions-efficiency` | `deploy/.agents/skills/github-actions-*/` |
-| K8s manifests or Helm charts | `kubernetes` | `deploy/.agents/skills/kubernetes/` |
-| `package.json` with REST routes or `routes/` dir | `api-design` | `deploy/.agents/skills/api-design/` |
-| `package.json` (no Next.js, any TS/JS) | `typescript-standalone` | `deploy/.agents/skills/typescript-standalone/` |
-| PostgreSQL used (requirements, config, or ORM) | `postgresql-optimization` | `deploy/.agents/skills/postgresql-optimization/` |
-| `*.test.*`, `*_test.go`, `jest`, `pytest` | `useful-tests` | `deploy/.agents/skills/useful-tests/` |
-| `.github/workflows/` with inefficient patterns | `github-actions-efficiency` | `deploy/.agents/skills/github-actions-efficiency/` |
+| Discovery Signal | Applicable Skills |
+|-----------------|-------------------|
+| `*.py` files or `pyproject.toml`/`setup.py` | `python-conventions` |
+| `*.go` files or `go.mod` | `go-conventions` |
+| `*.rs` files or `Cargo.toml` | `rust-conventions` |
+| `*.tsx` + `next.config.*` or `next` in package.json | `nextjs-conventions` |
+| `Dockerfile` or `compose.yaml` | `containers` |
+| `*.sh` or `*.bash` files | `shell-scripts` |
+| `*.sql` files or `migrations/` dir | `sql-database` |
+| K8s manifests or Helm charts | `kubernetes` |
+| `package.json` with REST routes or `routes/` dir | `api-design` |
+| `package.json` (no Next.js, any TS/JS) | `typescript-standalone` |
+| PostgreSQL used (requirements, config, or ORM) | `postgresql-optimization` |
+| `*.test.*`, `*_test.go`, `jest`, `pytest` | `useful-tests` |
 
 ### Always-Applied Skills (universal — copy unconditionally)
 
@@ -206,12 +204,6 @@ Using the reports from Phase 1 and the mapping above, produce two lists:
 1. **Skills to copy**: Items from the tables where the discovery signal matched
 2. **Skills available but not applicable**: Items that don't match — these are NOT copied but logged for the user
 
-**Excluded from deploy** (bootstrap-only, never copy):
-- `bootstrap.sh` — for fresh scaffolds, not existing repos
-- `create-readme` — source-only, replaced by `generate-docs`
-- `gh-cli` — source-only tool reference
-- `SKILL-INDEX.md` — index is internal to the source repo
-
 ---
 
 ## Phase 3 — Apply Bootstrap Payload
@@ -227,7 +219,7 @@ mkdir -p .agents/{skills,instructions,tools,hooks} docs/
 For each skill in the "Skills to copy" list from Phase 2:
 
 ```bash
-cp -r "$BOOTSTRAP_REPO/deploy/.agents/skills/<skill-name>/" ".agents/skills/<skill-name>/"
+cp -r "$BOOTSTRAP_REPO/.agents/skills/<skill-name>/" ".agents/skills/<skill-name>/"
 ```
 
 Where `$BOOTSTRAP_REPO` is the path to the cloned bootstrap repo.
@@ -240,7 +232,7 @@ Always copy all these instructions (they're the session management layer):
 for instr in skill-load help repo-context debugging-patterns self-correction-patterns \
              local-model-commands update-skills audit-skills update-skill-index \
              generate-docs write-docs lm-studio thread-auto-context; do
-  cp -r "$BOOTSTRAP_REPO/deploy/.agents/instructions/$instr/" ".agents/instructions/$instr/"
+  cp -r "$BOOTSTRAP_REPO/.agents/instructions/$instr/" ".agents/instructions/$instr/"
 done
 ```
 
@@ -251,8 +243,8 @@ Copy tools based on project needs (from Phase 2 mapping):
 ```bash
 # Always copy github-issues (low cost, high value)
 for tool in chrome-devtools playwright-mcp web-design-reviewer github-issues; do
-  if [[ -d "$BOOTSTRAP_REPO/deploy/.agents/tools/$tool/" ]]; then
-    cp -r "$BOOTSTRAP_REPO/deploy/.agents/tools/$tool/" ".agents/tools/$tool/"
+  if [[ -d "$BOOTSTRAP_REPO/.agents/tools/$tool/" ]]; then
+    cp -r "$BOOTSTRAP_REPO/.agents/tools/$tool/" ".agents/tools/$tool/"
   fi
 done
 ```
@@ -260,13 +252,13 @@ done
 ### 3.5 Copy Hooks (Always — All 3)
 
 ```bash
-cp "$BOOTSTRAP_REPO/deploy/.agents/hooks/"*.json ".agents/hooks/"
+cp "$BOOTSTRAP_REPO/.agents/hooks/"*.json ".agents/hooks/"
 ```
 
 ### 3.6 Copy and Customize AGENTS.md
 
 ```bash
-cp "$BOOTSTRAP_REPO/deploy/AGENTS.md" "AGENTS.md"
+cp "$BOOTSTRAP_REPO/AGENTS.md" "AGENTS.md"
 ```
 
 Then **edit AGENTS.md** to update the quick-reference tables:
@@ -282,7 +274,7 @@ Then **edit AGENTS.md** to update the quick-reference tables:
 ```bash
 for doc in README.md ARCHITECTURE.md TECH-STACK.md CONVENTIONS.md; do
   if [[ ! -f "docs/$doc" ]] || grep -q "<!-- TODO -->" "docs/$doc"; then
-    cp "$BOOTSTRAP_REPO/deploy/docs/$doc" "docs/$doc"
+    cp "$BOOTSTRAP_REPO/docs/$doc" "docs/$doc"
   fi
 done
 ```
@@ -364,13 +356,13 @@ Provide a summary:
 
 | Artifact | Source Path |
 |----------|-------------|
-| AGENTS.md | `$BOOTSTRAP_REPO/deploy/AGENTS.md` |
-| Skills | `$BOOTSTRAP_REPO/deploy/.agents/skills/<name>/` |
-| Instructions | `$BOOTSTRAP_REPO/deploy/.agents/instructions/<name>/` |
-| Tools | `$BOOTSTRAP_REPO/deploy/.agents/tools/<name>/` |
-| Hooks | `$BOOTSTRAP_REPO/deploy/.agents/hooks/` |
-| Docs templates | `$BOOTSTRAP_REPO/deploy/docs/` |
-| Hook bootstrap script | `$BOOTSTRAP_REPO/deploy/.agents/scripts/hook-bootstrap.sh` |
-| CI workflow | `$BOOTSTRAP_REPO/deploy/.agents/workflows/ci.yml` |
+| AGENTS.md | `$BOOTSTRAP_REPO/AGENTS.md` |
+| Skills | `$BOOTSTRAP_REPO/.agents/skills/<name>/` |
+| Instructions | `$BOOTSTRAP_REPO/.agents/instructions/<name>/` |
+| Tools | `$BOOTSTRAP_REPO/.agents/tools/<name>/` |
+| Hooks | `$BOOTSTRAP_REPO/.agents/hooks/` |
+| Docs templates | `$BOOTSTRAP_REPO/docs/` |
+| Hook bootstrap script | `$BOOTSTRAP_REPO/.agents/scripts/hook-bootstrap.sh` |
+| CI workflow | `$BOOTSTRAP_REPO/.agents/workflows/ci.yml` |
 
 Default `$BOOTSTRAP_REPO`: path to local clone of `jtmb/ingenium`

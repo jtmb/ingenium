@@ -1,6 +1,6 @@
 ---
 name: write-docs
-description: "Write high-quality documentation — READMEs, API docs, ADRs, architecture decision records, and AGENTS.md skill index. AUTO-INVOKE after any change to the skill system (.agents/skills/, deploy/, tests/, bootstrap scripts) or when docs are stale. Do not wait for the user to ask — check docs freshness proactively after every code change. Invokes the Explore subagent by default."
+description: "Write high-quality documentation — READMEs, API docs, ADRs, architecture decision records, and AGENTS.md skill index. AUTO-INVOKE after any change to the skill system (.agents/skills/, tests/, bootstrap scripts) or when docs are stale. Do not wait for the user to ask — check docs freshness proactively after every code change. Invokes the Explore subagent by default."
 ---
 
 # Write Project Documentation
@@ -11,13 +11,12 @@ description: "Write high-quality documentation — READMEs, API docs, ADRs, arch
 
 - `.agents/skills/*/SKILL.md` — skill added, removed, or modified
 - `.agents/scripts/` — bootstrap or hook scripts changed
-- `deploy/` — deploy structure or files changed
 - `tests/` — test infrastructure changed
 - Project root files — `README.md`, `USAGE.md`, `AGENTS.md`
 - `.opencode/agents/*.md` — agents added, removed, or modified
 - `.opencode/plugins/*` — plugins added or modified
 - `.agents/hooks/*.json` — hooks added or modified
-- `opencode.json`, `.vscode/mcp.json` — config changed
+- `opencode.json` — config changed
 - `docs/agents.md` — agent architecture doc changed (self-referential)
 
 **Workflow:** Complete the code change → check which docs are affected → update them → commit. Same turn. No waiting.

@@ -2,12 +2,11 @@
 
 ## Overview
 
-**Ingenium** is a self-improving AI conventions system packaged as a bootstrap toolkit. It provides a skill-based framework that tells AI coding agents (GitHub Copilot, Cline, etc.) how to follow project conventions, enforce rules, and grow new skills as the codebase evolves. The project is self-hosting: its own skill system governs its own development.
+**Ingenium** is a self-improving AI conventions system packaged as a bootstrap toolkit. It provides a skill-based framework that tells AI coding agents (OpenCode AI agents) how to follow project conventions, enforce rules, and grow new skills as the codebase evolves. The project is self-hosting: its own skill system governs its own development.
 
 Key properties:
 - **Zero runtime dependencies** — pure Markdown + YAML + shell scripts
 - **Self-improving** — an `update-skills` detection pipeline identifies gaps and auto-creates skills
-- **Deployable** — a `deploy/` mirror for clean project bootstrapping
 
 ## Directory Map
 
@@ -27,10 +26,7 @@ ingenium/
 │   └── tests/ → moved to tests/
 ├── tests/                      ← Test suite (at project root, alongside docs/)
 │   └── test-self-improving.sh  ← Validates update-skills detection pipeline (7 test functions, 20 checks)
-├── deploy/                     ← Bootstrap payload (3 domain variants)
-│   ├── software-dev/           ← General software engineering
-│   ├── dev-ops/                ← Kubernetes cluster operations
-│   └── sec-ops/                ← Security penetration testing
+├── deploy/                     ← Bootstrap payload
 ├── docs/                       ← Project documentation (this directory)
 │   ├── agents.md               ← Agent architecture reference
 │   ├── ARCHITECTURE.md         ← This file — project structure and data flow
@@ -73,7 +69,7 @@ All 45 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, boot
 
 Two bash scripts that scaffold new projects with the skill system:
 
-- **`bootstrap.sh`** — Main entry point. Copies deployable skills from `deploy/` to the target project. Supports `--framework` selection, `--dry-run`, and `--auto` detection. Uses `BOOTSTRAP_DIR` to point to `deploy/`.
+- **`bootstrap.sh`** — Main entry point. Deploys the skill system from repo root to the target project. Supports `--framework` selection, `--dry-run`, and `--auto` detection. Uses `BOOTSTRAP_DIR` to point to repo root.
 - **`hook-bootstrap.sh`** — Non-interactive bootstrap for hooks/CI. Auto-detects framework, clones from git cache.
 
 ### Plugin System (`.opencode/plugins/`)
@@ -153,17 +149,6 @@ flowchart TB
 
 The board is the authoritative state. `todowrite` is a secondary mirror for in-session OpenCode visibility — the orchestrator updates it at each kaban transition (`get-next-task`, `move-to-in-progress`, `move-to-review`, `complete`). The anti-patterns table includes "forgot to update todowrite" to ensure both are kept in sync. See `docs/agents.md` for the full agent lifecycle and `kaban-board/SKILL.md` for the complete MCP tool reference.
 
-### Deploy Separation (`deploy/`)
-
-A set of 3 domain variant mirrors containing only what gets deployed to target projects:
-- `deploy/software-dev/` — General software engineering (skills, hooks, agents, plugins, docs, config)
-- `deploy/dev-ops/` — Kubernetes cluster operations (skills, hooks, agents, plugins, docs, config)
-- `deploy/sec-ops/` — Security penetration testing (skills, hooks, agents, plugins, docs, config)
-- Each variant contains `.agents/skills/` (45 skills), `.agents/hooks/`, `.opencode/agents/`, `.opencode/plugins/`, `docs/`, `AGENTS.md`, `opencode.json`, and `SKILL-INDEX.md`
-- No scripts or tests — source-only artifacts stay in root
-
-The `test-self-improving.sh` suite validates that deploy stays in sync with source (TEST 5) and that no source-only files leak in (TEST 4).
-
 ### Self-Improving Pipeline (`update-skills` + tests)
 
 The project detects its own gaps using four signals:
@@ -217,7 +202,7 @@ Three lifecycle hooks provide deterministic enforcement and self-improvement tri
 | `pre-tool-use.json` | Before every tool call | Validate terminal command safety, check file-scope rules, block dangerous patterns |
 | `post-tool-use.json` | After every 5 tool calls | Periodic reminder to log new patterns, run `/update-skills`, check for skill gaps, verify delegation patterns |
 
-Hooks live in both source (`.agents/hooks/`) and deploy (`deploy/.agents/hooks/`). They bridge the gap between skills (which are read/interpreted by the AI) and deterministic enforcement (which runs regardless of AI state).
+Hooks live in `.agents/hooks/`. They bridge the gap between skills (which are read/interpreted by the AI) and deterministic enforcement (which runs regardless of AI state).
 
 ## Data Flow
 
@@ -263,7 +248,7 @@ graph TD
 The project has no runtime communication — it operates entirely at edit time:
 - **AI reads skills** — The AI assistant scans `.agents/skills/` on startup and when file types change
 - **AI writes skills** — `update-skills` creates new skill files; `audit-skills` fixes consistency
-- **Bootstrap copies** — `bootstrap.sh` copies `deploy/` contents to target projects
+- **Bootstrap deploys** — `bootstrap.sh` deploys the skill system from repo root to target projects
 - **Tests validate** — `test-self-improving.sh` runs as a bash script, not part of the AI loop
 
 ## External Dependencies
@@ -287,7 +272,7 @@ The project is deployed by **bootstrapping** — running `bootstrap.sh` against 
 ./ingenium/.agents/scripts/bootstrap.sh --framework nextjs /path/to/new-project
 ```
 
-This copies `deploy/.agents/` + `deploy/AGENTS.md` into the target, giving it the full skill system. The bootstrap supports:
+This deploys `.agents/` + `AGENTS.md` from the repo root into the target, giving it the full skill system. The bootstrap supports:
 - **Framework selection** — `--framework nextjs|python|go|rust` selects the right skills
 - **Auto-detection** — `--auto` scans existing code to detect frameworks
 - **Dry runs** — `--dry-run` previews what would be copied

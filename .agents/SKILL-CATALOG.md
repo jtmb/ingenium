@@ -53,7 +53,7 @@
 | `mermaid` | Mermaid diagrams — mandatory visuals in ALL documentation (architecture, data-flow, lifecycle, process) |
 | `write-docs` | Need README, API docs, or ADRs |
 | `thread-auto-context` | Persistent memory via Thread MCP |
-| `onboard-existing-repo` | 🔴 **Existing repo → skill system** — parallel subagents explore, map findings, apply deploy payload |
+| `onboard-existing-repo` | 🔴 **Existing repo → skill system** — parallel subagents explore, map findings, apply all skills and config |
 | `lm-studio` | 🔴 LM Studio local inference — server mgmt, vision bridge, model lifecycle, API reference |
 | `chrome-devtools` | Browser screenshots, performance, network |
 | `playwright-mcp` | Browser automation via Playwright |
@@ -76,5 +76,5 @@
 | `/generate-docs` | Docs are stale or templates are empty |
 | `/write-docs` | Need README, API docs, or ADRs |
 | `/create-readme` | Need a README.md for the project |
-| `/onboard-existing-repo` | Onboard an existing repo to the skill system — parallel subagents explore, map to catalog, apply deploy |
+| `/onboard-existing-repo` | Onboard an existing repo to the skill system — parallel subagents explore, map to catalog, apply all skills and config |
 | `/lm-studio` | 🔴 LM Studio — local inference, vision bridge, model management |

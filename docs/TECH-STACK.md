@@ -6,7 +6,7 @@
 |----------|----------|-----|
 | **Bash** (5.x+) | Bootstrap scripts, test suite | Universal availability, no runtime deps, POSIX-compatible |
 | **TypeScript** | OpenCode lifecycle plugins (`.opencode/plugins/*.ts`) | Type-safe plugin development with strict compiler flags; compiled to JS for runtime |
-| **Markdown** | All skill bodies (SKILL.md), all documentation | Universal format, AI-native, rendered on GitHub/GitLab |
+| **Markdown** | All skill bodies (SKILL.md), all documentation | Universal format, AI-native, rendered as Markdown |
 | **YAML** | Skill frontmatter (`name`, `description`) | Human-readable, strict syntax prevents silent failures |
 | **JSON** | Hooks (`session-start.json`, `pre-tool-use.json`, `post-tool-use.json`) | Deterministic, machine-enforced |
 | **Mermaid** | Architecture & flow diagrams in README.md and docs | Renders on GitHub without external deps |
@@ -38,7 +38,7 @@ The `package.json` at the project root contains entries like `solidjs`, `astro`,
 | **Node.js / npm** | Installing `@opencode-ai/plugin` SDK and running `tsc` |
 | **shellcheck** (optional) | Linting bootstrap and test scripts |
 | **git** | Version control, conventional commits |
-| **Any editor with AI support** | The skill system targets any AI coding assistant that supports the `.agents/` convention (Copilot, Cline, Claude, and others) |
+| **Any editor with AI support** | The skill system targets any AI coding assistant that supports the `.agents/` convention (OpenCode, Cline, Claude, and others) |
 
 ## Infrastructure
 
@@ -69,17 +69,9 @@ None. This is a file-based toolkit. There is no server, no database, no deployme
 
 | Integration | Purpose | Configured by |
 |-------------|---------|---------------|
-| **Thread MCP** | Persistent memory via local MCP server | `.vscode/mcp.json` or `opencode.json` `mcp.thread` |
+| **Thread MCP** | Persistent memory via local MCP server | `opencode.json` `mcp.thread` |
 | **LM Studio** | Local model inference for `ingenium-scout` (qwopus) | `~/.config/opencode/opencode.jsonc` provider config |
 | **OpenCode Zen** | Free-tier model pool for execution subagents | `opencode.json` model assignments |
 | **DeepSeek API** | Paid model pool for planner + orchestrator + explore + security-auditor | `opencode.json` model assignments |
 
-## Deploy Variants
 
-The deploy/ directory has 3 independent target variants, each with its own skills, agents, and docs:
-
-| Variant | Domain | Skills | Key Agents |
-|---------|--------|--------|------------|
-| `software-dev/` | General software engineering | 47 universal + 1 primer (48 total) | planner, orchestrator, software-engineer, qa, docs, explore, scout, security-auditor |
-| `dev-ops/` | Kubernetes cluster operations | 43 universal + 4 K8s + 1 primer (48 total) | planner, orchestrator, infrastructure-engineer, qa, docs, explore, scout, security-auditor |
-| `sec-ops/` | Security penetration testing | 44 universal + 10 pentest + 1 primer (55 total) | planner, orchestrator, security-engineer, qa, docs, explore, scout, security-auditor |

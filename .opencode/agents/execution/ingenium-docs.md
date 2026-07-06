@@ -36,13 +36,12 @@ Follow this process:
    | Changes to | Update these docs |
    |---|---|
    | `.agents/skills/*/SKILL.md` | `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/README.md` |
-   | `.agents/scripts/` | `docs/ARCHITECTURE.md` |
-   | `deploy/` | `docs/ARCHITECTURE.md` |
-   | `tests/` | `docs/TECH-STACK.md` |
-   | `README.md`, `USAGE.md`, `AGENTS.md` | `docs/README.md` |
-   | `.opencode/agents/*.md` | `docs/agents.md`, `docs/ARCHITECTURE.md` |
+    | `.agents/scripts/` | `docs/ARCHITECTURE.md` |
+    | `tests/` | `docs/TECH-STACK.md` |
+    | `README.md`, `USAGE.md`, `AGENTS.md` | `docs/README.md` |
+    | `.opencode/agents/*.md` | `docs/agents.md`, `docs/ARCHITECTURE.md` |
     | `.agents/hooks/*.json` | `docs/ARCHITECTURE.md` |
-    | Any skills/agents/hooks/plugins/deploy/config/docs change | `.agents/skills/learnings.md` |
+    | Any skills/agents/hooks/plugins/config/docs change | `.agents/skills/learnings.md` |
 
 3. **Read only what's needed** — Don't regenerate everything. Read the affected docs first, then make targeted updates. Follow the `write-docs` skill's incremental update rules.
 4. **Update incrementally** — Apply changes only to the sections that are stale. Never regenerate an entire document from scratch unless it was freshly scaffolded.
