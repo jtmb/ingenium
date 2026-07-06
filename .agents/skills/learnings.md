@@ -182,3 +182,15 @@
   - Added "Session ending soon?" tip in During the Session — MANDATORY CHECKLIST
   - Added cross-reference from "/export" section to the new mandatory export section
 - **Why**: Ensure agents always export full session context (summary, decisions, git state) with copyable import prompts at session end
+
+## 2026-07-05 — Mandatory session-end export in thread-auto-context
+
+- **Commit**: `efa1bff`
+- **Category**: skill | config
+- **Changes**:
+  1. **At Session End** → **MANDATORY EXPORT**: Now requires full 5-step export (session summary, decisions, git state, copyable import prompt, prior-export check). Previously was a single optional summary entry.
+  2. **MANDATORY CHECKLIST**: Added "Session ending soon?" cross-reference pointing to the export workflow.
+  3. **/export section**: Added cross-reference to session-end export — both workflows produce the same output format.
+  4. **Synced** to 3 deploy destinations.
+- **Before**: `6c13ef0`
+- **Why**: Users need a way to carry context across OpenCode sessions. The export workflow now always runs at session end and outputs a copyable prompt that can be used to import context in the next chat.
