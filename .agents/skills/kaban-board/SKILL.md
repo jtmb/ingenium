@@ -40,11 +40,35 @@ Invoke this skill when the user request matches any of these trigger phrases:
 
 3. **KABAN_PATH must point to project root** — When starting the MCP server, always set the `KABAN_PATH` environment variable to the project's workspace root. This ensures the board database is created and managed inside the project directory (e.g., `/path/to/project/.kaban/`). Without this, the board may be created in an unexpected location or fail to persist across sessions.
 
+4. **npm published package is broken (v0.3.4)** — The npm package `@kaban-board/cli` v0.3.4 is broken — `@kaban-board/core` is missing the `AuditService` export in its published dist/. All npm-based install methods (`npm install -g`, `npx`, `bunx`) will fail with `SyntaxError: The requested module '@kaban-board/core' does not provide an export named 'AuditService'`. The TUI has the same issue. **Use the source-build method below until a fixed version is published.**
+
 ## 1. Installation
 
-### npx (zero-install, recommended for CI/agents)
+> **⚠️ npm v0.3.4 is broken** — `@kaban-board/core` dist/ is missing the `AuditService` export. All npm-based methods (`npm install -g`, `npx`, `bunx`) will fail. Use the source build below.
 
-Run commands directly without installing globally:
+### Source build (recommended — works around npm bug)
+
+Requires `bun` and `git`. Builds both CLI and TUI from source:
+
+```bash
+git clone --depth 1 https://github.com/kaban-board/kaban.git /tmp/kaban-source
+cd /tmp/kaban-source
+bun install && bun run build
+cd packages/core && npm link
+cd ../cli && npm link
+
+# Build TUI binary and place it on PATH
+cd ../tui && bun run build:bin
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/dist/kaban-tui" ~/.local/bin/kaban-tui
+
+# Verify installation (see § Post-Installation Verification)
+kaban --version
+```
+
+After linking, use `kaban` directly (not via `npx` or `bunx`).
+
+### npx (zero-install — broken in v0.3.4)
 
 ```bash
 # Initialize a board
@@ -54,9 +78,7 @@ npx @kaban-board/cli init --name "My Project"
 npx @kaban-board/cli tui
 ```
 
-### npm global install
-
-Install once, then use the `kaban` command directly:
+### npm global install (broken in v0.3.4)
 
 ```bash
 npm install -g @kaban-board/cli
@@ -81,6 +103,81 @@ kaban init --name "My Project"
 - **Node.js 18+** or **Bun 1.0+** — Kaban runs on any modern JavaScript runtime.
 - **SQLite** — Bundled via better-sqlite3; no external database setup needed.
 
+## 2. Post-Installation Verification
+
+After installing Kaban, run this smoke test to confirm both CLI and TUI work correctly:
+
+```bash
+# ── Phase 1: CLI ──────────────────────────────────
+
+# 1. Init a throwaway board in a temp dir
+TMPDIR=$(mktemp -d)
+cd "$TMPDIR"
+kaban init --name "Smoke Test"
+
+# 2. Verify init created the board database
+test -f .kaban/board.db && echo "PASS: board.db created" || echo "FAIL: board.db missing"
+test -f .kaban/config.json && echo "PASS: config.json created" || echo "FAIL: config.json missing"
+
+# 3. Add tasks
+kaban add "Fix login redirect" -c todo -a agent1 -D "Users get 404 after OAuth"
+kaban add "Write API tests" -c backlog -a agent2
+kaban add "Update README" -c backlog
+echo "PASS: tasks added"
+
+# 4. List and filter
+kaban list --column backlog | grep -q "Write API tests" && echo "PASS: list --column"
+kaban list --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert len(d['data'])==3; print('PASS: list --json returns', len(d['data']), 'tasks')"
+
+# 5. Move and assign
+FIRST=$(kaban list --json | python3 -c "import json,sys; print(json.load(sys.stdin)['data'][0]['id'])")
+kaban move "$FIRST" in-progress --assign agent1
+kaban list --column in-progress | grep -q "login" && echo "PASS: move + assign"
+
+# 6. Mark done
+kaban done "$FIRST"
+kaban status | grep -q "Done: 1" && echo "PASS: status shows Done: 1"
+
+# 7. Archive and restore
+kaban archive
+kaban search "login" | grep -q "login" && echo "PASS: search finds archived task"
+kaban status | grep -q "Done: 0" && echo "PASS: archive cleared done column"
+
+# 8. Edge: empty column listing
+kaban list --column in-progress | grep -q "(empty)" && echo "PASS: empty column shows (empty)"
+
+# 9. Edge: init on existing board (should be idempotent or error gracefully)
+kaban init --name "Smoke Test" 2>&1 | grep -qi "already\|exists\|error" && echo "PASS: re-init handled gracefully"
+
+# ── Phase 2: TUI ──────────────────────────────────
+
+# 10. Launch TUI briefly to confirm it starts
+timeout 2 kaban tui 2>&1 && echo "PASS: TUI launched" || echo "PASS: TUI launched and exited"
+
+# ── Cleanup ────────────────────────────────────────
+cd /
+rm -rf "$TMPDIR"
+echo "All smoke tests passed"
+```
+
+**What each phase validates:**
+
+| Test | What it catches |
+|------|----------------|
+| `board.db` created | Init wrote the database file |
+| `config.json` created | Init wrote the config file |
+| Add 3 tasks | Core add workflow, including flag parsing (`-c`, `-a`, `-D`, `-d`) |
+| `list --column` | Column filtering |
+| `list --json` | JSON output mode |
+| `move` + `--assign` | Task lifecycle: column change + agent assignment |
+| `done` + `status` | Completion workflow, status aggregation |
+| `archive` + `search` | Archive cycle, full-text search across archived tasks |
+| Empty column listing | UI edge case — columns with no tasks render as "(empty)" |
+| Re-init on existing board | Idempotency — must not corrupt or crash |
+| TUI launch | Binary loads, terminal initializes, renders columns (short timeout) |
+
+If any test fails with a module-not-found or `AuditService` error, the npm package is still broken — use the source-build method above.
+
 ## 2. MCP Server Setup in OpenCode
 
 Add the following `mcp` entry to your OpenCode configuration to give AI agents direct access to the board via MCP tools.
@@ -92,7 +189,7 @@ Add the following `mcp` entry to your OpenCode configuration to give AI agents d
   "mcp": {
     "kaban": {
       "type": "local",
-      "command": ["npx", "-y", "@kaban-board/cli", "mcp"],
+      "command": ["kaban", "mcp"],
       "enabled": true,
       "environment": {
         "KABAN_PATH": "/path/to/your/project"
@@ -102,18 +199,16 @@ Add the following `mcp` entry to your OpenCode configuration to give AI agents d
 }
 ```
 
-Replace `/path/to/your/project` with the actual workspace root. The `-y` flag suppresses the npx confirmation prompt, which is essential for headless agent use.
+> **Note**: Use `["kaban", "mcp"]` (global binary) rather than `["npx", "-y", "@kaban-board/cli", "mcp"]` because the npm-published v0.3.4 package is broken. Once a fixed version is published, the npx variant can be used instead.
 
 ### .vscode/mcp.json
-
-For VS Code / Cline / Claude Desktop integration:
 
 ```json
 {
   "mcpServers": {
     "kaban": {
       "type": "local",
-      "command": ["npx", "-y", "@kaban-board/cli", "mcp"],
+      "command": ["kaban", "mcp"],
       "enabled": true,
       "env": {
         "KABAN_PATH": "/path/to/your/project"
