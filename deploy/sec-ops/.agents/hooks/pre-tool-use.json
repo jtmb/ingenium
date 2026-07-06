@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "type": "command",
+        "command": "if [ ! -f AGENTS.md ]; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\"},\"systemMessage\":\"AGENTS.md is missing. Either the SessionStart hook did not run, or this repo has not been bootstrapped yet. Run hook-bootstrap.sh manually, or use /bootstrap from VS Code chat.\"}' && exit 0; fi; CMD=\"${TOOL_INPUT_COMMAND:-}\" && if [ -n \"$CMD\" ] && echo \"$CMD\" | grep -qE '(find|grep|rg).*(node_modules|\\.git|dist|build|\\.next|target|__pycache__|venv)'; then echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"allow\"},\"systemMessage\":\"⚠️ Your command targets node_modules or build directories — this may hang the terminal. Alternatives: use language tools (tsc --noEmit, cargo check), read package manifests, or narrow the search path.\"}'; else echo '{\"continue\":true}'; fi",
+        "timeout": 5
+      }
+    ]
+  }
+}
