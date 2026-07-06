@@ -1,6 +1,6 @@
 ---
 name: wsl-cleanup
-description: "WSL2 Ubuntu system maintenance and disk cleanup — Docker prune, apt/pip/npm caches, journalctl vacuum, temp file cleanup, snap revisions, model caches. 🔴 Never touches $HOME/repos. Use when disk space is low or routine maintenance is needed."
+description: "WSL2 Ubuntu system maintenance and disk cleanup — Docker prune, apt/pip/npm caches, journalctl vacuum, temp file cleanup, snap revisions, model caches. 🔴 Never touches $HOME/repos or /mnt. Use when disk space is low or routine maintenance is needed."
 ---
 
 # WSL2 Ubuntu Cleanup & Disk Maintenance
@@ -27,11 +27,11 @@ Invoke this skill when the user makes a request related to WSL2 disk space or sy
 
 These rules override everything else. They are not optional.
 
-### 🔴 NEVER Touch `$HOME/repos`
+### 🔴 NEVER Touch `$HOME/repos` or `/mnt`
 
-**The `$HOME/repos` directory and all subdirectories are off-limits.** No cleanup, no listing, no analysis, no operations of any kind inside `$HOME/repos`. This is the only exclusion — everything else in `$HOME` may be fair game with proper confirmation.
+**The `$HOME/repos` directory and all subdirectories are off-limits.** No cleanup, no listing, no analysis, no operations of any kind inside `$HOME/repos`. **The `/mnt` directory (Windows drive mounts) is also off-limits.** These are the only exclusions — everything else in `$HOME` may be fair game with proper confirmation.
 
-Before running ANY command that operates on paths, verify the path does not start with `$HOME/repos` or a resolved equivalent.
+Before running ANY command that operates on paths, verify the path does not start with `$HOME/repos`, `/mnt`, or a resolved equivalent.
 
 ### 🔴 Assess Before Acting
 

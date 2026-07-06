@@ -240,3 +240,15 @@
   8. All deploy variants updated: software-dev (48), dev-ops (47 = 43 universal + 4 cluster), sec-ops (53 = 44 universal + 10 pentest + 1 primer)
 - **Before**: (new skill directory + metadata)
 - **Why**: New WSL2 domain skill needed full registration in the skill system catalog, bootstrap.sh for deployment, and cross-variant deploy sync with accurate count documentation.
+
+## 2026-07-05 — wsl-cleanup: add /mnt exclusion
+
+- **Commit**: `45bfbf4`
+- **Category**: skill
+- **Changes**:
+  1. Added /mnt (WSL Windows drive mounts) to the exclusion list alongside $HOME/repos
+  2. Updated SKILL.md: description, HARD RULE heading, and exclusion body text
+  3. Updated script: header comment, usage text, MNT_DIR constant, check_exclusions() function (renamed from check_repos_exclusion), error messages, and pre-flight summary
+  4. Synced to all 3 deploy variants
+- **Before**: `9e63885`
+- **Why**: /mnt/c, /mnt/d etc. are Windows drive mounts — cleanup should never operate on them.
