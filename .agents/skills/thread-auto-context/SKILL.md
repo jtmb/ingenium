@@ -488,44 +488,46 @@ content=$(curl -sSfL -H "Accept: text/markdown" "${url}" 2>/dev/null)
 content=$(webfetch "${url}" format:"markdown" 2>/dev/null)
 ```
 
-**Strategy 5 — HTML extraction fallback**
+**Strategy 5 — HTML → plain text extraction fallback**
 
 ```bash
-# Fetch as HTML and extract readable content
+# Fetch as HTML and extract readable text with python3
 html=$(webfetch "${url}" format:"html" 2>/dev/null)
 
-# Extract <article> or <main> or fallback to entire body
-clean_html=$(echo "$html" | python3 -c "
+content=$(echo "$html" | python3 -c "
 import sys, re
 html = sys.stdin.read()
-# Extract article or main content
-for tag in ['article', 'main', '[role=main]', 'body']:
-    match = re.search(rf'<{tag}[^>]*>(.*?)</{tag}>', html, re.DOTALL)
-    if match:
-        sys.stdout.write(match.group(1))
-        sys.exit(0)
-sys.stdout.write(html)
-" 2>/dev/null)
 
-# Remove nav, header, footer, aside, script, style
-clean_html=$(echo "$clean_html" | python3 -c "
-import sys, re
-html = sys.stdin.read()
+# Extract <article> or <main> content first
+for tag in ['article', 'main', '[role=main]']:
+    m = re.search(rf'<{tag}[^>]*>(.*?)</{tag}>', html, re.DOTALL)
+    if m: html = m.group(1); break
+
+# Remove nav, header, footer, aside, script, style elements
 for tag in ['nav', 'header', 'footer', 'aside', 'script', 'style', 'noscript']:
     html = re.sub(rf'<{tag}[^>]*>.*?</{tag}>', '', html, flags=re.DOTALL)
-sys.stdout.write(html)
-")
 
-# Convert headings to markdown format (h1→#, h2→##, etc.)
-clean_html=$(echo "$clean_html" | python3 -c "
-import sys, re
-html = sys.stdin.read()
-for i in range(6, 0, -1):
-    html = re.sub(rf'<h{i}[^>]*>(.*?)</h{i}>', '#' * i + r' \1', html, flags=re.DOTALL)
-sys.stdout.write(html)
-")
+# Insert newlines before block elements for readability
+for tag in ['h1','h2','h3','h4','h5','h6','p','li','div','br','tr','th','td']:
+    html = re.sub(rf'(</?{tag}[^>]*>)', r'\n\1', html)
 
-content=$(webfetch format:"text" 2>/dev/null <<< "$clean_html")
+# Strip all remaining HTML tags
+html = re.sub(r'<[^>]+>', '', html)
+
+# Decode common HTML entities
+html = (html.replace('&amp;', '&').replace('&lt;', '<')
+            .replace('&gt;', '>').replace('&quot;', '\"')
+            .replace('&#39;', \"'\").replace('&nbsp;', ' '))
+
+# Collapse multiple blank lines
+html = re.sub(r'\n{3,}', '\n\n', html)
+sys.stdout.write(html.strip())
+" 2>/dev/null)
+
+# Only use if webfetch markdown returned too little content
+if [ ${#content} -lt 50 ]; then
+  content=$(webfetch "${url}" format:"text" 2>/dev/null)
+fi
 ```
 
 **After each page fetch,** append to the combined markdown file:
