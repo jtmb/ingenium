@@ -13,7 +13,7 @@ skills:
   - audit-skills                # Cross-references skills against docs
   - create-readme               # README.md creation templates
   - mermaid                     # Mandatory diagrams in all documentation
-  - lm-studio                   # LM Studio documentation and setup guides
+  - local-models                  # LM Studio documentation and setup guides
   - generic-conventions
 ---
 
