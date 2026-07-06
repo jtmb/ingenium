@@ -76,25 +76,60 @@ gh pr checks <number>
 
 ## Issues
 
-### List issues
+### 🔴 HARD RULE — Every Issue Must Be Complete
+
+**If you file a bug report or feature request, you MUST use the template at [templates/issue-report.md](templates/issue-report.md).** An incomplete issue wastes everyone's time on back-and-forth ("what version?", "how to reproduce?").
+
+The template is designed so someone else can diagnose and fix the issue without asking a single follow-up question. If you skip a section, you are delivering a broken report.
+
+### Filing a Bug Report
+
+Use the template file to file a complete bug:
+
 ```bash
+# Populate the template with your specific details, then create
+gh api repos/{owner}/{repo}/issues \
+  -X POST \
+  -f title="Bug: {one-line summary}" \
+  -f body="$(cat .agents/skills/gh-cli/templates/issue-report.md)" \
+  -f type="Bug" \
+  -f labels[]="bug" \
+  --jq '.html_url'
+```
+
+Edit the body to replace placeholders with your specific data before submitting.
+
+### Filing a Feature Request
+
+```bash
+gh api repos/{owner}/{repo}/issues \
+  -X POST \
+  -f title="Feature: {one-line summary}" \
+  -f body="$(cat .agents/skills/gh-cli/templates/issue-report.md)" \
+  -f type="Feature" \
+  -f labels[]="enhancement" \
+  --jq '.html_url'
+```
+
+### Quick Commands (no template needed for simple queries)
+
+```bash
+# List open issues
 gh issue list --state open --json number,title,labels,updatedAt
-```
 
-### View an issue
-```bash
+# View an issue
 gh issue view <number> --json number,title,body,state,comments
-```
 
-### Create an issue
-```bash
-gh issue create --title "Bug: description" --body "Steps to reproduce..." --label "bug"
-```
+# Create a simple issue (no template — only for trivial items)
+gh issue create --title "Task: description" --body "Brief note" --label "task"
 
-### Close an issue (no PR)
-```bash
+# Close an issue
 gh issue close <number> --reason "completed"
 ```
+
+### Cross-Reference
+
+For advanced issue management (issue types, projects V2, sub-issues, dependencies, custom fields, issue templates with structured workflows), see the `github-issues` skill. That skill covers the full issue life cycle beyond basic creation and querying.
 
 ## Releases
 
