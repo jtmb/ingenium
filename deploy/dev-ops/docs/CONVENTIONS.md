@@ -17,7 +17,7 @@
 ```
 dev-ops/
 ├── .agents/
-│   ├── skills/             # 47 skill directories (43 universal + 4 cluster ops)
+│   ├── skills/             # 48 skill directories (44 universal + 4 cluster ops)
 │   ├── hooks/              # 3 lifecycle hooks (JSON)
 │   └── scripts/            # Bootstrap scripts
 ├── .opencode/
