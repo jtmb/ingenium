@@ -2,7 +2,7 @@
 
 ## Overview
 
-**sec-ops** is an AI-driven security penetration testing agent system built on the Ingenium skill framework. It provides a structured, phase-gated methodology for conducting authorized security assessments — from initial reconnaissance through exploitation to final reporting. The system uses a team of specialized AI agents (8 total: 2 primary + 6 subagents) that coordinate through the OpenCode platform, backed by 53 skills (43 universal + 10 pentest-domain) that govern tool usage, methodology, evidence handling, and ethical boundaries.
+**sec-ops** is an AI-driven security penetration testing agent system built on the Ingenium skill framework. It provides a structured, phase-gated methodology for conducting authorized security assessments — from initial reconnaissance through exploitation to final reporting. The system uses a team of specialized AI agents (8 total: 2 primary + 6 subagents) that coordinate through the OpenCode platform, backed by 54 skills (44 universal + 10 pentest-domain) that govern tool usage, methodology, evidence handling, and ethical boundaries.
 
 Key properties:
 - **No runtime dependencies beyond pentesting tools** — pure Markdown + YAML + shell scripts for the agent system
@@ -41,7 +41,7 @@ graph TB
 
     SE --> SA[ingenium-security-auditor.md — Project security audit]
 
-    AS --> SK[skills/ — 53 skills]
+    AS --> SK[skills/ — 54 skills]
     AS --> HK[hooks/ — 3 lifecycle hooks]
     AS --> SCR[scripts/ — hook-bootstrap.sh]
 
@@ -69,7 +69,7 @@ graph TB
 
 ### Skill System (`.agents/skills/`)
 
-The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 53 skills live under `.agents/skills/`:
+The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 54 skills live under `.agents/skills/`:
 
 | Tier | Pattern | Count | Examples |
 |------|---------|-------|----------|
@@ -80,11 +80,11 @@ The core of the project. Every skill is a directory containing a single `SKILL.m
 | **Task** | invocable via `/command` | ~14 | update-skills, audit-skills, generate-docs, write-docs, help, etc. |
 | **Tool** | automation interfaces | ~5 | chrome-devtools, playwright-mcp, gh-cli, github-issues, web-design-reviewer |
 
-All 53 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
+All 54 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
 
 ### Agent Pipeline (`.opencode/agents/`)
 
-8 custom agents defined for OpenCode: 2 primary (planner + orchestrator) and 6 subagents (explore, scout, security-engineer, qa, docs, security-auditor). See `docs/agents.md` for full architecture and workflow.
+8 custom agents defined for OpenCode in role-nested directories: `primary/` (planner, orchestrator), `execution/` (security-engineer, qa, docs), `research/` (explore, scout), `security/` (security-auditor). The orchestrator NEVER writes code directly — it delegates all implementation to @ingenium-security-engineer. See `docs/agents.md` for full architecture and workflow.
 
 ### Plugin System (`.opencode/plugins/`)
 
@@ -94,7 +94,7 @@ All 53 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, and 
 |--------|------|---------|
 | `session-start.ts` | `session.created` | Injects skill-loading checklist at session start |
 | `pre-tool-use.ts` | `tool.execute.before` | Warns when bash commands target `.venv`, `.git`, or deprecated directories |
-| `post-tool-use.ts` | `tool.execute.after` | Tracks tool call count, reminds about evidence logging every 10 calls |
+| `post-tool-use.ts` | `tool.execute.after` | Tracks tool call count, reminds about evidence logging every 5 calls; verifies delegation patterns |
 
 ### Hooks System (`.agents/hooks/`)
 
@@ -104,7 +104,7 @@ All 53 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, and 
 |------|--------------|---------|
 | `session-start.json` | Session start | Inject abbreviated checklist, match skills, load them, note 🔴 HARD RULEs |
 | `pre-tool-use.json` | Before every tool call | Validate terminal command safety, check scope boundaries, block dangerous patterns |
-| `post-tool-use.json` | After every ~10 tool calls | Periodic reminder to log findings, run `/update-skills`, check for skill gaps |
+| `post-tool-use.json` | After every 5 tool calls | Periodic reminder to log findings, run `/update-skills`, check for skill gaps, verify delegation patterns |
 
 ## Data Flow
 
@@ -210,7 +210,7 @@ The project is deployed by **bootstrapping** — running `hook-bootstrap.sh` aga
 ```
 
 The system structure is self-contained — the `.agents/` directory is the entire deployable unit:
-- `.agents/skills/` — All 53 skills (copied)
+- `.agents/skills/` — All 54 skills (copied)
 - `.agents/hooks/` — 3 lifecycle hooks (copied)
 - `AGENTS.md` — Project rules (copied)
 - `opencode.json` — Configuration with `<PLACEHOLDER>` tokens (never real secrets)

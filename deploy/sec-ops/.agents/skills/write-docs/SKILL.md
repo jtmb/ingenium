@@ -14,6 +14,11 @@ description: "Write high-quality documentation — READMEs, API docs, ADRs, arch
 - `deploy/` — deploy structure or files changed
 - `tests/` — test infrastructure changed
 - Project root files — `README.md`, `USAGE.md`, `AGENTS.md`
+- `.opencode/agents/*.md` — agents added, removed, or modified
+- `.opencode/plugins/*` — plugins added or modified
+- `.agents/hooks/*.json` — hooks added or modified
+- `opencode.json`, `.vscode/mcp.json` — config changed
+- `docs/agents.md` — agent architecture doc changed (self-referential)
 
 **Workflow:** Complete the code change → check which docs are affected → update them → commit. Same turn. No waiting.
 
@@ -29,12 +34,17 @@ When a specific change was made, update only the affected docs:
 
 | Change | Docs to update |
 |--------|---------------|
-| Added/removed a skill | `docs/ARCHITECTURE.md` (skill list, directory map), `docs/CONVENTIONS.md` (naming patterns) |
-| Moved directories (e.g., tests/ to root) | `docs/ARCHITECTURE.md` (directory map) |
-| Changed bootstrap logic | `docs/ARCHITECTURE.md` (bootstrap flow) |
+| Added/removed/modified a skill | `docs/ARCHITECTURE.md` (skill count, directory map), `docs/CONVENTIONS.md` (naming patterns) |
+| Added/removed/modified an agent (`.opencode/agents/`) | `docs/agents.md` (agent table, profiles), `docs/ARCHITECTURE.md` (agent pipeline section) |
+| Added/removed/modified hooks (`.agents/hooks/`) | `docs/ARCHITECTURE.md` (hooks section) |
+| Added/removed/modified plugins (`.opencode/plugins/`) | `docs/ARCHITECTURE.md` (plugin system section) |
+| Changed opencode.json or mcp.json config | `docs/ARCHITECTURE.md` (config section), `docs/TECH-STACK.md` (integrations table) |
+| Changed deploy structure or added new target | `docs/ARCHITECTURE.md` (deploy separation section), `docs/TECH-STACK.md` (deploy variants table) |
 | Added new dependencies | `docs/TECH-STACK.md` (dependencies table) |
 | Changed naming or file patterns | `docs/CONVENTIONS.md` |
+| Changed agent permissions, pipeline flow, or delegation model | `docs/agents.md` (agent profiles, lifecycle table), `docs/ARCHITECTURE.md` (agent pipeline section) |
 | Added/removed top-level dirs | `docs/ARCHITECTURE.md`, `docs/README.md` |
+| Changed learnings.md scope or format | `.agents/skills/learnings.md` (self-documenting), `docs/CONVENTIONS.md` (git practices section) |
 
 **Never regenerate all docs from scratch** unless the project was freshly scaffolded. Incremental updates keep docs credible.
 

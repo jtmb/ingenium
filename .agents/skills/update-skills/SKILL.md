@@ -40,7 +40,7 @@ description: "What this covers and when to use it. Be keyword-rich for AI discov
 
 ## Detection: Finding Skill Candidates
 
-Before every coding session — and whenever you touch a new area of a project — scan for these signals. When you find one, **create the skill immediately** — no need to ask. The agent audits, fixes, and creates autonomously.
+Before every coding session — and whenever you touch a new area of a project — scan for these signals. When you find one, **act immediately** — no need to ask. The agent audits, fixes, and creates autonomously. These signals cover not just skills but also agent definitions, hooks, plugins, documentation drift, and missing learnings entries. Any change to the skill system pipeline should be self-detected and self-corrected.
 
 ### Signal 1 — New Framework or Dependency
 
@@ -120,6 +120,49 @@ Before every coding session — and whenever you touch a new area of a project �
 - A `git log --oneline -5` shows commits that mention "deploy", "agent", "plugin", "config", "hook" but no corresponding commit touches `.agents/skills/learnings.md`
 
 **The fix:** Run `git log --oneline -5` and `git diff --name-only HEAD~1` to identify what changed, then create the missing learnings.md entry. If the changes were already committed, still log to learnings.md with the commit hash — the entry documents what happened even if it's retrospective.
+
+### Signal 6 — Documentation Drift
+
+**Trigger:** The project's documentation (`docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/TECH-STACK.md`, `docs/agents.md`, `docs/README.md`) is out of sync with the actual file structure, agent definitions, or skill content.
+
+**Detection checklist:**
+- `git diff --name-only HEAD~5` shows `.opencode/agents/*.md` changes but `docs/agents.md` hasn't been updated (agent table stale, profiles missing new agents)
+- `git diff --name-only HEAD~5` shows `.agents/skills/*` changes but skill count in `docs/ARCHITECTURE.md` hasn't been updated
+- `git diff --name-only HEAD~5` shows `deploy/` restructures but `docs/ARCHITECTURE.md` still references old deploy structure
+- `git diff --name-only HEAD~5` shows `.agents/hooks/` or `.opencode/plugins/` changes but `docs/ARCHITECTURE.md` hooks/plugins sections are stale
+- `git diff --name-only HEAD~5` shows `opencode.json` changes but `docs/TECH-STACK.md` integrations/config table is stale
+- Agent permission changes (edit/write/bash) documented in `.opencode/agents/*.md` that aren't reflected in `docs/agents.md` profile tables
+- The `orchestrator-primer` skill was added but not mentioned in any docs
+- New deploy target variant added but no variant table exists in `docs/TECH-STACK.md`
+- Pipeline flow or delegation model changed but `docs/agents.md` workflow diagrams are stale
+
+**Detection commands:**
+```bash
+# Find docs that haven't been updated along with code changes
+for agent_file in .opencode/agents/*/ingenium-*.md; do
+  agent_basename=$(basename "$agent_file" .md)
+  if git diff --name-only HEAD~1 | grep -q "$agent_basename"; then
+    if ! git diff --name-only HEAD~1 | grep -q "docs/agents.md"; then
+      echo "STALE: $agent_file changed but docs/agents.md not updated"
+    fi
+  fi
+done
+
+# Check if skill count in ARCHITECTURE.md matches actual count
+actual_skills=$(ls -d .agents/skills/*/ 2>/dev/null | wc -l)
+grep -oP '\d+(?= skills)' docs/ARCHITECTURE.md | while read doc_count; do
+  if [ "$doc_count" -ne "$actual_skills" ]; then
+    echo "STALE: docs/ARCHITECTURE.md says $doc_count skills, actual is $actual_skills"
+  fi
+done
+```
+
+**The fix:** Read the stale doc, compare it to the actual state, and apply targeted updates. Run the doc count check above to validate. After fixing, run:
+```bash
+grep -c '|' docs/agents.md                       # verify agent table has rows
+ls -d .agents/skills/*/ | wc -l                   # verify skill count
+git diff --name-only HEAD~1 | grep 'docs/'       # verify docs were changed
+```
 
 ## Creation: Writing a New Skill
 
