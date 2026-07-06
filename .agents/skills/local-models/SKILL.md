@@ -97,6 +97,64 @@ nginx -g 'daemon off;'  # foreground server
 
 Running `find` or `grep` in `node_modules`, `.git`, `dist`, `build`, `.next`, `target`, `__pycache__`, `venv`, or `.venv` produces massive output (50K–500K files) and hangs the terminal.
 
+### 🔴 ALWAYS Verify Authentication Before Destructive Operations
+
+**When deleting or modifying Thread sessions, NEVER assume HTTP 401 means success.** The auth token in `opencode.json` must be used correctly:
+
+```bash
+# CORRECT way to read token (safe, doesn't expose full value):
+grep 'THREAD_API_TOKEN' ~/.config/opencode/opencode.json | \
+  sed 's/.*"THREAD_API_TOKEN": "\([^"]*\)".*/\\1/' > /tmp/thread_token.txt
+
+# Then use it:  
+curl -X DELETE "http://localhost:5000/api/v1/sessions/<id>" \
+  -H "Authorization: Bearer $(< /tmp/thread_token.txt)"
+```
+
+**Never copy-paste the full token into scripts or config files.** The JWT contains sensitive claims including `sub: admin`. If the token is exposed, it can be used by anyone.
+
+### 🔴 Parse HTTP Status Codes Correctly (Don't Assume 401 = Success)
+
+When making DELETE requests to Thread API:
+- **HTTP 204** → Successfully deleted ✓  
+- **HTTP 404** on DELETE endpoint → Already deleted OR session doesn't exist  
+- **HTTP 401** → Authentication failed (wrong token, expired, or missing header) — NOT a deletion indicator!
+
+The error pattern I made earlier:
+```bash
+# INCORRECT interpretation:
+curl -s -X DELETE "..." | grep -q "401" && echo "✓ Deleted"  # WRONG!
+# Correct approach:
+if [ "$http_code" = "204" ]; then echo "✓ Deleted"; fi
+elif [ "$http_code" = "401" ]; then echo "? Auth failed, token may be invalid"; fi
+```
+
+### 🔴 Use Python for Complex API Operations (Avoid Bash Escaping Issues)
+
+The JWT token is a long string (~128 characters). Bash struggles with:
+- Token extraction via `sed` and `grep` pipelines  
+- Long environment variable assignments  
+- Multi-line curl command construction  
+
+**Use Python instead:**
+```python
+import subprocess, json
+with open('/home/brajam/repos/gh-llm-bootstrap/opencode.json') as f:
+    config = json.load(f)
+token = config['mcp']['thread']['environment'].get('THREAD_API_TOKEN', '')
+response = subprocess.run(['curl', '-s', url, '-H', f'Authorization: Bearer {token}'], ...)
+```
+
+Python handles long strings safely without shell escaping problems. The `opencode.json` file stores the token securely — read it programmatically, don't manually copy-paste values into scripts or config files.
+
+### 🔴 Always Verify Before Acting (The "Verify → Act" Pattern)
+
+From local-models skill:
+1. **Check server health**: `curl http://localhost:5000/api/v1/health`  
+2. **Parse response properly** — don't just check HTTP status code  
+3. **Use Python for complex operations** that involve long strings or multiple API calls  
+4. **Document mistakes in learnings.md and this skill** so future sessions avoid the same errors
+
 **Why:** This is a pattern of making assumptions about where code exists without verification first. The same mistake happens everywhere:
 - Assuming a server is running → no health check before curl
 - Assuming an MCP server is available → no config lookup  

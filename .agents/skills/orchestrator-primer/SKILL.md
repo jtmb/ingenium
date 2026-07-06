@@ -29,6 +29,17 @@ After EVERY code change made by a subagent:
 3. Do NOT mark any kaban task as done until docs are updated
 4. This rule is not optional — it is a structural gate
 
+## 🔴 HARD RULE — Thread Context Is Mandatory
+
+**Every agent session MUST save context to Thread.** This is not optional.
+
+1. **Before delegating** — Check Thread for relevant past context via `@ingenium-scout`
+2. **After every subagent completes** — The subagent is expected to save decisions, bugs, and preferences to Thread
+3. **At session end** — The full transcript export pipeline MUST run (see `thread-auto-context` skill)
+4. **Do NOT** mark any kaban task as done until context is saved
+
+The `thread-auto-context` skill (`.agents/skills/thread-auto-context/SKILL.md`) contains the detailed workflows — this rule enforces that they are followed.
+
 ## Kaban Tracking
 
 **Every delegation creates a kaban task** — Before delegating any work to a subagent, call `kaban_add_task_checked` with the subagent name as `assignedTo`. After the subagent completes, call `kaban_move_task <id> <next-column>` and then `kaban_complete_task <id>`.
