@@ -168,9 +168,7 @@ Collect reports from all 3 subagents, then cross-reference against the bootstrap
 - `refactoring-recipes` — refactoring patterns
 - `cli-toolkit` — CLI tool reference
 - `regex-reference` — regex patterns
-- `git-workflows` — git DAG operations
 - `error-interpretation` — error diagnosis
-- `model-profiles` — model capability reference
 
 **Instructions:**
 - `skill-load` — 🔴 mandatory bootstrap payload
@@ -178,13 +176,13 @@ Collect reports from all 3 subagents, then cross-reference against the bootstrap
 - `repo-context` — project identity
 - `debugging-patterns` — systematic debugging
 - `self-correction-patterns` — AI recovery
-- `local-model-commands` — terminal safety
+- `local-models` — terminal safety, model profiles, LM Studio API
 - `update-skills` — self-improvement
 - `audit-skills` — consistency checks
 - `update-skill-index` — index regeneration
 - `generate-docs` — doc generation
 - `write-docs` — doc writing
-- `lm-studio` — 🔴 LM Studio local inference, vision bridge
+- `local-models` — 🔴 Local LLM management, LM Studio API, vision bridge
 - `thread-auto-context` — session memory
 
 **Tools (if project has browser/UI/API surface):**
@@ -230,8 +228,8 @@ Always copy all these instructions (they're the session management layer):
 
 ```bash
 for instr in skill-load help repo-context debugging-patterns self-correction-patterns \
-             local-model-commands update-skills audit-skills update-skill-index \
-             generate-docs write-docs lm-studio thread-auto-context; do
+             local-models update-skills audit-skills update-skill-index \
+             generate-docs write-docs thread-auto-context; do
   cp -r "$BOOTSTRAP_REPO/.agents/instructions/$instr/" ".agents/instructions/$instr/"
 done
 ```

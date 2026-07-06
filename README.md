@@ -6,7 +6,7 @@
 ### Genius doesn't repeat itself. Neither should you.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-49%20total-green?style=flat-square" alt="45 total — all in .agents/skills/" />
+  <img src="https://img.shields.io/badge/skills-43%20total-green?style=flat-square" alt="43 total — all in .agents/skills/" />
   <img src="https://img.shields.io/badge/frameworks-4%20%2B%2029%20domain-purple?style=flat-square" alt="Frameworks" />
   <img src="https://img.shields.io/badge/skills%20that%20grow%20with%20you-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Skills that grow with you" />
 </p>
@@ -17,7 +17,7 @@
 
 **The problem:** Every time you start a new project with an AI coding assistant, the AI doesn't know your conventions. It doesn't know to keep docs in sync, write comments, run tests before claiming done, or use your framework's idioms. You repeat the same instructions in every chat — and the AI drifts from your standards.
 
-**What this solves:** A **skill-based AI conventions system** — **skills that grow with you** 🌱 — that bootstraps into every project automatically. 49 items (all in \`.agents/skills/\`) covering frameworks, domains, and tasks — each invoked on-demand by any AI assistant that supports the `.agents/` convention. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
+**What this solves:** A **skill-based AI conventions system** — **skills that grow with you** 🌱 — that bootstraps into every project automatically. 43 items (all in \`.agents/skills/\`) covering frameworks, domains, and tasks — each invoked on-demand by any AI assistant that supports the `.agents/` convention. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
 
 **But it goes further — the system learns from you.** When you add a new dependency, repeat a pattern across files, or write a new file type, the AI detects it. It doesn't just suggest a new skill — it **writes one**, creates the `SKILL.md`, commits it with a descriptive message, and logs the change to `.agents/skills/learnings.md`. Every entry includes before/after commit hashes, so you can `git checkout` any skill back to its previous state. When you remove a dependency, the corresponding skill retires automatically — no stale rules, no ghost conventions. The system grows and shrinks with your codebase, always reflecting reality.
 
@@ -95,7 +95,7 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | **Core rules** | `.agents/skills/generic-conventions/SKILL.md` | The definitive 13-section reference: comments, docs, testing, DRY, security, error handling, config, naming |
 | **Project structure** | `.agents/skills/project-structure/SKILL.md` | Monorepo layout, service layering (pages/features/domain/infrastructure), naming, boundaries |
 | **Frameworks** | `.agents/skills/{fw}-conventions/SKILL.md` (4 files) | Next.js, Python, Go, Rust — build commands, idioms, project layout |
-| **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (20 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests, Gitignore, PostgreSQL, Code Review, Refactoring, CLI Toolkit, Regex, Git Workflows, Error Interpretation, Model Profiles, Local Model Commands |
+| **Cross-cutting** | `.agents/skills/{domain}/SKILL.md` (19 files) | Containers, Shell, SQL, API Design, Kubernetes, TypeScript, Agent Pipelines, Useful Tests, Gitignore, PostgreSQL, Code Review, Refactoring, CLI Toolkit, Regex, Error Interpretation, Local Models |
 | **Docs** | `docs/` (4 files) | Templates the AI fills in as it works — architecture, tech stack, conventions |
 | **Instructions & Tools** | `.agents/skills/{name}/SKILL.md` (19 files) | All task skills, browser automation, and GitHub operations — invocable via `/` commands or on-demand by file type |
 | **Hooks** | `.agents/hooks/` (3 files) | PreToolUse safety checks, SessionStart checklist + bootstrap, PostToolUse periodic reminders |
@@ -136,9 +136,7 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | 🛠️ CLI Toolkit | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep — flags, recipes, gotchas |
 | 🔤 Regex | `regex-reference` | Common patterns, per-language escaping, catastrophic backtracking |
 | ❌ Error Interpretation | `error-interpretation` | Error signature → root cause per language — cross-language patterns |
-| 🧠 Model Profiles | `model-profiles` | Model-aware hints for Qwen and Gemma — context windows, strengths, prompt adaptation per model size |
-| 🤖 Local Model Commands | `local-model-commands` | Terminal command safety — no `&` backgrounding, timeout wrappers, termination signals |
-
+| 🧠 Local Models | `local-models` | Model profiles (Qwen, Gemma, DeepSeek), terminal safety rules, and LM Studio API reference |
 ### Task Skills (invoke via `/`)
 
 All skills live in `.agents/skills/`:
@@ -155,14 +153,13 @@ All skills live in `.agents/skills/`:
 | `skill-load` | `/skill-load` — session bootstrap protocol (auto-invoked at session start) |
 | `debugging-patterns` | `/debugging-patterns` — systematic debugging workflow |
 | `self-correction-patterns` | `/self-correction-patterns` — AI recovery from mistakes |
-| `local-model-commands` | `/local-model-commands` — terminal safety for local LLMs |
+| `local-models` | `/local-models` — model profiles, terminal safety, LM Studio API |
 | `thread-auto-context` | `/thread-auto-context` — automatic persistent memory via Thread MCP **(source only)** |
 | `chrome-devtools` | `/chrome-devtools` — browser automation, screenshots, network analysis, performance profiling |
 | `playwright-mcp` | `/playwright-mcp` — browser automation via Playwright MCP |
 | `gh-cli` | `/gh-cli` — GitHub CLI integration for repos, PRs, issues, releases |
 | `web-design-reviewer` | `/web-design-reviewer` — inspect websites for responsive, accessibility, and layout issues |
 | `onboard-existing-repo` | `/onboard-existing-repo` — onboard an existing repo to the skill system |
-| `lm-studio` | `/lm-studio` — LM Studio local inference, vision bridge, model management |
 | `create-readme` | `/create-readme` — create a README.md file for the project |
 
 ## Architecture — Skill System

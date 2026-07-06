@@ -28,9 +28,8 @@ skills:
   - self-correction-patterns
   - useful-tests
   - project-structure
-  - lm-studio
   - shell-scripts
-  - local-model-commands
+  - local-models
   - kaban-board
   - mermaid
   - typescript-standalone

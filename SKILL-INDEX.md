@@ -2,7 +2,7 @@
 
 This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill in `.agents/skills/` is listed here with its description, function, commands, and a link to its full documentation.
 
-**Total: 45 items** (all in `.agents/skills/`)
+**Total: 43 items** (all in `.agents/skills/`)
 
 ---
 
@@ -20,10 +20,9 @@ This file is the **canonical index** of all skills in this project. It is automa
 | `/update-skills` | [update-skills](.agents/skills/update-skills/SKILL.md) | Create, update, and retire skills as projects evolve. Detects patterns (new frameworks, repeated conventions, missing coverage) and creates new skills autonomously. Covers both target-project skill management and bootstrap repo maintenance. Use when the codebase has grown new patterns, added dependencies, or when conventions have drifted. | `.agents/skills/` |
 | `/write-docs` | [write-docs](.agents/skills/write-docs/SKILL.md) | Write high-quality documentation — READMEs, API docs, ADRs, architecture decision records, and AGENTS.md skill index. AUTO-INVOKE after any change to the skill system (.agents/skills/, tests/, bootstrap scripts) or when docs are stale. Do not wait for the user to ask — check docs freshness proactively after every code change. Invokes the Explore subagent by default. | `.agents/skills/` |
 | `/onboard-existing-repo` | [onboard-existing-repo](.agents/skills/onboard-existing-repo/SKILL.md) | Onboard an existing repository to the ingenium skill system. Launches parallel subagents to explore structure/languages/CI/docs, maps findings to applicable skills, generates docs from templates. Use when user says 'onboard this repo', 'add skill system to this project', or 'bootstrap this existing codebase'. | `.agents/skills/` |
-| `/lm-studio` | [lm-studio](.agents/skills/lm-studio/SKILL.md) | LM Studio local inference server conventions — API reference, server management, model lifecycle, vision bridge. Use when running local models via LM Studio, managing model loads/unloads, calling chat/vision/embedding endpoints, or connecting agents to the local inference server at http://192.168.0.13:1234. | `.agents/skills/` |
+| `/local-models` | [local-models](.agents/skills/local-models/SKILL.md) | Local LLM management — model profiles (Qwen, Gemma, DeepSeek), command safety rules, LM Studio API reference, and cross-model strategy guide. | `.agents/skills/` |
 | `/debugging-patterns` | [debugging-patterns](.agents/skills/debugging-patterns/SKILL.md) | Systematic debugging methodology — isolation, bisection, log-driven, and stack-trace analysis. Use when diagnosing bugs, interpreting errors, or investigating test failures. | `.agents/skills/` |
 | `/self-correction-patterns` | [self-correction-patterns](.agents/skills/self-correction-patterns/SKILL.md) | Patterns for recognizing and recovering from AI mistakes — backtracking triggers, verification loops, assumption checking. Use when the model produces incorrect output, gets stuck in a loop, or needs to self-correct. | `.agents/skills/` |
-| `/local-model-commands` | [local-model-commands](.agents/skills/local-model-commands/SKILL.md) | Terminal command safety rules for local LLMs — never background commands with &, avoid infinite-wait commands, and always ensure commands produce a termination signal (exit code, output, or timeout). Use when crafting terminal commands with local models (Ollama, LM Studio, vLLM, llama.cpp) to prevent hung sessions. | `.agents/skills/` |
 | `/thread-auto-context` | [thread-auto-context](.agents/skills/thread-auto-context/SKILL.md) | >- | `.agents/skills/` |
 | `/chrome-devtools` | [chrome-devtools](.agents/skills/chrome-devtools/SKILL.md) | 'Expert-level browser automation, debugging, and performance analysis using Chrome DevTools MCP. Use for interacting with web pages, capturing screenshots, analyzing network traffic, and profiling performance.' | `.agents/skills/` |
 | `/playwright-mcp` | [playwright-mcp](.agents/skills/playwright-mcp/SKILL.md) | Browser automation via Playwright MCP — navigate, click, type, snapshot pages. Use when you need to interact with web pages. | `.agents/skills/` |
@@ -57,7 +56,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | [gitignore](.agents/skills/gitignore/SKILL.md) | `.gitignore` files | Git ignore file conventions — patterns, structure, and rules for .gitignore files. Use when creating or editing .gitignore files. |
 | [kubernetes](.agents/skills/kubernetes/SKILL.md) | `**/{k8s,kubernetes,helm,charts,templates}/**/*.{yaml,yml}` | Kubernetes conventions — security contexts, resource limits, probes, network policies, deployment strategies. Use when writing K8s manifests, Helm charts, or Kustomize overlays. |
 | [mermaid](.agents/skills/mermaid/SKILL.md) | Documentation, architecture diagrams | Mermaid diagram conventions — mandatory diagrams in all documentation. Every architectural, data-flow, lifecycle, process, state, or relationship concept MUST have a Mermaid visual. Use when editing files in docs/, writing ADRs, generating READMEs, documenting architecture, or creating any markdown file that explains system behavior. |
-| [model-profiles](.agents/skills/model-profiles/SKILL.md) | Prompt adaptation, model selection | Model-aware instruction tuning for local LLMs — Qwen and Gemma families across 2B–72B parameter ranges. Use when adapting prompts, choosing model-appropriate strategies, or diagnosing model-specific failure patterns. |
+| [local-models](.agents/skills/local-models/SKILL.md) | Model selection, terminal safety, LM Studio API | Local LLM management — model profiles (Qwen, Gemma, DeepSeek), command safety rules, LM Studio API reference, and cross-model strategy guide. |
 | [orchestrator-primer](.agents/skills/orchestrator-primer/SKILL.md) | Session start, delegation rules | 🔴 MANDATORY DELEGATION DIRECTIVE — Always visible. Never write code or edit files directly. Always delegate to subagents. Loaded via opencode.json instructions for always-on enforcement. |
 | [postgresql-optimization](.agents/skills/postgresql-optimization/SKILL.md) | PostgreSQL development | 'PostgreSQL-specific development assistant focusing on unique PostgreSQL features, advanced data types, and PostgreSQL-exclusive capabilities. Covers JSONB operations, array types, custom types, range/geometric types, full-text search, window functions, and PostgreSQL extensions ecosystem.' |
 | [project-structure](.agents/skills/project-structure/SKILL.md) | Creating projects, reorganizing code | Monorepo microservices project structure conventions — root-level services (config/, lib/, scripts/, data/), naming, boundaries, shared packages, anti-patterns. Use when creating new projects, adding services, or reorganizing code. |
@@ -83,7 +82,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 |-------|-------------|-------------|
 | [debugging-patterns](.agents/skills/debugging-patterns/SKILL.md) | — | Systematic debugging methodology — isolation, bisection, log-driven, and stack-trace analysis. Use when diagnosing bugs, interpreting errors, or investigating test failures. |
 | [help](.agents/skills/help/SKILL.md) | — | Display all available skills, their commands, and invocation patterns. Quick-reference for the entire skill system. Use when the user asks 'help', 'what commands', 'what skills', 'show me everything', or needs to find the right skill for a task. |
-| [local-model-commands](.agents/skills/local-model-commands/SKILL.md) | — | Terminal command safety rules for local LLMs — never background commands with &, avoid infinite-wait commands, and always ensure commands produce a termination signal (exit code, output, or timeout). Use when crafting terminal commands with local models (Ollama, LM Studio, vLLM, llama.cpp) to prevent hung sessions. |
+| [local-models](.agents/skills/local-models/SKILL.md) | — | Local LLM management — model profiles (Qwen, Gemma, DeepSeek), command safety rules, LM Studio API reference, and cross-model strategy guide. |
 | [repo-context](.agents/skills/repo-context/SKILL.md) | — | Provide project context to the AI — identity, tech stack, docs map, conventions overview, build/test commands. Use when starting a new coding session or needing to refresh context. |
 | [self-correction-patterns](.agents/skills/self-correction-patterns/SKILL.md) | — | Patterns for recognizing and recovering from AI mistakes — backtracking triggers, verification loops, assumption checking. Use when the model produces incorrect output, gets stuck in a loop, or needs to self-correct. |
 | [skill-load](.agents/skills/skill-load/SKILL.md) | — | 🔴 MANDATORY FIRST COMMAND — Inject the skill-system payload. Tells the model to read AGENTS.md and load all applicable skills from .agents/skills/ before ANY action. Use as the first message in every session: '/skill-load'. This IS the payload. |
@@ -94,7 +93,6 @@ This file is the **canonical index** of all skills in this project. It is automa
 | [generate-docs](.agents/skills/generate-docs/SKILL.md) | — | Scan the codebase and populate docs/ templates (ARCHITECTURE.md, TECH-STACK.md, CONVENTIONS.md). Use after project scaffolding or when docs are stale. |
 | [write-docs](.agents/skills/write-docs/SKILL.md) | — | Write high-quality documentation — READMEs, API docs, ADRs, architecture decision records, and AGENTS.md skill index. AUTO-INVOKE after any change to the skill system (.agents/skills/, tests/, bootstrap scripts) or when docs are stale. Do not wait for the user to ask — check docs freshness proactively after every code change. Invokes the Explore subagent by default. |
 | [onboard-existing-repo](.agents/skills/onboard-existing-repo/SKILL.md) | — | Onboard an existing repository to the ingenium skill system. Launches parallel subagents to explore structure/languages/CI/docs, maps findings to applicable skills, generates docs from templates. Use when user says 'onboard this repo', 'add skill system to this project', or 'bootstrap this existing codebase'. |
-| [lm-studio](.agents/skills/lm-studio/SKILL.md) | — | LM Studio local inference server conventions — API reference, server management, model lifecycle, vision bridge. Use when running local models via LM Studio, managing model loads/unloads, calling chat/vision/embedding endpoints, or connecting agents to the local inference server at http://192.168.0.13:1234. |
 
 ---
 
@@ -134,7 +132,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 
 ---
 
-## Skills — `.agents/skills/` (45)
+## Skills — `.agents/skills/` (43)
 
 | # | Directory | File |
 |---|-----------|------|
@@ -156,33 +154,31 @@ This file is the **canonical index** of all skills in this project. It is automa
 | 16 | `help` | [`.agents/skills/help/SKILL.md`](.agents/skills/help/SKILL.md) |
 | 17 | `kaban-board` | [`.agents/skills/kaban-board/SKILL.md`](.agents/skills/kaban-board/SKILL.md) |
 | 18 | `kubernetes` | [`.agents/skills/kubernetes/SKILL.md`](.agents/skills/kubernetes/SKILL.md) |
-| 19 | `lm-studio` | [`.agents/skills/lm-studio/SKILL.md`](.agents/skills/lm-studio/SKILL.md) |
-| 20 | `local-model-commands` | [`.agents/skills/local-model-commands/SKILL.md`](.agents/skills/local-model-commands/SKILL.md) |
-| 21 | `mermaid` | [`.agents/skills/mermaid/SKILL.md`](.agents/skills/mermaid/SKILL.md) |
-| 22 | `model-profiles` | [`.agents/skills/model-profiles/SKILL.md`](.agents/skills/model-profiles/SKILL.md) |
-| 23 | `nextjs-conventions` | [`.agents/skills/nextjs-conventions/SKILL.md`](.agents/skills/nextjs-conventions/SKILL.md) |
-| 24 | `onboard-existing-repo` | [`.agents/skills/onboard-existing-repo/SKILL.md`](.agents/skills/onboard-existing-repo/SKILL.md) |
-| 25 | `orchestrator-primer` | [`.agents/skills/orchestrator-primer/SKILL.md`](.agents/skills/orchestrator-primer/SKILL.md) |
-| 26 | `playwright-mcp` | [`.agents/skills/playwright-mcp/SKILL.md`](.agents/skills/playwright-mcp/SKILL.md) |
-| 27 | `postgresql-optimization` | [`.agents/skills/postgresql-optimization/SKILL.md`](.agents/skills/postgresql-optimization/SKILL.md) |
-| 28 | `project-structure` | [`.agents/skills/project-structure/SKILL.md`](.agents/skills/project-structure/SKILL.md) |
-| 29 | `python-conventions` | [`.agents/skills/python-conventions/SKILL.md`](.agents/skills/python-conventions/SKILL.md) |
-| 30 | `refactoring-recipes` | [`.agents/skills/refactoring-recipes/SKILL.md`](.agents/skills/refactoring-recipes/SKILL.md) |
-| 31 | `regex-reference` | [`.agents/skills/regex-reference/SKILL.md`](.agents/skills/regex-reference/SKILL.md) |
-| 32 | `repo-context` | [`.agents/skills/repo-context/SKILL.md`](.agents/skills/repo-context/SKILL.md) |
-| 33 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
-| 34 | `self-correction-patterns` | [`.agents/skills/self-correction-patterns/SKILL.md`](.agents/skills/self-correction-patterns/SKILL.md) |
-| 35 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
-| 36 | `skill-load` | [`.agents/skills/skill-load/SKILL.md`](.agents/skills/skill-load/SKILL.md) |
-| 37 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
-| 38 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
-| 39 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
-| 40 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
-| 41 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
-| 42 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
-| 43 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
-| 44 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
-| 45 | `wsl-cleanup` | [`.agents/skills/wsl-cleanup/SKILL.md`](.agents/skills/wsl-cleanup/SKILL.md) |
+| 19 | `local-models` | [`.agents/skills/local-models/SKILL.md`](.agents/skills/local-models/SKILL.md) |
+| 20 | `mermaid` | [`.agents/skills/mermaid/SKILL.md`](.agents/skills/mermaid/SKILL.md) |
+| 21 | `nextjs-conventions` | [`.agents/skills/nextjs-conventions/SKILL.md`](.agents/skills/nextjs-conventions/SKILL.md) |
+| 22 | `onboard-existing-repo` | [`.agents/skills/onboard-existing-repo/SKILL.md`](.agents/skills/onboard-existing-repo/SKILL.md) |
+| 23 | `orchestrator-primer` | [`.agents/skills/orchestrator-primer/SKILL.md`](.agents/skills/orchestrator-primer/SKILL.md) |
+| 24 | `playwright-mcp` | [`.agents/skills/playwright-mcp/SKILL.md`](.agents/skills/playwright-mcp/SKILL.md) |
+| 25 | `postgresql-optimization` | [`.agents/skills/postgresql-optimization/SKILL.md`](.agents/skills/postgresql-optimization/SKILL.md) |
+| 26 | `project-structure` | [`.agents/skills/project-structure/SKILL.md`](.agents/skills/project-structure/SKILL.md) |
+| 27 | `python-conventions` | [`.agents/skills/python-conventions/SKILL.md`](.agents/skills/python-conventions/SKILL.md) |
+| 28 | `refactoring-recipes` | [`.agents/skills/refactoring-recipes/SKILL.md`](.agents/skills/refactoring-recipes/SKILL.md) |
+| 29 | `regex-reference` | [`.agents/skills/regex-reference/SKILL.md`](.agents/skills/regex-reference/SKILL.md) |
+| 30 | `repo-context` | [`.agents/skills/repo-context/SKILL.md`](.agents/skills/repo-context/SKILL.md) |
+| 31 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
+| 32 | `self-correction-patterns` | [`.agents/skills/self-correction-patterns/SKILL.md`](.agents/skills/self-correction-patterns/SKILL.md) |
+| 33 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
+| 34 | `skill-load` | [`.agents/skills/skill-load/SKILL.md`](.agents/skills/skill-load/SKILL.md) |
+| 35 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
+| 36 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
+| 37 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
+| 38 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
+| 39 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
+| 40 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
+| 41 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
+| 42 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
+| 43 | `wsl-cleanup` | [`.agents/skills/wsl-cleanup/SKILL.md`](.agents/skills/wsl-cleanup/SKILL.md) |
 
 ---
 
