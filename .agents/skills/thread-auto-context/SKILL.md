@@ -714,9 +714,11 @@ Once the Cline MCP config is written (global settings and/or `.cline/mcp.json`),
 
 **You do not pick the session name.** The MCP config in `.vscode/mcp.json` sets `THREAD_DEFAULT_SESSION` — that IS the session. Every `thread_*` tool defaults to it. Never pass `session` param unless the user explicitly asks. Only call `thread_create_session` if the user says "create a session."
 
+The default value for `THREAD_DEFAULT_SESSION` is `"default"`. This is Thread's global knowledge base — use this session for all shared infrastructure, frameworks, tools, and consumables that are not specific to any single repository or workspace.
+
 ## Shared Infrastructure vs Workspace-Specific Content
 
-**Default Global Session (`THREAD_DEFAULT_SESSION`):** Use for shared infrastructure, frameworks, tools, and consumables that are **not specific to any single repository or workspace**. This includes:
+**Default Global Session (`THREAD_DEFAULT_SESSION` = `"default"`):** Use for shared infrastructure, frameworks, tools, and consumables that are **not specific to any single repository or workspace**. This includes:
 - Documentation (Kubernetes docs, Docker best practices, Python/Next.js conventions)  
 - Framework guides (React patterns, Python type hints, Rust lifetimes)  
 - Infrastructure reference material (IDE usage, OS commands, CI/CD patterns)  
@@ -728,7 +730,7 @@ Once the Cline MCP config is written (global settings and/or `.cline/mcp.json`),
 - Bug fixes and their lessons  
 - Design choices in this project  
 - User preferences or constraints for this repo  
-- Project-specific patterns or conventions  
+- Project-specific patterns or conventions
 
 The default session is the **shared library** — think of it as the global knowledge base that all projects can benefit from. Workspace sessions are for local context only.
 
