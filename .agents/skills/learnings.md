@@ -467,3 +467,14 @@
   4. Fixed in: scrum, orchestrator, software-engineer (all 3 variants)
 - **Files**: 5 agent files modified (scrum, orchestrator, software-engineer, software-engineer-fast, software-engineer-premium)
 - **Why**: Critical permission bug — missing `"*": "deny"` meant any `mode: subagent` agent leaked into every agent's task tool picker, allowing plan-mode bypass via subagents
+
+## 2026-07-06 — cleanup: added plan-file to orchestrator, kaban-board to SEs, removed stale git-workflows
+
+- **Commit**: (after commit)
+- **Category**: security | skill | cleanup
+- **Changes**:
+  1. Added `ingenium-plan-file` to orchestrator's task allow list (it references it for clearing plan.md)
+  2. Removed stale `git-workflows` skill from all 3 software-engineer variants (skill was deleted)
+  3. Added `kaban-board` skill to all 3 software-engineer variants (needed for kaban awareness)
+  4. Verified 7/7 tests pass after cleanup
+- **Why**: Dead skills accumulate; agents loading non-existent skills silently degrade behavior
