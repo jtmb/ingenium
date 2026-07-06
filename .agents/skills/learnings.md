@@ -358,3 +358,15 @@
   4. Fixed CLI reference tables in kaban-board/SKILL.md: removed non-existent `-p/--priority`, added 9 missing CLI commands (next, schema, audit, stats, edit, export, import, sync, hook), 11 missing MCP tools (assign_task, get_next_task, get_task_history, add/remove/get links, export/import markdown, get_audit_history, score_tasks, wins)
   5. Added `.kaban/` to `.gitignore` (local state, not for version control)
   6. Synced updated SKILL.md to all 3 deploy variants
+
+## 2026-07-05 — kaban post-install verification suite
+
+- **Commit**: `4a4f916` (after)
+- **Category**: skill
+- **Changes**:
+  1. Added 🔴 HARD RULE #4: npm v0.3.4 `AuditService` bug documented
+  2. Added source-build installation method (default/recommended) with `bun install && bun run build && npm link` workflow, including TUI binary compilation + PATH setup
+  3. Demoted npx/npm methods to second-tier with broken-note caveat
+  4. Added full **§2 Post-Installation Verification** section with 10-test smoke suite covering: init, add (flags: -c, -a, -D), list (--column filter, --json), move+assign, done+status, archive+search, empty column edge case, re-init idempotency, TUI launch
+  5. Switched MCP config from `["npx", "-y", ...]` to `["kaban", "mcp"]` with caveat note
+  6. Synced to all 3 deploy variants
