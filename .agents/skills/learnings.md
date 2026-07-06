@@ -346,3 +346,15 @@
   6. Removed from all 3 deploy variants (12 skill dirs + 16 reference files + 16 docs copies)
   7. Deploy SKILL-INDEX.md, CATALOG, and variant AGENTS/USAGE/ARCHITECTURE synced
 - **Skill count**: Source: 45, software-dev: 45, dev-ops: 44, sec-ops: 50
+
+## 2026-07-05 — kaban board setup + SKILL.md CLI fix
+
+- **Commit**: `b7bc703` (after)
+- **Category**: skill | config
+- **Changes**:
+  1. Installed kaban from source (npm published v0.3.4/broken — `AuditService` missing from `@kaban-board/core` dist/, built from GitHub with `bun`)
+  2. Initialized `.kaban/` board with 6 tasks: fix test failures, report npm bug, register MCP, update help SKILL.md, fix kaban SKILL.md flags, add FTS5 workaround
+  3. Registered kaban MCP server in `opencode.json` (uses global `kaban` binary, not `npx` — avoids broken npm package)
+  4. Fixed CLI reference tables in kaban-board/SKILL.md: removed non-existent `-p/--priority`, added 9 missing CLI commands (next, schema, audit, stats, edit, export, import, sync, hook), 11 missing MCP tools (assign_task, get_next_task, get_task_history, add/remove/get links, export/import markdown, get_audit_history, score_tasks, wins)
+  5. Added `.kaban/` to `.gitignore` (local state, not for version control)
+  6. Synced updated SKILL.md to all 3 deploy variants
