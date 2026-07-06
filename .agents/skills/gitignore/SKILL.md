@@ -24,9 +24,6 @@ description: "Git ignore file conventions — patterns, structure, and rules for
 Thumbs.db
 
 # ── Editor / IDE ──────────────────────────────────────
-.vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
 .idea/
 
 # ── Dependencies ──────────────────────────────────────
@@ -65,7 +62,7 @@ build/
 | **Dependencies** | `node_modules/`, `vendor/`, `__pycache__/` | Reproducible from lockfiles |
 | **Build output** | `dist/`, `build/`, `out/`, `*.tsbuildinfo` | Generated, not source |
 | **OS files** | `.DS_Store`, `Thumbs.db`, `Desktop.ini` | Not project files |
-| **Editor files** | `.vscode/` (selectively), `.idea/` | Team-specific, not universal |
+| **Editor files** | `.idea/` | Team-specific, not universal |
 | **Runtime artifacts** | `*.log`, `.cache/`, `.tmp/`, `coverage/` | Ephemeral |
 | **Generated code** | `*.generated.*`, `*.pb.go`, GraphQL types (varies) | Check team policy — some commit, some don't |
 
@@ -75,7 +72,7 @@ build/
 |----------|----------|-----|
 | **Lockfiles** | `package-lock.json`, `yarn.lock`, `Cargo.lock`, `go.sum` | Reproducible builds |
 | **Example configs** | `.env.example`, `config.example.yaml` | Documents needed vars without exposing secrets |
-| **CI/CD configs** | `.github/`, `.gitlab-ci.yml`, `Jenkinsfile` | Pipeline as code |
+| **CI/CD configs** | `.gitlab-ci.yml`, `Jenkinsfile` | Pipeline as code |
 | **Dockerfiles** | `Dockerfile`, `docker-compose.yml` | Infrastructure as code |
 | **Docs** | `*.md`, `docs/` | Documentation is source |
 

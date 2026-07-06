@@ -8,12 +8,10 @@ This is your handbook for working with the layered agent instruction system. Whe
 
 See **[Getting Started](./README.md#getting-started)** in the README for installation options:
 
-- **Quick Install (one-liner)** — curl/tar from GitHub
-- **Auto-Bootstrap (set up the hook)** — one-time hook, auto-bootstraps every project you open
-- **Manual Install** — clone and copy `deploy/`
+- **Manual Install** — clone and run `bootstrap.sh`
 - **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
 
-**What you get in every project:** the full `.agents/skills/` (45 items total), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
+**What you get in every project:** the full `.agents/skills/` (45 items total), `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — all auto-detected to match your framework.
 
 ---
 
@@ -114,7 +112,6 @@ your-project/
 │   │   │   └── SKILL.md                         ←   Playwright automation
 │   │   ├── gh-cli/
 │   │   │   └── SKILL.md                         ←   GitHub CLI operations
-│   │   │   └── SKILL.md                         ←   GitHub issue management
 │   │   ├── web-design-reviewer/
 │   │   │   └── SKILL.md                         ←   UI/UX inspection
 │   │   ├── lm-studio/
@@ -123,7 +120,7 @@ your-project/
 │   │   │   └── SKILL.md                         ←   Repo onboarding
 │   │   └── ... (49 total)
 │   ├── hooks/                                   ← Deterministic enforcement (JSON)
-│   │   ├── session-start.json                   ←   Auto-bootstrap on Copilot session start
+│   │   ├── session-start.json                   ←   Auto-bootstrap on session start
 │   │   ├── pre-tool-use.json                    ←   Validate before tool calls
 │   │   └── post-tool-use.json                   ←   Auto-lint after file edits
 │   └── scripts/                                 ← Bootstrap engine
@@ -278,7 +275,7 @@ Key: the `generic-conventions` skill covers the whole repo. Framework skills are
 | Scope | Location | Use For |
 |-------|----------|---------|
 | **Project** (team-shared) | `.agents/` in the repo | Rules everyone on the team should follow |
-| **User** (personal) | `{{VSCODE_USER_PROMPTS_FOLDER}}/` | Personal preferences that roam across all your projects |
+| **User** (personal) | `~/.config/ai/user-rules/` or editor-specific config | Personal preferences that roam across all your projects |
 
 User-level examples: "I prefer single quotes", "Always use async/await over .then()", "Never suggest class components in React". These belong in your user profile, not in every project's `.agents/`.
 

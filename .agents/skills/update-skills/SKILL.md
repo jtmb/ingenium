@@ -114,10 +114,9 @@ Before every coding session — and whenever you touch a new area of a project �
 - `git diff --name-only HEAD~1` shows `.opencode/agents/` changes but no learnings.md entry for agent changes
 - `git diff --name-only HEAD~1` shows `.agents/hooks/` changes but no learnings.md entry for hook changes
 - `git diff --name-only HEAD~1` shows `.opencode/plugins/` changes but no learnings.md entry for plugin changes
-- `git diff --name-only HEAD~1` shows `deploy/` restructures but no learnings.md entry for deploy changes
 - `git diff --name-only HEAD~1` shows `opencode.json` changes but no learnings.md entry for config changes
 - `git diff --name-only HEAD~1` shows `.agents/` changes across multiple categories but no learnings.md entries
-- A `git log --oneline -5` shows commits that mention "deploy", "agent", "plugin", "config", "hook" but no corresponding commit touches `.agents/skills/learnings.md`
+- A `git log --oneline -5` shows commits that mention "agent", "plugin", "config", "hook" but no corresponding commit touches `.agents/skills/learnings.md`
 
 **The fix:** Run `git log --oneline -5` and `git diff --name-only HEAD~1` to identify what changed, then create the missing learnings.md entry. If the changes were already committed, still log to learnings.md with the commit hash — the entry documents what happened even if it's retrospective.
 
@@ -128,12 +127,10 @@ Before every coding session — and whenever you touch a new area of a project �
 **Detection checklist:**
 - `git diff --name-only HEAD~5` shows `.opencode/agents/*.md` changes but `docs/agents.md` hasn't been updated (agent table stale, profiles missing new agents)
 - `git diff --name-only HEAD~5` shows `.agents/skills/*` changes but skill count in `docs/ARCHITECTURE.md` hasn't been updated
-- `git diff --name-only HEAD~5` shows `deploy/` restructures but `docs/ARCHITECTURE.md` still references old deploy structure
 - `git diff --name-only HEAD~5` shows `.agents/hooks/` or `.opencode/plugins/` changes but `docs/ARCHITECTURE.md` hooks/plugins sections are stale
 - `git diff --name-only HEAD~5` shows `opencode.json` changes but `docs/TECH-STACK.md` integrations/config table is stale
 - Agent permission changes (edit/write/bash) documented in `.opencode/agents/*.md` that aren't reflected in `docs/agents.md` profile tables
 - The `orchestrator-primer` skill was added but not mentioned in any docs
-- New deploy target variant added but no variant table exists in `docs/TECH-STACK.md`
 - Pipeline flow or delegation model changed but `docs/agents.md` workflow diagrams are stale
 
 **Detection commands:**
@@ -235,12 +232,9 @@ For skills that need external docs loaded on demand:
     └── api-reference.md       ← detailed API docs, loaded when needed
 ```
 
-### Tests Go in `tests/`, Not in Skills or Deploy
+### Tests Go in `tests/`, Not in Skills
 
-Tests for the skill system itself — validation scripts, audit helpers, self-improving pipeline tests — belong in `tests/` at the project root, alongside `docs/`. They should **never** be placed in:
-
-- `deploy/.agents/` — deploy is a clean slate of skills only; no scripts, hooks, or tests
-- Individual skill directories — skills are documentation, not test harnesses
+Tests for the skill system itself — validation scripts, audit helpers, self-improving pipeline tests — belong in `tests/` at the project root, alongside `docs/`. They should **never** be placed in individual skill directories — skills are documentation, not test harnesses.
 
 **If `tests/` doesn't exist, create it.** The `useful-tests` skill covers testing conventions; any test script added to `tests/` should follow those patterns.
 
@@ -274,7 +268,6 @@ Tests for the skill system itself — validation scripts, audit helpers, self-im
 This creates a changelog where every entry is traceable to a specific commit. The category tag enables grep-based filtering:
 - `grep "Category: skill" .agents/skills/learnings.md` — all skill changes
 - `grep "Category: agent" .agents/skills/learnings.md` — all agent changes
-- `grep "Category: deploy" .agents/skills/learnings.md` — all deploy structure changes
 
 ### Step 6 — Validate
 
