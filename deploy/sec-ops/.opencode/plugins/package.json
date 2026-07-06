@@ -1,0 +1,10 @@
+{
+  "name": "gh-llm-bootstrap-plugins",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenCode plugins for the gh-llm-bootstrap skill system",
+  "type": "module",
+  "dependencies": {
+    "opencode": "^1.0.0"
+  }
+}

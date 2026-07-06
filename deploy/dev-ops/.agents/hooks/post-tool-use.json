@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "command": "STATE=\"$PROJECT_ROOT/.agents/.session-state\" && touch \"$STATE\" && COUNT=$(head -1 \"$STATE\" 2>/dev/null || echo 0) && COUNT=$((COUNT + 1)) && printf '%d\\n' \"$COUNT\" > \"$STATE\" && if [ $((COUNT % 5)) -eq 0 ]; then printf '{\"additionalContext\":\"📋 Checkpoint: %d tool calls. Log new patterns, decisions, or changes to .agents/skills/learnings.md. If skills changed, run /update-skills.\"}' \"$COUNT\"; else echo '{\"continue\":true}'; fi",
+        "timeout": 5
+      }
+    ]
+  }
+}
