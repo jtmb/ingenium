@@ -2,7 +2,7 @@
 
 ## Overview
 
-Eight agents total: 2 primary, 6 subagents. The **planner** researches and produces plans (read-only). The **orchestrator** coordinates execution — it NEVER writes code directly, always delegating to subagents. Six specialized subagents handle search, context, implementation, review, documentation, and security.
+Nine agents total: 2 primary, 7 subagents. The **planner** researches and produces plans (read-only). The **orchestrator** coordinates execution — it NEVER writes code directly, always delegating to subagents. Six specialized subagents handle search, context, implementation, review, documentation, and security.
 
 ```mermaid
 flowchart TB
@@ -56,6 +56,7 @@ flowchart TB
 |-------|------|-------|----------|--------|---------|
 | **ingenium-planner** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | Mastermind — analyzes, delegates research, produces execution plan |
 | **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-flash` | DeepSeek API | Full R/W | Coordinator — delegates ALL work to subagents, never writes code directly |
+| **ingenium-plan-file** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (plan.md only) | Single-purpose — manages `plan.md` at project root. Created/updated/deleted only by planner instruction |
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `lmstudio/qwopus3.5-9b-coder` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
 | **ingenium-software-engineer** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read/Write | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
@@ -91,20 +92,22 @@ flowchart TB
 | **Access** | Read-only |
 | **Invoked by** | User (Tab key) |
 | **Triggers** | User request: "Plan X", "Analyze Y", "Research Z" |
-| **Can spawn** | `@ingenium-explore`, `@ingenium-scout`, `@ingenium-security-auditor`, `@ingenium-docs` |
+| **Can spawn** | `@ingenium-explore`, `@ingenium-scout`, `@ingenium-security-auditor`, `@ingenium-docs`, `@ingenium-plan-file` |
 
 | Phase | Action | Delegates to |
 |-------|--------|-------------|
+| 0. Resume check | Check for `plan.md` at project root — may be resuming interrupted plan | explore |
 | 1. Understand | Parse user request, identify scope and constraints | — |
 | 2. Delegate | Spawn 2-4 subagents in parallel | explore ×2, scout, security-auditor |
 | 3. Analyze | Read files subagents identified, synthesize findings | — |
 | 4. Plan | Produce step-by-step plan (files, subagents, order, tests, docs) | — |
-| 5. Hand off | Ask user to switch to orchestrator | — |
+| 5. Persist & hand off | Save plan to `plan.md`, hand off to orchestrator | plan-file |
 
 **Planner HARD RULEs:**
 - 🔴 Never search code, grep, or glob directly — always delegate to explore
 - 🔴 Never access general subagent or circumvent read-only restrictions
 - 🔴 Produce the full plan in the handoff message for the orchestrator to read
+- 🔴 Persist the plan to `plan.md` via @ingenium-plan-file after every plan
 
 ### @ingenium-orchestrator — Coordinator
 
@@ -114,19 +117,20 @@ flowchart TB
 | **Access** | Full R/W |
 | **Invoked by** | User (Tab key) |
 | **Triggers** | User: "Execute", "Go ahead", "Implement", or provides a plan |
-| **Can spawn** | ALL 6 subagents |
+| **Can spawn** | ALL 7 subagents |
 | **Direct bash** | ONLY: `git add/commit/push`, `git rev-parse`, test/build verification |
 
 | Phase | Action | Delegates to |
 |-------|--------|-------------|
-| 1. Detect plan | Scan messages for planner's plan | — |
+| 1. Detect plan | Scan messages for planner's plan + check `plan.md` at project root | explore (reads plan.md) |
 | 2. Split work | Identify subagents needed, parallelize | — |
 | 3. Delegate | Spawn subagents for ALL work | explore, software-engineer, qa, docs, security-auditor, scout |
 | 4. Merge | Collect findings, resolve conflicts | — |
 | 5. Verify | Run tests and type-checks via bash | — |
 | 6. Document | 🔴 Mandatory: spawn docs after every change | docs |
 | 7. Learnings | Log to learnings.md with commit hash | docs |
-| 8. Commit | git add/commit/push | — |
+| 8. Clear plan | Clear `plan.md` after completion | plan-file |
+| 9. Commit | git add/commit/push | — |
 
 **Orchestrator Controls (5-layer enforcement):**
 
@@ -314,7 +318,7 @@ flowchart LR
 |----------|--------|-------|------|
 | DeepSeek V4 Pro (API) | `ingenium-planner` | 1 | Paid |
 | DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor` | 3 | Paid |
-| DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-software-engineer`, `ingenium-qa`, `ingenium-docs` | 3 | Free |
+| DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-software-engineer`, `ingenium-qa`, `ingenium-docs`, `ingenium-plan-file` | 4 | Free |
 | qwopus 3.5 9B Coder (LM Studio) | `ingenium-scout` | 1 | Local |
 
 ## Subagent Invocation
@@ -329,6 +333,7 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
 | ingenium-qa | `@ingenium-qa` | Write tests | orchestrator only |
 | ingenium-docs | `@ingenium-docs` | Write docs | orchestrator only |
+| ingenium-plan-file | `@ingenium-plan-file` | Read/Write (plan.md only) | planner only |
 
 ## How to Use the Pipeline
 
