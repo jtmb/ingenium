@@ -2,274 +2,212 @@
 
 ## Overview
 
-**dev-ops** is an AI-driven Kubernetes cluster operations agent system built on the Ingenium skill framework. It provides a structured, safety-tiered methodology for autonomous cluster monitoring, diagnosis, and remediation — from health probe ingestion through verification and documentation. The system uses a team of specialized AI agents (8 total: 2 primary + 6 subagents) that coordinate through the OpenCode platform, backed by 48 skills (44 universal + 4 cluster-ops domain) that govern tool usage, safety classification, diagnostics, and operational conventions.
+**Ingenium** is a self-improving AI conventions system packaged as a bootstrap toolkit. It provides a skill-based framework that tells AI coding agents (GitHub Copilot, Cline, etc.) how to follow project conventions, enforce rules, and grow new skills as the codebase evolves. The project is self-hosting: its own skill system governs its own development.
 
 Key properties:
-- **No runtime dependencies beyond kubectl/flux/helm/jq** — pure Markdown + YAML + shell scripts for the agent system
-- **3-tier safety model** — strict classification of every action into auto-approve, needs-approval, or never-allowed
-- **Discover-before-assume** — cluster state is discovered at runtime, never hardcoded
-- **Evidence-driven** — every command output is captured and cited
+- **Zero runtime dependencies** — pure Markdown + YAML + shell scripts
 - **Self-improving** — an `update-skills` detection pipeline identifies gaps and auto-creates skills
+- **Deployable** — a `deploy/` mirror for clean project bootstrapping
 
 ## Directory Map
 
-```mermaid
-graph TB
-    ROOT[dev-ops/] --> AGENTS[AGENTS.md — Project rules]
-    ROOT --> OCONFIG[opencode.json — OpenCode config]
-    ROOT --> OA[.opencode/agents/ — 8 agent definitions]
-    ROOT --> OP[.opencode/plugins/ — 3 lifecycle plugins]
-    ROOT --> AS[.agents/ — Skill system core]
-    ROOT --> VS[.vscode/ — Editor config]
-    ROOT --> GH[.github/ — Deprecated]
-    ROOT --> D[docs/ — Project documentation]
-
-    OA --> PR[primary/]
-    OA --> RS[research/]
-    OA --> EX[execution/]
-    OA --> SE[security/]
-
-    PR --> PL[ingenium-planner.md — Mastermind, read-only]
-    PR --> OR[ingenium-orchestrator.md — Executor, full R/W]
-
-    RS --> EXP[ingenium-explore.md — Codebase search]
-    RS --> SCT[ingenium-scout.md — Thread context]
-
-    EX --> IE[ingenium-infrastructure-engineer.md — Infrastructure review]
-    EX --> QA[ingenium-qa.md — Test authoring]
-    EX --> DOC[ingenium-docs.md — Documentation & reports]
-
-    SE --> SA[ingenium-security-auditor.md — Project security audit]
-
-    AS --> SK[skills/ — 48 skills]
-    AS --> HK[hooks/ — 3 lifecycle hooks]
-    AS --> SCR[scripts/ — hook-bootstrap.sh]
-
-    SK --> CORE[generic-conventions/ — Core rules]
-    SK --> CO[cluster-operator/ — K8s monitoring & remediation]
-    SK --> CR[cluster-remediation/ — 3-tier safety model]
-    SK --> KD[kubectl-diagnose/ — Diagnostic commands]
-    SK --> CLO[cluster-operations/ — Safety & discovery]
-    SK --> K8S[kubernetes/ — K8s manifest conventions]
-    SK --> REST[Other standard skills — 37 universal skills]
-
-    D --> DA[docs/agents.md — Agent architecture]
-    D --> DA2[docs/ARCHITECTURE.md — System architecture]
-    D --> DTC[docs/TECH-STACK.md — Tools & dependencies]
-    D --> DC[docs/CONVENTIONS.md — Safety & conventions]
-    D --> DR[docs/README.md — Docs index]
+```
+ingenium/
+├── .agents/                    ← AI conventions system (the "product")
+│   ├── skills/                 ← 48 skills — framework, domain, task, and tool conventions
+│   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
+│   │   ├── {framework}-conventions/ ← nextjs, python, go, rust, typescript-standalone
+│   │   ├── {domain}-skills/       ← containers, kubernetes, api-design, sql-database, etc.
+│   │   ├── orchestrator-primer/  ← Always-visible delegation rules (loaded via opencode.json)
+│   │   └── learnings.md           ← Changelog of all skill system changes: skills, agents, hooks, plugins, deploy, config, architecture decisions, bugs, and patterns discovered
+│   ├── SKILL-CATALOG.md        ← Full catalog (lazy-loaded by AI)
+│   ├── scripts/                ← Bootstrap engine
+│   │   ├── bootstrap.sh        ← Main entry point — scaffolds projects with selected skills
+│   │   └── hook-bootstrap.sh   ← Auto-detection + interactive mode
+│   └── tests/ → moved to tests/
+├── tests/                      ← Test suite (at project root, alongside docs/)
+│   └── test-self-improving.sh  ← Validates update-skills detection pipeline (7 test functions, 20 checks)
+├── deploy/                     ← Bootstrap payload (3 domain variants)
+│   ├── software-dev/           ← General software engineering
+│   ├── dev-ops/                ← Kubernetes cluster operations
+│   └── sec-ops/                ← Security penetration testing
+├── docs/                       ← Project documentation (this directory)
+│   ├── agents.md               ← Agent architecture reference
+│   ├── ARCHITECTURE.md         ← This file — project structure and data flow
+│   ├── TECH-STACK.md           ← Languages, tools, and dependencies
+│   └── CONVENTIONS.md          ← Naming, file organization, and patterns
+├── assets/                     ← Mermaid diagrams for docs
+├── .opencode/agents/           ← OpenCode custom agent definitions (8 agents)
+│   ├── primary/                ← planner, orchestrator
+│   ├── execution/              ← software-engineer, qa, docs
+│   ├── research/               ← explore, scout
+│   └── security/               ← security-auditor
+├── .opencode/plugins/          ← TypeScript plugins with lifecycle hooks (session-start, pre-tool-use, post-tool-use)
+│   ├── tsconfig.json           ← Strict TypeScript config with 10+ strict flags
+│   ├── session-start.ts        ← Injects skill-loading checklist at session start
+│   ├── pre-tool-use.ts         ← Warns before commands that target build/cache dirs
+│   └── post-tool-use.ts        ← Tracks tool calls, reminds about learnings.md
+├── AGENTS.md                   ← Project rules — skill loading, agent pipeline, testing
+├── README.md                   ← Project overview, architecture diagram, skill catalog
+├── USAGE.md                    ← How to use and maintain the skill system
+└── package.json                ← Minimal — only for dependency gap detection testing
 ```
 
 ## Key Components
 
 ### Skill System (`.agents/skills/`)
 
-The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 48 skills live under `.agents/skills/`:
+The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 48 skills live in a single hierarchy under `.agents/skills/`:
 
 | Tier | Pattern | Count | Examples |
 |------|---------|-------|----------|
 | **Core** | `generic-conventions` | 1 | Universal rules — docs, security, error handling, DRY |
 | **Framework** | `*-conventions` | 5 | nextjs, python, go, rust, typescript-standalone |
-| **Domain (universal)** | named by topic | ~28 | kubernetes, containers, api-design, sql-database, shell-scripts, useful-tests, etc. |
-| **Cluster Ops Domain** | named by topic | 4 | cluster-operator, cluster-remediation, kubectl-diagnose, cluster-operations |
+| **Domain** | named by topic | ~20 | containers, kubernetes, api-design, sql-database, shell-scripts, useful-tests, etc. |
 | **Task** | invocable via `/command` | ~14 | update-skills, audit-skills, generate-docs, write-docs, help, etc. |
 | **Tool** | automation interfaces | ~5 | chrome-devtools, playwright-mcp, gh-cli, github-issues, web-design-reviewer |
 
-All 48 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
+All 48 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, bootstrap.sh, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
 
-### Agent Pipeline (`.opencode/agents/`)
+### Bootstrap Engine (`.agents/scripts/`)
 
-8 custom agents defined for OpenCode in role-nested directories: `primary/` (planner, orchestrator), `execution/` (infrastructure-engineer, qa, docs), `research/` (explore, scout), `security/` (security-auditor). The orchestrator NEVER writes code directly — it delegates all implementation to @ingenium-infrastructure-engineer. See `docs/agents.md` for full architecture and workflow.
+Two bash scripts that scaffold new projects with the skill system:
+
+- **`bootstrap.sh`** — Main entry point. Copies deployable skills from `deploy/` to the target project. Supports `--framework` selection, `--dry-run`, and `--auto` detection. Uses `BOOTSTRAP_DIR` to point to `deploy/`.
+- **`hook-bootstrap.sh`** — Non-interactive bootstrap for hooks/CI. Auto-detects framework, clones from git cache.
 
 ### Plugin System (`.opencode/plugins/`)
 
-3 TypeScript plugins hook into OpenCode's lifecycle for deterministic enforcement:
+TypeScript plugins that hook into OpenCode's lifecycle to provide deterministic enforcement beyond what skill files can express:
 
 | Plugin | Hook | Purpose |
 |--------|------|---------|
 | `session-start.ts` | `session.created` | Injects skill-loading checklist at session start |
-| `pre-tool-use.ts` | `tool.execute.before` | Warns when bash commands target build/cache directories or deprecated paths |
-| `post-tool-use.ts` | `tool.execute.after` | Tracks tool call count, reminds about documentation logging every 5 calls; verifies delegation patterns |
+| `pre-tool-use.ts` | `tool.execute.before` | Warns when bash commands target `node_modules`, `.git`, `dist`, or build directories |
+| `post-tool-use.ts` | `tool.execute.after` | Tracks tool call count, reminds about `learnings.md` and `/update-skills` every 5 calls; reminds about delegation patterns and learnings.md |
+
+Each plugin is a TypeScript module that imports the `Plugin` type from `@opencode-ai/plugin` and exports a default typed plugin object with named hooks. A strict `tsconfig.json` (`strict: true`, plus `noUncheckedIndexedAccess`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `noUnusedLocals`, `noUnusedParameters`, etc.) enforces type safety across all plugin files.
+
+Plugins bridge the gap between skills (AI-interpreted) and deterministic guardrails. They run regardless of AI state and provide immediate feedback for dangerous patterns.
+
+### Agent Pipeline (`.opencode/agents/`)
+
+8 custom agents defined for OpenCode in role-nested directories: `primary/` (planner, orchestrator), `execution/` (software-engineer, qa, docs), `research/` (explore, scout), `security/` (security-auditor). The orchestrator NEVER writes code directly — it delegates all implementation to @ingenium-software-engineer (now with read/write permissions). See `docs/agents.md` for full architecture.
+
+### Deploy Separation (`deploy/`)
+
+A set of 3 domain variant mirrors containing only what gets deployed to target projects:
+- `deploy/software-dev/` — General software engineering (skills, hooks, agents, plugins, docs, config)
+- `deploy/dev-ops/` — Kubernetes cluster operations (skills, hooks, agents, plugins, docs, config)
+- `deploy/sec-ops/` — Security penetration testing (skills, hooks, agents, plugins, docs, config)
+- Each variant contains `.agents/skills/` (48 skills), `.agents/hooks/`, `.opencode/agents/`, `.opencode/plugins/`, `docs/`, `AGENTS.md`, `opencode.json`, and `SKILL-INDEX.md`
+- No scripts or tests — source-only artifacts stay in root
+
+The `test-self-improving.sh` suite validates that deploy stays in sync with source (TEST 5) and that no source-only files leak in (TEST 4).
+
+### Self-Improving Pipeline (`update-skills` + tests)
+
+The project detects its own gaps using four signals:
+1. **Dependency gaps** — `package.json` has a dep with no matching skill
+2. **Missing coverage** — file types (`.vue`, `.svelte`) not covered by any skill
+3. **Repeated conventions** — patterns used 3+ times without a skill
+4. **Stale content** — skill references wrong versions or deleted paths
+
+The `test-self-improving.sh` suite (7 test functions, 20 checks) validates all four signals, deploy integrity, frontmatter validity, and file drift.
+
+### Thread Persistent Memory
+
+The `thread-auto-context` skill provides automatic persistent memory across AI sessions via a Thread MCP server. It auto-bootstraps the bridge on first use, saves decisions/preferences/bugs during sessions, and performs a **mandatory full export pipeline at session end**:
+
+1. **Full transcript upload** — Writes entire conversation to `/tmp/opencode/` and uploads to Thread (🔴 HARD RULE)
+2. **Session summary** — Key changes, decisions, outcomes
+3. **Decisions log** — All design decisions and architecture choices
+4. **Git state** — Recent commits and staged/unstaged changes
+
+This ensures every session is fully recoverable even if the platform's chat history is lost. The export uses the Thread byte-offset tracking system for incremental deduplication.
 
 ### Hooks System (`.agents/hooks/`)
 
-3 lifecycle hooks provide deterministic enforcement and remediation tracking:
+Three lifecycle hooks provide deterministic enforcement and self-improvement triggers:
 
 | Hook | When it fires | Purpose |
 |------|--------------|---------|
 | `session-start.json` | Session start | Inject abbreviated checklist, match skills, load them, note 🔴 HARD RULEs |
-| `pre-tool-use.json` | Before every tool call | Validate terminal command safety, check safety tier, block Tier 3 actions |
-| `post-tool-use.json` | After every 5 tool calls | Periodic reminder to log findings, run `/update-skills`, check for skill gaps, verify delegation patterns |
+| `pre-tool-use.json` | Before every tool call | Validate terminal command safety, check file-scope rules, block dangerous patterns |
+| `post-tool-use.json` | After every 5 tool calls | Periodic reminder to log new patterns, run `/update-skills`, check for skill gaps, verify delegation patterns |
+
+Hooks live in both source (`.agents/hooks/`) and deploy (`deploy/.agents/hooks/`). They bridge the gap between skills (which are read/interpreted by the AI) and deterministic enforcement (which runs regardless of AI state).
 
 ## Data Flow
 
-### Rememdiation Lifecycle
-
 ```mermaid
-flowchart LR
-    HP[Health Probe Data] --> PL[ingenium-planner]
-    PL --> PLAN[Remediation Plan]
-    PLAN --> PH1{Phase 1: Diagnosis}
-    PH1 -->|Pass| DIAG[Cluster Diagnosis]
-    DIAG --> EVID1[Evidence: Pod Status / Node Conditions / Events]
-
-    EVID1 --> PH2{Phase 2: Planning}
-    PH2 -->|Pass| PLAN2[Detailed Remediation Plan]
-    PLAN2 --> EVID2[Evidence: Safety Tiers / Topology Constraints]
-
-    EVID2 --> PH3{Phase 3: Remediation}
-    PH3 -->|Pass| REMEDIATE[Remediation Execution]
-    REMEDIATE --> EVID3[Evidence: Actions Taken / Command Output]
-
-    EVID3 --> PH4{Phase 4: Verification}
-    PH4 -->|Pass| VERIFY[Cluster State Verification]
-    VERIFY --> EVID4[Evidence: Post-Remediation Health / Events]
-
-    EVID4 --> PH5{Phase 5: Reporting}
-    PH5 -->|Pass| REPORT[Remediation Report / Docs Updated]
-    REPORT --> FINDINGS[Learnings / Skill Updates]
-
-    subgraph Orchestrator[ingenium-orchestrator]
-        direction LR
-        TOOLS[kubectl / flux / helm] --> OUTPUT[Command Output]
-        OUTPUT --> VERIFY2[Safety Verification]
-        VERIFY2 --> CAPTURE[Evidence Capture]
-    end
-
-    DIAG --> Orchestrator
-    PLAN2 --> Orchestrator
-    REMEDIATE --> Orchestrator
-    VERIFY --> Orchestrator
-```
-
-### Health Probe Lifecycle
-
-```mermaid
-flowchart TB
-    PROBE[Cluster Watchdog] -->|Pod CrashLoopBackOff| CAT1{Category?}
-    PROBE -->|Node NotReady| CAT2{Category?}
-    PROBE -->|PVC Pending| CAT3{Category?}
-    PROBE -->|Flux Not Ready| CAT4{Category?}
-    PROBE -->|Cert Expiring| CAT5{Category?}
-
-    CAT1 -->|Pod Issue| POD_OP[cluster-operator: pod health probe]
-    CAT2 -->|Node Issue| NODE_OP[cluster-operator: node health probe]
-    CAT3 -->|Storage Issue| PVC_OP[cluster-operator: storage probe]
-    CAT4 -->|GitOps Issue| FLUX_OP[cluster-operator: flux probe]
-    CAT5 -->|Certificate Issue| CERT_OP[cluster-operator: cert probe]
-
-    POD_OP --> DIAGNOSE[Load kubectl-diagnose]
-    NODE_OP --> DIAGNOSE
-    PVC_OP --> DIAGNOSE
-    FLUX_OP --> DIAGNOSE
-    CERT_OP --> DIAGNOSE
-
-    DIAGNOSE --> SAFETY[Load cluster-remediation: classify by tier]
-    SAFETY --> EXECUTE[Orchestrator: execute safe actions]
-    EXECUTE --> VERIFY_STATE[Verify cluster state]
-    VERIFY_STATE --> DOC[ingenium-docs: document]
-```
-
-### Agent-to-Tool Flow
-
-```mermaid
-sequenceDiagram
-    participant O as ingenium-orchestrator
-    participant IE as ingenium-infrastructure-engineer
-    participant BASH as bash (kubectl/flux/helm)
-    participant DOC as ingenium-docs
-
-    O->>IE: Review planned remediation for safety
-    IE-->>O: Approved / Modified approach
-    O->>BASH: kubectl describe pod (diagnostic)
-    BASH-->>O: Diagnostic output / events
-    O->>O: Verify output & classify safety
-    O->>BASH: kubectl rollout restart (Tier 1)
-    BASH-->>O: Restart confirmed
-    O->>BASH: kubectl get pods -A (verify)
-    BASH-->>O: All Running
-    O->>DOC: Record remediation with evidence paths
-    DOC-->>O: Confirmation + doc location
-    Note over O,DOC: 🔴 Mandatory after every remediation
+graph TD
+    A[AI receives task] --> B[AI scans .agents/skills/]
+    B --> C{What files are involved?}
+    C -->|.tsx/.ts in Next.js| D[nextjs-conventions]
+    C -->|.py files| E[python-conventions]
+    C -->|.go files| F[go-conventions]
+    C -->|.rs files| G[rust-conventions]
+    C -->|Dockerfile/compose| H[containers]
+    C -->|K8s manifests| I[kubernetes]
+    C -->|API routes| J[api-design]
+    C -->|Shell scripts| K[shell-scripts]
+    C -->|SQL files| L[sql-database]
+    C -->|Test files| M[useful-tests]
+    C -->|No match| N[generic-conventions]
+    D --> O[Hooks enforce deterministic guardrails]
+    E --> O
+    F --> O
+    G --> O
+    H --> O
+    I --> O
+    J --> O
+    K --> O
+    L --> O
+    M --> O
+    N --> O
+    O --> P[AI follows conventions]
+    P --> Q{PostToolUse — check patterns?}
+    Q -->|Yes| R[Log new patterns to learnings.md]
+    R --> S[update-skills detects gaps]
+    S --> T{New skill needed?}
+    T -->|Yes| U[Create skill + audit wiring]
+    T -->|No| V[SessionStart re-loads skills]
+    Q -->|No| V
+    U --> V
 ```
 
 ## Communication Patterns
 
-The project operates entirely at edit time with no runtime communication between components:
-- **AI reads skills** — The AI assistant scans `.agents/skills/` on startup and when tool types change
-- **AI executes commands** — The orchestrator runs kubectl/flux/helm via bash and validates output
-- **AI writes evidence** — `ingenium-docs` saves remediation reports; `update-skills` creates new skill files
-- **Bootstrap copies** — `hook-bootstrap.sh` copies the skill system to new targets
+The project has no runtime communication — it operates entirely at edit time:
+- **AI reads skills** — The AI assistant scans `.agents/skills/` on startup and when file types change
+- **AI writes skills** — `update-skills` creates new skill files; `audit-skills` fixes consistency
+- **Bootstrap copies** — `bootstrap.sh` copies `deploy/` contents to target projects
 - **Tests validate** — `test-self-improving.sh` runs as a bash script, not part of the AI loop
-
-## 3-Tier Safety Architecture
-
-The safety model is enforced at multiple levels:
-
-| Level | Enforcement | Details |
-|-------|-------------|---------|
-| 1. Agent Instructions | Agent prompt rules | Each agent's `.md` file defines what it can/cannot do |
-| 2. Skill System | `.agents/skills/` rules | `cluster-remediation/SKILL.md` defines the tier taxonomy |
-| 3. VS Code Config | `.vscode/settings.json` | Auto-approves kubectl/flux/helm/jq at the tool permission level |
-| 4. OpenCode Permissions | `opencode.json` | Read=allow, Edit=ask, Bash=allow — human must approve edits |
-
-### Safety Tier Enforcement Flow
-
-```mermaid
-flowchart TB
-    ACTION[Proposed Action] --> TIER{Classify by 3-Tier Safety}
-    TIER --> TIER1{Tier 1<br/>Auto-Approve}
-    TIER --> TIER2{Tier 2<br/>Needs Approval}
-    TIER --> TIER3{Tier 3<br/>NEVER Allowed}
-
-    TIER1 -->|kubectl describe/logs/get<br/>kubectl rollout restart<br/>kubectl delete pod --force<br/>flux reconcile<br/>kubectl annotate| EXECUTE[Execute Immediately]
-
-    TIER2 -->|kubectl delete pvc/ns/deployment<br/>kubectl cordon/drain<br/>flux suspend/resume<br/>helm uninstall| ASK{Ask Human}
-    ASK -->|Approved| EXECUTE2[Execute]
-    ASK -->|Denied| BLOCK2[Skip / Report]
-
-    TIER3 -->|kubectl delete node/clusterrolebinding/crd/secret<br/>touch /etc/kubernetes/<br/>rm/mv/dd/mkfs| REJECT[Reject & Report]
-
-    style EXECUTE fill:#4ad94a,color:#fff
-    style EXECUTE2 fill:#4ad94a,color:#fff
-    style ASK fill:#ffaa00,color:#000
-    style REJECT fill:#ff0000,color:#fff
-```
 
 ## External Dependencies
 
-### Essential Runtime Tools
-- **kubectl** — Primary Kubernetes interaction (describe, logs, get, delete, rollout)
-- **flux** — GitOps reconciliation (get, reconcile, suspend, resume, trace)
-- **helm** — Package management (list, history, uninstall)
-- **jq** — JSON output parsing and filtering
+None at runtime. The project is pure files — Markdown, YAML, Bash, JSON.
 
-### Agent System
-- **OpenCode** — Agent orchestration platform
-- **Thread MCP** — Persistent memory (cross-session context)
-- **Bash 5.x** — Command execution and scripting
-
-### Discovered at Runtime
-- **Kubernetes cluster** (v1.25+) — Target environment
-- **FluxCD v2.x** — GitOps operator
-- **cert-manager** — TLS certificate management
-- **Longhorn** — Distributed block storage (if installed)
-- **CNI plugin** — Calico, Cilium, or Flannel (auto-detected)
-- **Ingress controller** — Traefik, NGINX, or other (auto-detected)
+For development/testing:
+- **bash** (5.x+) — Test suite and bootstrap scripts
+- **git** — Version control and commit-based learning log
+- **TypeScript** (via `tsc`) — Compiles `.opencode/plugins/` TypeScript source to JavaScript
+- **Node.js / npm** — Package management and build tooling for OpenCode plugins
+- **`@opencode-ai/plugin`** — SDK for OpenCode plugin development (typed `Plugin` interface, lifecycle hook signatures)
+- **package.json** (root) — Exists only to provide a dependency list for gap detection testing (actual packages are never installed)
 
 ## Deployment
 
-The project is deployed by **bootstrapping** — running `hook-bootstrap.sh` against a target project or by copying the `deploy/` directory:
+The project is deployed by **bootstrapping** — running `bootstrap.sh` against a target project:
 
 ```bash
-# Bootstrap a new cluster operations project
-./.agents/scripts/hook-bootstrap.sh --auto /path/to/cluster-ops
+# Bootstrap a new Next.js project with skill conventions
+./ingenium/.agents/scripts/bootstrap.sh --framework nextjs /path/to/new-project
 ```
 
-The system structure is self-contained — the `.agents/` directory is the entire deployable unit:
-- `.agents/skills/` — All 48 skills (copied)
-- `.agents/hooks/` — 3 lifecycle hooks (copied)
-- `AGENTS.md` — Project rules (copied)
-- `opencode.json` — Configuration with `<PLACEHOLDER>` tokens (never real secrets)
-
-**No external services required.** The system works fully offline with local tools and local LLMs.
+This copies `deploy/.agents/` + `deploy/AGENTS.md` into the target, giving it the full skill system. The bootstrap supports:
+- **Framework selection** — `--framework nextjs|python|go|rust` selects the right skills
+- **Auto-detection** — `--auto` scans existing code to detect frameworks
+- **Dry runs** — `--dry-run` previews what would be copied
+- **Non-interactive mode** — `hook-bootstrap.sh` for CI/hook environments

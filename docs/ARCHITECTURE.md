@@ -115,6 +115,17 @@ The project detects its own gaps using four signals:
 
 The `test-self-improving.sh` suite (7 test functions, 20 checks) validates all four signals, deploy integrity, frontmatter validity, and file drift.
 
+### Thread Persistent Memory
+
+The `thread-auto-context` skill provides automatic persistent memory across AI sessions via a Thread MCP server. It auto-bootstraps the bridge on first use, saves decisions/preferences/bugs during sessions, and performs a **mandatory full export pipeline at session end**:
+
+1. **Full transcript upload** — Writes entire conversation to `/tmp/opencode/` and uploads to Thread (🔴 HARD RULE)
+2. **Session summary** — Key changes, decisions, outcomes
+3. **Decisions log** — All design decisions and architecture choices
+4. **Git state** — Recent commits and staged/unstaged changes
+
+This ensures every session is fully recoverable even if the platform's chat history is lost. The export uses the Thread byte-offset tracking system for incremental deduplication.
+
 ### Hooks System (`.agents/hooks/`)
 
 Three lifecycle hooks provide deterministic enforcement and self-improvement triggers:
