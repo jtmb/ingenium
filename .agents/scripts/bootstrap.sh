@@ -175,6 +175,7 @@ declare -a FILES=(
     ".agents/skills/chrome-devtools/SKILL.md|.agents/skills/chrome-devtools/SKILL.md|optional"
     ".agents/skills/playwright-mcp/SKILL.md|.agents/skills/playwright-mcp/SKILL.md|optional"
     ".agents/skills/gh-cli/SKILL.md|.agents/skills/gh-cli/SKILL.md|optional"
+    ".agents/skills/gh-cli/templates/issue-report.md|.agents/skills/gh-cli/templates/issue-report.md|optional"
     ".agents/skills/github-issues/SKILL.md|.agents/skills/github-issues/SKILL.md|optional"
     ".agents/skills/wsl-cleanup/SKILL.md|.agents/skills/wsl-cleanup/SKILL.md|always"
     ".agents/skills/wsl-cleanup/scripts/wsl-cleanup.sh|.agents/skills/wsl-cleanup/scripts/wsl-cleanup.sh|optional"
