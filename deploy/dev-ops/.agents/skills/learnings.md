@@ -160,3 +160,15 @@
   6. **All 4 files synced** to 6 destinations: 3 deploy variants + 3 local mirrors.
 - **Before**: `b253ed0`
 - **Why**: Plans were lost on session close with no persistence. Thread MCP would create hard dependency. File-based plan.md with single-purpose subagent is zero-dependency. Scout had websearch permissions but never used them — needed instructions.
+
+## 2026-07-05 — Test responsibility flip: SE writes tests, QA reviews only
+
+- **Commit**: `c2799f9`
+- **Category**: agent | config | docs
+- **Changes**:
+  1. **ingenium-software-engineer**: "Write production code, not tests" → "Write production code AND tests. QA provides review only." Step 2 now includes test plan guidance.
+  2. **ingenium-qa**: Removed all test authoring references. Description: "Code review and quality assurance. Verifies tests written by @ingenium-software-engineer." Section 2 renamed from "Test Authoring" to "Test Verification". Added "No test authoring" to What You Don't Do.
+  3. **docs/agents.md**: SE + QA profiles updated — SE now shows "Write tests alongside production code", QA shows "Test verification". Stale references fixed in agent table and invocation table.
+  4. **Synced** to 6 destinations + deploy variant docs.
+- **Why**: Subagents can't spawn subagents efficiently. QA doesn't write tests in practice. SE already has useful-tests skill loaded and self-verifies — natural for it to own both code and tests.
+- **Before**: `bfb2bd0`
