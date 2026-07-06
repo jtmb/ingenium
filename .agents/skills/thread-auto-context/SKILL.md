@@ -18,6 +18,25 @@ At session start, if Thread MCP is not already configured, bootstrap the bridge 
 
 **You do NOT start the Thread server.** The server is the user's responsibility. If it's not running, tell them how to start it — but never start, build, or manage the server yourself.
 
+## 🔴 HARD RULE — Verify Configuration Before Making Assumptions
+
+**Never assume which MCP servers are available.** Always verify by:
+1. Checking `.vscode/mcp.json` for existing `servers.thread` config
+2. Confirming Thread is reachable at the configured URL (`THREAD_SERVER_URL`)
+3. Looking up environment variables in the **default global MCP configuration location** (where opencode stores server settings, auth tokens, and provider configs) — don't directly reference paths or keys
+
+The Thread API token and authentication credentials are stored in the default global MCP config location. This is where OpenCode centralizes all MCP server configurations including:
+- Server URLs and connection parameters  
+- Authentication tokens for external services  
+- Environment variables passed to bridge processes  
+
+**Do not:**
+- Hardcode file paths or specific key names
+- Assume a particular directory structure
+- Directly point users to internal config files without context
+
+**Instead, say generically:** "The Thread API token is configured in the default global MCP configuration location. This is where OpenCode stores all MCP server settings."
+
 ### Bootstrap Decision Tree
 
 ```

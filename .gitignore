@@ -26,3 +26,4 @@ Thumbs.db
 # ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env
 .vscode
+temp
