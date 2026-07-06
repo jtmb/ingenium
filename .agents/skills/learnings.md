@@ -478,3 +478,33 @@
   3. Added `kaban-board` skill to all 3 software-engineer variants (needed for kaban awareness)
   4. Verified 7/7 tests pass after cleanup
 - **Why**: Dead skills accumulate; agents loading non-existent skills silently degrade behavior
+
+## 2026-07-06 — consolidated model-profiles, local-model-commands, lm-studio into local-models
+
+- **Commit**: (to be added after commit)
+- **Category**: skill | consolidation
+- **Changes**:
+  1. Merged 3 local model skills into 1 comprehensive `local-models` skill
+  2. Updated all agent skill lists (11 files) to reference `local-models`
+  3. Updated all skill cross-references
+  4. Updated opencode.json (instructions array)
+  5. Updated bootstrap.sh FILES array
+  6. Updated SKILL-INDEX.md, SKILL-CATALOG.md, AGENTS.md, README.md, USAGE.md
+  7. Updated all skill files with cross-references to the old skills
+- **Skill count**: 45 → 43
+
+## 2026-07-06 — Rename ingenium-scrum to ingenium-planner
+
+- **Commit**: `547d49d` (after)
+- **Before**: `8c611b6` (before)
+- **Category**: agent | config
+- **Changes**:
+  1. Renamed `.opencode/agents/primary/ingenium-scrum.md` → `ingenium-planner.md`
+  2. Updated `name:` from `ingenium-scrum` to `ingenium-planner` with new description
+  3. Updated `.agents/models.yaml` — `ingenium-scrum` → `ingenium-planner` in both agent assignment and reasoning effort
+  4. Updated `AGENTS.md` — agent pipeline table row + workflow description
+  5. Updated `ingenium-orchestrator.md` — all `ingenium-scrum` references
+  6. Updated `docs/agents.md` — 18 changes: all `ingenium-scrum` → `ingenium-planner`, plus subgraph labels, headings, compute split table
+  7. Updated `docs/ARCHITECTURE.md` — 7 changes: tool access table, model config, mermaid subgraph labels
+  8. Updated `docs/TECH-STACK.md` — agent name + purpose text
+  9. `opencode.json` — no changes needed (no references existed)
