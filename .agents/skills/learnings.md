@@ -700,3 +700,50 @@ if '<title>404' in verify_after.stdout: print(f"✓ Verified deleted (HTTP 404)"
 - **Category**: config
 - **Changes**: Commented out `model: opencode/deepseek-v4-flash-free` from 4 agent configs (ingenium-docs, ingenium-qa, ingenium-explore, ingenium-scout)
 - **Why**: Hit free usage limit on DeepSeek V4 Flash free tier
+
+## 2026-07-06 — Restore sec-ops & dev-ops directories (874 files)
+
+- **Before**: `f147b25`
+- **After**: `14c5eda`
+- **Category**: config + repo-restoration  
+- **Changes**: Restored , , ,  from git history (deleted in commit 131f1c9ae)
+- **Why**: User requested restoration of deleted agent configuration directories
+- **Files restored**: ~50 agent markdown configs, ~25K Python venv files, ~300 skill docs, deploy hooks
+
+### Self-improvement commands applied:
+-  — detect gaps (no new skills needed)
+-  — verify all 46 skills in README/bootstrap.sh/mermaid (all consistent)
+-  — regenerate SKILL-INDEX.md (already up to date, count matches 46)
+
+EOF && echo "Learnings logged"
+
+## 2026-07-06 — Restore sec-ops & dev-ops directories (874 files)
+
+- Before: f147b25
+- After: 14c5eda  
+- Category: config + repo-restoration
+- Changes: Restored .opencode/sec-ops/, .opencode/dev-ops/, deploy/sec-ops/, deploy/dev-ops/ from git history (deleted in commit 131f1c9ae)
+- Why: User requested restoration of deleted agent configuration directories
+- Files restored: ~50 agent markdown configs, ~25K Python venv files, ~300 skill docs, deploy hooks
+
+### Self-improvement commands applied:
+- /update-skills — detect gaps (no new skills needed)
+- /audit-skills — verify all 46 skills in README/bootstrap.sh/mermaid (all consistent)  
+- /update-skill-index — regenerate SKILL-INDEX.md (already up to date, count matches 46)
+
+ENDOFFILE && echo "Learnings entry written"
+
+## 2026-07-06 — Restore sec-ops & dev-ops directories (874 files)
+
+- Before: f147b25
+- After: 14c5eda  
+- Category: config + repo-restoration
+- Changes: Restored .opencode/sec-ops/, .opencode/dev-ops/, deploy/sec-ops/, deploy/dev-ops/ from git history (deleted in commit 131f1c9ae)
+- Why: User requested restoration of deleted agent configuration directories
+- Files restored: ~50 agent markdown configs, ~25K Python venv files, ~300 skill docs, deploy hooks
+
+### Self-improvement commands applied:
+- /update-skills — detect gaps (no new skills needed)
+- /audit-skills — verify all 46 skills in README/bootstrap.sh/mermaid (all consistent)  
+- /update-skill-index — regenerate SKILL-INDEX.md (already up to date, count matches 46)
+
