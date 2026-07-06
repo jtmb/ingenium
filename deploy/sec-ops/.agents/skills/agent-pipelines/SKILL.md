@@ -287,6 +287,7 @@ Agent B (builder) → POST /api/v1/projects → API (stores)
 - **`containers`** — Multi-stage Dockerfiles, non-root users, HEALTHCHECK for orchestrator.
 - **`api-design`** — Orchestrator and API endpoints follow REST conventions, proper status codes.
 - **`generic-conventions`** — Error handling (crash-only, wrap with context), configuration (one config module), testing (every phase is testable).
+- **`kaban-board`** — Each pipeline phase maps to a kaban column. Before executing any pipeline step, create a kaban task with the appropriate subagent assigned. Move tasks as pipeline phases complete: `todo` → `in_progress` (building) → `review` (testing) → `done`. After pipeline completion, verify kaban board state with `kaban_status` and `kaban_archive_tasks`.
 
 ---
 
