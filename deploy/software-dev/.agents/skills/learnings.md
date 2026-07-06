@@ -115,3 +115,34 @@
   3. **ingenium-orchestrator.md** — Updated delegation table: added "Write code, implement features" → `@ingenium-software-engineer`. Changed anti-patterns (write/edit tool) from QA → software-engineer. Changed forbidden bash patterns (sed/awk/cp/mv) from QA → software-engineer. QA keeps: code review, test authoring.
   4. **All deploy targets synced** — software-dev, dev-ops, sec-ops.
 - **Why**: User explicitly directed that orchestrator should never write code directly — all code writing goes to @ingenium-software-engineer. The previous permission model prevented this (software-engineer was read-only, code writing was incorrectly routed to QA).
+
+## 2026-07-05 — docs-stale-content-fixes
+
+- **Commit**: `pending`
+- **Category**: docs | config | architecture
+- **Changes**: Applied 12 targeted fixes to `docs/ARCHITECTURE.md` (7 items) and `docs/CONVENTIONS.md` (5 items):
+  1. Skill count 46→47, added `orchestrator-primer/` to directory tree
+  2. Added `.opencode/agents/` role-nested sub-structure (primary/, execution/, research/, security/)
+  3. Updated deploy section to 3 domain variants (software-dev, dev-ops, sec-ops)
+  4. Updated agent pipeline paragraph with role-nested directories and orchestrator delegation rules
+  5. Changed hooks frequency from every 10→5 calls with delegation pattern reminders
+  6. Broadened learnings.md description to cover all change categories
+  7. Added Orchestration Rules section to CONVENTIONS.md
+  8. Updated agent file naming convention from `{name}.agent.md` to `ingenium-{role}.md`
+  9. Removed obsolete `.agents/instructions/` and `.agents/tools/` references
+  10. Broadened learnings entry trigger to include agents, hooks, plugins, deploy, config, architecture, bugs, patterns
+  11. Updated deploy description with 3 domain variants
+- **Synced**: All 3 deploy targets (software-dev, dev-ops, sec-ops); created new `deploy/software-dev/docs/CONVENTIONS.md`
+
+## 2026-07-05 — Documentation audit: 15 staleness fixes, write-docs expansion, Signal 6 added
+
+- **Commit**: `b253ed0`
+- **Category**: docs | skill | config
+- **Changes**: 
+  1. **docs/ARCHITECTURE.md** — 7 fixes: skill count 46→47, added orchestrator-primer to tree, agent subdirectories (primary/execution/research/security), agent pipeline mentions delegation+software-engineer write perms, hooks every 5 calls with delegation checks, deploy section shows 3 domain variants, learnings.md description broadened to 10 categories
+  2. **docs/CONVENTIONS.md** — 5 fixes: agent naming `ingenium-{role}.md` with role-nested dirs, removed stale .agents/instructions/ refs, deploy description to 3 variants, learnings trigger broadened, added Orchestration Rules section
+  3. **docs/TECH-STACK.md** — 3 additions: Agent Pipeline Models table (8 agents w/ model+perms), Key Integrations table (Thread MCP, LM Studio, OpenCode Zen, DeepSeek API), Deploy Variants table (3 targets with skill counts)
+  4. **write-docs/SKILL.md** — Expanded trigger table from 6 rows to 11 rows covering agents, hooks, plugins, config, deploy, permissions/delegation, learnings scope
+  5. **update-skills/SKILL.md** — Added Signal 6 (Documentation Drift) with 9 detection conditions, automated detection commands, and fix workflow
+  6. **All deploy targets synced** — software-dev/docs/ (4 files), dev-ops docs+skills, sec-ops docs+skills
+- **Why**: Audit revealed the detection pipeline only looked at skills, not agents/hooks/plugins/config/docs. write-docs trigger table was too narrow to catch agent/config/plugin changes. No mechanism existed to detect stale documentation.
