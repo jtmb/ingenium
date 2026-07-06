@@ -59,8 +59,10 @@ None. This is a file-based toolkit. There is no server, no database, no deployme
 | @ingenium-planner | DeepSeek V4 Pro | Task planning, kaban board population — read-only. Spawns explore + scout for analysis |
 | @ingenium-orchestrator | DeepSeek V4 Flash | Coordination — NEVER writes code directly. Full 5-layer enforcement: always-visible primer in opencode.json, Pre-Action Gate, Anti-Patterns table, Periodic Self-Audit, post-tool-use hook |
 | @ingenium-software-engineer | DeepSeek V4 Flash (Zen free) | **All code implementation** — read/write. Writes production code, self-verifies |
-| @ingenium-qa | DeepSeek V4 Flash (Zen free) | Code review + test authoring. Write-only (tests). Does NOT write production code |
-| @ingenium-docs | DeepSeek V4 Flash (Zen free) | Documentation + skill management. Write-only (docs) |
+| @ingenium-software-engineer-fast | DeepSeek V4 Flash (Zen free) | Standard bug fixes, simple refactors, test authoring. Medium reasoning effort |
+| @ingenium-software-engineer-premium | DeepSeek V4 Pro | Complex multi-file refactoring, architecture changes. xhigh reasoning effort. Paid. |
+| @ingenium-qa | DeepSeek V4 Flash (Zen free) | Code review + test verification. Edit-only. Does NOT write production code |
+| @ingenium-docs | DeepSeek V4 Flash (Zen free) | Documentation + skill management. Edit + Write (`edit: allow, write: allow, bash: deny`) |
 | @ingenium-explore | DeepSeek V4 Flash | Codebase search — read-only. grep, glob, file discovery |
 | @ingenium-scout | qwopus 3.5 9B Coder (LM Studio) | Thread/RAG context — read-only. Persistent memory across sessions |
 | @ingenium-security-auditor | DeepSeek V4 Flash | Security audit — bash + read-only. Git history leak scanning |

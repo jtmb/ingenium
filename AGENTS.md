@@ -4,18 +4,21 @@ This is the **bootstrap source repo** for the Ingenium skill system. Skills live
 
 ## Agent Pipeline (this repo only)
 
-Two primary agents, six subagents. Full architecture: `docs/agents.md`.
+Two primary agents, nine subagents. Full architecture: `docs/agents.md`.
 
 | Agent | Type | Model | Access | Purpose |
 |-------|------|-------|--------|---------|
-| `ingenium-planner` | Primary | DeepSeek V4 Pro | Read-only | Planner — plans sprints, decomposes feature requests, populates kaban board |
-| `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Full R/W | Executor — writes code, runs commands, drives work |
+| `ingenium-planner` | Primary | DeepSeek V4 Pro | Read-only | Planner — plans sprints, decomposes feature requests, populates kaban board. Spawns ONLY research agents (explore, scout, security-auditor). |
+| `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Full R/W | Executor — delegates to subagents, NEVER writes code directly. |
 | `ingenium-explore` | Subagent | V4 Flash | Read-only | Codebase search (paid, max reasoning) |
 | `ingenium-scout` | Subagent | qwopus (LM Studio) | Read-only | Thread/RAG context — search past decisions |
-| `ingenium-qa` | Subagent | V4 Flash (Zen free) | Write tests | Code review + test authoring |
-| `ingenium-docs` | Subagent | V4 Flash (Zen free) | Write docs | Documentation + skill updates |
-| `ingenium-security-auditor` | Subagent | V4 Flash | Bash + read-only | Security audit + git-history leak scanning |
-| `ingenium-software-engineer` | Subagent | V4 Flash (Zen free) | Read-only | Design review, implementation analysis, technical recommendations |
+| `ingenium-qa` | Subagent | V4 Flash (Zen free) | Edit (`edit: allow`) | Code review + test verification |
+| `ingenium-docs` | Subagent | V4 Flash (Zen free) | Edit + Write (`edit: allow, write: allow`) | Documentation + skill updates |
+| `ingenium-security-auditor` | Subagent | V4 Flash | Bash + read-only (`write: deny`) | Security audit + git-history leak scanning |
+| `ingenium-software-engineer` | Subagent | V4 Flash (Zen free) | Read/Write (`edit: allow, write: allow`) | Implementation, refactoring, bug fixes, design review |
+| `ingenium-software-engineer-fast` | Subagent | V4 Flash (Zen free) | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring |
+| `ingenium-software-engineer-premium` | Subagent | V4 Pro (paid) | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes |
+| `ingenium-plan-file` | Subagent | V4 Flash (Zen free) | Read/Write (plan.md only) | Manages `plan.md` — created/updated/deleted by planner |
 
 **Workflow**: Tab to planner for sprint planning/research → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
 
