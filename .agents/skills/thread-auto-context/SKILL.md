@@ -670,8 +670,29 @@ When you create or modify documentation files (`.md`, `.txt`, `.json`, `.jsonl`)
 
 - **Updating existing docs:** First clean up stale entries from the previous version, then upload the new one:
   1. **Find old entries** — Use `thread_search` with a keyword from the file's path or title to locate entries from the previous upload. Scope by the current workspace session (run `basename "$PWD"`).
-  2. **Remove stale entries** — Read candidate entries with `thread_read_entries_batch` to confirm they're stale, then delete them with `thread_delete_entry`.
+  2. **Remove stale entries** — Read candidate entries with `thread_read_entries_batch` to confirm they're stale, then delete them with `thread_delete_entry`. For bulk removal (many entries matching a tag), use the helper script at `.agents/skills/thread-auto-context/scripts/cleanup-entries.py`.
   3. **Upload the updated file** — Run `thread_upload_file` on the changed file with the same Tags: `["reference", "docs"]`. Priority: 4.
+
+### Batch Cleanup of Entries
+
+When you need to remove many entries at once (e.g., after a re-import with
+better fetch settings), use the helper script:
+
+```bash
+.agents/skills/thread-auto-context/scripts/cleanup-entries.py
+```
+
+Edit the config block at the top of the script to set:
+- `SESSION` — target session name
+- `TARGET_TAG` — only entries with this tag are deleted
+- `BASE_URL` — Thread server URL (default: `http://localhost:5000`)
+- `LIMIT` — entries per page (default: 200)
+- `SLEEP_MS` — delay between deletes to avoid hammering the server (default: 50)
+
+The script scans the entire session via cursor pagination, finds all entries
+matching `TARGET_TAG`, and deletes them one by one.
+
+**Requirements:** `requests` library, `THREAD_API_TOKEN` env var.
 
 ### VS Code Integration
 Once `.vscode/mcp.json` is written, the VS Code MCP extension automatically detects the config change and spawns the bridge process. No manual reload needed. If Thread tools don't appear within ~15 seconds, run the VS Code command `Developer: Reload Window`.
