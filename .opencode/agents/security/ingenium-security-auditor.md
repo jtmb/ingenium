@@ -19,7 +19,6 @@ skills:
   - containers
   - kubernetes
   - gh-cli
-  - git-workflows              # Rebase, bisect, reflog for history scanning
   - debugging-patterns         # Root cause analysis for security bugs
 ---
 

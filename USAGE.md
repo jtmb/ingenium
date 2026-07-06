@@ -11,7 +11,7 @@ See **[Getting Started](./README.md#getting-started)** in the README for install
 - **Manual Install** — clone and run `bootstrap.sh`
 - **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
 
-**What you get in every project:** the full `.agents/skills/` (43 items total), `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — all auto-detected to match your framework.
+**What you get in every project:** the full `.agents/skills/` (44 items total), `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — all auto-detected to match your framework.
 
 ---
 
@@ -61,7 +61,7 @@ your-project/
 │   ├── TECH-STACK.md                            ←   Dependencies & version decisions
 │   └── CONVENTIONS.md                           ←   Naming, patterns, file organization
 ├── .agents/
-│   ├── skills/                                  ← ALL conventions (43 items)
+│   ├── skills/                                  ← ALL conventions (44 items)
 │   │   ├── generic-conventions/
 │   │   │   └── SKILL.md                         ←   Fallback for any file type
 │   │   ├── nextjs-conventions/
@@ -117,7 +117,7 @@ your-project/
 │   │   │   └── SKILL.md                         ←   UI/UX inspection
 │   │   ├── onboard-existing-repo/
 │   │   │   └── SKILL.md                         ←   Repo onboarding
-│   │   └── ... (43 total)
+│   │   └── ... (44 total)
 │   ├── hooks/                                   ← Deterministic enforcement (JSON)
 │   │   ├── session-start.json                   ←   Auto-bootstrap on session start
 │   │   ├── pre-tool-use.json                    ←   Validate before tool calls

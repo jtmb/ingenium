@@ -36,6 +36,30 @@ When a local LLM runs a terminal command, that command MUST produce one of:
 
 If a command produces NONE of these, the LLM sits waiting forever with no feedback.
 
+### MCP Tool Calls MUST Have Clean JSON Format (Qwen 3.5+, Claude)
+
+For all MCP tool calls using OpenAI-compatible format (LM Studio, Ollama, most local inference servers):
+- **NO trailing text** after the `arguments` closing brace (`}`) — even a space or newline can break parsing
+- **NO explanatory phrases** like "this is a common issue" or "execute this tool call" after the arguments object
+- **Pure JSON only** — the tool call must be exactly what's in the schema, with no modifications
+
+```json
+{
+  "name": "kaban_kaban_add_task",
+  "arguments": {
+    "title": "Fix the bug"
+  }
+}
+// ✅ Good: Clean JSON ends here
+// ❌ Bad: this is a common issue with QWEN models above version 3.5
+```
+
+**Why:** Models like Qwen 3.5+ and Claude are known to add natural language after tool arguments when prompted with lengthy context or complex instructions. This breaks the OpenAI-compatible parser on the server side, causing:
+- Tool call rejection with "invalid format" errors
+- Silent failures where nothing happens
+
+**Detection:** Before making an MCP tool call, ask: "Did I just write a long explanation about tool limitations?" If yes, use clean JSON only — no explanatory text before or after.
+
 ### NEVER Background With `&`
 
 Never append `&` to a terminal command to "run it in the background." This is the #1 failure pattern for local LLMs.
@@ -250,6 +274,9 @@ The Qwen2.5 family was the strongest general-purpose open-weight family through 
 
 The latest Qwen generation as of mid-2026. The 27B variant matches or exceeds Qwen2.5 72B on most benchmarks while being dramatically smaller and faster.
 
+**Known Limitations:**
+- **Tool call trailing text**: May occasionally add explanatory phrases after tool arguments in OpenAI-compatible format (LM Studio, Ollama). Use clean JSON only with no trailing whitespace or natural language after `arguments` object.
+
 **Strengths:**
 
 | Area | Notes |
@@ -275,6 +302,9 @@ The latest Qwen generation as of mid-2026. The 27B variant matches or exceeds Qw
 #### Qwen 3.5 (Late 2025 – present)
 
 **Sizes**: 9B, 35B
+
+**Known Limitations:**
+- **Tool call trailing text**: Models in this family may add explanatory phrases after tool arguments in OpenAI-compatible format when prompted with lengthy context or complex instructions. Always provide clean JSON with no trailing content after `arguments` object to ensure reliable tool execution.
 
 Bridge generation between Qwen2.5 and Qwen 3.6. The 35B variant outperforms Qwen2.5 72B on coding and reasoning while using half the parameters.
 
@@ -439,11 +469,106 @@ Both models are MIT licensed and available via API (`deepseek-v4-flash`, `deepse
 - **V4-Pro vs. Qwen 3.6 27B**: V4-Pro outperforms on knowledge, coding benchmarks, and agentic tasks. Qwen 3.6 27B is more practical for local deployment.
 - **All DeepSeek V4**: Work best with explicit instruction formatting. Follow system prompts very precisely.
 
-### Universal Local Model Behavior
+### Universal Local Model Behavior & Tool Call Limitations
 
-All local LLMs — regardless of family, size, or architecture — share a critical failure pattern: **backgrounding terminal commands with `&`**. When a local model appends `&` to a dev server, watcher, or daemon command, it receives zero feedback (no exit code, no output) and the session hangs indefinitely.
+All local LLMs — regardless of family, size, or architecture — share two critical failure patterns that break MCP tool calls:
+
+#### 1. Terminal Command Backgrounding with `&`
+
+When a local model appends `&` to a dev server, watcher, or daemon command, it receives zero feedback (no exit code, no output) and the session hangs indefinitely.
 
 **This skill provides the safe alternatives** documented in Part 1: timeout wrappers, background+verify patterns, and the 🔴 HARD RULEs above.
+
+#### 2. Trailing Text After Tool Call Arguments (Qwen 3.5+, Claude, Some Others)
+
+When making an MCP tool call with OpenAI-compatible format (used by LM Studio, Ollama, many local inference servers), **never include explanatory text after the `arguments` object**. The model will misparse or refuse to execute.
+
+**Example of what breaks:**
+```json
+{
+  "name": "kaban_kaban_add_task",
+  "arguments": {
+    "title": "Fix the bug"
+  }
+}
+// ❌ BAD: This trailing text confuses Qwen 3.5+ models
+// this is a common issue with QWEN models above version 3.5
+
+{
+  "name": "kaban_kaban_add_task", 
+  "arguments": {
+    "title": "Fix the bug"
+  }
+} this explanation will cause the model to fail
+```
+
+**What works:**
+- Clean JSON with no trailing whitespace or text after `}`
+- The exact MCP protocol format from the tool schema
+- No explanatory comments in the arguments block
+
+#### Why This Happens
+
+The OpenAI-compatible API used by LM Studio and many local servers expects **pure JSON** for tool calls. When a model like Qwen 3.5+ (or Claude) adds natural language after the `arguments` closing brace — whether intentionally or as part of its completion pattern — the server's parser fails to extract the arguments object correctly, resulting in:
+- Tool call rejection with "invalid format" errors
+- The tool not executing at all
+- Silent failures where no error is returned but nothing happens
+
+#### Detection Triggers for This Pattern
+
+Before emitting any MCP tool call, check:
+
+1. **Is my model Qwen 3.5 or newer?** — These models are known to occasionally add explanatory text after arguments objects in the OpenAI-compatible format
+2. **Have I just written a long explanation about tool limitations?** — Models may try to "confirm" with natural language before making the actual call
+3. **Is there any trailing text (even a space or newline) after the closing `}` of the arguments object?** — This alone can break parsing
+
+#### Safe Tool Call Patterns
+
+**Pattern 1: Direct MCP Protocol Format (Recommended)**
+```json
+{
+  "name": "kaban_kaban_add_task",
+  "arguments": {
+    "title": "Fix the bug"
+  }
+}
+```
+- No trailing text
+- Exact schema from tool definition
+- Clean JSON only
+
+**Pattern 2: If Model Tends to Add Explanations (Qwen 3.5+, Claude)**
+Wrap in a brief instruction BEFORE the tool call, then use Pattern 1 for the actual call:
+```
+Execute the following tool call exactly as written — no modifications:
+{
+  "name": "kaban_kaban_add_task",
+  "arguments": {
+    "title": "Fix the bug"
+  }
+}
+```
+
+**Pattern 3: Force Pure JSON Mode (if available in your inference engine)**
+Some servers support `json_mode=true` or equivalent. Enable this when using Qwen 3.5+ or other models known to add trailing text.
+
+#### Model-Specific Notes for Tool Calls
+
+| Model Family | Trailing Text Risk | Mitigation |
+|--------------|-------------------|------------|
+| **Qwen 3.5 / 3.6** (9B+) | Medium-High | Always use Pattern 1; avoid lengthy explanations before tool calls |
+| **Gemma 4** (12B) | Low-Medium | Generally fine, but can still add trailing text in rare cases |
+| **DeepSeek V4** | Very Low | Excellent at clean JSON output |
+| **Qwen 2.5 / older** | Low | Not typically an issue |
+
+#### Verification Checklist for Tool Calls
+
+- Every MCP tool call uses exact schema format with no deviations
+- No explanatory text appears after the `arguments` closing brace (`}`)
+- The entire tool call is a single JSON object (no surrounding prose that could be misinterpreted as part of arguments)
+- If in doubt, use Pattern 1 directly
+
+---
 
 Smaller models (2B–9B) are more prone to backgrounding because they don't reason about terminal lifecycle. Larger models (27B+) still do it but less frequently.
 
@@ -632,11 +757,20 @@ LM Studio manages models through its UI, but models can also be referenced at ru
 
 ## Cross-Model Strategy Guide
 
-### Which Model for Which Task
+### Model Comparison Table (mid-2026)
 
-| Task | Best model(s) | Why |
-|------|--------------|-----|
-| Complex code generation | DeepSeek-V4-Pro / Qwen3.6 27B | Best code quality, tool calling, reasoning |
+| Model Family | Reasoning | Coding | Tool Call Stability* | Recommended For |
+|--------------|-----------|--------|---------------------|-----------------|
+| DeepSeek V4-Pro / Flash | Excellent | Excellent | High | Complex tasks, tool chains |
+| Qwen 3.6 27B | Excellent | Excellent | Medium-High** (see note) | Heavy reasoning, large context |
+| Qwen 3.5 35B/9B | Very Good | Excellent | Medium-High* (see note) | Coding + moderate tool use |
+| Gemma 4 12B | Very Good | Very Good | High | Balanced all-around tasks |
+| DeepSeek V4-Flash / Pro | Outstanding | Top-tier | High | Best local model overall for reliability |
+
+\* Qwen 3.5+ may add trailing text in OpenAI-compatible format on some inference engines (LM Studio, Ollama). Always provide clean JSON with no explanatory content after `arguments` object to ensure reliable tool execution.  
+\** DeepSeek V4-Flash is generally more consistent for MCP tool calls while maintaining excellent performance.
+
+### Which Model for Which Task
 | Debugging (bisect method) | Gemma 4 12B / Qwen3.5 9B | Strong reasoning, structured checklist adherence |
 | Debugging (hypothesis-driven) | DeepSeek-V4-Pro / Qwen3.6 27B | Sustained reasoning across multiple assumptions |
 | Code review (5-lens) | DeepSeek-V4-Pro / Qwen3.6 27B | Breadth of analysis requires larger models |

@@ -1,6 +1,6 @@
 # AGENTS.md — Skill System Protocol for gh-llm-bootstrap
 
-This is the **bootstrap source repo** for the Ingenium skill system. Skills live in `.agents/skills/` — all 43 are deployed via `bootstrap.sh` from the repo root. Edit source files here.
+This is the **bootstrap source repo** for the Ingenium skill system. Skills live in `.agents/skills/` — all 44 are deployed via `bootstrap.sh` from the repo root. Edit source files here.
 
 ## Agent Pipeline (this repo only)
 
