@@ -252,3 +252,41 @@
   4. Synced to all 3 deploy variants
 - **Before**: `9e63885`
 - **Why**: /mnt/c, /mnt/d etc. are Windows drive mounts — cleanup should never operate on them.
+
+## 2026-07-05 — thread-auto-context: full transcript export HARD RULE
+
+- **Commit**: `4964b68` (after)
+- **Category**: skill
+- **Changes**:
+  1. Added 🔴 HARD RULE to "At Session End — MANDATORY EXPORT" requiring full conversation transcript to be written to `/tmp/opencode/` and uploaded to Thread via `thread_upload_file`
+  2. This is step 0 — must run before the summary/decisions/git-state steps
+  3. Added `transcript` and `full-session` tags to the Tag Convention section
+  4. Updated the copyable import prompt to include the transcript entry
+  5. Synced to all 3 deploy variants
+- **Why**: User asked us to export and upload the full chat transcript; this should happen automatically every session, not just when manually requested.
+
+## 2026-07-05 — docs update for thread-auto-context transcript export
+
+- **Commit**: `114075f` (after)
+- **Category**: docs
+- **Changes**:
+  1. Added "Thread / Export Conventions" section to `docs/CONVENTIONS.md` covering the 🔴 HARD RULE, export order, tag conventions, dedup rules, and OpenCode detection
+  2. Added "Thread Persistent Memory" section to `docs/ARCHITECTURE.md` describing the 4-step export pipeline (transcript → summary → decisions → git state)
+  3. Synced to all 3 deploy variants
+- **Before**: `4964b68`
+- **Why**: The thread-auto-context skill's new export HARD RULE needed documentation in both conventions and architecture docs to be discoverable.
+
+## 2026-07-05 — thread-auto-context: site-agnostic doc website ingestion
+
+- **Commit**: `aa6db52` (after)
+- **Category**: skill
+- **Changes**:
+  1. Added "Uploading Documentation Websites to Thread" section to thread-auto-context SKILL.md — a site-agnostic workflow for discovering, fetching, chunking, and uploading docs from any documentation website
+  2. 5 discovery methods in priority order: `/llms.txt` → XML sitemaps → markdown sitemaps → API endpoints → recursive nav crawl
+  3. 5 content fetch strategies per page: API markdown endpoint → `.md` suffix → `Accept: text/markdown` → webfetch markdown → HTML extraction fallback
+  4. 3 upload options: Combined markdown file (50+ pages, chunks by `##`), bulk entries (<50 pages), per-page entries (<20 pages)
+  5. 🔴 HARD RULEs: no auth-gated content, respect robots.txt, rate-limit aggressively, no site-specific code, prefer native markdown
+  6. Added `docs-import` tag to Tag Convention section
+  7. Synced to all 3 deploy variants
+- **Before**: `4964b68`
+- **Why**: User wanted the ability to point the skill at any documentation website (not site-specific logic) and have it crawl/ingest all pages into Thread for reference. Test sites: docs.github.com, nextjs.org/docs.
