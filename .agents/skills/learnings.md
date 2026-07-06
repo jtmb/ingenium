@@ -206,3 +206,37 @@
   4. **Synced** to 6 destinations (all copies show 3 matches for "NEVER use bash")
 - **Before**: `efa1bff`
 - **Why**: Models default to bash (`echo >`, `cat >`, `sed`) for file operations even though write/edit tools are available. This causes escaping issues and is error-prone. The write/edit tools are purpose-built for code authoring.
+
+## 2026-07-05 — wsl-cleanup: safe WSL2 Ubuntu cleanup utility script
+
+- **Commit**: `54ebf1a`
+- **Category**: skill
+- **Changes**:
+  1. Created `.agents/skills/wsl-cleanup/scripts/wsl-cleanup.sh` — 1125-line production-grade cleanup script
+  2. 13 operations: Docker prune (3 types), apt clean + autoremove, pip/npm/yarn cache, journal vacuum, temp files, trash, snap revisions, AI model caches
+  3. Every destructive step requires `[y/N]` confirmation
+  4. HARD RULE: never touches `$HOME/repos` via `check_repos_exclusion()` guard
+  5. Root blocked by default (`--allow-root` override)
+  6. Dry-run mode (`--dry-run`) previews without execution
+  7. `--force` flags never used without explicit user consent
+  8. Input sanitization (`sanitize_digits`) prevents multi-line injection from `|| echo` in `$()` with `pipefail`
+  9. Box-drawing summary table using `printf` (not `tr` which breaks multi-byte UTF-8)
+  10. `|| true` pattern (not `|| echo` inside `$()`) to avoid doubled output with `set -o pipefail`
+- **Before**: (new file)
+ - **Why**: Needed a safe, interactive cleanup utility for WSL2 Ubuntu that provides guardrails against accidental deletion while still being useful for reclaiming disk space. Common bash pitfalls (pipefail + || echo doubling, du exit codes, multi-byte tr) were discovered and fixed during implementation.
+
+## 2026-07-05 — wsl-cleanup: skill definition, registration, deploy sync, docs
+
+- **Commit**: `e9997a9`
+- **Category**: skill | config | docs
+- **Changes**:
+  1. Created `.agents/skills/wsl-cleanup/SKILL.md` — 383-line skill definition with 10 sections covering pre-flight assessment, Docker cleanup, package manager caches, journal vacuum, temp files, snap, model caches, comprehensive workflow, disk reference, and cross-references
+  2. Added 5 🔴 HARD RULEs: no `$HOME/repos` touch, assess-before-acting, confirm-before-destruction, shell safety patterns, no `--force` without confirmation
+  3. Registered in `.agents/SKILL-CATALOG.md` (domain skills table)
+  4. Registered in `.agents/scripts/bootstrap.sh` (always for SKILL.md, optional for script)
+  5. Synced to all 3 deploy variants: software-dev, dev-ops, sec-ops
+  6. Regenerated SKILL-INDEX.md (count 46→48, fixed stale entries)
+  7. Updated docs/ counts across AGENTS.md, USAGE.md, README.md, ARCHITECTURE.md, TECH-STACK.md in source and deploy variants
+  8. All deploy variants updated: software-dev (48), dev-ops (47 = 43 universal + 4 cluster), sec-ops (53 = 44 universal + 10 pentest + 1 primer)
+- **Before**: (new skill directory + metadata)
+- **Why**: New WSL2 domain skill needed full registration in the skill system catalog, bootstrap.sh for deployment, and cross-variant deploy sync with accurate count documentation.

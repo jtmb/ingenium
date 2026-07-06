@@ -2,7 +2,7 @@
 
 ## Overview
 
-**dev-ops** is an AI-driven Kubernetes cluster operations agent system built on the Ingenium skill framework. It provides a structured, safety-tiered methodology for autonomous cluster monitoring, diagnosis, and remediation — from health probe ingestion through verification and documentation. The system uses a team of specialized AI agents (8 total: 2 primary + 6 subagents) that coordinate through the OpenCode platform, backed by 47 skills (43 universal + 4 cluster-ops domain) that govern tool usage, safety classification, diagnostics, and operational conventions.
+**dev-ops** is an AI-driven Kubernetes cluster operations agent system built on the Ingenium skill framework. It provides a structured, safety-tiered methodology for autonomous cluster monitoring, diagnosis, and remediation — from health probe ingestion through verification and documentation. The system uses a team of specialized AI agents (8 total: 2 primary + 6 subagents) that coordinate through the OpenCode platform, backed by 48 skills (44 universal + 4 cluster-ops domain) that govern tool usage, safety classification, diagnostics, and operational conventions.
 
 Key properties:
 - **No runtime dependencies beyond kubectl/flux/helm/jq** — pure Markdown + YAML + shell scripts for the agent system
@@ -41,7 +41,7 @@ graph TB
 
     SE --> SA[ingenium-security-auditor.md — Project security audit]
 
-    AS --> SK[skills/ — 47 skills]
+    AS --> SK[skills/ — 48 skills]
     AS --> HK[hooks/ — 3 lifecycle hooks]
     AS --> SCR[scripts/ — hook-bootstrap.sh]
 
@@ -64,7 +64,7 @@ graph TB
 
 ### Skill System (`.agents/skills/`)
 
-The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 47 skills live under `.agents/skills/`:
+The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 48 skills live under `.agents/skills/`:
 
 | Tier | Pattern | Count | Examples |
 |------|---------|-------|----------|
@@ -75,7 +75,7 @@ The core of the project. Every skill is a directory containing a single `SKILL.m
 | **Task** | invocable via `/command` | ~14 | update-skills, audit-skills, generate-docs, write-docs, help, etc. |
 | **Tool** | automation interfaces | ~5 | chrome-devtools, playwright-mcp, gh-cli, github-issues, web-design-reviewer |
 
-All 47 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
+All 48 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
 
 ### Agent Pipeline (`.opencode/agents/`)
 
@@ -267,7 +267,7 @@ The project is deployed by **bootstrapping** — running `hook-bootstrap.sh` aga
 ```
 
 The system structure is self-contained — the `.agents/` directory is the entire deployable unit:
-- `.agents/skills/` — All 47 skills (copied)
+- `.agents/skills/` — All 48 skills (copied)
 - `.agents/hooks/` — 3 lifecycle hooks (copied)
 - `AGENTS.md` — Project rules (copied)
 - `opencode.json` — Configuration with `<PLACEHOLDER>` tokens (never real secrets)

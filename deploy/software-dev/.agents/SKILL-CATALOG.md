@@ -62,6 +62,7 @@
 | `gh-cli` | GitHub CLI — PRs, issues, releases, search |
 | `github-issues` | Creating/updating GitHub issues |
 | `web-design-reviewer` | UI/UX inspection, responsive/accessibility |
+| `wsl-cleanup` | WSL2 disk cleanup — Docker prune, apt/pip/npm caches, journal vacuum, temp/tmp, snap revisions, model caches. 🔴 Excludes $HOME/repos |
 | `create-readme` | Need a README.md for the project |
 
 ## 📋 Task Skills (invoke via `/command`)
