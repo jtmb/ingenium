@@ -470,7 +470,7 @@
 
 ## 2026-07-06 — cleanup: added plan-file to orchestrator, kaban-board to SEs, removed stale git-workflows
 
-- **Commit**: (after commit)
+- **Commit**: `a657f2e`
 - **Category**: security | skill | cleanup
 - **Changes**:
   1. Added `ingenium-plan-file` to orchestrator's task allow list (it references it for clearing plan.md)
