@@ -60,7 +60,7 @@ flowchart TB
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `lmstudio/qwopus3.5-9b-coder` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
 | **ingenium-software-engineer** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read/Write | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
-| **ingenium-qa** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Write tests | Code review + test authoring. Does NOT write production code |
+| **ingenium-qa** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Edit (`edit: allow`) | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code |
 | **ingenium-docs** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Write docs | Documentation + skill updates + learnings.md entries |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only | Security audit + git-history leak scanning |
 
@@ -187,15 +187,15 @@ flowchart TB
 |-------|--------|-------|
 | 1. Understand | Read task context, review relevant files | `read`, `glob` |
 | 2. Research | For complex tasks, delegate to scout/explore for patterns | `task` (spawns scout/explore) |
-| 3. Implement | Write production code | `write`, `edit` |
+| 3. Implement | Write production code AND tests | `write`, `edit` |
 | 4. Self-verify | Run type-checks, lints, tests | `bash` |
 | 5. Return | Structured output: summary, files changed, verification results | — |
 
 **Responsibilities:**
 - ✅ Write production code (features, fixes, refactors)
+- ✅ Write tests alongside production code (unit, integration, E2E)
 - ✅ Design review and technical analysis
 - ✅ Self-verify (tests, type-check, lint)
-- ❌ Does NOT write tests (→ QA)
 - ❌ Does NOT do code review (→ QA)
 - ❌ Does NOT update docs (→ Docs)
 
@@ -204,21 +204,21 @@ flowchart TB
 | Property | Value |
 |----------|-------|
 | **Model** | DeepSeek V4 Flash (OpenCode Zen free) |
-| **Access** | Write tests (`edit: allow`) |
+| **Access** | Edit (`edit: allow`) |
 | **Invoked by** | Orchestrator only |
-| **Triggers** | "Review code X", "Write tests for Y", "QA check on Z" |
+| **Triggers** | "Review code X", "Verify tests for Y", "QA check on Z" |
 
 | Phase | Action | Tools |
 |-------|--------|-------|
 | 1. Review | 5-lens code review (security, correctness, performance, readability, testing) | `read`, `grep` |
-| 2. Test | Write unit/integration/E2E tests | `write`, `edit` |
-| 3. Verify | Run tests to confirm they pass | `bash` |
-| 4. Report | Return findings with severity levels | — |
+| 2. Verify tests | Review unit/integration/E2E tests written by SE | `read`, `grep` |
+| 3. Report | Return findings with severity levels | — |
 
 **Responsibilities:**
 - ✅ Code review (5-lens)
-- ✅ Test authoring (unit, integration, E2E)
+- ✅ Test verification (review tests written by Software-Engineer for coverage, quality, edge cases)
 - ✅ Quality assurance feedback
+- ❌ Does NOT author tests (→ Software-Engineer)
 - ❌ Does NOT write production code (→ Software-Engineer)
 - ❌ Does NOT update docs (→ Docs)
 
@@ -331,7 +331,7 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-scout | `@ingenium-scout` | Read-only | planner + orchestrator + user |
 | ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | planner + orchestrator + user |
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
-| ingenium-qa | `@ingenium-qa` | Write tests | orchestrator only |
+| ingenium-qa | `@ingenium-qa` | Edit (`edit: allow`) | orchestrator only |
 | ingenium-docs | `@ingenium-docs` | Write docs | orchestrator only |
 | ingenium-plan-file | `@ingenium-plan-file` | Read/Write (plan.md only) | planner only |
 
