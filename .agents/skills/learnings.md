@@ -423,7 +423,7 @@
 
 ## 2026-07-06 — repo consolidation: OpenCode-only, removed deploy/vscode/github
 
-- **Commit**: `714b86f`
+- **Commit**: `131f1c9`
 - **Category**: architecture | skill | config
 - **Changes**:
   1. Deleted .vscode/ directory (VS Code editor config, replaced by opencode.json)
