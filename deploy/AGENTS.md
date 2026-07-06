@@ -8,7 +8,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 
 | Agent | Type | Model | Access | Purpose |
 |-------|------|-------|--------|---------|
-| `ingenium-planner` | Primary | DeepSeek V4 Pro | Read-only | Mastermind — researches, plans, delegates to subagents |
+| `ingenium-scrum` | Primary | DeepSeek V4 Pro | Read-only | Scrum master — plans sprints, decomposes feature requests, populates kaban board |
 | `ingenium-orchestrator` | Primary | DeepSeek V4 Flash | Full R/W | Executor — writes code, runs commands, drives work |
 | `ingenium-explore` | Subagent | V4 Flash | Read-only | Codebase search (paid, max reasoning) |
 | `ingenium-scout` | Subagent | qwopus (LM Studio) | Read-only | Thread/RAG context — search past decisions |
@@ -17,7 +17,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 | `ingenium-security-auditor` | Subagent | V4 Flash | Bash + read-only | Security audit + git-history leak scanning |
 | `ingenium-software-engineer` | Subagent | V4 Flash (Zen free) | Read-only | Design review, implementation analysis, technical recommendations |
 
-**Workflow**: Tab to planner for research/planning → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
+**Workflow**: Tab to scrum master for sprint planning/research → Tab to orchestrator for execution. `@`-mention any subagent directly for ad-hoc tasks.
 
 ## Platform Support
 
