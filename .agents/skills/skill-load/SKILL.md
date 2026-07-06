@@ -18,7 +18,7 @@ Read the file `AGENTS.md` at the project root. It contains:
 - The **Session Startup Checklist** — 4 steps you MUST complete
 - The **Pre-Flight Check** — maps every action type to its required skill
 - The **🔴 Local Model Mandatory Skills** — non-negotiable skills for local models
-- The **Skill Quick-Reference** — full catalog of 43+ skills organized by category
+- The **Skill Quick-Reference** — full catalog of 44+ skills organized by category
 - The **Self-Improvement** rules — update skills, audit, log to learnings
 
 **Read it now.** Do not proceed until you have read AGENTS.md.

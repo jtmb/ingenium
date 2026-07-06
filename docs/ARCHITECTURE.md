@@ -13,7 +13,7 @@ Key properties:
 ```
 ingenium/
 ├── .agents/                    ← AI conventions system (the "product")
-│   ├── skills/                 ← 43 skills — framework, domain, task, and tool conventions
+│   ├── skills/                 ← 44 skills — framework, domain, task, and tool conventions
 │   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
 │   │   ├── {framework}-conventions/ ← nextjs, python, go, rust, typescript-standalone
 │   │   ├── {domain}-skills/       ← containers, kubernetes, api-design, sql-database, etc.
@@ -53,17 +53,17 @@ ingenium/
 
 ### Skill System (`.agents/skills/`)
 
-The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 43 skills live in a single hierarchy under `.agents/skills/`:
+The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 44 skills live in a single hierarchy under `.agents/skills/`:
 
 | Tier | Pattern | Count | Examples |
 |------|---------|-------|----------|
 | **Core** | `generic-conventions` | 1 | Universal rules — docs, security, error handling, DRY |
 | **Framework** | `*-conventions` | 5 | nextjs, python, go, rust, typescript-standalone |
-| **Domain** | named by topic | ~20 | containers, kubernetes, api-design, sql-database, shell-scripts, useful-tests, etc. |
+| **Domain** | named by topic | ~21 | containers, docker, kubernetes, api-design, sql-database, shell-scripts, useful-tests, etc. |
 | **Task** | invocable via `/command` | ~14 | update-skills, audit-skills, generate-docs, write-docs, help, etc. |
 | **Tool** | automation interfaces | ~5 | chrome-devtools, playwright-mcp, gh-cli, web-design-reviewer |
 
-All 43 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, bootstrap.sh, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
+All 44 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, bootstrap.sh, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
 
 ### Bootstrap Engine (`.agents/scripts/`)
 
@@ -88,7 +88,7 @@ Plugins bridge the gap between skills (AI-interpreted) and deterministic guardra
 
 ### Agent Pipeline (`.opencode/agents/`)
 
-11 custom agents defined for OpenCode in role-nested directories: `primary/` (planner, orchestrator), `execution/` (software-engineer, software-engineer-fast, software-engineer-premium, qa, docs, plan-file), `research/` (explore, scout), `security/` (security-auditor). The planner is **read-only** — it ONLY spawns research agents (explore, scout, security-auditor) and populates the kaban board. The orchestrator NEVER writes code directly — it delegates all implementation to @ingenium-software-engineer (read/write permissions). All 11 agents now have explicit `edit:` and `write:` permissions in their task blocks, with `"*": "deny"` as the first entry to prevent subagent leakage. The orchestrator uses a kaban board for structured work tracking: tasks flow from `todo` → `in-progress` → `review` → `done` via kaban MCP tools. See `docs/agents.md` for full architecture.
+11 custom agents defined for OpenCode in role-nested directories: `primary/` (planner, orchestrator), `execution/` (software-engineer, software-engineer-fast, software-engineer-premium, qa, docs, plan-file), `research/` (explore, scout), `security/` (security-auditor). The planner is **read-only** — it ONLY spawns research agents (explore, scout, security-auditor) and populates the kaban board. The orchestrator NEVER writes code directly — it delegates all implementation to @ingenium-software-engineer (read/write permissions). All 11 agents now have explicit `edit:` and `write:` permissions in their task blocks, with `"*": "deny"` as the first entry to prevent subagent leakage. The orchestrator uses a kaban board for structured work tracking: tasks flow from `todo` → `in-progress` → `review` → `done` via kaban MCP tools. **🔴 Definition of Done Docs Gate**: After every code change by any subagent, the orchestrator MUST spawn `@ingenium-docs` to update affected documentation before marking any kaban task as done — this is a structural gate, not optional. See `docs/agents.md` for full architecture.
 
 ### Kaban Board in the Agent Pipeline
 
@@ -157,7 +157,10 @@ The project detects its own gaps using four signals:
 3. **Repeated conventions** — patterns used 3+ times without a skill
 4. **Stale content** — skill references wrong versions or deleted paths
 
-The `test-self-improving.sh` suite (7 test functions, 20 checks) validates all four signals, deploy integrity, frontmatter validity, and file drift.
+Two test suites validate the system:
+
+- **`test-self-improving.sh`** (7 test functions, 20 checks) — Validates all four signals, deploy integrity, frontmatter validity, and file drift.
+- **`test-agent-validation.sh`** (7 tests) — Validates all 11 agent `.md` files: frontmatter validity, permission completeness, stale skill references, duplicate skills, task block safety (read-only agents cannot spawn write-capable subagents), and skill count consistency.
 
 ### Model Configuration (`.agents/models.yaml`)
 
