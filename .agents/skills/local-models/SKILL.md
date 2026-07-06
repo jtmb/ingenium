@@ -254,6 +254,63 @@ If the answer to "Will this command exit on its own?" is "I don't know," run it 
 - No `tail -f`, `journalctl -f`, or other infinite-follow commands
 - Server commands use `timeout N` wrapper or Pattern 3 (background + poll)
 
+### 🔴 MCP Tool Call Verification Rules (Mandatory)
+
+**Before claiming success on ANY MCP tool call, you MUST verify the actual response.** This is the #1 failure pattern. When a command fails silently or returns an error, you must:
+1. Parse the full JSON response (even if it's an error object)  
+2. Check for specific error patterns before declaring completion  
+3. If no output appears, assume MCP server is unreachable and ask user to verify  
+
+**What triggers verification:**
+
+| Scenario | What to do |
+|----------|------------|
+| Tool call succeeds but response is empty or null | Read the actual file to confirm it was written (don't just trust exit code) |
+| Tool call fails with `command not found` / `connection refused` | Show the actual error message, don't claim "success" |
+| MCP server returns HTTP 404/503 | Parse the JSON body for specific reason ("Model not loaded", "Server crashed") |
+| User expects a value (like file path) but gets nothing | Check if the tool actually returned something; use `Read` to verify file exists |
+
+**Mandatory pre-flight check before every MCP call:**
+
+```bash
+# ✅ Good - always verify server is reachable first
+curl -s http://localhost:5000/api/v1/health || echo "Server not running, cannot proceed"
+
+# ❌ Bad - no health check before calling Thread tools
+thread_thread_read_entries --limit 3  # This will fail silently or hang
+```
+
+**Error handling patterns for MCP failures:**
+
+| Error signature | Meaning | Fix |
+|-----------------|---------|-----|
+| `command not found` | MCP server binary not in PATH, wrong config path, or server crashed | Check `.vscode/mcp.json` has valid `THREAD_SERVER_URL`, restart Thread with health check |
+| `connection refused` | Server process died (OOM killed, crash loop) or firewall blocking port 5000 | Run `curl http://localhost:5000/api/v1/health`; if no response, restart server |
+| HTTP 401 unauthorized | Missing API token in MCP config (`~/.lm-studio-env` not sourced correctly) | Source `.vscode/mcp.json` or check for `THREAD_API_TOKEN` environment variable |
+| HTTP 503 Service Unavailable | Server running but model not loaded, GPU out of memory | Check LM Studio UI, unload unused models, verify model is in `/v1/models` response |
+
+**Never claim success without verifying:**
+
+```bash
+# ❌ BAD - MCP server failed, but I claimed it worked anyway
+thread_thread_read_entries --limit 3
+/bin/bash: line 1: thread_thread_read_entries: command not found
+✅ Done! Documentation uploaded to Thread (default session): ... [LIES HERE]
+
+# ✅ GOOD - show actual error and ask user what to do
+thread_thread_read_entries --limit 3
+/bin/bash: line 1: thread_thread_read_entries: command not found
+```
+**Error:** MCP server is not reachable at `http://localhost:5000`. The Thread bridge binary is missing or the config path in `.vscode/mcp.json` is incorrect. Please verify:
+
+1. Thread server is running (health check): `curl http://localhost:5000/api/v1/health`
+2. MCP config file exists and has valid `THREAD_SERVER_URL`: cat your global MCP config location  
+3. The bridge binary is installed or can be downloaded from the repo
+
+**For this specific case:** Your Thread server may not have been started yet, OR you need to verify that the MCP provider was registered in `.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json`. The "command not found" error means the bridge binary path or executable isn't available.
+
+**The pattern:** Always check for errors BEFORE saying "success". If a bash command returns non-zero exit code, parse stderr/stdout and display the actual message to the user. Never assume "no output = success".
+
 ---
 
 ## Part 2: Model Profiles
