@@ -193,3 +193,20 @@ Before declaring any change complete:
 - **No abbreviations.** `config` not `cfg`, `response` not `resp`.
 - **Consistent casing per language.** See framework-specific skills for details.
 - **Boolean variables read as a question.** `isLoading`, `hasError`, `canSubmit`.
+
+
+### 🔴 Append-Only Files Rule
+
+**Never overwrite `.agents/skills/learnings.md` via MCP write tool or bash `>` redirection.** Use:
+- `cat >> .agents/skills/learnings.md << EOF` (bash heredoc with append)
+- Or use the `.agents/skills/learnings.sh` helper script (preferred)
+- If accidental overwrite occurs: restore from git + log recovery in learnings.md itself
+
+### Cross-references
+
+| Path | Purpose |
+|------|---------|
+| `.agents/skills/learnings.sh` | Helper script that enforces proper append formatting and verification |
+| `docs/CONVENTIONS.md` (see "Append-Only Files" section) | Main conventions documentation — see "Git Practices" for learnings.md rules |
+| `.agents/skills/orchestrator-primer/SKILL.md` | Orchestrator's delegation rules — see Kaban Tracking table |
+
