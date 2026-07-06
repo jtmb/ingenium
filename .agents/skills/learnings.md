@@ -692,3 +692,11 @@ if '<title>404' in verify_after.stdout: print(f"✓ Verified deleted (HTTP 404)"
 - **Category**: skill
 - **Changes**: Added permanent installation section to kaban-board SKILL.md — wrapper script in ~/.local/bin/ + built files in ~/.local/share/kaban/ to survive WSL reboot
 - **Why**: Source build in /tmp/ wiped on reboot, npm link depended on ephemeral fnm path
+
+## 2026-07-06 — Comment out free models from agent configs
+
+- **After**: `2eb73ac`
+- **Before**: `5c0be6f`
+- **Category**: config
+- **Changes**: Commented out `model: opencode/deepseek-v4-flash-free` from 4 agent configs (ingenium-docs, ingenium-qa, ingenium-explore, ingenium-scout)
+- **Why**: Hit free usage limit on DeepSeek V4 Flash free tier
