@@ -6,7 +6,7 @@
 ### Genius doesn't repeat itself. Neither should you.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-49%20total-green?style=flat-square" alt="49 total — all in .agents/skills/" />
+  <img src="https://img.shields.io/badge/skills-49%20total-green?style=flat-square" alt="45 total — all in .agents/skills/" />
   <img src="https://img.shields.io/badge/frameworks-4%20%2B%2029%20domain-purple?style=flat-square" alt="Frameworks" />
   <img src="https://img.shields.io/badge/skills%20that%20grow%20with%20you-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Skills that grow with you" />
 </p>
@@ -186,8 +186,6 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | ☸️ Kubernetes | `kubernetes` | Security context, probes, resources, network policies |
 | 📘 TypeScript | `typescript-standalone` | Strict config, type safety, async patterns, Node.js |
 | 🗂️ Gitignore | `gitignore` | .gitignore conventions — patterns, structure, and rules per language |
-| 🛡️ GitHub Actions Hardening | `github-actions-hardening` | Security review — script injection, token scoping, supply chain, triggers |
-| ⚡ GitHub Actions Efficiency | `github-actions-efficiency` | Audit CI minutes, reduce costs, optimize workflow performance |
 | 🐘 PostgreSQL | `postgresql-optimization` | JSONB, arrays, custom types, full-text search, window functions, extensions |
 | 🐛 Debugging | `debugging-patterns` | Systematic debugging — bisect, log-driven, stack-trace analysis, anti-patterns |
 | ✅ Code Review | `code-review-checklist` | 5-lens review across security, correctness, perf, readability, testing |
@@ -195,7 +193,6 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | 🔄 Self-Correction | `self-correction-patterns` | AI mistake recognition, backtracking triggers, verification loops |
 | 🛠️ CLI Toolkit | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep — flags, recipes, gotchas |
 | 🔤 Regex | `regex-reference` | Common patterns, per-language escaping, catastrophic backtracking |
-| 🌿 Git Workflows | `git-workflows` | Rebase, bisect, reflog recovery, conventional commits, squashing |
 | ❌ Error Interpretation | `error-interpretation` | Error signature → root cause per language — cross-language patterns |
 | 🧠 Model Profiles | `model-profiles` | Model-aware hints for Qwen and Gemma — context windows, strengths, prompt adaptation per model size |
 | 🤖 Local Model Commands | `local-model-commands` | Terminal command safety — no `&` backgrounding, timeout wrappers, termination signals |
@@ -221,7 +218,6 @@ All skills live in `.agents/skills/`:
 | `chrome-devtools` | `/chrome-devtools` — browser automation, screenshots, network analysis, performance profiling |
 | `playwright-mcp` | `/playwright-mcp` — browser automation via Playwright MCP |
 | `gh-cli` | `/gh-cli` — GitHub CLI integration for repos, PRs, issues, releases |
-| `github-issues` | `/github-issues` — create/update/manage issues, labels, milestones, dependencies |
 | `web-design-reviewer` | `/web-design-reviewer` — inspect websites for responsive, accessibility, and layout issues |
 | `onboard-existing-repo` | `/onboard-existing-repo` — onboard an existing repo to the skill system |
 | `lm-studio` | `/lm-studio` — LM Studio local inference, vision bridge, model management |

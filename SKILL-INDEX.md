@@ -2,7 +2,7 @@
 
 This file is the **canonical index** of all skills in this project. It is automatically maintained by the `update-skill-index` skill. Every skill in `.agents/skills/` is listed here with its description, function, commands, and a link to its full documentation.
 
-**Total: 49 items** (all in `.agents/skills/`)
+**Total: 45 items** (all in `.agents/skills/`)
 
 ---
 
@@ -28,7 +28,6 @@ This file is the **canonical index** of all skills in this project. It is automa
 | `/chrome-devtools` | [chrome-devtools](.agents/skills/chrome-devtools/SKILL.md) | 'Expert-level browser automation, debugging, and performance analysis using Chrome DevTools MCP. Use for interacting with web pages, capturing screenshots, analyzing network traffic, and profiling performance.' | `.agents/skills/` |
 | `/playwright-mcp` | [playwright-mcp](.agents/skills/playwright-mcp/SKILL.md) | Browser automation via Playwright MCP — navigate, click, type, snapshot pages. Use when you need to interact with web pages. | `.agents/skills/` |
 | `/gh-cli` | [gh-cli](.agents/skills/gh-cli/SKILL.md) | >- | `.agents/skills/` |
-| `/github-issues` | [github-issues](.agents/skills/github-issues/SKILL.md) | 'Create, update, and manage GitHub issues using MCP tools. Use this skill when users want to create bug reports, feature requests, or task issues, update existing issues, add labels/assignees/milestones, set issue fields (dates, priority, custom fields), set issue types, manage issue workflows, link issues, add dependencies, or track blocked-by/blocking relationships. Triggers on requests like create an issue, file a bug, request a feature, update issue X, set the priority, set the start date, link issues, add dependency, blocked by, blocking, or any GitHub issue management task.' | `.agents/skills/` |
 | `/web-design-reviewer` | [web-design-reviewer](.agents/skills/web-design-reviewer/SKILL.md) | 'This skill enables visual inspection of websites running locally or remotely to identify and fix design issues. Triggers on requests like review website design, check the UI, fix the layout, find design problems. Detects issues with responsive design, accessibility, visual consistency, and layout breakage, then performs fixes at the source code level.' | `.agents/skills/` |
 
 ---
@@ -55,9 +54,6 @@ This file is the **canonical index** of all skills in this project. It is automa
 | [containers](.agents/skills/containers/SKILL.md) | `**/{Dockerfile,Containerfile,docker-compose*,.dockerignore}` | Container conventions — multi-stage builds, non-root users, layer caching, secrets hygiene, HEALTHCHECK, signal handling, docker-compose patterns. Use when editing Dockerfiles, Containerfiles, or compose files. |
 | [error-interpretation](.agents/skills/error-interpretation/SKILL.md) | Build/runtime/CI failures | Map common error signatures to their actual root causes — null reference, type mismatch, import failure, permission denied, network timeout. Use when diagnosing build failures, runtime errors, or CI failures. |
 | [generic-conventions](.agents/skills/generic-conventions/SKILL.md) | — | Fallback coding conventions — ALWAYS check .agents/skills/ for framework/domain skills FIRST. Load this only when no other skill applies. Covers comments, docs, DRY, security, error handling, git, config. |
-| [git-workflows](.agents/skills/git-workflows/SKILL.md) | Git history management | Git workflow patterns beyond the basics — rebase vs merge, bisect, reflog recovery, conventional commits, clean history. Complements gh-cli (GitHub API) with git DAG operations. Use when rewriting history, recovering lost commits, or structuring branches. |
-| [github-actions-efficiency](.agents/skills/github-actions-efficiency/SKILL.md) | CI workflow review | 'Audit GitHub Actions workflow efficiency and recommend fixes to reduce CI minutes and costs.' |
-| [github-actions-hardening](.agents/skills/github-actions-hardening/SKILL.md) | CI security review | Security hardening reviewer for GitHub Actions workflow files (.github/workflows/*.yml). Reasons about the Actions threat model that pattern matchers and general code linters miss — untrusted-input script injection, privileged triggers running fork code, mutable action references, and over-scoped tokens. Use this skill when asked to review, audit, harden, or secure a GitHub Actions workflow, when writing a new workflow, or for any request like is this workflow safe?, review my CI for security issues, why is pull_request_target dangerous here?, pin my actions, or lock down GITHUB_TOKEN permissions. Covers script injection via ${{ }} interpolation, pull_request_target / workflow_run privilege escalation, SHA-pinning of third-party actions, least-privilege permissions, GITHUB_ENV/GITHUB_OUTPUT injection, secret exposure, OIDC over long-lived credentials, and self-hosted runner exposure on public repositories. |
 | [gitignore](.agents/skills/gitignore/SKILL.md) | `.gitignore` files | Git ignore file conventions — patterns, structure, and rules for .gitignore files. Use when creating or editing .gitignore files. |
 | [kubernetes](.agents/skills/kubernetes/SKILL.md) | `**/{k8s,kubernetes,helm,charts,templates}/**/*.{yaml,yml}` | Kubernetes conventions — security contexts, resource limits, probes, network policies, deployment strategies. Use when writing K8s manifests, Helm charts, or Kustomize overlays. |
 | [mermaid](.agents/skills/mermaid/SKILL.md) | Documentation, architecture diagrams | Mermaid diagram conventions — mandatory diagrams in all documentation. Every architectural, data-flow, lifecycle, process, state, or relationship concept MUST have a Mermaid visual. Use when editing files in docs/, writing ADRs, generating READMEs, documenting architecture, or creating any markdown file that explains system behavior. |
@@ -74,7 +70,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 | [chrome-devtools](.agents/skills/chrome-devtools/SKILL.md) | Browser debugging | 'Expert-level browser automation, debugging, and performance analysis using Chrome DevTools MCP. Use for interacting with web pages, capturing screenshots, analyzing network traffic, and profiling performance.' |
 | [playwright-mcp](.agents/skills/playwright-mcp/SKILL.md) | Browser automation | Browser automation via Playwright MCP — navigate, click, type, snapshot pages. Use when you need to interact with web pages. |
 | [gh-cli](.agents/skills/gh-cli/SKILL.md) | GitHub operations | >- |
-| [github-issues](.agents/skills/github-issues/SKILL.md) | Issue management | 'Create, update, and manage GitHub issues using MCP tools. Use this skill when users want to create bug reports, feature requests, or task issues, update existing issues, add labels/assignees/milestones, set issue fields (dates, priority, custom fields), set issue types, manage issue workflows, link issues, add dependencies, or track blocked-by/blocking relationships. Triggers on requests like create an issue, file a bug, request a feature, update issue X, set the priority, set the start date, link issues, add dependency, blocked by, blocking, or any GitHub issue management task.' |
+| [kaban-board](.agents/skills/kaban-board/SKILL.md) | Kaban terminal Kanban board | Terminal Kanban board for AI agents — install npm package, configure MCP server in OpenCode, manage tasks via CLI or TUI. Use when managing task boards, tracking work across agents, or setting up the Kaban MCP server. |
 | [web-design-reviewer](.agents/skills/web-design-reviewer/SKILL.md) | UI/UX review | 'This skill enables visual inspection of websites running locally or remotely to identify and fix design issues. Triggers on requests like review website design, check the UI, fix the layout, find design problems. Detects issues with responsive design, accessibility, visual consistency, and layout breakage, then performs fixes at the source code level.' |
 | [kaban-board](.agents/skills/kaban-board/SKILL.md) | Kaban terminal Kanban board | Terminal Kanban board for AI agents — install npm package, configure MCP server in OpenCode, manage tasks via CLI or TUI. Use when managing task boards, tracking work across agents, or setting up the Kaban MCP server. |
 | [wsl-cleanup](.agents/skills/wsl-cleanup/SKILL.md) | WSL disk cleanup, system maintenance | WSL2 Ubuntu system maintenance and disk cleanup — Docker prune, apt/pip/npm caches, journalctl vacuum, temp file cleanup, snap revisions, model caches. 🔴 Never touches $HOME/repos. Use when disk space is low or routine maintenance is needed. |
@@ -138,7 +134,7 @@ This file is the **canonical index** of all skills in this project. It is automa
 
 ---
 
-## Skills — `.agents/skills/` (49)
+## Skills — `.agents/skills/` (45)
 
 | # | Directory | File |
 |---|-----------|------|
@@ -155,49 +151,45 @@ This file is the **canonical index** of all skills in this project. It is automa
 | 11 | `generate-docs` | [`.agents/skills/generate-docs/SKILL.md`](.agents/skills/generate-docs/SKILL.md) |
 | 12 | `generic-conventions` | [`.agents/skills/generic-conventions/SKILL.md`](.agents/skills/generic-conventions/SKILL.md) |
 | 13 | `gh-cli` | [`.agents/skills/gh-cli/SKILL.md`](.agents/skills/gh-cli/SKILL.md) |
-| 14 | `git-workflows` | [`.agents/skills/git-workflows/SKILL.md`](.agents/skills/git-workflows/SKILL.md) |
-| 15 | `github-actions-efficiency` | [`.agents/skills/github-actions-efficiency/SKILL.md`](.agents/skills/github-actions-efficiency/SKILL.md) |
-| 16 | `github-actions-hardening` | [`.agents/skills/github-actions-hardening/SKILL.md`](.agents/skills/github-actions-hardening/SKILL.md) |
-| 17 | `github-issues` | [`.agents/skills/github-issues/SKILL.md`](.agents/skills/github-issues/SKILL.md) |
-| 18 | `gitignore` | [`.agents/skills/gitignore/SKILL.md`](.agents/skills/gitignore/SKILL.md) |
-| 19 | `go-conventions` | [`.agents/skills/go-conventions/SKILL.md`](.agents/skills/go-conventions/SKILL.md) |
-| 20 | `help` | [`.agents/skills/help/SKILL.md`](.agents/skills/help/SKILL.md) |
-| 21 | `kaban-board` | [`.agents/skills/kaban-board/SKILL.md`](.agents/skills/kaban-board/SKILL.md) |
-| 22 | `kubernetes` | [`.agents/skills/kubernetes/SKILL.md`](.agents/skills/kubernetes/SKILL.md) |
-| 23 | `lm-studio` | [`.agents/skills/lm-studio/SKILL.md`](.agents/skills/lm-studio/SKILL.md) |
-| 24 | `local-model-commands` | [`.agents/skills/local-model-commands/SKILL.md`](.agents/skills/local-model-commands/SKILL.md) |
-| 25 | `mermaid` | [`.agents/skills/mermaid/SKILL.md`](.agents/skills/mermaid/SKILL.md) |
-| 26 | `model-profiles` | [`.agents/skills/model-profiles/SKILL.md`](.agents/skills/model-profiles/SKILL.md) |
-| 27 | `nextjs-conventions` | [`.agents/skills/nextjs-conventions/SKILL.md`](.agents/skills/nextjs-conventions/SKILL.md) |
-| 28 | `onboard-existing-repo` | [`.agents/skills/onboard-existing-repo/SKILL.md`](.agents/skills/onboard-existing-repo/SKILL.md) |
-| 29 | `orchestrator-primer` | [`.agents/skills/orchestrator-primer/SKILL.md`](.agents/skills/orchestrator-primer/SKILL.md) |
-| 30 | `playwright-mcp` | [`.agents/skills/playwright-mcp/SKILL.md`](.agents/skills/playwright-mcp/SKILL.md) |
-| 31 | `postgresql-optimization` | [`.agents/skills/postgresql-optimization/SKILL.md`](.agents/skills/postgresql-optimization/SKILL.md) |
-| 32 | `project-structure` | [`.agents/skills/project-structure/SKILL.md`](.agents/skills/project-structure/SKILL.md) |
-| 33 | `python-conventions` | [`.agents/skills/python-conventions/SKILL.md`](.agents/skills/python-conventions/SKILL.md) |
-| 34 | `refactoring-recipes` | [`.agents/skills/refactoring-recipes/SKILL.md`](.agents/skills/refactoring-recipes/SKILL.md) |
-| 35 | `regex-reference` | [`.agents/skills/regex-reference/SKILL.md`](.agents/skills/regex-reference/SKILL.md) |
-| 36 | `repo-context` | [`.agents/skills/repo-context/SKILL.md`](.agents/skills/repo-context/SKILL.md) |
-| 37 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
-| 38 | `self-correction-patterns` | [`.agents/skills/self-correction-patterns/SKILL.md`](.agents/skills/self-correction-patterns/SKILL.md) |
-| 39 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
-| 40 | `skill-load` | [`.agents/skills/skill-load/SKILL.md`](.agents/skills/skill-load/SKILL.md) |
-| 41 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
-| 42 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
-| 43 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
-| 44 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
-| 45 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
-| 46 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
-| 47 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
-| 48 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
-| 49 | `wsl-cleanup` | [`.agents/skills/wsl-cleanup/SKILL.md`](.agents/skills/wsl-cleanup/SKILL.md) |
+| 14 | `gitignore` | [`.agents/skills/gitignore/SKILL.md`](.agents/skills/gitignore/SKILL.md) |
+| 15 | `go-conventions` | [`.agents/skills/go-conventions/SKILL.md`](.agents/skills/go-conventions/SKILL.md) |
+| 16 | `help` | [`.agents/skills/help/SKILL.md`](.agents/skills/help/SKILL.md) |
+| 17 | `kaban-board` | [`.agents/skills/kaban-board/SKILL.md`](.agents/skills/kaban-board/SKILL.md) |
+| 18 | `kubernetes` | [`.agents/skills/kubernetes/SKILL.md`](.agents/skills/kubernetes/SKILL.md) |
+| 19 | `lm-studio` | [`.agents/skills/lm-studio/SKILL.md`](.agents/skills/lm-studio/SKILL.md) |
+| 20 | `local-model-commands` | [`.agents/skills/local-model-commands/SKILL.md`](.agents/skills/local-model-commands/SKILL.md) |
+| 21 | `mermaid` | [`.agents/skills/mermaid/SKILL.md`](.agents/skills/mermaid/SKILL.md) |
+| 22 | `model-profiles` | [`.agents/skills/model-profiles/SKILL.md`](.agents/skills/model-profiles/SKILL.md) |
+| 23 | `nextjs-conventions` | [`.agents/skills/nextjs-conventions/SKILL.md`](.agents/skills/nextjs-conventions/SKILL.md) |
+| 24 | `onboard-existing-repo` | [`.agents/skills/onboard-existing-repo/SKILL.md`](.agents/skills/onboard-existing-repo/SKILL.md) |
+| 25 | `orchestrator-primer` | [`.agents/skills/orchestrator-primer/SKILL.md`](.agents/skills/orchestrator-primer/SKILL.md) |
+| 26 | `playwright-mcp` | [`.agents/skills/playwright-mcp/SKILL.md`](.agents/skills/playwright-mcp/SKILL.md) |
+| 27 | `postgresql-optimization` | [`.agents/skills/postgresql-optimization/SKILL.md`](.agents/skills/postgresql-optimization/SKILL.md) |
+| 28 | `project-structure` | [`.agents/skills/project-structure/SKILL.md`](.agents/skills/project-structure/SKILL.md) |
+| 29 | `python-conventions` | [`.agents/skills/python-conventions/SKILL.md`](.agents/skills/python-conventions/SKILL.md) |
+| 30 | `refactoring-recipes` | [`.agents/skills/refactoring-recipes/SKILL.md`](.agents/skills/refactoring-recipes/SKILL.md) |
+| 31 | `regex-reference` | [`.agents/skills/regex-reference/SKILL.md`](.agents/skills/regex-reference/SKILL.md) |
+| 32 | `repo-context` | [`.agents/skills/repo-context/SKILL.md`](.agents/skills/repo-context/SKILL.md) |
+| 33 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
+| 34 | `self-correction-patterns` | [`.agents/skills/self-correction-patterns/SKILL.md`](.agents/skills/self-correction-patterns/SKILL.md) |
+| 35 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
+| 36 | `skill-load` | [`.agents/skills/skill-load/SKILL.md`](.agents/skills/skill-load/SKILL.md) |
+| 37 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
+| 38 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
+| 39 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
+| 40 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
+| 41 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
+| 42 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
+| 43 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
+| 44 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
+| 45 | `wsl-cleanup` | [`.agents/skills/wsl-cleanup/SKILL.md`](.agents/skills/wsl-cleanup/SKILL.md) |
 
 ---
 
 ## Deploy Mirror
 
 The `deploy/` directory mirrors the bootstrap repo for distribution. It contains:
-- `deploy/.agents/skills/` — all deployable skill files (49)
+- `deploy/.agents/skills/` — all deployable skill files (45)
 - `deploy/.agents/hooks/` — 3 lifecycle hooks
 - `deploy/.github/hooks/` — 3 Copilot hooks
 - `deploy/AGENTS.md` — skill system overview
