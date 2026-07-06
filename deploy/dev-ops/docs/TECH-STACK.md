@@ -1,146 +1,71 @@
 # Tech Stack
 
-## Environment
+## Languages
 
-| Component | Version / Spec | Notes |
-|-----------|---------------|-------|
-| **Target Cluster** | Kubernetes v1.25+ | Any distribution (kubeadm, EKS, AKS, GKE, K3s) |
-| **Shell** | Bash 5.x | Default shell for all command execution |
-| **OpenCode** | Latest | Agent orchestration platform (replaces GitHub Copilot as primary agent interface) |
+| Language | Used for | Why |
+|----------|----------|-----|
+| **Bash** (5.x+) | Bootstrap scripts, test suite | Universal availability, no runtime deps, POSIX-compatible |
+| **TypeScript** | OpenCode lifecycle plugins (`.opencode/plugins/*.ts`) | Type-safe plugin development with strict compiler flags; compiled to JS for runtime |
+| **Markdown** | All skill bodies (SKILL.md), all documentation | Universal format, AI-native, rendered on GitHub/GitLab |
+| **YAML** | Skill frontmatter (`name`, `description`) | Human-readable, strict syntax prevents silent failures |
+| **JSON** | Hooks (`session-start.json`, `pre-tool-use.json`, `post-tool-use.json`) | Deterministic, machine-enforced |
+| **Mermaid** | Architecture & flow diagrams in README.md and docs | Renders on GitHub without external deps |
+| **Bash** (orchestrator use) | Git operations, verification, file moves — strict subagent delegation | Orchestrator NEVER writes code. Bash use limited to `git add/commit/push`, `cp/mv/rm`, `npm run`, verify-only commands |
 
-## Core CLI Tools
+## Frameworks
 
-| Tool | Installation | Purpose | Domain Skill |
-|------|-------------|---------|-------------|
-| `kubectl` | `apt install kubectl` or cloud CLI | Primary K8s interaction — describe, logs, get, delete, rollout | `kubectl-diagnose`, `cluster-operations` |
-| `flux` | `curl -s https://fluxcd.io/install.sh \| bash` | GitOps reconciliation — get, reconcile, suspend, resume, trace | `cluster-operations` |
-| `helm` | `apt install helm` | Package management — list, history, uninstall, upgrade | `cluster-operations` |
-| `jq` | `apt install jq` | JSON output parsing and filtering from kubectl commands | `kubectl-diagnose` |
+**None.** The project intentionally has zero framework dependencies. It operates as pure files — Markdown + YAML + Bash — so it can bootstrap into any target project regardless of its tech stack.
 
-### Tool Auto-Approval Configuration
+## Key Dependencies
 
-```json
-{
-    "chat.tools.terminal.autoApprove": {
-        "kubectl": true,
-        "flux": true,
-        "helm": true,
-        "jq": true
-    }
-}
-```
+| Dependency | Version | Purpose | Why |
+|-----------|---------|---------|-----|
+| **bash** | ≥5.0 | Script execution | `inherit_errexit` (default ON in 5.x) needed for test suite |
+| **git** | any | Version control | Commit hashes for learnings.md changelog |
+| **TypeScript / tsc** | ≥5.x (via `@opencode-ai/plugin`) | Plugin compilation | Strict type safety for OpenCode lifecycle hooks |
+| **Node.js / npm** | ≥18.x | Plugin package management | Required for `npm install` and `tsc` in plugin directory |
+| **find** | any | Test suite file enumeration | Standard POSIX utility |
+| **grep** | any | Pattern matching in tests | Standard POSIX utility |
+| **sed** | any | Text processing | Standard POSIX utility |
 
-These tools are auto-approved in `.vscode/settings.json` to enable rapid diagnosis without blocking on every command. Safety is enforced at the agent instruction level via the 3-tier safety model.
+The `package.json` at the project root contains entries like `solidjs`, `astro`, `pino`, and `bullmq` — but these are **never installed**. They exist solely to provide a dependency list that the `test-self-improving.sh` gap detection (Signal 1) can validate against. The test asserts that these deps correctly trigger "NO matching skill" detection.
 
-## Cluster Integrations
+## Development Tools
 
-| Integration | Purpose | Discovery Method | Domain Skill |
-|------------|---------|-----------------|-------------|
-| **Kubernetes** | Target cluster environment | Runtime via kubectl (auto-discovered) | `cluster-operator` |
-| **FluxCD v2.x** | GitOps reconciliation | `flux get sources git -A` (auto-discovered) | `cluster-operations` |
-| **cert-manager** | TLS certificate management | `kubectl get certificates -A` (auto-discovered) | `cluster-operator` |
-| **Longhorn** | Distributed block storage | `kubectl get volumes -n longhorn-system` (auto-discovered) | `cluster-operator` |
-| **CNI Plugin** | Cluster networking (Calico/Cilium/Flannel) | `kubectl get pods -n kube-system \| grep -E 'calico\|flannel\|cilium'` | `cluster-operations` |
-| **Ingress Controller** | HTTP routing (Traefik/NGINX) | `kubectl get ingressclasses` | `cluster-operations` |
-
-## Agent Models
-
-| Role | Model | Provider | Purpose |
-|------|-------|----------|---------|
-| **ingenium-planner** | DeepSeek V4 Pro (`deepseek/deepseek-v4-pro`) | DeepSeek API | Remediation planning, cluster analysis, multi-step reasoning |
-| **ingenium-orchestrator** | DeepSeek V4 Flash (`deepseek/deepseek-v4-flash`) | DeepSeek API | Command execution, evidence collection, coordination |
-| **ingenium-explore** | DeepSeek V4 Flash (`deepseek/deepseek-v4-flash`) | DeepSeek API | Fast manifest discovery and config research |
-| **ingenium-scout** | qwopus 3.5 9B Coder (`lmstudio/qwopus3.5-9b-coder`) | LM Studio | Persistent memory via Thread MCP (local, free) |
-| **ingenium-infrastructure-engineer** | DeepSeek V4 Flash (`opencode/deepseek-v4-flash-free`) | OpenCode Zen | Infrastructure design review, safety assessment (free tier) |
-| **ingenium-qa** | DeepSeek V4 Flash (`opencode/deepseek-v4-flash-free`) | OpenCode Zen | Script testing and code review (free tier) |
-| **ingenium-docs** | DeepSeek V4 Flash (`opencode/deepseek-v4-flash-free`) | OpenCode Zen | Documentation and report generation (free tier) |
-| **ingenium-security-auditor** | DeepSeek V4 Flash (`deepseek/deepseek-v4-flash`) | DeepSeek API | Project security audits and git-history scanning |
-
-## Framework
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Skill system** | Ingenium (self-hosted) | Agent behavior governance, safety tier enforcement, methodology |
-| **Agent orchestration** | OpenCode | Primary agent platform (8 agents defined) |
-| **Persistent memory** | Thread MCP | Cross-session context, past remediations, cluster knowledge |
-| **Editor** | VS Code (or compatible) | Development environment |
-
-## Domain Skills (4)
-
-| Skill | Location | Purpose |
-|-------|----------|---------|
-| `cluster-operator` | `.agents/skills/cluster-operator/SKILL.md` | Autonomous K8s monitoring and remediation workflows by resource type |
-| `cluster-remediation` | `.agents/skills/cluster-remediation/SKILL.md` | 3-tier safety model — defines auto-approve, needs-approval, never-allowed actions |
-| `kubectl-diagnose` | `.agents/skills/kubectl-diagnose/SKILL.md` | kubectl diagnostic command reference organized by resource type (pod, node, PVC, Flux, cert) |
-| `cluster-operations` | `.agents/skills/cluster-operations/SKILL.md` | K8s operations patterns — discover-before-assume, output capture rules, safety conventions |
-
-## Key Integrations Diagram
-
-```mermaid
-graph TB
-    AGENT[Agent System] --> K8S[Kubernetes Cluster]
-    K8S --> FLUX[FluxCD<br/>GitOps]
-    K8S --> CERT[cert-manager<br/>TLS Certificates]
-    K8S --> LONG[Longhorn<br/>Block Storage]
-    K8S --> CNI[CNI Plugin<br/>Calico / Cilium / Flannel]
-
-    AGENT --> CLI[kubectl / flux / helm / jq]
-    CLI --> K8S
-
-    AGENT --> THREAD[Thread MCP<br/>Persistent Memory]
-    THREAD --> MEM[(Thread DB<br/>SQLite)]
-
-    AGENT --> OPENCODE[OpenCode<br/>AI Platform]
-    OPENCODE --> PLUGINS[Plugins<br/>TypeScript ESM]
-
-    subgraph "AI Models"
-        V4_PRO[DeepSeek V4 Pro<br/>Planning]
-        V4_FLASH[DeepSeek V4 Flash<br/>Execution]
-        QWOPUS[qwopus 3.5 9B<br/>Context Search]
-    end
-
-    AGENT --> V4_PRO
-    AGENT --> V4_FLASH
-    AGENT --> QWOPUS
-
-    style V4_PRO fill:#4a90d9,color:#fff
-    style V4_FLASH fill:#d94a4a,color:#fff
-    style QWOPUS fill:#888,color:#fff
-```
+| Tool | Used for |
+|------|----------|
+| **TypeScript Compiler (`tsc`)** | Compiling `.opencode/plugins/*.ts` to JavaScript with strict checks |
+| **Node.js / npm** | Installing `@opencode-ai/plugin` SDK and running `tsc` |
+| **shellcheck** (optional) | Linting bootstrap and test scripts |
+| **git** | Version control, conventional commits |
+| **Any editor with AI support** | The skill system targets any AI coding assistant that supports the `.agents/` convention (Copilot, Cline, Claude, and others) |
 
 ## Infrastructure
 
-- **No servers, databases, or containers required** — the system is entirely file-based
-- **No cloud dependencies** for core operation — all cluster tools run against the target cluster
-- **Thread MCP** can be local or remote depending on configuration
-- **Target clusters** are discovered at runtime — no preconfiguration needed
+None. This is a file-based toolkit. There is no server, no database, no deployment infrastructure.
 
 ## Version Policy
 
-- **CLI tools (kubectl/flux/helm/jq)**: Use the version installed on the system or in the cluster environment
-- **Agent models**: Cloud-hosted (DeepSeek API) and local (LM Studio) — no version management needed
-- **Skill system**: Versioned via git — each remediation on its own branch or tag
-- **Plugins**: TypeScript ESM modules managed via package.json
+- **Bash**: Must be ≥5.0 for `inherit_errexit` behavior. Earlier versions will fail tests silently.
+- **git**: Any version supporting conventional commits.
+- **TypeScript**: Must be compatible with `@opencode-ai/plugin` SDK types (currently `1.x`).
+- **Node.js**: Must be ≥18.x for ESM module support in plugin directory.
+- **No pinned versions for runtime** — the project's core (Markdown + YAML + Bash) has zero runtime dependencies to pin. `package.json` at root is a test fixture, not an install manifest. Plugin `package.json` in `.opencode/plugins/` does pin `@opencode-ai/plugin`.
 
-## Tool Installation Quick Reference
+## Agent Pipeline Models
 
-```bash
-# Essential CLI tools
-sudo apt update
-sudo apt install -y kubectl helm jq
+| Agent | Model | Purpose |
+|-------|-------|---------|
+| @ingenium-planner | DeepSeek V4 Pro | Research, planning — read-only. Spawns explore + scout for analysis |
+| @ingenium-orchestrator | DeepSeek V4 Flash | Coordination — NEVER writes code directly. Full 5-layer enforcement: always-visible primer in opencode.json, Pre-Action Gate, Anti-Patterns table, Periodic Self-Audit, post-tool-use hook |
+| @ingenium-software-engineer | DeepSeek V4 Flash (Zen free) | **All code implementation** — read/write. Writes production code, self-verifies |
+| @ingenium-qa | DeepSeek V4 Flash (Zen free) | Code review + test authoring. Write-only (tests). Does NOT write production code |
+| @ingenium-docs | DeepSeek V4 Flash (Zen free) | Documentation + skill management. Write-only (docs) |
+| @ingenium-explore | DeepSeek V4 Flash | Codebase search — read-only. grep, glob, file discovery |
+| @ingenium-scout | qwopus 3.5 9B Coder (LM Studio) | Thread/RAG context — read-only. Persistent memory across sessions |
+| @ingenium-security-auditor | DeepSeek V4 Flash | Security audit — bash + read-only. Git history leak scanning |
 
-# Flux CLI
-curl -s https://fluxcd.io/install.sh | sudo bash
-
-# Verify installations
-kubectl version --client
-flux version
-helm version
-jq --version
-
-## Bootstrap Key Integrations
-
-The Ingenium bootstrap system integrates with the following services:
+## Key Integrations
 
 | Integration | Purpose | Configured by |
 |-------------|---------|---------------|
@@ -156,5 +81,5 @@ The deploy/ directory has 3 independent target variants, each with its own skill
 | Variant | Domain | Skills | Key Agents |
 |---------|--------|--------|------------|
 | `software-dev/` | General software engineering | 47 universal + 1 primer (48 total) | planner, orchestrator, software-engineer, qa, docs, explore, scout, security-auditor |
-| `dev-ops/` | Kubernetes cluster operations | 42 universal + 4 K8s + 1 primer (47 total) | planner, orchestrator, infrastructure-engineer, qa, docs, explore, scout, security-auditor |
-| `sec-ops/` | Security penetration testing | 43 universal + 10 pentest + 1 primer (54 total) | planner, orchestrator, security-engineer, qa, docs, explore, scout, security-auditor |
+| `dev-ops/` | Kubernetes cluster operations | 43 universal + 4 K8s + 1 primer (48 total) | planner, orchestrator, infrastructure-engineer, qa, docs, explore, scout, security-auditor |
+| `sec-ops/` | Security penetration testing | 44 universal + 10 pentest + 1 primer (55 total) | planner, orchestrator, security-engineer, qa, docs, explore, scout, security-auditor |
