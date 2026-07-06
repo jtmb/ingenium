@@ -318,3 +318,17 @@
   4. Synced template + SKILL.md to all 3 deploy variants
   5. Filed `https://github.com/jtmb/thread/issues/1` with full reproduction data using the new template (3 failing query variants with request IDs, 2 working variants, environment, impact analysis, workaround)
 - **Skill audit**: `gh-cli` stays independent. Covers 5 domains beyond issues (PRs, releases, gists, search, raw API). `alwaysApply: true` foundation. `github-issues` adds deep issue management when triggered. Cross-reference added from `gh-cli` → `github-issues`.
+
+## 2026-07-05 — kaban-board: terminal Kanban board skill + README upload to Thread
+
+- **Commit**: `13a3021` (after)
+- **Category**: skill
+- **Changes**:
+  1. Created `.agents/skills/kaban-board/SKILL.md` — 340 lines, 7 sections: When to Use, 3 🔴 HARD RULEs, Installation (npx/npm/brew), MCP Server Setup for OpenCode (opencode.json config), CLI Quick Reference (15 commands), 20 MCP Tools Reference, TUI Keyboard Shortcuts, 4 Workflows (Setup, Task Lifecycle, Agent Coordination, TodoWrite Hook), Data Model
+  2. Registered in `.agents/SKILL-CATALOG.md` (domain skills table)
+  3. Registered in `.agents/scripts/bootstrap.sh` as `optional`
+  4. Regenerated `SKILL-INDEX.md` (48→49) with kaban-board at #21
+  5. Updated all docs counts: AGENTS.md, README.md, USAGE.md, ARCHITECTURE.md (+ deploy mirrors)
+  6. Synced skill + docs to all 3 deploy variants
+  7. Uploaded Kaban README from GitHub to Thread (entries 181-192, 12 chunks, tags: docs-import, kaban-board, readme)
+- **Skill count**: Source: 49, software-dev: 49, dev-ops: 49, sec-ops: 54
