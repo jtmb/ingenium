@@ -5,6 +5,8 @@ mode: subagent
 model: opencode/deepseek-v4-flash-free
 permission:
   bash: deny
+  task:
+    "*": "deny"                           # No subagent delegation allowed
 skills:
   - write-docs
   - generate-docs

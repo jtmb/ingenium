@@ -25,6 +25,8 @@ permission:
   edit: deny
   write: deny
   bash: deny
+  task:
+    "*": "deny"                           # No subagent delegation allowed
   skill:
     "*": "allow"
 skills:

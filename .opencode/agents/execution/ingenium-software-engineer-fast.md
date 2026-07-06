@@ -13,6 +13,7 @@ permission:
   write: allow
   bash: allow
   task:
+    "*": "deny"                           # 🔴 Catch-all deny — explicit allow list only
     "ingenium-docs": "allow"
     "ingenium-scout": "allow"
   skill:
