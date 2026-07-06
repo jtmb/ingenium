@@ -14,11 +14,12 @@ Key properties:
 ```
 ingenium/
 ├── .agents/                    ← AI conventions system (the "product")
-│   ├── skills/                 ← 46 skills — framework, domain, task, and tool conventions
+│   ├── skills/                 ← 47 skills — framework, domain, task, and tool conventions
 │   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
 │   │   ├── {framework}-conventions/ ← nextjs, python, go, rust, typescript-standalone
 │   │   ├── {domain}-skills/       ← containers, kubernetes, api-design, sql-database, etc.
-│   │   └── learnings.md           ← Changelog of all skill additions/retirements
+│   │   ├── orchestrator-primer/  ← Always-visible delegation rules (loaded via opencode.json)
+│   │   └── learnings.md           ← Changelog of all skill system changes: skills, agents, hooks, plugins, deploy, config, architecture decisions, bugs, and patterns discovered
 │   ├── SKILL-CATALOG.md        ← Full catalog (lazy-loaded by AI)
 │   ├── scripts/                ← Bootstrap engine
 │   │   ├── bootstrap.sh        ← Main entry point — scaffolds projects with selected skills
@@ -26,12 +27,10 @@ ingenium/
 │   └── tests/ → moved to tests/
 ├── tests/                      ← Test suite (at project root, alongside docs/)
 │   └── test-self-improving.sh  ← Validates update-skills detection pipeline (7 test functions, 20 checks)
-├── deploy/                     ← Clean mirror for bootstrapping other projects
-│   ├── AGENTS.md               ← Same as root, copied to target projects
-│   ├── opencode.json           ← Template with <PLACEHOLDER> tokens
-│   ├── SKILL-INDEX.md          ← Full skill index for target projects
-│   ├── .agents/skills/         ← 46 deployable skills (source-only scripts/tests excluded)
-│   └── .agents/hooks/          ← 3 lifecycle hooks for deterministic enforcement
+├── deploy/                     ← Bootstrap payload (3 domain variants)
+│   ├── software-dev/           ← General software engineering
+│   ├── dev-ops/                ← Kubernetes cluster operations
+│   └── sec-ops/                ← Security penetration testing
 ├── docs/                       ← Project documentation (this directory)
 │   ├── agents.md               ← Agent architecture reference
 │   ├── ARCHITECTURE.md         ← This file — project structure and data flow
@@ -39,6 +38,10 @@ ingenium/
 │   └── CONVENTIONS.md          ← Naming, file organization, and patterns
 ├── assets/                     ← Mermaid diagrams for docs
 ├── .opencode/agents/           ← OpenCode custom agent definitions (8 agents)
+│   ├── primary/                ← planner, orchestrator
+│   ├── execution/              ← software-engineer, qa, docs
+│   ├── research/               ← explore, scout
+│   └── security/               ← security-auditor
 ├── .opencode/plugins/          ← TypeScript plugins with lifecycle hooks (session-start, pre-tool-use, post-tool-use)
 │   ├── tsconfig.json           ← Strict TypeScript config with 10+ strict flags
 │   ├── session-start.ts        ← Injects skill-loading checklist at session start
@@ -54,7 +57,7 @@ ingenium/
 
 ### Skill System (`.agents/skills/`)
 
-The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 46 skills live in a single hierarchy under `.agents/skills/`:
+The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 47 skills live in a single hierarchy under `.agents/skills/`:
 
 | Tier | Pattern | Count | Examples |
 |------|---------|-------|----------|
@@ -64,7 +67,7 @@ The core of the project. Every skill is a directory containing a single `SKILL.m
 | **Task** | invocable via `/command` | ~14 | update-skills, audit-skills, generate-docs, write-docs, help, etc. |
 | **Tool** | automation interfaces | ~5 | chrome-devtools, playwright-mcp, gh-cli, github-issues, web-design-reviewer |
 
-All 46 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, bootstrap.sh, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
+All 47 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, bootstrap.sh, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
 
 ### Bootstrap Engine (`.agents/scripts/`)
 
@@ -81,7 +84,7 @@ TypeScript plugins that hook into OpenCode's lifecycle to provide deterministic 
 |--------|------|---------|
 | `session-start.ts` | `session.created` | Injects skill-loading checklist at session start |
 | `pre-tool-use.ts` | `tool.execute.before` | Warns when bash commands target `node_modules`, `.git`, `dist`, or build directories |
-| `post-tool-use.ts` | `tool.execute.after` | Tracks tool call count, reminds about `learnings.md` and `/update-skills` every 10 calls |
+| `post-tool-use.ts` | `tool.execute.after` | Tracks tool call count, reminds about `learnings.md` and `/update-skills` every 5 calls; reminds about delegation patterns and learnings.md |
 
 Each plugin is a TypeScript module that imports the `Plugin` type from `@opencode-ai/plugin` and exports a default typed plugin object with named hooks. A strict `tsconfig.json` (`strict: true`, plus `noUncheckedIndexedAccess`, `noImplicitReturns`, `noFallthroughCasesInSwitch`, `noUnusedLocals`, `noUnusedParameters`, etc.) enforces type safety across all plugin files.
 
@@ -89,17 +92,16 @@ Plugins bridge the gap between skills (AI-interpreted) and deterministic guardra
 
 ### Agent Pipeline (`.opencode/agents/`)
 
-8 custom agents defined for OpenCode: 2 primary (planner + orchestrator) and 6 subagents (explore, scout, review, docs, ingenium-security-auditor, software-engineer). See `docs/agents.md` for full architecture.
+8 custom agents defined for OpenCode in role-nested directories: `primary/` (planner, orchestrator), `execution/` (software-engineer, qa, docs), `research/` (explore, scout), `security/` (security-auditor). The orchestrator NEVER writes code directly — it delegates all implementation to @ingenium-software-engineer (now with read/write permissions). See `docs/agents.md` for full architecture.
 
 ### Deploy Separation (`deploy/`)
 
-A clean mirror containing only what gets deployed to target projects:
-- `deploy/.agents/skills/` — All 46 skills (same content as `.agents/skills/`)
-- `deploy/.agents/hooks/` — 3 lifecycle hooks (session-start, pre-tool-use, post-tool-use)
-- `deploy/AGENTS.md` — Copied to target projects as project rules
-- `deploy/opencode.json` — Template with `<PLACEHOLDER>` tokens (never real secrets)
-- `deploy/SKILL-INDEX.md` — Full skill index for target projects
-- No scripts, tests, or .opencode agents — source-only artifacts stay in root
+A set of 3 domain variant mirrors containing only what gets deployed to target projects:
+- `deploy/software-dev/` — General software engineering (skills, hooks, agents, plugins, docs, config)
+- `deploy/dev-ops/` — Kubernetes cluster operations (skills, hooks, agents, plugins, docs, config)
+- `deploy/sec-ops/` — Security penetration testing (skills, hooks, agents, plugins, docs, config)
+- Each variant contains `.agents/skills/` (47 skills), `.agents/hooks/`, `.opencode/agents/`, `.opencode/plugins/`, `docs/`, `AGENTS.md`, `opencode.json`, and `SKILL-INDEX.md`
+- No scripts or tests — source-only artifacts stay in root
 
 The `test-self-improving.sh` suite validates that deploy stays in sync with source (TEST 5) and that no source-only files leak in (TEST 4).
 
@@ -121,7 +123,7 @@ Three lifecycle hooks provide deterministic enforcement and self-improvement tri
 |------|--------------|---------|
 | `session-start.json` | Session start | Inject abbreviated checklist, match skills, load them, note 🔴 HARD RULEs |
 | `pre-tool-use.json` | Before every tool call | Validate terminal command safety, check file-scope rules, block dangerous patterns |
-| `post-tool-use.json` | After every ~10 tool calls | Periodic reminder to log new patterns, run `/update-skills`, check for skill gaps |
+| `post-tool-use.json` | After every 5 tool calls | Periodic reminder to log new patterns, run `/update-skills`, check for skill gaps, verify delegation patterns |
 
 Hooks live in both source (`.agents/hooks/`) and deploy (`deploy/.agents/hooks/`). They bridge the gap between skills (which are read/interpreted by the AI) and deterministic enforcement (which runs regardless of AI state).
 
