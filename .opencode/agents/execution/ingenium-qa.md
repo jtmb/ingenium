@@ -5,6 +5,7 @@ mode: subagent
 model: opencode/deepseek-v4-flash-free
 permission:
   edit: allow
+  write: allow
   bash: deny
   task:
     "*": "deny"                           # No subagent delegation allowed
@@ -19,7 +20,7 @@ skills:
   - api-design                 # For testing API endpoints
   - shell-scripts              # For reviewing shell scripts
   - project-structure          # For understanding where tests go
-  - model-profiles             # For adapting advice to model capabilities
+  - local-models               # For model profiles and terminal safety
   - update-skills              # Detects patterns, creates skills autonomously
 ---
 

@@ -28,7 +28,7 @@ Read the file `AGENTS.md` at the project root. It contains:
 Using the Skill Quick-Reference table in AGENTS.md:
 
 1. Identify which framework skills match files you'll edit (`.py` → `python-conventions`, `.go` → `go-conventions`, etc.)
-2. Identify which domain skills match the task type (terminal commands → `local-model-commands`, tests → `useful-tests`, etc.)
+2. Identify which domain skills match the task type (terminal commands → `local-models`, tests → `useful-tests`, etc.)
 3. Check the 🔴 Mandatory Skills section in AGENTS.md — every skill listed there is non-negotiable, load them all
 4. Identify which task skills are relevant (`/help` for catalog, `/repo-context` for project identity)
 
@@ -46,7 +46,7 @@ Read the full SKILL.md for EVERY skill that matches:
 
 As you load each skill, extract every 🔴 HARD RULE. These are non-negotiable. Examples:
 
-- `local-model-commands`: Never use `&` in terminal commands. Never run infinite-wait commands.
+- `local-models`: Never use `&` in terminal commands. Never run infinite-wait commands.
 - `shell-scripts`: Always use `set -euo pipefail`. Always quote variables.
 - `generic-conventions`: Update docs in the same turn as code changes.
 
