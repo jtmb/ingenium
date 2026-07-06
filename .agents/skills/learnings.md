@@ -1,3 +1,32 @@
+## 2026-07-06 — Sprint: agent validation, docs gate, dead refs cleanup, docker skill added to index
+
+- **Commit**: `7869232` (after)
+- **Before**: `c153e28`
+- **Category**: agents | tests | docs | config | skills
+- **Changes**:
+  - Wired `question: allow` to planner permission block (tool referenced but never wired)
+  - Removed stale `git-workflows` from security-auditor agent skill list
+  - Batch-fixed orchestrator.md: `todowrite: allow`, removed duplicate `local-models`, removed dead `kaban_kaban_wins` MCP permission, added 🔴 Definition of Done docs gate
+  - Updated orchestrator-primer SKILL.md: removed `kaban_wins` reference, added 🔴 HARD RULE Docs Gate section
+  - Removed dead `kaban_wins` prose reference from orchestrator.md workflow steps
+  - Created `tests/test-agent-validation.sh` (7 tests: frontmatter, permissions, stale refs, duplicates, task block safety, git-workflows, skill count consistency)
+  - Added `docker` skill to SKILL-INDEX.md (orphan directory — 44th skill)
+  - Updated all project docs for above changes (README, ARCHITECTURE, SKILL-INDEX, CONVENTIONS, USAGE, AGENTS, skill-load, local-models)
+- **Why**: Tighten orchestrator delegation rules with a structural docs gate, prevent stale skill references from lingering, add automated agent validation to CI, fix SKILL-INDEX.md count (docker orphan).
+- **Bug discovered**: `learnings.md` overwritten by ingenium-docs instead of appended — 550 lines of history lost, restored from git. Root cause: ingenium-docs' tools: block has no subagent spawning ability, so it wrote learnings.md directly and rewrote the whole file. Fix: learnings.md is a sequential log — appending is the only correct operation.
+
+**Files modified:**
+- `.opencode/agents/primary/ingenium-planner.md`
+- `.opencode/agents/security/ingenium-security-auditor.md`
+- `.opencode/agents/primary/ingenium-orchestrator.md`
+- `.agents/skills/orchestrator-primer/SKILL.md`
+- `.agents/skills/local-models/SKILL.md`
+- `tests/test-agent-validation.sh` (new)
+- `SKILL-INDEX.md`
+- `README.md`
+- `docs/ARCHITECTURE.md`
+- `.agents/skills/learnings.md` (this entry + restored history)
+
 ## 2026-07-06 — Add `"*": "deny"` to all agent task permission blocks
 
 - **Commit**: `22f4b2c` (after)

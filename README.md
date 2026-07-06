@@ -6,7 +6,7 @@
 ### Genius doesn't repeat itself. Neither should you.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-43%20total-green?style=flat-square" alt="43 total — all in .agents/skills/" />
+  <img src="https://img.shields.io/badge/skills-44%20total-green?style=flat-square" alt="44 total — all in .agents/skills/" />
   <img src="https://img.shields.io/badge/frameworks-4%20%2B%2029%20domain-purple?style=flat-square" alt="Frameworks" />
   <img src="https://img.shields.io/badge/skills%20that%20grow%20with%20you-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Skills that grow with you" />
 </p>
@@ -17,7 +17,7 @@
 
 **The problem:** Every time you start a new project with an AI coding assistant, the AI doesn't know your conventions. It doesn't know to keep docs in sync, write comments, run tests before claiming done, or use your framework's idioms. You repeat the same instructions in every chat — and the AI drifts from your standards.
 
-**What this solves:** A **skill-based AI conventions system** — **skills that grow with you** 🌱 — that bootstraps into every project automatically. 43 items (all in \`.agents/skills/\`) covering frameworks, domains, and tasks — each invoked on-demand by any AI assistant that supports the `.agents/` convention. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
+**What this solves:** A **skill-based AI conventions system** — **skills that grow with you** 🌱 — that bootstraps into every project automatically. 44 items (all in \`.agents/skills/\`) covering frameworks, domains, and tasks — each invoked on-demand by any AI assistant that supports the `.agents/` convention. The AI arrives already knowing the rules. You focus on the work; the skill system handles the rest.
 
 **But it goes further — the system learns from you.** When you add a new dependency, repeat a pattern across files, or write a new file type, the AI detects it. It doesn't just suggest a new skill — it **writes one**, creates the `SKILL.md`, commits it with a descriptive message, and logs the change to `.agents/skills/learnings.md`. Every entry includes before/after commit hashes, so you can `git checkout` any skill back to its previous state. When you remove a dependency, the corresponding skill retires automatically — no stale rules, no ghost conventions. The system grows and shrinks with your codebase, always reflecting reality.
 
@@ -102,6 +102,8 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 | **CI** | `.agents/workflows/ci.yml` (optional) | Matrix CI for lint/build/test — copied if present |
 | **Usage** | `USAGE.md` | Handbook for adding your own skills |
 
+**Agent validation** — The `tests/test-agent-validation.sh` suite (7 tests) validates all 11 agent `.md` files for frontmatter validity, permission completeness (every agent must have explicit `edit:` and `write:` settings), stale skill references, duplicate skills, task block safety (read-only agents cannot spawn write-capable subagents), and skill count consistency against SKILL-INDEX.md.
+
 ## Coverage — Every File Type Has Rules
 
 ### Framework Detection (auto-bootstrapped by hook)
@@ -120,6 +122,7 @@ No approvals. No stale rules. The system grows and shrinks with your codebase �
 |--------|-------|-----------------|
 | 🏗️ Structure | `project-structure` | Monorepo layout, 4-layer services, naming, service boundaries |
 | 🐳 Containers | `containers` | Multi-stage builds, non-root user, HEALTHCHECK, secrets |
+| 🐳 Docker Ecosystem | `docker` | Build cache optimization, garbage collection, volume lifecycle, log management |
 | 🤖 Agent Pipelines | `agent-pipelines` | Agent loops, turn-based orchestration, state checkpoints, crash recovery |
 | 🧪 Useful Tests | `useful-tests` | Write tests that catch real bugs — unit, integration, E2E with Playwright, app lifecycle |
 | 🐚 Shell | `shell-scripts` | `set -euo pipefail`, quoting, error handling, portability |
@@ -184,7 +187,7 @@ graph TD
     L --> B
 ```
 
-**Agent pipeline** — 11 custom OpenCode agents (2 primary, 9 subagents) with **planner-is-read-only** architecture. The planner (`@ingenium-planner`) ONLY spawns research agents (explore, scout, security-auditor) and populates the kaban board. The orchestrator (`@ingenium-orchestrator`) executes plans via **kaban board integration** — tasks flow from `todo` → `in-progress` → `review` → `done` with kaban MCP tools. All agents have explicit permissions with `"*": "deny"` on task blocks. See [`docs/agents.md`](docs/agents.md) for the full agent architecture.
+**Agent pipeline** — 11 custom OpenCode agents (2 primary, 9 subagents) with **planner-is-read-only** architecture. The planner (`@ingenium-planner`) ONLY spawns research agents (explore, scout, security-auditor) and populates the kaban board. The orchestrator (`@ingenium-orchestrator`) executes plans via **kaban board integration** — tasks flow from `todo` → `in-progress` → `review` → `done` with kaban MCP tools. All agents have explicit permissions with `"*": "deny"` on task blocks. **🔴 Definition of Done Docs Gate**: After every code change by any subagent, the orchestrator MUST spawn `@ingenium-docs` to update affected documentation before marking any kaban task as done. This is mandatory — not optional, not deferrable. See [`docs/agents.md`](docs/agents.md) for the full agent architecture.
 
 **Multi-model software engineer** — Three tiers: `-fast` (V4 Flash, medium reasoning), default (V4 Flash, high), `-premium` (V4 Pro, xhigh). Model assignments centralized in `.agents/models.yaml`.
 
