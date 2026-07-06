@@ -714,6 +714,24 @@ Once the Cline MCP config is written (global settings and/or `.cline/mcp.json`),
 
 **You do not pick the session name.** The MCP config in `.vscode/mcp.json` sets `THREAD_DEFAULT_SESSION` — that IS the session. Every `thread_*` tool defaults to it. Never pass `session` param unless the user explicitly asks. Only call `thread_create_session` if the user says "create a session."
 
+## Shared Infrastructure vs Workspace-Specific Content
+
+**Default Global Session (`THREAD_DEFAULT_SESSION`):** Use for shared infrastructure, frameworks, tools, and consumables that are **not specific to any single repository or workspace**. This includes:
+- Documentation (Kubernetes docs, Docker best practices, Python/Next.js conventions)  
+- Framework guides (React patterns, Python type hints, Rust lifetimes)  
+- Infrastructure reference material (IDE usage, OS commands, CI/CD patterns)  
+- General tooling guides (docker-compose, kubectl, git workflows)  
+- Cross-project reusable knowledge and anti-patterns
+
+**Workspace-Specific Session:** Use for:
+- Decisions about this specific codebase  
+- Bug fixes and their lessons  
+- Design choices in this project  
+- User preferences or constraints for this repo  
+- Project-specific patterns or conventions  
+
+The default session is the **shared library** — think of it as the global knowledge base that all projects can benefit from. Workspace sessions are for local context only.
+
 ## Priority Guidelines
 | Priority | When to use |
 |----------|-------------|
@@ -724,18 +742,30 @@ Once the Cline MCP config is written (global settings and/or `.cline/mcp.json`),
 | 0-2 | System markers, low-signal entries |
 
 ## Tag Convention
-- `architecture` — system design, component layout
-- `decision` — any design or implementation choice
-- `preference` — user style/approach preferences
-- `bug` — bug findings and fixes
-- `pattern` — reusable code patterns discovered
-- `summary` — session summaries
-- `export` — `/export` snapshots of git state, decisions, and counts
-- `reference` — documentation, spec links, API references
-- `transcript` — full conversation transcript exports
-- `full-session` — complete session context dumps
-- `docs-import` — documentation website imports (see "Uploading Documentation Websites to Thread")
+
+**Shared Infrastructure Tags (default global session):**
+- `architecture` — system design, component layout  
+- `decision` — any design or implementation choice  
+- `preference` — user style/approach preferences  
+- `bug` — bug findings and fixes  
+- `pattern` — reusable code patterns discovered  
+- `reference` — documentation, spec links, API references  
+- `docs-import` — documentation website imports (see "Uploading Documentation Websites to Thread")  
+
+**Workspace-Specific Tags:**
+- `project-decision` — decisions about this specific codebase (prefer over generic `decision`)  
+- `bug-fix` — bug fixes in this project (prefer over generic `bug`)  
+- `workspace-preference` — user preferences for this repo  
+- `local-pattern` — patterns discovered only in this workspace  
+
+**General Tags:**
+- `summary` — session summaries  
+- `export` — `/export` snapshots of git state, decisions, and counts  
+- `transcript` — full conversation transcript exports  
+- `full-session` — complete session context dumps  
 - Project-specific tags as appropriate
+
+**Rule of thumb:** If it's useful to **any project** (including future ones you'll work on), put it in the default global session. If it only matters for **this specific repository**, use a workspace session with `-project-name` suffix if needed.
 
 ## Never
 - Don't create a session unless the user explicitly says "create a session"
