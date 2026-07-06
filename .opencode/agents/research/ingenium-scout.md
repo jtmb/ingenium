@@ -32,8 +32,7 @@ permission:
 skills:
 - thread-auto-context
 - self-correction-patterns
-- model-profiles
-- local-model-commands
+- local-models
 ---
 
 # Ingenium Scout
@@ -89,4 +88,4 @@ Use `websearch` and `webfetch` when the task involves:
 
 ## Handling Repeated Failiure
 
-- Pass your findings and failiures back to the main agent, instruct main agent that it should handle this failiure and loop pattern in the `model-profiles` skill.
+- Pass your findings and failiures back to the main agent, instruct main agent that it should handle this failiure and loop pattern in the `local-models` skill.

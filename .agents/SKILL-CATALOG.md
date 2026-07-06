@@ -39,10 +39,9 @@
 | `cli-toolkit` | jq, curl, sed, awk, find, xargs, grep |
 | `regex-reference` | Writing or reviewing regular expressions |
 | `error-interpretation` | Understanding compiler/runtime errors |
-| `model-profiles` | Adapting prompts for Qwen/Gemma/DeepSeek |
+| `local-models` | Model profiles, terminal safety, LM Studio API, and cross-model strategy guide |
 | `debugging-patterns` | Systematic debugging — bisection, log-driven, isolation |
 | `self-correction-patterns` | Recovering from AI mistakes |
-| `local-model-commands` | **ALL terminal commands** — no `&`, no infinite-wait |
 | `skill-load` | 🔴 **Session init** — `/skill-load` injects bootstrap payload |
 | `help` | Need a skill overview |
 | `repo-context` | Starting a new session |
@@ -54,7 +53,6 @@
 | `write-docs` | Need README, API docs, or ADRs |
 | `thread-auto-context` | Persistent memory via Thread MCP |
 | `onboard-existing-repo` | 🔴 **Existing repo → skill system** — parallel subagents explore, map findings, apply all skills and config |
-| `lm-studio` | 🔴 LM Studio local inference — server mgmt, vision bridge, model lifecycle, API reference |
 | `chrome-devtools` | Browser screenshots, performance, network |
 | `playwright-mcp` | Browser automation via Playwright |
 | `gh-cli` | GitHub CLI — PRs, issues, releases, search |
@@ -77,4 +75,4 @@
 | `/write-docs` | Need README, API docs, or ADRs |
 | `/create-readme` | Need a README.md for the project |
 | `/onboard-existing-repo` | Onboard an existing repo to the skill system — parallel subagents explore, map to catalog, apply all skills and config |
-| `/lm-studio` | 🔴 LM Studio — local inference, vision bridge, model management |
+| `/local-models` | 🔴 Local LLM management — model profiles, terminal safety, LM Studio API, vision bridge |

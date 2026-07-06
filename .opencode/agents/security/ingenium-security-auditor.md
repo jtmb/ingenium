@@ -6,6 +6,7 @@ model: deepseek/deepseek-v4-flash
 reasoningEffort: "high"
 permission:
   edit: deny
+  write: deny
   bash: allow
   task:
     "*": "deny"                           # No subagent delegation allowed
