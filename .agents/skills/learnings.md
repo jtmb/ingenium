@@ -172,3 +172,13 @@
   4. **Synced** to 6 destinations + deploy variant docs.
 - **Why**: Subagents can't spawn subagents efficiently. QA doesn't write tests in practice. SE already has useful-tests skill loaded and self-verifies — natural for it to own both code and tests.
 - **Before**: `bfb2bd0`
+
+## 2026-07-05 — thread-auto-context mandatory export workflow
+
+- **Commit**: `6c13ef0` (after)
+- **Category**: skill
+- **Changes**: Updated `.agents/skills/thread-auto-context/SKILL.md` with 3 changes:
+  - Changed "At Session End" to "At Session End — MANDATORY EXPORT" with 5-step mandatory workflow (save summary, decisions, git state, output copyable import prompt, check for prior exports)
+  - Added "Session ending soon?" tip in During the Session — MANDATORY CHECKLIST
+  - Added cross-reference from "/export" section to the new mandatory export section
+- **Why**: Ensure agents always export full session context (summary, decisions, git state) with copyable import prompts at session end

@@ -174,6 +174,7 @@ After EVERY code change (write/edit/delete/refactor), IMMEDIATELY save context b
 > - Hear the user state a constraint/deadline/requirement? → `thread_create_entry` NOW. Priority 9.
 > - Create or update a documentation file? → `thread_upload_file` NOW. Tags: `["reference", "docs"]`. Priority 4.
 
+> **Session ending soon?** → Run the full export workflow below in "At Session End — MANDATORY EXPORT". Do NOT just save a summary — save decisions, git state, and output the import prompt.
 **If you call task_complete and haven't saved context since your last code change, you have violated this rule.** The `.github/instructions/thread-auto-context.instructions.md` instruction fires before every edit and will remind you.
 
 ### Storage Monitoring
@@ -186,8 +187,35 @@ Before uploading large files (transcripts, bulk imports), check disk headroom:
 
 This prevents silent failures from disk-full conditions on resource-constrained hardware like Raspberry Pi.
 
-### At Session End
-- When the user says "thanks", "done", "that's all" "that worked", or similar wrap-up phrases, save a summary entry with `priority=5`, tags: `["summary"]`
+### At Session End — MANDATORY EXPORT
+
+**When the user says "thanks", "done", "that's all", "that worked", or similar wrap-up phrases, you MUST do ALL of the following:**
+
+1. **Save session summary** — `thread_create_entry` with the session's key changes, decisions, and outcomes. Priority: 7. Tags: `["export", "session-state", "opencode"]`.
+
+2. **Save decisions** — `thread_create_entry` consolidating all design decisions, architecture choices, and non-obvious lessons from this session. Priority: 8. Tags: `["export", "decisions", "opencode"]`.
+
+3. **Save git state** — Run `git log --oneline -7` and `git diff --cached --stat`. Save the output via `thread_create_entry`. Priority: 6. Tags: `["export", "git-status", "opencode"]`.
+
+4. **Output a copyable import prompt** — After saving, tell the user:
+   ```
+   === Thread Export Complete ===
+
+   Session: {workspace-name}
+
+   Entries created/updated:
+   1. Session Summary — tags: ["export", "session-state", "opencode"]
+   2. Decisions — tags: ["export", "decisions", "opencode"]
+   3. Git State — tags: ["export", "git-status", "opencode"]
+
+   === Copyable Import Prompt ===
+
+   @ingenium-scout search thread for tags: ["export"] AND ["opencode"] for the {workspace-name} workspace. Read the session-state, decisions, and git-status entries and summarize the context.
+   ```
+
+5. **Check for prior exports first** — Before creating, run `thread_search` with `"export" AND "opencode"`. If entries already exist, update them via `thread_update_entry` rather than creating duplicates.
+
+**This is NOT optional. If you reach session end and have not saved context, you have violated the protocol.**
 
 ### Uploading Copilot Conversation Transcripts
 
@@ -217,6 +245,8 @@ When the user mentions Cline or at session end, upload Cline conversations autom
 ### Uploading OpenCode Session Context — `/export`
 
 When the user runs `/export` or says "export context", or at session end while running in OpenCode, capture the full session state and save it to Thread.
+
+**Cross-reference:** The "At Session End — MANDATORY EXPORT" section above triggers this workflow automatically. If the user explicitly says `/export`, run this section directly. The two workflows should produce the same output format — the user should get a copyable import prompt either way.
 
 **OpenCode detection:** Check for these indicators (first match wins):
 - `$OPENCODE` environment variable is set
