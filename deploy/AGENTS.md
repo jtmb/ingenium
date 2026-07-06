@@ -1,6 +1,6 @@
 # AGENTS.md — Skill System Protocol for gh-llm-bootstrap
 
-This is the **bootstrap source repo** for the Ingenium skill system. The `deploy/` directory is the payload that gets copied to target projects via `bootstrap.sh`. Skills live in `.agents/skills/` — all 46 are deployed. Edit source files here, then sync to `deploy/`.
+This is the **bootstrap source repo** for the Ingenium skill system. The `deploy/` directory is the payload that gets copied to target projects via `bootstrap.sh`. Skills live in `.agents/skills/` — all 48 are deployed. Edit source files here, then sync to `deploy/`.
 
 ## Agent Pipeline (this repo only)
 
@@ -99,7 +99,7 @@ Tests: dependency gap detection, missing coverage, skill count consistency, depl
 ├── .opencode/agents/*.md       # OpenCode custom agent definitions (8 agents)
 ├── .agents/
 │   ├── SKILL-CATALOG.md        # Full skill catalog (lazy-loaded)
-│   ├── skills/                 # All 46 skills — domain conventions + instructions + tools
+│   ├── skills/                 # All 48 skills — domain conventions + instructions + tools
 │   │   └── learnings.md        # Changelog with before/after commit hashes
 │   └── scripts/                # Bootstrap engine (bootstrap.sh, hook-bootstrap.sh)
 ├── tests/

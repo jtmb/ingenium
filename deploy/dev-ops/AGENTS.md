@@ -1,6 +1,6 @@
 # AGENTS.md — Skill System Protocol for Kubernetes Cluster Operations Agent
 
-This is the **deploy target** for the Ingenium skill system in a Kubernetes Cluster Operations AI agent project. The `.agents/skills/` directory contains 42 universal skills (copied from software-dev) plus 4 domain-specific cluster operations skills. All 46 skills are deployed.
+This is the **deploy target** for the Ingenium skill system in a Kubernetes Cluster Operations AI agent project. The `.agents/skills/` directory contains 43 universal skills (copied from software-dev) plus 4 domain-specific cluster operations skills. All 47 skills are deployed.
 
 ## Agent Pipeline
 
@@ -123,7 +123,7 @@ dev-ops/
 │       └── ingenium-security-auditor.md
 ├── .agents/
 │   ├── SKILL-CATALOG.md        # Full skill catalog (lazy-loaded)
-│   ├── skills/                 # 46 skills — 42 universal + 4 cluster ops domain skills
+│   ├── skills/                 # 47 skills — 43 universal + 4 cluster ops domain skills
 │   │   ├── generic-conventions/
 │   │   ├── cluster-operator/
 │   │   ├── cluster-remediation/
