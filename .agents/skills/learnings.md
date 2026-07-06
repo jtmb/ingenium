@@ -133,3 +133,16 @@
   10. Broadened learnings entry trigger to include agents, hooks, plugins, deploy, config, architecture, bugs, patterns
   11. Updated deploy description with 3 domain variants
 - **Synced**: All 3 deploy targets (software-dev, dev-ops, sec-ops); created new `deploy/software-dev/docs/CONVENTIONS.md`
+
+## 2026-07-05 — Documentation audit: 15 staleness fixes, write-docs expansion, Signal 6 added
+
+- **Commit**: `b253ed0`
+- **Category**: docs | skill | config
+- **Changes**: 
+  1. **docs/ARCHITECTURE.md** — 7 fixes: skill count 46→47, added orchestrator-primer to tree, agent subdirectories (primary/execution/research/security), agent pipeline mentions delegation+software-engineer write perms, hooks every 5 calls with delegation checks, deploy section shows 3 domain variants, learnings.md description broadened to 10 categories
+  2. **docs/CONVENTIONS.md** — 5 fixes: agent naming `ingenium-{role}.md` with role-nested dirs, removed stale .agents/instructions/ refs, deploy description to 3 variants, learnings trigger broadened, added Orchestration Rules section
+  3. **docs/TECH-STACK.md** — 3 additions: Agent Pipeline Models table (8 agents w/ model+perms), Key Integrations table (Thread MCP, LM Studio, OpenCode Zen, DeepSeek API), Deploy Variants table (3 targets with skill counts)
+  4. **write-docs/SKILL.md** — Expanded trigger table from 6 rows to 11 rows covering agents, hooks, plugins, config, deploy, permissions/delegation, learnings scope
+  5. **update-skills/SKILL.md** — Added Signal 6 (Documentation Drift) with 9 detection conditions, automated detection commands, and fix workflow
+  6. **All deploy targets synced** — software-dev/docs/ (4 files), dev-ops docs+skills, sec-ops docs+skills
+- **Why**: Audit revealed the detection pipeline only looked at skills, not agents/hooks/plugins/config/docs. write-docs trigger table was too narrow to catch agent/config/plugin changes. No mechanism existed to detect stale documentation.
