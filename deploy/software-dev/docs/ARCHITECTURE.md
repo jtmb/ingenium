@@ -14,7 +14,7 @@ Key properties:
 ```
 ingenium/
 ├── .agents/                    ← AI conventions system (the "product")
-│   ├── skills/                 ← 47 skills — framework, domain, task, and tool conventions
+│   ├── skills/                 ← 48 skills — framework, domain, task, and tool conventions
 │   │   ├── generic-conventions/  ← Core rules: docs, security, error handling, DRY
 │   │   ├── {framework}-conventions/ ← nextjs, python, go, rust, typescript-standalone
 │   │   ├── {domain}-skills/       ← containers, kubernetes, api-design, sql-database, etc.
@@ -57,7 +57,7 @@ ingenium/
 
 ### Skill System (`.agents/skills/`)
 
-The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 47 skills live in a single hierarchy under `.agents/skills/`:
+The core of the project. Every skill is a directory containing a single `SKILL.md` file with YAML frontmatter (`name`, `description`) and Markdown body. All 48 skills live in a single hierarchy under `.agents/skills/`:
 
 | Tier | Pattern | Count | Examples |
 |------|---------|-------|----------|
@@ -67,7 +67,7 @@ The core of the project. Every skill is a directory containing a single `SKILL.m
 | **Task** | invocable via `/command` | ~14 | update-skills, audit-skills, generate-docs, write-docs, help, etc. |
 | **Tool** | automation interfaces | ~5 | chrome-devtools, playwright-mcp, gh-cli, github-issues, web-design-reviewer |
 
-All 47 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, bootstrap.sh, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
+All 48 skills are cross-referenced in `README.md` tables, `SKILL-INDEX.md`, bootstrap.sh, and the mermaid diagram. The `audit-skills` skill validates consistency across all integration points.
 
 ### Bootstrap Engine (`.agents/scripts/`)
 
@@ -100,7 +100,7 @@ A set of 3 domain variant mirrors containing only what gets deployed to target p
 - `deploy/software-dev/` — General software engineering (skills, hooks, agents, plugins, docs, config)
 - `deploy/dev-ops/` — Kubernetes cluster operations (skills, hooks, agents, plugins, docs, config)
 - `deploy/sec-ops/` — Security penetration testing (skills, hooks, agents, plugins, docs, config)
-- Each variant contains `.agents/skills/` (47 skills), `.agents/hooks/`, `.opencode/agents/`, `.opencode/plugins/`, `docs/`, `AGENTS.md`, `opencode.json`, and `SKILL-INDEX.md`
+- Each variant contains `.agents/skills/` (48 skills), `.agents/hooks/`, `.opencode/agents/`, `.opencode/plugins/`, `docs/`, `AGENTS.md`, `opencode.json`, and `SKILL-INDEX.md`
 - No scripts or tests — source-only artifacts stay in root
 
 The `test-self-improving.sh` suite validates that deploy stays in sync with source (TEST 5) and that no source-only files leak in (TEST 4).
