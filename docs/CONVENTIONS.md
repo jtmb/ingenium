@@ -114,3 +114,14 @@ description: "One sentence. Keyword-rich. Includes when to invoke."
 - **🔴 CRITICAL — All agent task permission blocks MUST have `"*": "deny"` as the first entry.** This prevents subagents from leaking across agent boundaries (mitigates OpenCode issue #6527). Without this, any `mode: subagent` agent leaks into every agent's task tool picker, allowing permission bypass.
 - **All 11 agents must have explicit `edit:` and `write:` settings** in their YAML frontmatter — no implicit defaults, no omitted keys.
 - **The planner is read-only** — it may ONLY spawn research subagents (explore, scout, security-auditor). It must never run implementation, QA, or documentation agents.
+
+
+## Append-Only Files
+
+Some files must be **append-only** to prevent accidental data loss. The standard MCP `writeFile` tool overwrites by default (`fs.writeFileSync`). Use append operations only:
+
+| File | Why it's append-only | How to append safely |
+|------|---------------------|----------------------|
+| `.agents/skills/learnings.md` | Sequential changelog of skill system evolution | `cat >> .agents/skills/learnings.md << EOF` or use `.agents/skills/learnings.sh` helper script. Never overwrite via MCP write tool or bash `>` redirection. If accidental overwrite occurs: restore from git immediately and log recovery in learnings.md itself.
+
+**See also:** [Generic Conventions](../.agents/skills/generic-conventions/SKILL.md#append-only-files-rule) for detailed rules.
