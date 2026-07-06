@@ -61,7 +61,7 @@ your-project/
 │   ├── TECH-STACK.md                            ←   Dependencies & version decisions
 │   └── CONVENTIONS.md                           ←   Naming, patterns, file organization
 ├── .agents/
-│   ├── skills/                                  ← ALL conventions (45 items)
+│   ├── skills/                                  ← ALL conventions (43 items)
 │   │   ├── generic-conventions/
 │   │   │   └── SKILL.md                         ←   Fallback for any file type
 │   │   ├── nextjs-conventions/
@@ -301,3 +301,33 @@ User-level examples: "I prefer single quotes", "Always use async/await over .the
 | TypeScript | `typescript-standalone` | Strict config, Type safety, Error handling, Async patterns, Module system, Node.js conventions, Testing, Styling |
 
 The `generic-conventions` skill covers all other file types with 13 sections — docs, comments, testing, DRY, secure coding, error handling, configuration, naming, and more. For the full skill catalog, see [`SKILL-INDEX.md`](SKILL-INDEX.md).
+
+---
+
+## Agent Pipeline
+
+This bootstrap repo defines **11 agents** (2 primary, 9 subagents) for OpenCode. See [`docs/agents.md`](docs/agents.md) for the full architecture.
+
+### Planner is Read-Only
+
+The `@ingenium-planner` agent is **read-only** — it researches requirements and produces plans, but NEVER executes work. It may ONLY spawn research subagents:
+- `@ingenium-explore` — codebase search
+- `@ingenium-scout` — Thread/RAG context
+- `@ingenium-security-auditor` — security scope check
+
+### Orchestrator-to-Kaban Workflow
+
+The `@ingenium-orchestrator` uses a **kaban board** for structured work tracking:
+
+1. **Get next task** — `kaban_get_next_task` reads highest-priority item from `todo` column
+2. **Claim task** — `kaban_move_task <id> in-progress` marks task as active
+3. **Spawn subagent** — delegates to the appropriate agent (software-engineer, qa, docs, etc.)
+4. **Move to review** — `kaban_move_task <id> review` after subagent completes
+5. **Complete** — `kaban_complete_task <id>` after QA approval
+6. **Archive** — `kaban_archive_tasks` at session end
+
+The kaban board is authoritative; `todowrite` mirrors state for OpenCode visibility.
+
+### Models Configuration (`.agents/models.yaml`)
+
+Model assignments for all agents are centralized in **`.agents/models.yaml`** — the human-editable source of truth. It defines model aliases (`fast`, `capable`, `premium`, `local`), per-agent model mappings, and reasoning effort overrides. Changes should be made here first, then propagated to each agent's `.md` frontmatter.

@@ -108,3 +108,9 @@ description: "One sentence. Keyword-rich. Includes when to invoke."
 - **Every tool call passes the Pre-Action Gate:** "Should a subagent do this?"
 - **After every change, @ingenium-docs is spawned** — mandatory, never optional.
 - **Every 5 tool calls, a Periodic Self-Audit runs** — checking if delegation rules were followed.
+
+## Security Rules — Agent Permissions
+
+- **🔴 CRITICAL — All agent task permission blocks MUST have `"*": "deny"` as the first entry.** This prevents subagents from leaking across agent boundaries (mitigates OpenCode issue #6527). Without this, any `mode: subagent` agent leaks into every agent's task tool picker, allowing permission bypass.
+- **All 11 agents must have explicit `edit:` and `write:` settings** in their YAML frontmatter — no implicit defaults, no omitted keys.
+- **The planner is read-only** — it may ONLY spawn research subagents (explore, scout, security-auditor). It must never run implementation, QA, or documentation agents.
