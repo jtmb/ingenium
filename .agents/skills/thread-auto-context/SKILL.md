@@ -20,22 +20,13 @@ At session start, if Thread MCP is not already configured, bootstrap the bridge 
 
 ## 🔴 HARD RULE — Verify Configuration Before Making Assumptions
 
-**Never assume which MCP servers are available.** Always verify by:
-1. Checking `.vscode/mcp.json` for existing `servers.thread` config
-2. Confirming Thread is reachable at the configured URL (`THREAD_SERVER_URL`)
-3. Looking up environment variables in the **default global MCP configuration location** (where opencode stores server settings, auth tokens, and provider configs) — don't directly reference paths or keys
+When making actions that require external context (MCP servers available, API keys exist, config values present), always verify it actually exists first:
+- **Thread MCP tools** → Confirm server reachable at configured URL before calling Thread APIs
+- **LM Studio models** → Check server is responding at its base URL (don't assume port 1234)  
+- **OpenAI-compatible calls** → Verify model exists on the endpoint, don't send requests hoping they work
+- **Environment variables** → Look in the default global MCP configuration location — don't guess paths or key names
 
-The Thread API token and authentication credentials are stored in the default global MCP config location. This is where OpenCode centralizes all MCP server configurations including:
-- Server URLs and connection parameters  
-- Authentication tokens for external services  
-- Environment variables passed to bridge processes  
-
-**Do not:**
-- Hardcode file paths or specific key names
-- Assume a particular directory structure
-- Directly point users to internal config files without context
-
-**Instead, say generically:** "The Thread API token is configured in the default global MCP configuration location. This is where OpenCode stores all MCP server settings."
+**The pattern:** "Verify → Act" not "Act and hope it worked."
 
 ### Bootstrap Decision Tree
 
