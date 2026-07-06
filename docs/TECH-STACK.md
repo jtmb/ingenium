@@ -56,7 +56,7 @@ None. This is a file-based toolkit. There is no server, no database, no deployme
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
-| @ingenium-scrum | DeepSeek V4 Pro | Sprint planning, kaban board population — read-only. Spawns explore + scout for analysis |
+| @ingenium-planner | DeepSeek V4 Pro | Task planning, kaban board population — read-only. Spawns explore + scout for analysis |
 | @ingenium-orchestrator | DeepSeek V4 Flash | Coordination — NEVER writes code directly. Full 5-layer enforcement: always-visible primer in opencode.json, Pre-Action Gate, Anti-Patterns table, Periodic Self-Audit, post-tool-use hook |
 | @ingenium-software-engineer | DeepSeek V4 Flash (Zen free) | **All code implementation** — read/write. Writes production code, self-verifies |
 | @ingenium-qa | DeepSeek V4 Flash (Zen free) | Code review + test authoring. Write-only (tests). Does NOT write production code |

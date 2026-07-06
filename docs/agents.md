@@ -2,7 +2,7 @@
 
 ## Overview
 
-Nine agents total: 2 primary, 7 subagents. The **scrum master** researches and produces plans (read-only), populating the kaban board with tasks. The **orchestrator** coordinates execution — it NEVER writes code directly, always delegating to subagents. Six specialized subagents handle search, context, implementation, review, documentation, and security.
+Nine agents total: 2 primary, 7 subagents. The **planner** researches and produces plans (read-only), populating the kaban board with tasks. The **orchestrator** coordinates execution — it NEVER writes code directly, always delegating to subagents. Six specialized subagents handle search, context, implementation, review, documentation, and security.
 
 ```mermaid
 flowchart TB
@@ -10,9 +10,9 @@ flowchart TB
         REQ["💬 User Request"]
     end
 
-    REQ --> P["⚙️ @ingenium-scrum<br/><i>DeepSeek V4 Pro</i><br/>Read-only | Scrum Master"]
+    REQ --> P["⚙️ @ingenium-planner<br/><i>DeepSeek V4 Pro</i><br/>Read-only | Planner"]
 
-    subgraph Scrum["🔍 Scrum — Research Phase"]
+    subgraph Planner["🔍 Planner — Research Phase"]
         P -->|"spawns 2-4 in parallel"| PARALLEL{ }
         PARALLEL --> EXP1["🔎 @ingenium-explore #1<br/>Find relevant files/patterns"]
         PARALLEL --> EXP2["🔎 @ingenium-explore #2<br/>Find dependencies/tests"]
@@ -54,7 +54,7 @@ flowchart TB
 
 | Agent | Type | Model | Provider | Access | Purpose |
 |-------|------|-------|----------|--------|---------|
-| **ingenium-scrum** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | Scrum master — plans sprints, decomposes feature requests, populates kaban board |
+| **ingenium-planner** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | Planner — plans sprints, decomposes feature requests, populates kaban board |
 | **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-flash` | DeepSeek API | Full R/W | Coordinator — delegates ALL work to subagents, never writes code directly |
 | **ingenium-plan-file** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (plan.md only) | Single-purpose — manages `plan.md` at project root. Created/updated/deleted only by planner instruction |
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
@@ -70,7 +70,7 @@ flowchart TB
 
 | # | Phase | Trigger | Agent | Action |
 |---|-------|---------|-------|--------|
-| 1 | **Research** | User request | Scrum | Spawns explore(2x) + scout + security-auditor in parallel → synthesizes plan, populates kaban board |
+| 1 | **Research** | User request | Planner | Spawns explore(2x) + scout + security-auditor in parallel → synthesizes plan, populates kaban board |
 | 2 | **Handoff** | Plan complete | User | Tabs to orchestrator |
 | 3 | **Pre-Action Gate** | EVERY tool use | Orchestrator | ⚡ Checks: "Should a subagent do this?" before any tool call |
 | 4 | **Code writing** | Implementation needed | Orchestrator → **Software-Engineer** | Implements code, self-verifies (tests/type-check), returns results |
@@ -84,11 +84,11 @@ flowchart TB
 
 ## Kaban Board Integration
 
-The kaban board is the authoritative work tracking system for the agent pipeline. Tasks flow through a structured lifecycle managed by the scrum master and orchestrator:
+The kaban board is the authoritative work tracking system for the agent pipeline. Tasks flow through a structured lifecycle managed by the planner and orchestrator:
 
 ```mermaid
 flowchart LR
-    subgraph Scrum["Scrum — Plan & Populate"]
+    subgraph Planner["Planner — Plan & Populate"]
         REQ["User Request"] --> CREATE["kaban_add_task_checked<br/>todo column"]
         CREATE --> ASSIGN["assignedTo subagent<br/>dependencies set"]
     end
@@ -116,7 +116,7 @@ flowchart LR
 
 | Step | Agent | Action | Kaban Tool | Todowrite Mirror |
 |------|-------|--------|-----------|-----------------|
-| 1 | Scrum | Creates tasks with subagent assignments and dependencies | `kaban_add_task_checked`, `kaban_add_dependency` | — |
+| 1 | Planner | Creates tasks with subagent assignments and dependencies | `kaban_add_task_checked`, `kaban_add_dependency` | — |
 | 2 | Orchestrator | Reads next high-priority work item from todo column | `kaban_get_next_task` | Mark `in_progress` |
 | 3 | Orchestrator | Claims task, marks as active, spawns subagent | `kaban_move_task <id> in-progress` | Mark `in_progress` |
 | 4 | Subagent | Implements, reviews, or documents the work | — | — |
@@ -128,14 +128,14 @@ flowchart LR
 
 | Column | State | Who moves | Description |
 |--------|-------|-----------|-------------|
-| `todo` | Pending | Scrum (create) | Work not yet started, ordered by priority |
+| `todo` | Pending | Planner (create) | Work not yet started, ordered by priority |
 | `in-progress` | Active | Orchestrator | Subagent is actively working on this task |
 | `review` | Under review | Orchestrator | QA review or peer verification needed |
 | `done` | Complete | Orchestrator | Finished, verified, ready for archive |
 
 ### Rules
 
-- **Scrum creates all tasks** during planning — orchestrator never creates tasks, only reads and moves them
+- **Planner creates all tasks** during planning — orchestrator never creates tasks, only reads and moves them
 - **Orchestrator reads** `kaban_get_next_task` before starting each work unit — never picks work from memory
 - **Tasks flow through** `todo → in-progress → review → done` — no skipping columns
 - **`kaban_archive_tasks`** runs at session end after all tasks are complete
@@ -147,7 +147,7 @@ flowchart LR
 
 ## Per-Agent Profiles
 
-### @ingenium-scrum — Scrum Master
+### @ingenium-planner — Planner
 
 | Property | Value |
 |----------|-------|
@@ -167,14 +167,14 @@ flowchart LR
 | 4. Plan | Produce step-by-step plan (files, subagents, order, tests, docs) | — |
 | 5. Persist & hand off | Save plan to `plan.md`, hand off to orchestrator | plan-file |
 
-**Probing workflow (§1.5):** Before spawning ANY research subagents, the scrum agent must validate its understanding with the user. This prevents wasted research on misunderstood requirements. The probe step requires at least 3 of 9 clarifying questions (priority, constraints, success criteria, stakeholders, deadlines, risks, out-of-scope, testing preferences, sprint split). It also runs three validation checks:
+**Probing workflow (§1.5):** Before spawning ANY research subagents, the planner must validate its understanding with the user. This prevents wasted research on misunderstood requirements. The probe step requires at least 3 of 9 clarifying questions (priority, constraints, success criteria, stakeholders, deadlines, risks, out-of-scope, testing preferences, sprint split). It also runs three validation checks:
 1. **Restatement** — "Here's what I understand you want. Is that correct?"
 2. **Assumptions** — "I am assuming X, Y, Z. Are these safe?"
 3. **Scope** — "I will NOT work on A, B. Confirm?"
 
 The `question` tool is used for structured choice questions; freeform text for open-ended ones. The agent waits for user responses before proceeding — no research happens before probe completion.
 
-**Scrum HARD RULEs:**
+**Planner HARD RULEs:**
 - 🔴 Never search code, grep, or glob directly — always delegate to explore
 - 🔴 Never access general subagent or circumvent read-only restrictions
 - 🔴 **Ask Before You Plan** — Never spawn research subagents without first asking clarifying questions. Ambiguous requests must be resolved before delegation
@@ -361,11 +361,11 @@ Model assignments are centralized in `.agents/models.yaml` — the human-editabl
 
 ## Workflow
 
-### Phase 1: Scrum (Research → Plan → Kaban Board)
+### Phase 1: Planner (Research → Plan → Kaban Board)
 
 ```mermaid
 flowchart LR
-    REQ["User Request"] --> P["Scrum Master"]
+    REQ["User Request"] -->     P["Planner"]
     P -->|parallel| E1["@explore #1<br/>Find relevant files"]
     P -->|parallel| E2["@explore #2<br/>Find dependencies"]
     P -->|parallel| SC["@scout<br/>Past decisions"]
@@ -411,7 +411,7 @@ flowchart LR
 
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
-| DeepSeek V4 Pro (API) | `ingenium-scrum`, `ingenium-software-engineer-premium` | 2 | Paid |
+| DeepSeek V4 Pro (API) | `ingenium-planner`, `ingenium-software-engineer-premium` | 2 | Paid |
 | DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor` | 3 | Paid |
 | DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-plan-file` | 5 | Free |
 | qwopus 3.5 9B Coder (LM Studio) | `ingenium-scout` | 1 | Local |
@@ -432,7 +432,7 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |
 | ingenium-qa | `@ingenium-qa` | Edit (`edit: allow`) | orchestrator only |
 | ingenium-docs | `@ingenium-docs` | Write docs | orchestrator only |
-| ingenium-plan-file | `@ingenium-plan-file` | Read/Write (plan.md only) | scrum only |
+| ingenium-plan-file | `@ingenium-plan-file` | Read/Write (plan.md only) | planner only |
 
 ## How to Use the Pipeline
 
@@ -442,15 +442,15 @@ You have **two primary agents** — switch between them with the **Tab** key:
 
 | Primary | Tab to | Use when you want to... |
 |---------|--------|------------------------|
-| **ingenium-scrum** | Tab | Sprint planning, research, produce plan, populate kaban board. Read-only — no accidental edits. |
+| **ingenium-planner** | Tab | Sprint planning, research, produce plan, populate kaban board. Read-only — no accidental edits. |
 | **ingenium-orchestrator** | Tab | Execute the plan. Coordinates subagents — never writes code directly. |
 
 ### Typical Workflow
 
 ```
-1. Tab → ingenium-scrum
+1. Tab → ingenium-planner
    You: "Plan the addition of OAuth to the API"
-   Scrum: auto-invokes @ingenium-explore (×2), @ingenium-scout, @ingenium-security-auditor
+   Planner: auto-invokes @ingenium-explore (×2), @ingenium-scout, @ingenium-security-auditor
             returns a step-by-step plan with files, subagent assignments, testing strategy
 
 2. Tab → ingenium-orchestrator  

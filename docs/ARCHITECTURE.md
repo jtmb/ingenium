@@ -92,11 +92,11 @@ Plugins bridge the gap between skills (AI-interpreted) and deterministic guardra
 
 ### Kaban Board in the Agent Pipeline
 
-The kaban board is the central work tracking hub connecting the scrum master, orchestrator, and subagents. Tasks flow through a structured lifecycle:
+The kaban board is the central work tracking hub connecting the planner, orchestrator, and subagents. Tasks flow through a structured lifecycle:
 
 ```mermaid
 flowchart TB
-    subgraph Scrum["📋 Scrum Agent — Populate Board"]
+    subgraph Planner["📋 Planner Agent — Populate Board"]
         A1["kaban_add_task_checked<br/>Create tasks in todo"]
         A2["kaban_add_dependency<br/>Set ordering constraints"]
         A1 --> A2
@@ -122,7 +122,7 @@ flowchart TB
         D1 --> D2
     end
 
-    Scrum --> Orchestrator
+    Planner --> Orchestrator
     B2 --> C1
     B2 --> C2
     B2 --> C3
@@ -134,7 +134,7 @@ flowchart TB
 
 **Data Flow:**
 
-1. **Scrum Agent** — After producing a plan, calls `kaban_add_task_checked` for each work unit, assigning `assignedTo` to the appropriate subagent (explore, software-engineer, qa, docs, security-auditor). Calls `kaban_add_dependency` to enforce ordering constraints (e.g., implementation before review). All tasks land in the `todo` column.
+1. **Planner Agent** — After producing a plan, calls `kaban_add_task_checked` for each work unit, assigning `assignedTo` to the appropriate subagent (explore, software-engineer, qa, docs, security-auditor). Calls `kaban_add_dependency` to enforce ordering constraints (e.g., implementation before review). All tasks land in the `todo` column.
 2. **Orchestrator** — Reads the next task via `kaban_get_next_task`, which returns the highest-priority task with resolved dependencies. Also marks the task as `in_progress` in `todowrite` for in-session OpenCode visibility. Moves the task to `in-progress` via `kaban_move_task <id> in-progress`, then spawns the assigned subagent.
 3. **Subagent** — Completes the assigned work (implementation, review, documentation). Returns results to the orchestrator.
 4. **Orchestrator (cont.)** — Moves the task to `review` via `kaban_move_task <id> review` and marks it as `pending` (for QA review) in `todowrite`. Spawns @ingenium-qa for verification. After QA approves, calls `kaban_complete_task <id>` and marks `completed` in `todowrite`.
@@ -144,7 +144,7 @@ flowchart TB
 
 | Agent | Kaban Tools | Todowrite |
 |-------|-------------|-----------|
-| `ingenium-scrum` | `kaban_add_task_checked`, `kaban_add_dependency`, `kaban_status`, `kaban_init` | — |
+| `ingenium-planner` | `kaban_add_task_checked`, `kaban_add_dependency`, `kaban_status`, `kaban_init` | — |
 | `ingenium-orchestrator` | `kaban_get_next_task`, `kaban_move_task`, `kaban_complete_task`, `kaban_archive_tasks`, `kaban_export_markdown`, `kaban_status`, `kaban_list_tasks` | `todo: allow` (mirror at each transition) |
 
 The board is the authoritative state. `todowrite` is a secondary mirror for in-session OpenCode visibility — the orchestrator updates it at each kaban transition (`get-next-task`, `move-to-in-progress`, `move-to-review`, `complete`). The anti-patterns table includes "forgot to update todowrite" to ensure both are kept in sync. See `docs/agents.md` for the full agent lifecycle and `kaban-board/SKILL.md` for the complete MCP tool reference.
@@ -166,8 +166,8 @@ Model assignments for all agents are centralized in `.agents/models.yaml`, the h
 | Section | Content | Example |
 |---------|---------|---------|
 | **Model aliases** | Short names mapping to full provider/model strings | `fast: deepseek/deepseek-v4-flash` |
-| **Agent assignments** | Per-agent model selection using aliases | `ingenium-scrum: premium` |
-| **Reasoning effort** | Per-agent `reasoningEffort` override | `ingenium-scrum: xhigh` |
+| **Agent assignments** | Per-agent model selection using aliases | `ingenium-planner: premium` |
+| **Reasoning effort** | Per-agent `reasoningEffort` override | `ingenium-planner: xhigh` |
 
 The model hierarchy uses three tiers:
 
