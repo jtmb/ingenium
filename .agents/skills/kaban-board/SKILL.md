@@ -68,6 +68,30 @@ kaban --version
 
 After linking, use `kaban` directly (not via `npx` or `bunx`).
 
+> **⚠️ Source in `/tmp` is ephemeral** — `/tmp/kaban-source` is wiped on reboot, and `npm link` resolves through fnm's temp path. The `kaban` binary will disappear after restart. See **Permanent installation** below for a durable setup.
+
+### Permanent installation (survives reboot)
+
+After the source build above, install permanently so `kaban` survives WSL restarts:
+
+```bash
+# Copy built packages to a permanent location
+mkdir -p ~/.local/share/kaban
+cp -r /tmp/kaban-source/packages ~/.local/share/kaban/
+
+# Create a wrapper script in ~/.local/bin/ (add to $PATH if not already)
+cat > ~/.local/bin/kaban << 'SCRIPT'
+#!/usr/bin/env bash
+exec bun run ~/.local/share/kaban/packages/cli/dist/index.js "$@"
+SCRIPT
+chmod +x ~/.local/bin/kaban
+
+# Verify
+kaban --version
+```
+
+This also works for the TUI binary (`kaban-tui` was already symlinked to `~/.local/bin/` during the source build above).
+
 ### npx (zero-install — broken in v0.3.4)
 
 ```bash
