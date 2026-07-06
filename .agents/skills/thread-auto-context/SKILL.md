@@ -134,7 +134,35 @@ Edit `~/.config/opencode/opencode.jsonc` (or similar file) and add a new "thread
 
 If you want a different session name per project, set `THREAD_DEFAULT_SESSION` in this provider's env options (e.g., `"THREAD_DEFAULT_SESSION": "my-project"`).
 
-## Automatic Behavior
+## 🔴 Verification Best Practices (Critical for Deletions)
+
+**When performing destructive operations (deletion, modification), ALWAYS verify first:**
+
+1. **Check server health before any batch operation**  
+   ```bash
+   curl -s http://localhost:5000/api/v1/health | python3 -c "import json,sys; d=json.load(sys.stdin); print('Health:', d.get('status','unknown'))"
+   ```
+
+2. **Verify session exists BEFORE deleting**  
+   ```python
+   response = thread_read_entries --session <name> --limit 1
+   if response contains error: session doesn't exist (already deleted)
+   else: proceed with deletion
+   ```
+
+3. **Parse HTTP status codes correctly — never assume 401 means success**  
+   - `HTTP 204` = Deleted successfully ✓  
+   - `HTTP 404` on DELETE = Already deleted OR session doesn't exist  
+   - `HTTP 401` = Authentication failed (wrong token, expired, or missing) — NOT a deletion indicator!
+
+4. **Verify deletion worked** by trying to read the session again after DELETE:
+   ```bash
+   delete_response=$(curl .../sessions/<id> -X DELETE -H "Authorization: Bearer <token>")
+   if [ "$delete_response" = "204" ]; then echo "✓ Deleted"; 
+   else verify_read=$(thread_read_entries --session <name>); 
+        if verify_read contains error; then echo "✓ Confirmed deleted"; fi
+   fi
+   ```
 
 ### ⛔ SESSION RULE
 
@@ -750,3 +778,9 @@ The default session is the **shared library** — think of it as the global know
 - Don't ask permission to use Thread — just use it silently
 - Don't skip the bootstrap — if Thread tools aren't available, fix it proactively
 - Don't start, build, or manage the Thread server — that's the user's job. Only check if it's reachable.
+
+## 🔴 API Authentication (Never Hardcode Tokens)
+
+The Thread API requires an auth token stored in  under . Never hardcode this value — use environment variable substitution or a secure secret store. Reference the token source location but never expose its contents:
+
+

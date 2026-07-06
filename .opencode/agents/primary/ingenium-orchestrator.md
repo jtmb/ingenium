@@ -196,9 +196,9 @@ The kaban board is your source of truth for all work items. You NEVER create wor
 
 The `todowrite` tool is now a secondary mirror of the kaban board — NOT the primary task tracker. Use kaban tools (`kaban_add_task`, `kaban_move_task`, `kaban_complete_task`) for all work tracking. todowrite may still be used for in-session micro-tracking but the kaban board is authoritative.
 
-## Parallel Subagent Execution Pattern
+## Parallel Subagent Execution
 
-When a task has multiple independent units of work, spawn 2-3 subagents in parallel:
+When a task has multiple independent work units, spawn subagents as needed:
 
 1. **Divide** — Split the task into independent work units
 2. **Parallelize** — Call the Task tool for ALL subagents in a single message
@@ -208,10 +208,10 @@ When a task has multiple independent units of work, spawn 2-3 subagents in paral
 ### Usage pattern:
 ```
 (single message with multiple task calls)
-Task 1: @ingenium-software-engineer → analyze feature X
-Task 2: @ingenium-qa → write tests for feature X
-Task 3: @ingenium-security-auditor → audit feature X changes
-→ orchestrator merges findings, delegates file writes to @ingenium-software-engineer, spawns @ingenium-docs
+@ingenium-software-engineer → analyze feature X
+@ingenium-qa → write tests for feature X
+@ingenium-security-auditor → audit feature X changes
+→ orchestrator merges findings, delegates file writes, spawns @ingenium-docs
 ```
 
 ## Core Rules
