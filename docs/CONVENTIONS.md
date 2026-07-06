@@ -34,6 +34,15 @@
 - **Test failures are explicit** — `test-self-improving.sh` prints `✓ PASS` or `✗ FAIL` with clear descriptions. No silent failures.
 - **Frontmatter errors are silent** — bad YAML doesn't throw errors, it just means the skill won't load. The test suite catches these.
 
+## Thread / Export Conventions
+
+- **Full transcript export is mandatory at session end** — the AI MUST write a comprehensive markdown transcript to `/tmp/opencode/session-{YYYY-MM-DD}-transcript.md` and upload it to Thread via `thread_upload_file` with Tags: `["export", "transcript", "full-session"]`, Priority: 9.
+- **This is a 🔴 HARD RULE** in the `thread-auto-context` skill — not optional, not deferrable.
+- **Export order**: transcript → session summary → decisions → git state. The transcript is step 0.
+- **Tag conventions**: use `export` + `transcript` + `full-session` for transcripts, `export` + `session-state` for summaries, `export` + `decisions` for decision logs, `export` + `git-status` for git state.
+- **No duplicates**: before creating entries, search `"export" AND "opencode"` and update existing entries rather than creating new ones.
+- **OpenCode detection**: check `$OPENCODE`, `opencode.json`, or `.opencode/` before exporting. Skip if not in OpenCode.
+
 ## Git Practices
 
 - **Conventional Commits**: `type(scope): description` format.
