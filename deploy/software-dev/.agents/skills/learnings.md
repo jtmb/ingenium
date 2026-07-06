@@ -146,3 +146,17 @@
   5. **update-skills/SKILL.md** — Added Signal 6 (Documentation Drift) with 9 detection conditions, automated detection commands, and fix workflow
   6. **All deploy targets synced** — software-dev/docs/ (4 files), dev-ops docs+skills, sec-ops docs+skills
 - **Why**: Audit revealed the detection pipeline only looked at skills, not agents/hooks/plugins/config/docs. write-docs trigger table was too narrow to catch agent/config/plugin changes. No mechanism existed to detect stale documentation.
+
+## 2026-07-05 — Plan persistence system + scout web search
+
+- **Commit**: `bfb2bd0`
+- **Category**: agent | config | docs
+- **Changes**:
+  1. **New agent**: `ingenium-plan-file` — single-purpose subagent restricted to `plan.md` only. Permissions: read/write/edit only. No task/bash/skill/grep/websearch. Three operations: save, update, delete.
+  2. **Planner updated**: Added `ingenium-plan-file` to task perms. Added Plan Style Guide section (TL;DR, Orchestrator Instructions table, Detailed Change Specs, Relevant Files, Verification, Decisions). Added step 0 (resume check for plan.md). Step 5 now persists plan to plan.md before handoff.
+  3. **Orchestrator updated**: Plan Detection now checks plan.md at project root. Process step 1 loads plan.md. Added step 7 (clear plan after completion). Self-audit checks for plan.md tracking.
+  4. **Scout updated**: Added web search instructions to description, process step 3, during-work entries, and new Web Search Usage section. Permissions (websearch/webfetch) already existed.
+  5. **docs/agents.md**: Updated for 9 agents (2 primary + 7 subagents). Added plan-file to agent table, planner/orchestrator profiles, subagent invocation table, compute split.
+  6. **All 4 files synced** to 6 destinations: 3 deploy variants + 3 local mirrors.
+- **Before**: `b253ed0`
+- **Why**: Plans were lost on session close with no persistence. Thread MCP would create hard dependency. File-based plan.md with single-purpose subagent is zero-dependency. Scout had websearch permissions but never used them — needed instructions.
