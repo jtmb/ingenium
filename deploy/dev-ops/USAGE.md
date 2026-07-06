@@ -13,7 +13,7 @@ See **[Getting Started](./README.md#getting-started)** in the README for install
 - **Manual Install** — clone and copy `deploy/`
 - **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
 
-**What you get in every project:** the full `.agents/skills/` (49 items total), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
+**What you get in every project:** the full `.agents/skills/` (45 items total), `AGENTS.md`, `SKILL-INDEX.md`, `docs/` templates, and hooks — all auto-detected to match your framework.
 
 ---
 
@@ -63,7 +63,7 @@ your-project/
 │   ├── TECH-STACK.md                            ←   Dependencies & version decisions
 │   └── CONVENTIONS.md                           ←   Naming, patterns, file organization
 ├── .agents/
-│   ├── skills/                                  ← ALL conventions (49 items)
+│   ├── skills/                                  ← ALL conventions (45 items)
 │   │   ├── generic-conventions/
 │   │   │   └── SKILL.md                         ←   Fallback for any file type
 │   │   ├── nextjs-conventions/
@@ -114,7 +114,6 @@ your-project/
 │   │   │   └── SKILL.md                         ←   Playwright automation
 │   │   ├── gh-cli/
 │   │   │   └── SKILL.md                         ←   GitHub CLI operations
-│   │   ├── github-issues/
 │   │   │   └── SKILL.md                         ←   GitHub issue management
 │   │   ├── web-design-reviewer/
 │   │   │   └── SKILL.md                         ←   UI/UX inspection

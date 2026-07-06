@@ -1,6 +1,6 @@
 # AGENTS.md — Skill System Protocol for gh-llm-bootstrap
 
-This is the **bootstrap source repo** for the Ingenium skill system. The `deploy/` directory is the payload that gets copied to target projects via `bootstrap.sh`. Skills live in `.agents/skills/` — all 49 are deployed. Edit source files here, then sync to `deploy/`.
+This is the **bootstrap source repo** for the Ingenium skill system. The `deploy/` directory is the payload that gets copied to target projects via `bootstrap.sh`. Skills live in `.agents/skills/` — all 45 are deployed. Edit source files here, then sync to `deploy/`.
 
 ## Agent Pipeline (this repo only)
 
@@ -26,7 +26,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 | **OpenCode** | `opencode.json` | `.opencode/agents/*.md` — 8 agents defined |
 | **GitHub Copilot** | `.github/` | SDK-based (programmatic) |
 
-**MCP Servers**: Thread (persistent memory, managed by `thread-auto-context` skill) | GitHub (remote OAuth, via `gh-cli` / `github-issues`)
+**MCP Servers**: Thread (persistent memory, managed by `thread-auto-context` skill) | GitHub (remote OAuth, via `gh-cli`)
 
 > 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
 
@@ -55,7 +55,7 @@ Two primary agents, six subagents. Full architecture: `docs/agents.md`.
 
 ### Mandatory Skills (load before ANY action)
 
-`generic-conventions` `model-profiles` `local-model-commands` `debugging-patterns` `useful-tests` `project-structure` `error-interpretation` `self-correction-patterns` `skill-load` `api-design` `shell-scripts` `sql-database` `typescript-standalone` `agent-pipelines` `gitignore` `postgresql-optimization` `code-review-checklist` `refactoring-recipes` `cli-toolkit` `regex-reference` `git-workflows` `web-design-reviewer` `chrome-devtools` `github-issues` `playwright-mcp`
+`generic-conventions` `model-profiles` `local-model-commands` `debugging-patterns` `useful-tests` `project-structure` `error-interpretation` `self-correction-patterns` `skill-load` `api-design` `shell-scripts` `sql-database` `typescript-standalone` `agent-pipelines` `gitignore` `postgresql-optimization` `code-review-checklist` `refactoring-recipes` `cli-toolkit` `regex-reference` `web-design-reviewer` `chrome-devtools` `playwright-mcp`
 
 ---
 

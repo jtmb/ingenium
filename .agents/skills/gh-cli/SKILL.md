@@ -129,7 +129,7 @@ gh issue close <number> --reason "completed"
 
 ### Cross-Reference
 
-For advanced issue management (issue types, projects V2, sub-issues, dependencies, custom fields, issue templates with structured workflows), see the `github-issues` skill. That skill covers the full issue life cycle beyond basic creation and querying.
+For GitHub issue operations beyond basic creation (issue types, projects V2, sub-issues, dependencies), use `gh api` directly with the GitHub REST API — see the API section below. The `gh-cli` template at `templates/issue-report.md` covers complete bug reporting structure.
 
 ## Releases
 
