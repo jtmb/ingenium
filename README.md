@@ -38,7 +38,24 @@ npm install
 ./run.sh dev
 ```
 
-**Connect an MCP client** — Point your MCP client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/index.js`. The server speaks stdio MCP with 23 tools. No HTTP port, no network config.
+**OpenCode global MCP config** — Add this entry to `~/.config/opencode/opencode.jsonc` to make Ingenium available across all your projects:
+
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "ingenium": {
+        "command": "node",
+        "args": ["/path/to/ingenium/services/ingenium-server/dist/index.js"],
+        "disabled": false,
+        "env": {}
+      }
+    }
+  }
+}
+```
+
+**Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/index.js`. The server speaks stdio MCP with 23 tools. No HTTP port, no network config.
 
 **Open the dashboard** — Navigate to `http://localhost:3000` in your browser. The Next.js dashboard provides visual management for all six feature areas.
 
