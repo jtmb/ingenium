@@ -29,7 +29,7 @@ export default function ServersPage() {
       <div className="bg-white p-4 rounded border space-y-3">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Server name" className="border p-2 rounded w-full" />
         <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. kaban mcp)" className="border p-2 rounded w-full" />
-        <button onClick={create} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add Server</button>
+        <button onClick={create} className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700">Add Server</button>
       </div>
       <div className="space-y-2">
         {servers.map((s) => (

@@ -29,7 +29,7 @@ export default function ArchivePage() {
         <h1 className="text-3xl font-bold">Archive</h1>
         <div className="flex gap-2">
           {archived.length > 0 && (
-            <button onClick={purge} className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 text-sm">
+            <button onClick={purge} className="bg-red-600 text-white p-2 rounded hover:bg-red-700">
               Purge All Expired
             </button>
           )}
@@ -49,7 +49,7 @@ export default function ArchivePage() {
                 </span>
               </div>
               <button onClick={() => restore(p.name)}
-                      className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+                      className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700">
                 Restore
               </button>
             </div>
