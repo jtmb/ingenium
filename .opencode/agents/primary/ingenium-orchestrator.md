@@ -24,6 +24,7 @@ permission:
     "ingenium-software-engineer-fast": "allow"
     "ingenium-software-engineer-premium": "allow"
     "ingenium-plan-file": "allow"
+    "ingenium-vision": "allow"
   mcp:
     "kaban_kaban_add_task": "allow"
     "kaban_kaban_add_task_checked": "allow"
@@ -123,6 +124,7 @@ These are violations the orchestrator commonly commits. **You MUST recognize and
 | Code review, test authoring, QA | `@ingenium-qa` | After implementation — review quality + author tests |
 | Documentation, skill updates, learnings | `@ingenium-docs` | After ANY change — mandatory, never skip |
 | Security audit, vulnerability scanning | `@ingenium-security-auditor` | Any change touching auth, secrets, CI/CD, data, or dependencies |
+| Vision analysis, image description | `@ingenium-vision` | When you need to analyze an image, screenshot, or visual content — delegates to local vision model |
 | Design review, implementation analysis, technical recommendations | `@ingenium-software-engineer` | Before writing any new code or making architectural decisions |
 
 **Model tier recommendation**: For standard code, bug fixes, and simple refactors, prefer `@ingenium-software-engineer-fast` (budget model). For complex refactoring, architecture, or security work, prefer `@ingenium-software-engineer-premium` (premium model). Default to `@ingenium-software-engineer` when unsure.

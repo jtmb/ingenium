@@ -789,7 +789,7 @@ BASE_URL=$(grep -A5 '"lmstudio\|"ollama\|"local' ~/.config/opencode/opencode.jso
   | grep baseURL | sed 's/.*"\(.*\)".*/\1/' || echo "http://localhost:1234/v1")
 
 API_KEY=$(grep -A5 '"lmstudio\|"ollama\|"local' ~/.config/opencode/opencode.jsonc 2>/dev/null \
-  | grep apiKey | sed 's/.*"\(.*\)".*/\1/' || echo "")
+  | grep apiKey | sed 's/.*"\(.*\)".*/\1/' || echo "")  # empty = no auth header sent
 
 # Set the vision model name (must be loaded in the provider)
 MODEL="google/gemma-4-12b-qat"  # ← set to whichever vision-capable model is loaded
