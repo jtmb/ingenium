@@ -155,6 +155,16 @@ What becomes easier? Harder? What are the tradeoffs?
 - Always include "what we didn't choose and why"
 - Link to superseded ADRs when reversing decisions
 
+## 🔴 HARD RULE — VARIABLES.md Required
+
+Every project MUST have a `VARIABLES.md` at the project root documenting ALL environment variables. Each entry lists:
+- Variable name
+- Default value (or "none" if required)
+- Which file(s) use it
+- Brief description
+
+**Trigger**: Any commit that adds a `process.env` call in any file MUST update VARIABLES.md in the same commit. Never add an env var without documenting it.
+
 ## 🔴 HARD RULE — Per-Feature HOW-TO Required
 
 Every project with multiple features or tabs MUST have a `docs/HOW-TO/` directory with one `.md` file per feature. Each HOW-TO covers:

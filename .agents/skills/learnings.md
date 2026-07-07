@@ -846,3 +846,10 @@ ENDOFFILE && echo "Learnings entry written"
 - **Category**: agent
 - **Changes**: ingenium-vision reverted to deepseek text model + bash-based DB extraction + LM Studio API call. Reliable method — the direct vision model routing had format issues with OpenCode's image forwarding.
 - **Why**: Direct `model: lmstudio/google/gemma-4-12b-qat` failed because OpenCode couldn't properly forward vision inputs to the LM Studio provider. The bash/curl approach works reliably.
+
+## 2026-07-07 — Per-feature HOW-TO docs created + encoded as convention
+
+- **Commit**: `474c154`
+- **Category**: docs
+- **Changes**: Created `docs/HOW-TO/` with 6 docs (projects, skills, learnings, tasks, plugins, servers). Updated write-docs (🔴 HARD RULE), generate-docs (HOW-TO generation), and generic-conventions (docs trigger table).
+- **Why**: Every dashboard feature needs its own HOW-TO documenting purpose, usage, API endpoints, code locations, and related docs. Encoded as 🔴 HARD RULE so future features automatically get documentation.
