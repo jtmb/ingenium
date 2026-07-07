@@ -79,6 +79,31 @@ Invoke this skill when working on files that don't match any framework-specific 
 - **Why**: {what triggered this change}
 ```
 
+### 🔴 Dual-Write: Also Log Via MCP Tool
+
+In addition to appending to `.agents/skills/learnings.md`, you MUST also call the `ingenium_learning_log` MCP tool to record every learning entry in the Ingenium database. This makes learnings searchable across sessions via FTS5.
+
+**Parameters for every learning_log call:**
+- `project`: `"ingenium"` (always)
+- `entry_type`: match the change category from the trigger table
+- `content`: same 2-5 bullet points you logged to learnings.md
+- `tags`: comma-separated categories
+- `priority`: 5 (default)
+
+**Triggers — same as the learnings.md table:**
+
+| Change category | entry_type | tags |
+|----------------|-----------|------|
+| `.agents/skills/*/SKILL.md` | `skill` | `skill` |
+| `.opencode/agents/*.md` | `agent` | `agent` |
+| `.agents/hooks/*.json` | `hook` | `hook` |
+| `.opencode/plugins/*` | `plugin` | `plugin` |
+| `opencode.json` (config changed) | `config` | `config` |
+| Architecture decisions | `architecture` | `architecture` |
+| Bug fix | `bug` | `bug` |
+
+**Do NOT skip this step.** The file-based learnings.md is for audit trail. The MCP-based learning_log is for searchable knowledge. Both are required.
+
 **If you skip logging to learnings.md, you have violated this rule.** The purpose is to create an auditable changelog of all skill system evolution — every entry is traceable to a specific commit.
 
 ## 🔴 HARD RULE — Comments Are Mandatory

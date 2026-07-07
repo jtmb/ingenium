@@ -24,9 +24,9 @@ export default function ArchivePage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Archive</h1>
+        <h1 className="text-3xl font-bold">Archive</h1>
         <div className="flex gap-2">
           {archived.length > 0 && (
             <button onClick={purge} className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 text-sm">
@@ -44,12 +44,12 @@ export default function ArchivePage() {
             <div key={p.id} className="bg-white p-4 rounded border flex items-center justify-between">
               <div>
                 <span className="font-medium">{p.name}</span>
-                <span className="text-xs text-gray-400 ml-3">
+                <span className="text-xs text-gray-500 ml-3">
                   Archived {p.archived_at ? new Date(p.archived_at).toLocaleDateString() : "unknown"}
                 </span>
               </div>
               <button onClick={() => restore(p.name)}
-                      className="bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700 text-sm">
+                      className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
                 Restore
               </button>
             </div>

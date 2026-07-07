@@ -880,3 +880,29 @@ ENDOFFILE && echo "Learnings entry written"
   - All 22 API calls across 7 tool files were affected — fixed centrally in client.ts without editing individual handlers
   - Verified: project_list, task_create, task_list all work with full JSON responses
 - **Why**: MCP tools returned HTML error pages because they were calling `http://localhost:4097/projects` instead of `http://localhost:4097/api/v1/projects`
+
+## 2026-07-07 — Archive, Settings, Upload, MCP Tests, Dashboard Fixes
+
+- **Commit**: `4077066`
+- **Category**: feature | tests | bug
+- **Changes**:
+  - Archive system: soft-delete projects with 7-day retention, restore, and purge
+  - Settings table: key-value store per-project, archive retention configurable in dashboard
+  - Skills upload: parse .md frontmatter via file input on /skills page
+  - Dashboard fixes: Add button error handling, default project "ingenium", nav links for Archive/Settings
+  - API: settings routes (GET/POST), archive routes (list/restore/purge)
+  - MCP tests: 21 tool tests + 10 dashboard E2E tests = 31 total, all passing
+  - Migration system: now detects missing columns and applies 002_archive.sql
+  - Playwright config: added INGENIUM_CORE_DB_PATH for consistent DB access
+- **Why**: User requested project archiving, configurable retention, skill file upload, MCP tool test coverage, and bug fixes for the dashboard
+
+## 2026-07-07 — Learning system now uses MCP tools + Zod enum expanded
+
+- **Commit**: (pending)
+- **Category**: pattern | skill
+- **Changes**:
+  - orchestrator-primer: added 🔴 HARD RULE to call ingenium_learning_log after every subagent completion
+  - generic-conventions: added Dual-Write requirement to also log via MCP, not just file
+  - update-skills: added auto-trigger instructions for learning logging on pattern detection
+  - schema.ts: expanded entry_type enum from 5 to 11 types (added skill, agent, config, hook, plugin, architecture)
+- **Why**: Learning system wasn't populating the database automatically — agent instructions now mandate MCP tool calls

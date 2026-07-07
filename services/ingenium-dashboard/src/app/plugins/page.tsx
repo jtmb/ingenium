@@ -22,8 +22,8 @@ export default function PluginsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Plugins</h1>
+    <div className="space-y-8">
+      <h1 className="text-3xl font-bold">Plugins</h1>
       <div className="space-y-2">
         {plugins.map((p) => (
           <div key={p.id} className="bg-white p-4 rounded border flex items-center justify-between">
