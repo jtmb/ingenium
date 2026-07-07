@@ -157,7 +157,7 @@ What becomes easier? Harder? What are the tradeoffs?
 
 ## 🔴 HARD RULE — VARIABLES.md Required
 
-Every project MUST have a `VARIABLES.md` at the project root documenting ALL environment variables. Each entry lists:
+Every project MUST have a `docs/VARIABLES.md` documenting ALL environment variables. Each entry lists:
 - Variable name
 - Default value (or "none" if required)
 - Which file(s) use it
