@@ -1,12 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    ".agents/skills/orchestrator-primer/SKILL.md",
-    ".agents/skills/generic-conventions/SKILL.md",
-    ".agents/skills/repo-context/SKILL.md",
-    ".agents/skills/local-models/SKILL.md"
-  ],
-  "permission": {
+"permission": {
     "read": "allow",
     "edit": "ask",
     "bash": "allow",

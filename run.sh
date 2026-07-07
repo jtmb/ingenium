@@ -7,6 +7,7 @@
 #   build     Build all packages
 #   test      Run all tests
 #   check     Type-check all packages
+#   seed      Seed skills from seed/skills/ into the database
 #
 # Services (start individually):
 #   api       ingenium-api (port 4097)
@@ -176,6 +177,30 @@ start_dev() {
 main() {
   check_prereqs
 
+  if [ "$CMD" = "seed" ]; then
+    info "Seeding skills from seed/skills/..."
+    NODE_ENV=production node -e "
+      const { getDb } = require('/home/brajam/repos/gh-llm-bootstrap/packages/ingenium-core/dist/lib/db.js');
+      const { seedSkills } = require('/home/brajam/repos/gh-llm-bootstrap/packages/ingenium-core/dist/lib/seed.js');
+      process.env.INGENIUM_CORE_DB_PATH = '/home/brajam/repos/gh-llm-bootstrap/.ingenium/data';
+      const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
+      const project = db.prepare(\"SELECT id FROM projects WHERE name = 'ingenium'\").get();
+      if (!project) {
+        db.prepare('INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+          require('node:crypto').randomUUID(), 'ingenium', new Date().toISOString(), new Date().toISOString()
+        );
+        const p2 = db.prepare(\"SELECT id FROM projects WHERE name = 'ingenium'\").get();
+        seedSkills(p2.id, '/home/brajam/repos/gh-llm-bootstrap/seed/skills');
+        console.log('Created ingenium project and seeded skills');
+      } else {
+        const c = seedSkills(project.id, '/home/brajam/repos/gh-llm-bootstrap/seed/skills');
+        console.log('Seeded', c, 'skills');
+      }
+    "
+    ok "Skills seeded"
+    exit 0
+  fi
+
   case "$CMD" in
     dev|start)
       if [ -n "$SERVICE" ]; then
@@ -205,8 +230,9 @@ main() {
       echo "  dev              Start all services in dev mode (default)"
       echo "  build            Build all packages"
       echo "  test             Run all tests"
-      echo "  check            Type-check all packages"
-      echo ""
+echo "  check            Type-check all packages"
+echo "  seed             Seed skills from seed/skills/ into database"
+echo ""
       echo "Services (start individually):"
       echo "  api              ingenium-api (port 4097)"
       echo "  server           ingenium-server (stdio MCP)"
