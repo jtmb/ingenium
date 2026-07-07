@@ -853,3 +853,19 @@ ENDOFFILE && echo "Learnings entry written"
 - **Category**: docs
 - **Changes**: Created `docs/HOW-TO/` with 6 docs (projects, skills, learnings, tasks, plugins, servers). Updated write-docs (🔴 HARD RULE), generate-docs (HOW-TO generation), and generic-conventions (docs trigger table).
 - **Why**: Every dashboard feature needs its own HOW-TO documenting purpose, usage, API endpoints, code locations, and related docs. Encoded as 🔴 HARD RULE so future features automatically get documentation.
+
+## 2026-07-07 — VARIABLES.md + .gitignore cleanup
+
+- **Commit**: `acd9326` (after)
+- **Before**: `ed9dc98`
+- **Category**: pattern | docs | git
+- **Changes**:
+  - Created `docs/VARIABLES.md` documenting all 12 env vars across 4 packages with defaults, file refs, and 5 rules
+  - Moved from project root to `docs/` after user feedback
+  - `write-docs`: path corrected from project root to `docs/VARIABLES.md`
+  - `generic-conventions`: trigger table now points to `docs/VARIABLES.md`
+  - `generate-docs`: explicit `docs/` path + location note
+  - `docs/README.md`: added full docs index table
+  - `.gitignore`: added `.next/`, `dist/`, `build/` to prevent build artifact leaks
+  - Amended previous commit: `git rm --cached` for all `.next/` artifacts
+- **Why**: User wanted single-file env var doc in `docs/`, not project root
