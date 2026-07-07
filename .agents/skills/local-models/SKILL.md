@@ -1,6 +1,6 @@
 ---
 name: local-models
-description: "Local LLM management — model profiles (Qwen, Gemma, DeepSeek), command safety rules (no &, timeout wrappers), LM Studio API reference, and cross-model strategy guide. Use when running, configuring, or debugging local inference."
+description: "Local LLM management — model profiles (Qwen, Gemma, DeepSeek), command safety rules (no &, timeout wrappers), local provider API reference (LM Studio, Ollama, vLLM), vision bridge for blind models, and cross-model strategy guide. Use when running, configuring, or debugging local inference."
 alwaysApply: true
 tags: ["local-models", "llm", "inference", "qwen", "gemma", "deepseek", "lm-studio", "terminal"]
 ---
@@ -777,36 +777,30 @@ curl -s -X POST http://192.168.0.13:1234/v1/embeddings \
 
 ### 🔴 Vision Bridge — Blind Model Image Analysis
 
-When a blind model (no vision capability) needs to analyze an image, use the LM Studio vision model. There is one exact command — do not deviate.
-
-#### Setup
-
-Ensure the API key is available:
-
-```bash
-source ~/.lm-studio-env
-echo "$LM_STUDIO_API_KEY" | head -c 10
-```
-
-If missing, create the file:
-```bash
-echo 'LM_STUDIO_API_KEY=sk-lm-...' > ~/.lm-studio-env
-chmod 600 ~/.lm-studio-env
-```
+When a blind model (no vision capability) needs to analyze an image, use the user's configured vision model. Read the provider config from `~/.config/opencode/opencode.jsonc` to find the local provider's base URL. This works with any OpenAI-compatible local provider (LM Studio, Ollama, vLLM, llama.cpp).
 
 #### 🔴 The Exact Command
 
 Substitute the actual PNG path and vision model name:
 
 ```bash
+# Read provider config for base URL and API key
+BASE_URL=$(grep -A5 '"lmstudio\|"ollama\|"local' ~/.config/opencode/opencode.jsonc 2>/dev/null \
+  | grep baseURL | sed 's/.*"\(.*\)".*/\1/' || echo "http://localhost:1234/v1")
+
+API_KEY=$(grep -A5 '"lmstudio\|"ollama\|"local' ~/.config/opencode/opencode.jsonc 2>/dev/null \
+  | grep apiKey | sed 's/.*"\(.*\)".*/\1/' || echo "")
+
+# Set the vision model name (must be loaded in the provider)
 MODEL="google/gemma-4-12b-qat"  # ← set to whichever vision-capable model is loaded
-source ~/.lm-studio-env \
-  && printf '{"model":"'"$MODEL"'","messages":[{"role":"user","content":[{"type":"text","text":"Describe this screenshot in detail: layout, colors, text content, visible elements, interactive elements."},{"type":"image_url","image_url":{"url":"data:image/png;base64,' > /tmp/vp.json \
+
+# Build and send the vision request
+printf '{"model":"'"$MODEL"'","messages":[{"role":"user","content":[{"type":"text","text":"Describe this screenshot in detail: layout, colors, text content, visible elements, interactive elements."},{"type":"image_url","image_url":{"url":"data:image/png;base64,' > /tmp/vp.json \
   && base64 -w0 /path/to/screenshot.png >> /tmp/vp.json \
   && printf '"}}]}],"max_tokens":1000}' >> /tmp/vp.json \
-  && curl -s -X POST http://192.168.0.13:1234/v1/chat/completions \
+  && curl -s "${BASE_URL}/chat/completions" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $LM_STUDIO_API_KEY" \
+    ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
     -d @/tmp/vp.json \
   && rm -f /tmp/vp.json
 ```
@@ -814,16 +808,19 @@ source ~/.lm-studio-env \
 **Steps:**
 1. Find the PNG file path (from Playwright screenshot, user attachment, or failed view_image)
 2. Replace `/path/to/screenshot.png` with the actual path
-3. Replace `$MODEL` if the loaded vision model differs
+3. Replace `$MODEL` with a vision-capable model loaded in the user's provider
 4. Run the command. Read the output. Continue your task.
 
-#### Script: `scripts/vision_call.py`
+#### Finding the Right Model
 
-A Python alternative that wraps the same logic:
+Check what vision-capable models are loaded on your provider:
 
 ```bash
-python3 .agents/skills/local-models/scripts/vision_call.py /path/to/screenshot.png
+# LM Studio / OpenAI-compatible
+curl -s "${BASE_URL}/models" | python3 -m json.tool
 ```
+
+Common vision models: `google/gemma-4-12b-qat`, `qwen/qwen-2.5-vl-7b`, `llava`, `cogvlm2`.
 
 #### 🔴 Rules
 
