@@ -21,7 +21,8 @@ interface RequestOptions {
  * Times out individual requests after TIMEOUT_MS to prevent hanging.
  */
 async function request(path: string, opts: RequestOptions, retries = MAX_RETRIES): Promise<Response> {
-  const url = new URL(path, config.apiUrl);
+  const cleanPath = path.startsWith("/") ? path.slice(1) : path;
+  const url = new URL(cleanPath, config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/");
   if (opts.params) {
     for (const [k, v] of Object.entries(opts.params)) {
       url.searchParams.set(k, v);

@@ -12,4 +12,11 @@ export declare function projectInit(name: string): Promise<{
         text: string;
     }[];
 }>;
+/** Delete a project by name. */
+export declare function projectDelete(name: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=projects.d.ts.map

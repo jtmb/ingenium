@@ -869,3 +869,14 @@ ENDOFFILE && echo "Learnings entry written"
   - Regenerated `SKILL-INDEX.md` to drop all bootstrap.sh references
   - 7/7 self-improving tests pass; 7/7 agent validation tests pass
 - **Why**: Project evolved from a bootstrap deployment tool to a standalone MCP Server app; docs no longer reflected reality
+
+## 2026-07-07 — Fixed MCP client URL construction bug
+
+- **Commit**: `(part of ongoing sesson)`
+- **Category**: bug | fix
+- **Changes**:
+  - Found and fixed a bug in `services/ingenium-server/lib/client.ts` line 24: `new URL(path, base)` dropped the `/api/v1` path segment because all tool handlers passed paths with leading `/` (e.g. `"/projects"`), which the URL constructor treats as absolute path replacements
+  - Fix: strip leading `/` from path and ensure trailing `/` on base URL so relative resolution works correctly
+  - All 22 API calls across 7 tool files were affected — fixed centrally in client.ts without editing individual handlers
+  - Verified: project_list, task_create, task_list all work with full JSON responses
+- **Why**: MCP tools returned HTML error pages because they were calling `http://localhost:4097/projects` instead of `http://localhost:4097/api/v1/projects`
