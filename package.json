@@ -1,10 +1,19 @@
 {
   "private": true,
-  "workspaces": ["packages/ingenium-core", "services/ingenium-api", "services/ingenium-server", "services/ingenium-dashboard"],
+  "workspaces": [
+    "packages/ingenium-core",
+    "services/ingenium-api",
+    "services/ingenium-server",
+    "services/ingenium-dashboard"
+  ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "tsc -b"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@tailwindcss/postcss": "^4.3.2"
   }
 }

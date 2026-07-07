@@ -23,6 +23,11 @@ Thumbs.db
 # ── Kaban board (local state) ─────────────────────────────
 .kaban/
 
+# ── Playwright test artifacts ────────────────────────────
+playwright-report/
+test-results/
+playwright/.cache/
+
 # ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env
 .vscode
