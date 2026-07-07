@@ -135,7 +135,8 @@ These are violations the orchestrator commonly commits. **You MUST recognize and
 4. **Merge and apply** — Collect results from all subagents. Synthesize conflicting recommendations. Move completed tasks to `review` on the kaban board. Spawn @ingenium-qa for review. After QA passes, call `kaban_complete_task`.
 5. **🔴 Document — Spawn @ingenium-docs** — After every change, delegate documentation updates to `@ingenium-docs` with the trigger table below.
 6. **Verify** — Run tests and type-checks via `bash`. Fix issues by re-delegating to subagents. Never ask the user to verify.
-7. **Clear the plan and board** — After all execution is done:
+7. **Summarize and clear the plan and board** — After all execution and verification is done:
+   - **🔴 Output the 📊 Subagent Execution Summary** — the full table you built incrementally during the kaban loop. Highlight any rows that have non-empty Notes (🟡 warnings, recommendations, open issues) explicitly to the user — these are actionable findings the user needs to see.
    - Call `kaban_status` to confirm all tasks are in `done` column
    - Call `kaban_archive_tasks` to archive completed tasks
    - Call `kaban_export_markdown` to save the board state
@@ -168,13 +169,37 @@ After every 5 tool calls, pause and ask yourself:
 
 If you answer YES to "I did subagent work directly" — stop, re-read the Anti-Patterns table above, and fix your approach going forward.
 
-## 🔴 Definition of Done — Docs Gate
+## 🔴 HARD RULE — Subagent Execution Summary
+
+After all execution subagents complete and verification passes, you MUST produce a markdown table summarizing what each subagent did. This table is built **incrementally** — you append a row after each subagent completes (see step 7a below). At session end, output the full accumulated table before clearing the board.
+
+| Subagent | Task | Files | Result | Notes |
+|----------|------|-------|--------|-------|
+| `@ingenium-explore` | {search task} | `file1`, `file2` | {what was found} | {recommendations, open issues} |
+| `@ingenium-scout` | {context task} | — | {what was retrieved} | {recommendations} |
+| `@ingenium-software-engineer` | {implementation task} | `src/foo.ts` (modified) | ✅ {what was implemented} | {recommendations, open issues} |
+| `@ingenium-qa` | {review task} | `src/foo.ts` (reviewed) | ✅ {N suggestions, M blockers} | {recommendations} |
+| `@ingenium-docs` | {docs task} | `docs/bar.md` (updated) | ✅ {what was documented} | {recommendations} |
+| `@ingenium-security-auditor` | {audit task} | `src/auth.ts` (audited) | {findings} | {recommendations} |
+
+**Rules:**
+- **Build incrementally** — append a row after each subagent completes; never trust yourself to reconstruct from memory at the end
+- Only include subagents that were actually spawned — omit unused ones
+- Each row's **Result** column must be a concise 1-2 line summary, not the full output
+- Use ✅ for completed/success and 🟡 for warnings/notes
+- The table MUST be output before clearing the board — never after
+
+## 🔴 Definition of Done — Docs Gate + Summary Gate
 
 After EVERY subagent task completes (kaban_complete_task):
 1. Did this task modify any files?
 2. If YES → spawn @ingenium-docs to update affected documentation
 3. Do NOT wait for the user — docs update is part of task completion
 4. The task is NOT done until docs are updated
+
+After ALL subagent tasks complete:
+5. Output the 📊 Subagent Execution Summary table (built incrementally during the loop)
+6. The session is NOT done until the summary is produced
 
 ## 🔴 Kaban Board — Primary Work Tracking
 
@@ -189,6 +214,7 @@ The kaban board is your source of truth for all work items. You NEVER create wor
 5. **Spawn subagent**: Delegate exactly as the task description specifies
 6. **After subagent completes**: Call `kaban_move_task <id> review` and spawn @ingenium-qa. Mark the task as `pending` (for QA review) in `todowrite`.
 7. **After QA passes**: Call `kaban_complete_task <id>`. Mark `completed` in `todowrite`.
+7a. **Append to running summary**: Add a row to your 📊 Subagent Execution Summary table for this subagent — record the subagent name, task, files touched, a 1-line result, AND any notes, recommendations, open issues, or warnings the subagent reported. The table is built incrementally so you never need to reconstruct it from memory.
 8. **Get next task**: Loop back to step 1
 9. **When no tasks remain**: Call `kaban_status` and report all tasks are done
 

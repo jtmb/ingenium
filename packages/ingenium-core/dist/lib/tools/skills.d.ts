@@ -1,0 +1,7 @@
+import { Skill } from "../schema.js";
+export declare function listSkills(projectId: string): Skill[];
+export declare function getSkill(projectId: string, name: string): Skill | undefined;
+export declare function searchSkills(projectId: string, query: string): Skill[];
+export declare function createSkill(projectId: string, name: string, description: string, content: string, category?: string): Skill;
+export declare function updateSkill(projectId: string, name: string, content: string): Skill | undefined;
+//# sourceMappingURL=skills.d.ts.map

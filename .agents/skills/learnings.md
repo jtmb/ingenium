@@ -784,3 +784,40 @@ ENDOFFILE && echo "Learnings entry written"
   - Added `other` section with prompt-engineer → premium
   - Removed `review` section (agents redistributed)
   - Reasoning section now only includes agents with actual reasoningEffort in their .md; added security-auditor → high, fixed orchestrator → xhigh, explore → high
+
+## 2026-07-07 — Added 🔴 HARD RULE: Subagent Summary tables + Handoff Plugin
+
+- **Commit**: `943f97b` (after)
+- **Category**: agent
+- **Changes**:
+  - **ingenium-planner.md**: Added `📊 Subagent Research Summary` to Required Sections, added 🔴 HARD RULE — Subagent Research Summary with table template, updated Hand off to produce summary before handoff
+  - **ingenium-orchestrator.md**: Added 🔴 HARD RULE — Subagent Execution Summary with incremental table building, added step 7a to kaban workflow for row-by-row collection, renamed Process step 7 to "Summarize and clear", updated DoD to "Docs Gate + Summary Gate"
+  - **planner-handoff.ts** (NEW): Plugin using `experimental.text.complete` hook that detects "Handing off to @ingenium-orchestrator" and auto-fills prompt with "Ok Orchestrator, you are up." via `client.tui.appendPrompt()` + toast notification
+- **Why**: User wanted both primary agents to produce a markdown table summarizing every subagent's work. Orchestrator builds table incrementally to avoid memory overhead. Plugin provides seamless planner→orchestrator transition.
+- **Format**: Planner: Subagent / Research Task / Findings. Orchestrator: Subagent / Task / Files / Result with ✅/🟡 status.
+
+## 2026-07-07 — Fixed recommendations gap + stale self-learning docs + TL;DR reorder
+
+- **Commit**: `943f97b`
+- **Category**: agent
+- **Changes**:
+  - **ingenium-planner.md**: Moved TL;DR from top of Required Sections to after Verification (concluding summary, not opening statement)
+  - **ingenium-orchestrator.md**: Added "Notes" column to Subagent Execution Summary table, updated step 7a to extract subagent notes/recommendations, updated Process step 7 to highlight actionable findings to user
+  - **update-skills/SKILL.md**: Fixed 4 stale `.agents/instructions/` path references → `.agents/skills/` (the 4th was not in the plan, bonus fix)
+  - **AGENTS.md**: Fixed stale counts — skill count 44→46, test count 7→5, updated test descriptions
+- **Why**: Subagent recommendations (open issues, notes) were being received by the orchestrator but never surfaced to the user. Self-learning pipeline docs had drifted from actual state. TL;DR was positioned as an intro but is semantically a conclusion.
+
+## 2026-07-07 — Ingenium MCP Server v1 architecture built
+
+- **Commit**: `{run git rev-parse --short HEAD after git add/commit}`
+- **Category**: architecture
+- **Changes**:
+  - Monorepo scaffolded: root package.json (workspaces), tsconfig.base.json, docker-compose.yml, 4 docs
+  - **packages/ingenium-core**: SQLite with WAL + FTS5, 7 tool modules (skills, learnings, tasks, context, projects, plugins, servers), Zod schemas, 001_init.sql migration, seed importer
+  - **services/ingenium-api**: Express REST API on :4097, 7 route files (one per resource), 4 middleware files (auth, rate-limit, validate, errors). Sole DB authority.
+  - **services/ingenium-server**: MCP stdio server, 23 tools via @modelcontextprotocol/sdk v1, HTTP client with retry+timeout, child MCP proxy engine. ZERO core imports.
+  - **services/ingenium-dashboard**: Next.js 16 App Router, 6 pages (projects, skills, learnings, tasks, plugins, servers), single api.ts HTTP client. ZERO core imports.
+  - 4 skills updated: project-structure (API-as-Authority pattern), api-design (sole data authority HARD RULE), nextjs-conventions (API-first frontend HARD RULE), update-skills (core/api/server/dashboard signals)
+  - CI gate: tests/enforce-no-db-leaks.sh created
+  - opencode.json: ingenium MCP server entry added (disabled by default)
+- **Why**: Transform Ingenium from file-based skill system + Thread/Kaban MCPs into a unified SQLite-backed MCP server with Next.js management dashboard. API is the sole database authority — no other service touches SQLite.

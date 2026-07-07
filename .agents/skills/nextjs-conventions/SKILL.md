@@ -54,6 +54,23 @@ This is NOT the Next.js you know. This version may have breaking changes — API
 - Route groups: `(groupName)/` — organizational, don't affect URL
 - Dynamic routes: `[param]/` — accessed via `params` prop
 
+## 🔴 HARD RULE — API-First Frontend
+
+**The dashboard NEVER imports from core, server, or any database library.**
+All data access goes through the API gateway via HTTP:
+
+```
+✅ Dashboard → fetch(API_URL) → API → Core → SQLite
+❌ Dashboard → import { db } from "core"  // NEVER
+❌ Dashboard → direct MCP tool call        // NEVER
+```
+
+- `lib/api.ts` is the single HTTP client — all data flows through it
+- `NEXT_PUBLIC_API_URL` env var points to the API
+- Server Components fetch on the server, Client Components fetch on mount
+- **CI enforces**: grep for `better-sqlite3|\.db|sqlite` in the dashboard directory must return zero results
+
+
 ## Secure Coding
 
 - **No secrets in client components.** `NEXT_PUBLIC_` env vars are bundled into the browser — only use them for non-sensitive config. All secrets stay in Server Components, Route Handlers, or server-only utilities.

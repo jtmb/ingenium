@@ -167,6 +167,19 @@ DELETE  /users/42       — Delete user 42
 - **PUT for full replacement**, PATCH for partial updates
 - **No verbs in URLs**: `POST /users` not `POST /create-user`
 
+## 🔴 HARD RULE — API as Sole Data Authority
+
+When the API is the ONLY service authorized to access the database:
+
+- **No other service imports a DB library** — not the MCP server, not the dashboard
+- **MCP tools call the API via HTTP** — each tool handler is a thin wrapper:
+  validate input → `fetch(API_URL)` → return result
+- **All validation lives in the API** — Zod middleware before every route handler
+- **Error shape is uniform** — `{ error: { code, message, details, requestId } }`
+  regardless of whether the caller is the dashboard or the MCP server
+- **Rate limiting applies to all callers** — dashboard and MCP server both get
+  `429 Too Many Requests` with `Retry-After` header
+
 ## Documentation
 
 Every API needs an OpenAPI spec (`openapi.yaml` or `openapi.json`). Not optional.

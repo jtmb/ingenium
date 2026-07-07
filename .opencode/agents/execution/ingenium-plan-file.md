@@ -2,7 +2,7 @@
 name: ingenium-plan-file
 description: "Single-purpose subagent for plan file management. Can ONLY create, update, or delete plan.md at the project root."
 mode: subagent
-model: deepseek/deepseek-v4-flash
+model: opencode/deepseek-v4-flash-free
 permission:
   read: allow
   write: allow
