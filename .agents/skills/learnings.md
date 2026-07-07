@@ -832,3 +832,17 @@ ENDOFFILE && echo "Learnings entry written"
   - **Path traversal fix**: Added `validatePluginPath()` in `plugins.ts` — regex whitelist + base-dir assertion on both `enablePlugin` and `disablePlugin`
   - **15 core tool tests**: Created `tests/skills.test.ts`, `tests/learnings.test.ts`, `tests/tasks.test.ts` — all passing with isolated temp DB per suite
 - **Why**: QA 5-lens review found 4 🔴 critical issues: unauthenticated API, broken FTS search, path traversal in plugin file writes, zero test coverage
+
+## 2026-07-07 — Vision agent now uses direct vision model
+
+- **Commit**: `8395dcd`
+- **Category**: agent
+- **Changes**: ingenium-vision agent switched from blind model + curl API calls to direct `lmstudio/google/gemma-4-12b-qat` vision model. User can now paste images directly in chat with `@ingenium-vision describe this`. local-models skill updated with preferred approach note.
+- **Why**: OpenCode supports vision models directly — no need for base64 extraction or LM Studio API calls when the agent has a vision-capable model.
+
+## 2026-07-07 — Vision agent uses DB extraction + LM Studio API
+
+- **Commit**: `8395dcd` (same HEAD)
+- **Category**: agent
+- **Changes**: ingenium-vision reverted to deepseek text model + bash-based DB extraction + LM Studio API call. Reliable method — the direct vision model routing had format issues with OpenCode's image forwarding.
+- **Why**: Direct `model: lmstudio/google/gemma-4-12b-qat` failed because OpenCode couldn't properly forward vision inputs to the LM Studio provider. The bash/curl approach works reliably.
