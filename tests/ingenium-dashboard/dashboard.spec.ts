@@ -185,10 +185,10 @@ test.describe("Ingenium Dashboard", () => {
     await page.getByRole("button", { name: "Add Server" }).click();
 
     // The server should appear in the list
-    await expect(page.getByText(serverName)).toBeVisible();
-    await expect(page.getByText(serverCommand)).toBeVisible();
+    await expect(page.getByText(serverName).first()).toBeVisible();
+    await expect(page.getByText(serverCommand).first()).toBeVisible();
 
     // A "Stopped" status badge should be visible for the new server
-    await expect(page.getByText("Stopped")).toBeVisible();
+    await expect(page.getByText("Stopped").first()).toBeVisible();
   });
 });
