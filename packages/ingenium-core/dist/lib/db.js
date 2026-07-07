@@ -21,16 +21,28 @@ export function getDb(dbPath) {
     return db;
 }
 function runMigrations(db) {
+    const migrationsDir = resolve(import.meta.dirname ?? __dirname, "../data/migrations");
     // Check if we need to initialize the schema
     const tableCount = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table'").get();
     if (tableCount.count === 0) {
-        const migrationPath = resolve(import.meta.dirname ?? __dirname, "../data/migrations/001_init.sql");
-        const sql = readFileSync(migrationPath, "utf-8");
-        db.exec(sql);
-        logger.info("Database initialized with migration 001_init.sql");
+        // Fresh DB — run all migrations in order
+        for (const file of ["001_init.sql", "002_archive.sql"]) {
+            const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
+            db.exec(sql);
+            logger.info(`Applied migration ${file}`);
+        }
     }
     else {
-        logger.debug("Database already initialized, skipping migration");
+        // Check if archived_at column exists (migration 002)
+        const colCheck = db.prepare("SELECT count(*) as count FROM pragma_table_info('projects') WHERE name = 'archived_at'").get();
+        if (colCheck.count === 0) {
+            const sql = readFileSync(resolve(migrationsDir, "002_archive.sql"), "utf-8");
+            db.exec(sql);
+            logger.info("Applied migration 002_archive.sql");
+        }
+        else {
+            logger.debug("Database already initialized, skipping migration");
+        }
     }
 }
 export function execTransaction(fn, retries = WRITE_MAX_RETRIES) {

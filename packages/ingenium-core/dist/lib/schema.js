@@ -3,6 +3,7 @@ export const ProjectSchema = z.object({
     id: z.string().uuid(),
     name: z.string().min(1).max(64),
     path: z.string().optional(),
+    archived_at: z.string().datetime().optional(),
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
 });

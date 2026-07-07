@@ -6,5 +6,6 @@ export * as context from "./tools/context.js";
 export * as projects from "./tools/projects.js";
 export * as plugins from "./tools/plugins.js";
 export * as servers from "./tools/servers.js";
+export * as settings from "./tools/settings.js";
 export * from "./schema.js";
 export * from "./logger.js";

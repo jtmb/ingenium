@@ -28,14 +28,41 @@ export function createProject(name: string): Project {
   });
 }
 
-export function deleteProject(name: string): boolean {
+export function archiveProject(name: string): boolean {
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const existing = db.prepare("SELECT * FROM projects WHERE name = ?").get(name);
+    const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NULL").get(name);
     if (!existing) return false;
-    db.prepare("DELETE FROM projects WHERE name = ?").run(name);
+    const now = new Date().toISOString();
+    db.prepare("UPDATE projects SET archived_at = ? WHERE name = ?").run(now, name);
     checkpointAfterWrite();
     return true;
+  });
+}
+
+export function unarchiveProject(name: string): boolean {
+  return execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NOT NULL").get(name);
+    if (!existing) return false;
+    db.prepare("UPDATE projects SET archived_at = NULL WHERE name = ?").run(name);
+    checkpointAfterWrite();
+    return true;
+  });
+}
+
+export function listArchivedProjects(): Project[] {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  return db.prepare("SELECT * FROM projects WHERE archived_at IS NOT NULL ORDER BY archived_at DESC").all() as Project[];
+}
+
+export function purgeExpiredProjects(retentionDays: number): number {
+  return execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+    const result = db.prepare("DELETE FROM projects WHERE archived_at IS NOT NULL AND archived_at < ?").run(cutoff);
+    checkpointAfterWrite();
+    return result.changes;
   });
 }
 

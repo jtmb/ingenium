@@ -13,15 +13,21 @@ const columns = ["todo", "in_progress", "review", "done"] as const;
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => { api.tasks.list().then((r) => setTasks(r.data)).catch(() => {}); }, []);
 
   /** Creates a new task (auto-placed in "todo") and prepends it. */
   const create = async () => {
     if (!title) return;
-    const res = await api.tasks.create(title);
-    setTasks([res.data, ...tasks]);
-    setTitle("");
+    try {
+      setError("");
+      const res = await api.tasks.create(title);
+      setTasks([res.data, ...tasks]);
+      setTitle("");
+    } catch (err) {
+      setError("Failed to create task. Please check that a project exists.");
+    }
   };
 
   /** Moves a task to the target column, optimistically updating state. */
@@ -40,6 +46,7 @@ export default function TasksPage() {
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" className="border p-2 rounded flex-1" />
         <button onClick={create} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add</button>
       </div>
+      {error && <div className="text-red-600 text-sm">{error}</div>}
       <div className="grid grid-cols-4 gap-4">
         {columns.map((col) => (
           <div key={col} className="bg-gray-100 p-3 rounded min-h-[200px]">
