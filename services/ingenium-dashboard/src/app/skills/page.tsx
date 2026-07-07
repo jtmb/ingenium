@@ -53,7 +53,7 @@ export default function SkillsPage() {
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border p-2 rounded flex-1" />
         <input ref={fileRef} type="file" accept=".md" onChange={handleUpload} className="hidden" />
         <button onClick={() => fileRef.current?.click()} disabled={uploadStatus === "uploading"}
-                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50">
+                className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50">
           {uploadStatus === "uploading" ? "Uploading..." : "Upload Skill"}
         </button>
         {uploadStatus === "success" && <span className="text-sm text-green-600">Uploaded!</span>}
