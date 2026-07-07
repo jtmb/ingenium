@@ -76,3 +76,99 @@ Any visual changes to the dashboard MUST be reflected in this document.
 4. **All text must use gray-900/600/500 scale**. No custom hex colors in components.
 5. **Cards never have shadows** by default. Only `hover:shadow-md`.
 6. **Page max-width is `max-w-6xl`**. No full-width layouts beyond navigation.
+
+---
+
+## Card Variants
+
+### Homepage Feature Cards
+
+Large promotional/feature cards used on the landing page.
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Background | White | `bg-white` |
+| Border | 1px light gray | `border` |
+| Border Radius | 8px | `rounded-lg` |
+| Padding | 24px | `p-6` |
+| Hover Effect | Light shadow | `hover:shadow-md` |
+| Transition | 150ms | `transition-shadow` |
+
+### List Item Card
+
+Used for list items and card grids such as the skills grid, server list, and plugin list. These are denser than homepage feature cards because they appear in grids with many items.
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Background | White | `bg-white` |
+| Border | 1px light gray | `border` |
+| Border Radius | 4-6px | `rounded` |
+| Padding | 16px | `p-4` |
+| Hover Effect | Light shadow | `hover:shadow-md` |
+| Transition | 150ms | `transition-shadow` |
+
+**When to use which:**
+
+| Card Type | CSS | Used In |
+|-----------|-----|---------|
+| Feature (large) | `p-6 rounded-lg` | Homepage, welcome/onboarding |
+| List item (compact) | `p-4 rounded border` | Skills grid, Server list, Plugin list |
+
+---
+
+## Stacked Form Card Pattern
+
+Forms with multiple fields (Server Add, Learnings Log, Settings) use a stacked card layout inside the grid.
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Container | White card | `bg-white p-4 rounded border` |
+| Field Spacing | 12px vertical | `space-y-3` |
+| Submit Button | Full width, primary blue | `w-full bg-blue-600 text-white py-2 px-4 rounded` |
+
+**Pattern:**
+```html
+<div class="bg-white p-4 rounded border space-y-3">
+  <input class="w-full border-gray-200 rounded" />
+  <textarea class="w-full border-gray-200 rounded"></textarea>
+  <button class="w-full bg-blue-600 text-white py-2 px-4 rounded">
+    Submit
+  </button>
+</div>
+```
+
+**When to use which form pattern:**
+
+| Pattern | Layout | Used In |
+|---------|--------|---------|
+| Stacked card | `bg-white p-4 rounded border space-y-3` with full-width button at bottom | Servers Add, Learnings Log, Settings |
+| Inline row | `flex flex-row gap-2 items-end` with input + button on same line | Projects Create (name field), Tasks Add |
+
+---
+
+## Button Color Rules
+
+| Color | Use Case | Examples |
+|-------|----------|---------|
+| `bg-blue-600 text-white` | **Primary action** — create, add, log, save | Projects Create, Tasks Add, Learnings Log, Servers Add |
+| `bg-red-600 text-white` | **Destructive action** — delete, purge | Archive Purge, Delete buttons |
+| `bg-green-600 text-white` | **Secondary action** — upload, import | Skills Upload Skill |
+
+**Rules:**
+- Blue is the default action button. Never use green or red for routine actions.
+- Red buttons must be reserved for operations that cannot be undone.
+- All buttons use consistent padding: `py-2 px-4` and border radius: `rounded`.
+- Disabled buttons use `opacity-50 cursor-not-allowed`.
+
+---
+
+## Grid Exceptions
+
+The general grid rule (Rule #1) sets `md:grid-cols-3` for card grids. Two pages deviate:
+
+| Page | Columns | Reason |
+|------|---------|--------|
+| Skills | `md:grid-cols-3` | Matches the general rule. Dense cards fit 3 across on desktop. |
+| Tasks (Kanban) | `grid-cols-4` | Kanban board needs 4 columns (Todo, In Progress, Review, Done). This is the only exception. |
+
+**If any page needs a different column count, document it here and update Rule #1.**

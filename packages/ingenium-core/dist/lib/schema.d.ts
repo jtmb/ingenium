@@ -57,7 +57,7 @@ export type Skill = z.infer<typeof SkillSchema>;
 export declare const LearningSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
-    entry_type: z.ZodEnum<["decision", "bug", "pattern", "preference", "research"]>;
+    entry_type: z.ZodEnum<["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "plugin", "architecture"]>;
     content: z.ZodString;
     tags: z.ZodOptional<z.ZodString>;
     priority: z.ZodDefault<z.ZodNumber>;
@@ -70,7 +70,7 @@ export declare const LearningSchema: z.ZodObject<{
     updated_at: string;
     project_id: string;
     content: string;
-    entry_type: "decision" | "bug" | "pattern" | "preference" | "research";
+    entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "plugin" | "architecture";
     priority: number;
     tags?: string | undefined;
     session_id?: string | undefined;
@@ -80,7 +80,7 @@ export declare const LearningSchema: z.ZodObject<{
     updated_at: string;
     project_id: string;
     content: string;
-    entry_type: "decision" | "bug" | "pattern" | "preference" | "research";
+    entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "plugin" | "architecture";
     tags?: string | undefined;
     priority?: number | undefined;
     session_id?: string | undefined;

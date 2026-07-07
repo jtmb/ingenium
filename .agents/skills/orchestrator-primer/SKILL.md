@@ -40,6 +40,36 @@ After EVERY code change made by a subagent:
 
 The `thread-auto-context` skill (`.agents/skills/thread-auto-context/SKILL.md`) contains the detailed workflows — this rule enforces that they are followed.
 
+## 🔴 HARD RULE — Learning Log Via MCP Is Mandatory
+
+After EVERY subagent task that modifies files, you MUST call `ingenium_learning_log` to record what changed. This is not optional.
+
+**Required fields:**
+- `project`: `"ingenium"` (always)
+- `entry_type`: one of `pattern`, `decision`, `bug`, `preference`, `research`, `skill`, `agent`, `config`, `hook`, `plugin`, `architecture`
+- `content`: 2-5 bullet points describing what changed and why
+- `tags`: comma-separated categories matching the change
+
+**Trigger — after these events, call ingenium_learning_log immediately:**
+
+| Event | entry_type | What to log |
+|-------|-----------|-------------|
+| Subagent completed code change | `pattern` | What was implemented, files touched |
+| New skill created | `skill` | Skill name, purpose, what it covers |
+| Bug fix | `bug` | Root cause, fix approach, prevention |
+| Architecture decision | `architecture` | Decision, rationale, alternatives considered |
+| Configuration change | `config` | What changed and why |
+| Documentation updated | `pattern` | Which docs, what sections changed |
+
+**Workflow:**
+1. Subagent completes and modifies files
+2. Move task to review
+3. Call `ingenium_learning_log` with change details
+4. Then spawn @ingenium-docs for documentation updates
+5. Then complete the task
+
+The purpose is to build a searchable knowledge base in the Ingenium database so patterns, bugs, and decisions are automatically discoverable by future sessions.
+
 ## Kaban Tracking
 
 **Every delegation creates a kaban task** — Before delegating any work to a subagent, call `kaban_add_task_checked` with the subagent name as `assignedTo`. After the subagent completes, call `kaban_move_task <id> <next-column>` and then `kaban_complete_task <id>`.

@@ -24,8 +24,8 @@ export default function ServersPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">MCP Servers</h1>
+    <div className="space-y-8">
+      <h1 className="text-3xl font-bold">MCP Servers</h1>
       <div className="bg-white p-4 rounded border space-y-3">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Server name" className="border p-2 rounded w-full" />
         <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. kaban mcp)" className="border p-2 rounded w-full" />

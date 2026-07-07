@@ -167,6 +167,26 @@ ls -d .agents/skills/*/ | wc -l                   # verify skill count
 git diff --name-only HEAD~1 | grep 'docs/'       # verify docs were changed
 ```
 
+### 🔴 Log Learnings When Detecting Signals
+
+When the agent detects any of the trigger signals (new dependency, repeated pattern, missing coverage, bug fix, architecture decision), it MUST log the discovery via MCP:
+
+1. Call `ingenium_learning_log` with:
+   - `project`: `"ingenium"`
+   - `entry_type`: match the signal type (`pattern`, `bug`, `architecture`, `skill`)
+   - `content`: 2-3 bullet points describing the signal, what was found, and what action was taken
+   - `tags`: comma-separated matching the signal category
+
+2. Do NOT skip this step — the learning database is the permanent record of skill system evolution
+
+**Trigger examples:**
+- New dependency detected → `entry_type: "pattern"` → log: "Detected new dependency {name}, created {name}-conventions skill"
+- Repeated code pattern found → `entry_type: "pattern"` → log: "Extracted shared {utility} from {files}"
+- Bug fix → `entry_type: "bug"` → log: "Fixed {issue} in {file}, root cause: {cause}"
+- Architecture decision → `entry_type: "architecture"` → log: "Decided to {decision}, rationale: {rationale}"
+
+---
+
 ## Creation: Writing a New Skill
 
 When you've identified a candidate, create it immediately. No approval needed.

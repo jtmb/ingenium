@@ -26,7 +26,7 @@ export type Skill = z.infer<typeof SkillSchema>;
 export const LearningSchema = z.object({
   id: z.number(),
   project_id: z.string(),
-  entry_type: z.enum(["decision", "bug", "pattern", "preference", "research"]),
+  entry_type: z.enum(["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "plugin", "architecture"]),
   content: z.string().min(1),
   tags: z.string().optional(),
   priority: z.number().min(0).max(10).default(5),

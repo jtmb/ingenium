@@ -47,21 +47,19 @@ export default function SkillsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Skills ({skills.length})</h1>
-        <div className="flex items-center gap-3">
-          <input ref={fileRef} type="file" accept=".md" onChange={handleUpload} className="hidden" />
-          <button onClick={() => fileRef.current?.click()} disabled={uploadStatus === "uploading"}
-                  className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm disabled:opacity-50">
-            {uploadStatus === "uploading" ? "Uploading..." : "Upload Skill"}
-          </button>
-          {uploadStatus === "success" && <span className="text-sm text-green-600">Uploaded!</span>}
-          {uploadStatus === "error" && <span className="text-sm text-red-600">Invalid file. Use a .md with name: and description: frontmatter.</span>}
-        </div>
+    <div className="space-y-8">
+      <h1 className="text-3xl font-bold">Skills ({skills.length})</h1>
+      <div className="flex gap-2 items-center">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border p-2 rounded flex-1" />
+        <input ref={fileRef} type="file" accept=".md" onChange={handleUpload} className="hidden" />
+        <button onClick={() => fileRef.current?.click()} disabled={uploadStatus === "uploading"}
+                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50">
+          {uploadStatus === "uploading" ? "Uploading..." : "Upload Skill"}
+        </button>
+        {uploadStatus === "success" && <span className="text-sm text-green-600">Uploaded!</span>}
+        {uploadStatus === "error" && <span className="text-sm text-red-600">Invalid file. Use a .md with name: and description: frontmatter.</span>}
       </div>
-      <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border p-2 rounded w-full" />
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {filtered.map((s) => (
           <div key={s.id} className="bg-white p-4 rounded border">
             <h3 className="font-medium">{s.name}</h3>

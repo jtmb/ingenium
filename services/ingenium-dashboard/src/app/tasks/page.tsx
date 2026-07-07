@@ -40,8 +40,8 @@ export default function TasksPage() {
   const grouped = Object.fromEntries(columns.map((c) => [c, tasks.filter((t) => t.column_id === c)]));
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Tasks</h1>
+    <div className="space-y-8">
+      <h1 className="text-3xl font-bold">Tasks</h1>
       <div className="flex gap-2">
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" className="border p-2 rounded flex-1" />
         <button onClick={create} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add</button>
@@ -53,7 +53,7 @@ export default function TasksPage() {
             <h3 className="font-medium text-sm uppercase mb-2">{col.replace("_", " ")}</h3>
             <div className="space-y-2">
               {(grouped[col] ?? []).map((t) => (
-                <div key={t.id} className="bg-white p-2 rounded text-sm border cursor-pointer hover:shadow"
+                <div key={t.id} className="bg-white p-2 rounded text-sm border cursor-pointer transition-shadow hover:shadow-md"
                      onClick={() => {
                        // Modulo arithmetic guarantees a valid index (0..3) for 4-element columns array
                         const nextCol = columns[(columns.indexOf(col) + 1) % columns.length]!;

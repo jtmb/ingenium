@@ -16,7 +16,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 /** A project managed by Ingenium. */
-export type Project = { id: string; name: string; path?: string; created_at: string; updated_at: string };
+export type Project = { id: string; name: string; path?: string; archived_at?: string; created_at: string; updated_at: string };
 
 /** An AI agent skill with its full content. */
 export type Skill = { id: string; name: string; description: string; content: string; category?: string; enabled: boolean };

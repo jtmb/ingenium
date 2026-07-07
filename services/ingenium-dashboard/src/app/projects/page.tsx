@@ -21,8 +21,8 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Projects</h1>
+    <div className="space-y-8">
+      <h1 className="text-3xl font-bold">Projects</h1>
       <div className="flex gap-2">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Project name" className="border p-2 rounded flex-1" />
         <button onClick={create} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Create</button>
