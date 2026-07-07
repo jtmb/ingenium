@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS skills (
 
 CREATE VIRTUAL TABLE IF NOT EXISTS skills_fts USING fts5(content, description);
 
+-- FTS5 sync is handled in application code (lib/tools/skills.ts)
+-- to avoid rowid type mismatch between TEXT PK and INTEGER FTS5 rowid.
+
 CREATE TABLE IF NOT EXISTS learnings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL REFERENCES projects(id),

@@ -3,6 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
+import { authMiddleware } from "../lib/middleware/auth.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
 import { learningsRouter } from "../lib/routes/learnings.js";
@@ -16,6 +17,7 @@ const app = express();
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json());
+app.use(authMiddleware);
 
 // Health check
 app.get("/api/v1/health", (_req, res) => {
