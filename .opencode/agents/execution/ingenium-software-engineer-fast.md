@@ -30,7 +30,6 @@ skills:
   - project-structure
   - shell-scripts
   - local-models
-  - kaban-board
   - mermaid
   - typescript-standalone
   - python-conventions

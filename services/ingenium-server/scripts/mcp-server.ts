@@ -146,21 +146,21 @@ server.registerTool(
   async ({ project }) => taskTools.taskNext(project),
 );
 
-// ── Context ─────────────────────────────────────────────
+// ── Plans ─────────────────────────────────────────────
 
 server.registerTool(
-  "ingenium_context_save",
+  "ingenium_plan_save",
   {
     description: "Save a context entry with optional tags and priority.",
     inputSchema: { project: projectParam, content: z.string(), tags: z.string().optional(), priority: z.number().optional() },
   },
-  async ({ project, content, tags, priority }) => contextTools.contextSave(project, content, tags, priority),
+  async ({ project, content, tags, priority }) => contextTools.planSave(project, content, tags, priority),
 );
 
 server.registerTool(
-  "ingenium_context_search",
+  "ingenium_plan_search",
   { description: "Full-text search across context entries.", inputSchema: { project: projectParam, query: z.string() } },
-  async ({ project, query }) => contextTools.contextSearch(project, query),
+  async ({ project, query }) => contextTools.planSearch(project, query),
 );
 
 // ── Projects ────────────────────────────────────────────

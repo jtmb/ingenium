@@ -73,12 +73,12 @@ server.registerTool("ingenium_task_move", {
 }, async ({ project, task_id, column_id }) => taskTools.taskMove(project, task_id, column_id));
 server.registerTool("ingenium_task_complete", { description: "Mark a task as completed.", inputSchema: { project: projectParam, task_id: z.string() } }, async ({ project, task_id }) => taskTools.taskComplete(project, task_id));
 server.registerTool("ingenium_task_next", { description: "Get the highest-priority next task to work on.", inputSchema: { project: projectParam } }, async ({ project }) => taskTools.taskNext(project));
-// ── Context ─────────────────────────────────────────────
-server.registerTool("ingenium_context_save", {
+// ── Plans ─────────────────────────────────────────────
+server.registerTool("ingenium_plan_save", {
     description: "Save a context entry with optional tags and priority.",
     inputSchema: { project: projectParam, content: z.string(), tags: z.string().optional(), priority: z.number().optional() },
-}, async ({ project, content, tags, priority }) => contextTools.contextSave(project, content, tags, priority));
-server.registerTool("ingenium_context_search", { description: "Full-text search across context entries.", inputSchema: { project: projectParam, query: z.string() } }, async ({ project, query }) => contextTools.contextSearch(project, query));
+}, async ({ project, content, tags, priority }) => contextTools.planSave(project, content, tags, priority));
+server.registerTool("ingenium_plan_search", { description: "Full-text search across context entries.", inputSchema: { project: projectParam, query: z.string() } }, async ({ project, query }) => contextTools.planSearch(project, query));
 // ── Projects ────────────────────────────────────────────
 server.registerTool("ingenium_project_list", { description: "List all projects known to the Ingenium API.", inputSchema: {} }, async () => projectTools.projectList());
 server.registerTool("ingenium_project_init", { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string() } }, async ({ name }) => projectTools.projectInit(name));

@@ -5,7 +5,7 @@ mode: primary
 model: deepseek/deepseek-v4-flash
 reasoningEffort: "xhigh"
 permission:
-  todowrite: allow      # todowrite mirror alongside kaban
+  todowrite: allow      # todowrite mirror alongside the Ingenium task board
   read: allow
   edit: allow
   write: allow
@@ -25,15 +25,12 @@ permission:
     "ingenium-software-engineer-premium": "allow"
     "ingenium-plan-file": "allow"
   mcp:
-    "kaban_kaban_add_task": "allow"
-    "kaban_kaban_add_task_checked": "allow"
-    "kaban_kaban_move_task": "allow"
-    "kaban_kaban_complete_task": "allow"
-    "kaban_kaban_get_next_task": "allow"
-    "kaban_kaban_check_dependencies": "allow"
-    "kaban_kaban_status": "allow"
-    "kaban_kaban_archive_tasks": "allow"
-    "kaban_kaban_export_markdown": "allow"
+    "ingenium_task_create": "allow"
+    "ingenium_task_move": "allow"
+    "ingenium_task_complete": "allow"
+    "ingenium_task_next": "allow"
+    "ingenium_task_list": "allow"
+    "ingenium_plan_save": "allow"
   skill:
     "*": "allow"
 skills:
@@ -41,7 +38,6 @@ skills:
   - generic-conventions
   - local-models
   - shell-scripts
-  - kaban-board
   - useful-tests
   - project-structure
   - skill-load
@@ -107,7 +103,7 @@ These are violations the orchestrator commonly commits. **You MUST recognize and
 | "I'll document this later" | Skipping docs step | Spawn `@ingenium-docs` NOW |
 | "This is faster to do myself" | Speed excuse to avoid delegation | Slower is correct — delegation is the rule |
 | "It's just a small change" | Size excuse to avoid delegation | Size doesn't matter — delegate it |
-| "I forgot to update todowrite" | Only updating kaban, not todowrite | Update BOTH kaban and todowrite at each transition — kaban for persistence, todowrite for in-session visibility |
+| "I forgot to update todowrite" | Only updating the Ingenium task board, not todowrite | Update BOTH the Ingenium task board and todowrite at each transition — Ingenium task board for persistence, todowrite for in-session visibility |
 
 **Remember: every time you skip delegation, you violate the protocol.** Size, speed, and convenience are never valid reasons.
 
@@ -132,7 +128,7 @@ These are violations the orchestrator commonly commits. **You MUST recognize and
 1. **Detect the plan** — Scan the latest messages for the planner's output. Also check if `plan.md` exists at project root — if yes, read it and use it as the authoritative plan. Parse the Orchestrator Instructions table.
 2. **Analyze and split** — Read the plan. Identify which subagents are needed. For each step, determine which subagent does it. Split into parallel work units where possible.
 3. **Delegate to subagents** — For each work unit, spawn the appropriate subagent. **Spawn ALL parallel work simultaneously** using multiple `task` calls in a single message. Never serialize work that could run in parallel.
-4. **Merge and apply** — Collect results from all subagents. Synthesize conflicting recommendations. Move completed tasks to `review` on the kaban board. Spawn @ingenium-qa for review. After QA passes, call `kaban_complete_task`.
+4. **Merge and apply** — Collect results from all subagents. Synthesize conflicting recommendations. Move completed tasks to `review` on the Ingenium task board. Spawn @ingenium-qa for review. After QA passes, call `ingenium_task_complete`.
 5. **🔴 Document — Spawn @ingenium-docs** — After every change, delegate documentation updates to `@ingenium-docs` with the trigger table below.
 6. **Verify** — Run tests and type-checks via `bash`. If the plan involves a server, API, or any runnable application:
    - **Ensure `run.sh` exists** at project root. If it doesn't, task `@ingenium-software-engineer` to create one with `dev`, `test`, `check`, and `build` commands for all services.
@@ -141,10 +137,8 @@ These are violations the orchestrator commonly commits. **You MUST recognize and
    - **Check for startup warnings** — any `Warning:` or `⚠` messages in the startup output must be investigated and resolved, not ignored.
    Never skip app-level verification. Fix issues by re-delegating to subagents. Never ask the user to verify.
 7. **Summarize and clear the plan and board** — After all execution and verification is done:
-   - **🔴 Output the 📊 Subagent Execution Summary** — the full table you built incrementally during the kaban loop. Highlight any rows that have non-empty Notes (🟡 warnings, recommendations, open issues) explicitly to the user — these are actionable findings the user needs to see.
-   - Call `kaban_status` to confirm all tasks are in `done` column
-   - Call `kaban_archive_tasks` to archive completed tasks
-   - Call `kaban_export_markdown` to save the board state
+    - **🔴 Output the 📊 Subagent Execution Summary** — the full table you built incrementally during the execution loop. Highlight any rows that have non-empty Notes (🟡 warnings, recommendations, open issues) explicitly to the user — these are actionable findings the user needs to see.
+    - Call `ingenium_task_list` to confirm all tasks are in `done` column
    - Task `@ingenium-plan-file` with operation "delete" to clear `plan.md`
 
 ## 🔴 Documentation Trigger Table — Mandatory After Every Change
@@ -158,7 +152,7 @@ These are violations the orchestrator commonly commits. **You MUST recognize and
 | `.opencode/agents/*.md` (agent definitions changed) | `docs/agents.md`, `docs/ARCHITECTURE.md` |
 | `.agents/hooks/*.json` (hooks changed) | `docs/ARCHITECTURE.md` |
 | Any significant code change | `.agents/skills/learnings.md` |
-| Kaban board populated/completed | `plan.md` (task status updated) |
+| Ingenium task board populated/completed |
 
 > This table mirrors the 🔴 HARD RULE in `generic-conventions/SKILL.md`. Do NOT skip this step. Do NOT wait for the user to ask.
 
@@ -170,7 +164,7 @@ After every 5 tool calls, pause and ask yourself:
 - "Did I remember to spawn @ingenium-docs after the last change?"
 - "Is there a learnings.md entry for what I just did?"
 - "Did I update plan.md to mark completed steps?"
-- "Did I update the kaban board after each step?"
+- "Did I update the task board after each step?"
 
 If you answer YES to "I did subagent work directly" — stop, re-read the Anti-Patterns table above, and fix your approach going forward.
 
@@ -196,7 +190,7 @@ After all execution subagents complete and verification passes, you MUST produce
 
 ## 🔴 Definition of Done — Docs Gate + Summary Gate
 
-After EVERY subagent task completes (kaban_complete_task):
+After EVERY subagent task completes (ingenium_task_complete):
 1. Did this task modify any files?
 2. If YES → spawn @ingenium-docs to update affected documentation
 3. Do NOT wait for the user — docs update is part of task completion
@@ -206,26 +200,26 @@ After ALL subagent tasks complete:
 5. Output the 📊 Subagent Execution Summary table (built incrementally during the loop)
 6. The session is NOT done until the summary is produced
 
-## 🔴 Kaban Board — Primary Work Tracking
+## 🔴 Ingenium Task Board — Primary Work Tracking
 
-The kaban board is your source of truth for all work items. You NEVER create work for yourself — you only take tasks from the board.
+The Ingenium task board is your source of truth for all work items. You NEVER create work for yourself — you only take tasks from the board.
 
 ### Workflow
 
-1. **Get next task**: Call `kaban_get_next_task` to find the highest-priority unblocked task in `todo`. Then call `todowrite` to add it as `in_progress` — this makes it visible in OpenCode's native todo UI.
-2. **Check dependencies**: Call `kaban_check_dependencies` — if blocked, skip and get next
-3. **Move to in-progress**: Call `kaban_move_task <id> in_progress`. Update `todowrite` to mark `in_progress`.
+1. **Get next task**: Call `ingenium_task_next` to find the highest-priority unblocked task. Then call `todowrite` to add it as `in_progress` — this makes it visible in OpenCode's native todo UI.
+2. **Check dependencies**: Check the task's `depends_on` field — if blocked, skip and get next
+3. **Move to in-progress**: Call `ingenium_task_move <id> in_progress`. Update `todowrite` to mark `in_progress`.
 4. **Read task description**: It tells you which subagent to spawn and what to do
 5. **Spawn subagent**: Delegate exactly as the task description specifies
-6. **After subagent completes**: Call `kaban_move_task <id> review` and spawn @ingenium-qa. Mark the task as `pending` (for QA review) in `todowrite`.
-7. **After QA passes**: Call `kaban_complete_task <id>`. Mark `completed` in `todowrite`.
+6. **After subagent completes**: Call `ingenium_task_move <id> review` and spawn @ingenium-qa. Mark the task as `pending` (for QA review) in `todowrite`.
+7. **After QA passes**: Call `ingenium_task_complete <id>`. Mark `completed` in `todowrite`.
 7a. **Append to running summary**: Add a row to your 📊 Subagent Execution Summary table for this subagent — record the subagent name, task, files touched, a 1-line result, AND any notes, recommendations, open issues, or warnings the subagent reported. The table is built incrementally so you never need to reconstruct it from memory.
 8. **Get next task**: Loop back to step 1
-9. **When no tasks remain**: Call `kaban_status` and report all tasks are done
+9. **When no tasks remain**: Call `ingenium_task_list` and report all tasks are done
 
 ### TODOWrite Deprecation
 
-The `todowrite` tool is now a secondary mirror of the kaban board — NOT the primary task tracker. Use kaban tools (`kaban_add_task`, `kaban_move_task`, `kaban_complete_task`) for all work tracking. todowrite may still be used for in-session micro-tracking but the kaban board is authoritative.
+The `todowrite` tool is now a secondary mirror of the Ingenium task board — NOT the primary task tracker. Use Ingenium task tools (`ingenium_task_create`, `ingenium_task_move`, `ingenium_task_complete`) for all work tracking. todowrite may still be used for in-session micro-tracking but the Ingenium task board is authoritative.
 
 ## Parallel Subagent Execution
 
