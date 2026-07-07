@@ -2,7 +2,7 @@
 
 Auto-maintained index of all skills. Updated via `/update-skill-index`.
 
-**Total: 46 skills** (all in `.agents/skills/`)
+**Total: 45 skills** (all in `.agents/skills/`)
 
 ---
 
@@ -51,7 +51,6 @@ These skills are directly invocable via `/command` patterns. See `help/SKILL.md`
 | [gh-cli](.agents/skills/gh-cli/SKILL.md) | GitHub operations | GitHub CLI (`gh`) integration — update repo metadata, manage PRs/issues/releases, create gists, search code, and query the API. |
 | [gitignore](.agents/skills/gitignore/SKILL.md) | `.gitignore` files | Git ignore file conventions — patterns, structure, and rules for .gitignore files. |
 | [help](.agents/skills/help/SKILL.md) | User asks "help" or "what skills" | Display all available skills, their commands, and invocation patterns. Quick-reference for the entire skill system. |
-| [kaban-board](.agents/skills/kaban-board/SKILL.md) | Kaban task board operations | Kaban — terminal Kanban board for AI agents. MCP server, CLI, and TUI for task management. |
 | [kubernetes](.agents/skills/kubernetes/SKILL.md) | `**/{k8s,kubernetes,helm,charts,templates}/**/*.{yaml,yml}` | Kubernetes conventions — security contexts, resource limits, probes, network policies, deployment strategies. |
 | [local-models](.agents/skills/local-models/SKILL.md) | Model selection, terminal safety, LM Studio API | Local LLM management — model profiles (Qwen, Gemma, DeepSeek), command safety rules (no `&`, timeout wrappers), local provider API reference, and cross-model strategy guide. |
 | [mermaid](.agents/skills/mermaid/SKILL.md) | Documentation, architecture diagrams | Mermaid diagram conventions — mandatory diagrams in all documentation. |
@@ -120,7 +119,7 @@ These skills are directly invocable via `/command` patterns. See `help/SKILL.md`
 
 ---
 
-## Skills — `.agents/skills/` (46)
+## Skills — `.agents/skills/` (45)
 
 | # | Directory | File |
 |---|-----------|------|
@@ -143,30 +142,29 @@ These skills are directly invocable via `/command` patterns. See `help/SKILL.md`
 | 17 | `gitignore` | [`.agents/skills/gitignore/SKILL.md`](.agents/skills/gitignore/SKILL.md) |
 | 18 | `go-conventions` | [`.agents/skills/go-conventions/SKILL.md`](.agents/skills/go-conventions/SKILL.md) |
 | 19 | `help` | [`.agents/skills/help/SKILL.md`](.agents/skills/help/SKILL.md) |
-| 20 | `kaban-board` | [`.agents/skills/kaban-board/SKILL.md`](.agents/skills/kaban-board/SKILL.md) |
-| 21 | `kubernetes` | [`.agents/skills/kubernetes/SKILL.md`](.agents/skills/kubernetes/SKILL.md) |
-| 22 | `local-models` | [`.agents/skills/local-models/SKILL.md`](.agents/skills/local-models/SKILL.md) |
-| 23 | `mermaid` | [`.agents/skills/mermaid/SKILL.md`](.agents/skills/mermaid/SKILL.md) |
-| 24 | `nextjs-conventions` | [`.agents/skills/nextjs-conventions/SKILL.md`](.agents/skills/nextjs-conventions/SKILL.md) |
-| 25 | `onboard-existing-repo` | [`.agents/skills/onboard-existing-repo/SKILL.md`](.agents/skills/onboard-existing-repo/SKILL.md) |
-| 26 | `orchestrator-primer` | [`.agents/skills/orchestrator-primer/SKILL.md`](.agents/skills/orchestrator-primer/SKILL.md) |
-| 27 | `playwright-mcp` | [`.agents/skills/playwright-mcp/SKILL.md`](.agents/skills/playwright-mcp/SKILL.md) |
-| 28 | `postgresql-optimization` | [`.agents/skills/postgresql-optimization/SKILL.md`](.agents/skills/postgresql-optimization/SKILL.md) |
-| 29 | `project-structure` | [`.agents/skills/project-structure/SKILL.md`](.agents/skills/project-structure/SKILL.md) |
-| 30 | `python-conventions` | [`.agents/skills/python-conventions/SKILL.md`](.agents/skills/python-conventions/SKILL.md) |
-| 31 | `refactoring-recipes` | [`.agents/skills/refactoring-recipes/SKILL.md`](.agents/skills/refactoring-recipes/SKILL.md) |
-| 32 | `regex-reference` | [`.agents/skills/regex-reference/SKILL.md`](.agents/skills/regex-reference/SKILL.md) |
-| 33 | `repo-context` | [`.agents/skills/repo-context/SKILL.md`](.agents/skills/repo-context/SKILL.md) |
-| 34 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
-| 35 | `self-correction-patterns` | [`.agents/skills/self-correction-patterns/SKILL.md`](.agents/skills/self-correction-patterns/SKILL.md) |
-| 36 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
-| 37 | `skill-load` | [`.agents/skills/skill-load/SKILL.md`](.agents/skills/skill-load/SKILL.md) |
-| 38 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
-| 39 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
-| 40 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
-| 41 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
-| 42 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
-| 43 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
-| 44 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
-| 45 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
-| 46 | `wsl-cleanup` | [`.agents/skills/wsl-cleanup/SKILL.md`](.agents/skills/wsl-cleanup/SKILL.md) |
+| 20 | `kubernetes` | [`.agents/skills/kubernetes/SKILL.md`](.agents/skills/kubernetes/SKILL.md) |
+| 21 | `local-models` | [`.agents/skills/local-models/SKILL.md`](.agents/skills/local-models/SKILL.md) |
+| 22 | `mermaid` | [`.agents/skills/mermaid/SKILL.md`](.agents/skills/mermaid/SKILL.md) |
+| 23 | `nextjs-conventions` | [`.agents/skills/nextjs-conventions/SKILL.md`](.agents/skills/nextjs-conventions/SKILL.md) |
+| 24 | `onboard-existing-repo` | [`.agents/skills/onboard-existing-repo/SKILL.md`](.agents/skills/onboard-existing-repo/SKILL.md) |
+| 25 | `orchestrator-primer` | [`.agents/skills/orchestrator-primer/SKILL.md`](.agents/skills/orchestrator-primer/SKILL.md) |
+| 26 | `playwright-mcp` | [`.agents/skills/playwright-mcp/SKILL.md`](.agents/skills/playwright-mcp/SKILL.md) |
+| 27 | `postgresql-optimization` | [`.agents/skills/postgresql-optimization/SKILL.md`](.agents/skills/postgresql-optimization/SKILL.md) |
+| 28 | `project-structure` | [`.agents/skills/project-structure/SKILL.md`](.agents/skills/project-structure/SKILL.md) |
+| 29 | `python-conventions` | [`.agents/skills/python-conventions/SKILL.md`](.agents/skills/python-conventions/SKILL.md) |
+| 30 | `refactoring-recipes` | [`.agents/skills/refactoring-recipes/SKILL.md`](.agents/skills/refactoring-recipes/SKILL.md) |
+| 31 | `regex-reference` | [`.agents/skills/regex-reference/SKILL.md`](.agents/skills/regex-reference/SKILL.md) |
+| 32 | `repo-context` | [`.agents/skills/repo-context/SKILL.md`](.agents/skills/repo-context/SKILL.md) |
+| 33 | `rust-conventions` | [`.agents/skills/rust-conventions/SKILL.md`](.agents/skills/rust-conventions/SKILL.md) |
+| 34 | `self-correction-patterns` | [`.agents/skills/self-correction-patterns/SKILL.md`](.agents/skills/self-correction-patterns/SKILL.md) |
+| 35 | `shell-scripts` | [`.agents/skills/shell-scripts/SKILL.md`](.agents/skills/shell-scripts/SKILL.md) |
+| 36 | `skill-load` | [`.agents/skills/skill-load/SKILL.md`](.agents/skills/skill-load/SKILL.md) |
+| 37 | `sql-database` | [`.agents/skills/sql-database/SKILL.md`](.agents/skills/sql-database/SKILL.md) |
+| 38 | `thread-auto-context` | [`.agents/skills/thread-auto-context/SKILL.md`](.agents/skills/thread-auto-context/SKILL.md) |
+| 39 | `typescript-standalone` | [`.agents/skills/typescript-standalone/SKILL.md`](.agents/skills/typescript-standalone/SKILL.md) |
+| 40 | `update-skill-index` | [`.agents/skills/update-skill-index/SKILL.md`](.agents/skills/update-skill-index/SKILL.md) |
+| 41 | `update-skills` | [`.agents/skills/update-skills/SKILL.md`](.agents/skills/update-skills/SKILL.md) |
+| 42 | `useful-tests` | [`.agents/skills/useful-tests/SKILL.md`](.agents/skills/useful-tests/SKILL.md) |
+| 43 | `web-design-reviewer` | [`.agents/skills/web-design-reviewer/SKILL.md`](.agents/skills/web-design-reviewer/SKILL.md) |
+| 44 | `write-docs` | [`.agents/skills/write-docs/SKILL.md`](.agents/skills/write-docs/SKILL.md) |
+| 45 | `wsl-cleanup` | [`.agents/skills/wsl-cleanup/SKILL.md`](.agents/skills/wsl-cleanup/SKILL.md) |

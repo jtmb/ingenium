@@ -25,8 +25,13 @@ export function seedSkills(projectId, skillsDir) {
             const description = descMatch?.[1] ?? "";
             const now = new Date().toISOString();
             const id = randomUUID();
-            db.prepare(`INSERT OR IGNORE INTO skills (id, project_id, name, description, content, created_at, updated_at)
+            const result = db.prepare(`INSERT OR IGNORE INTO skills (id, project_id, name, description, content, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, name, description, content, now, now);
+            // Sync FTS5 index if this was a new insert (not ignored)
+            if (result.changes > 0) {
+                db.prepare("INSERT OR IGNORE INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
+                    .run(result.lastInsertRowid, content, description);
+            }
             count++;
         }
         checkpointAfterWrite();

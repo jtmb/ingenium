@@ -15,15 +15,7 @@
     "list": "allow"
   },
   "mcp": {
-    "kaban": {
-      "type": "local",
-      "command": ["kaban", "mcp"],
-      "enabled": true,
-      "environment": {
-        "KABAN_PATH": "/home/brajam/repos/gh-llm-bootstrap"
-      }
-    },
-    "thread": {
+"thread": {
       "type": "local",
       "command": ["/home/brajam/.thread-bridge/.venv/bin/python", "-m", "thread_bridge.bridge"],
       "cwd": "/home/brajam/.thread-bridge",
