@@ -40,7 +40,7 @@ export default function LearningsPage() {
           <option value="research">Research</option>
         </select>
         <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="What did you learn?" className="border p-2 rounded w-full h-24" />
-        <button onClick={log} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Log Learning</button>
+        <button onClick={log} className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700">Log Learning</button>
         {error && <div className="text-red-600 text-sm">{error}</div>}
       </div>
       <div className="space-y-2">
