@@ -121,7 +121,9 @@ start_server() {
 start_dashboard() {
   info "Starting ingenium-dashboard on port 3000..."
   cd "$ROOT/services/ingenium-dashboard"
+  # Next.js requires development mode for dev server
   NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-http://localhost:4097/api/v1}" \
+  NODE_ENV=development \
     npx next dev --port 3000 &
   DASH_PID=$!
   echo "$DASH_PID" > /tmp/ingenium-dashboard.pid
