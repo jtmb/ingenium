@@ -777,6 +777,13 @@ curl -s -X POST http://192.168.0.13:1234/v1/embeddings \
 
 ### 🔴 Vision Bridge — Blind Model Image Analysis
 
+**Preferred approach**: Use `@ingenium-vision` if available — paste the image
+directly in chat with `@ingenium-vision describe this`. The vision agent has
+a vision-capable model and processes images natively.
+
+**Fallback (when vision agent is unavailable)**: Use the curl command below
+to call a local vision model via API.
+
 When a blind model (no vision capability) needs to analyze an image, use the user's configured vision model. Read the provider config from `~/.config/opencode/opencode.jsonc` to find the local provider's base URL. This works with any OpenAI-compatible local provider (LM Studio, Ollama, vLLM, llama.cpp).
 
 #### 🔴 The Exact Command
