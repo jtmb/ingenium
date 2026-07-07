@@ -821,3 +821,14 @@ ENDOFFILE && echo "Learnings entry written"
   - CI gate: tests/enforce-no-db-leaks.sh created
   - opencode.json: ingenium MCP server entry added (disabled by default)
 - **Why**: Transform Ingenium from file-based skill system + Thread/Kaban MCPs into a unified SQLite-backed MCP server with Next.js management dashboard. API is the sole database authority — no other service touches SQLite.
+
+## 2026-07-07 — Fixed 4 critical QA findings
+
+- **Commit**: `11741c2`
+- **Category**: bug
+- **Changes**:
+  - **Auth middleware wired**: Imported and applied `authMiddleware` in `api-server.ts` — API is no longer wide open
+  - **Skills FTS5 sync**: Replaced broken FTS triggers with application-level sync in `createSkill`/`updateSkill`. `searchSkills()` now returns results. 15 vitest tests pass.
+  - **Path traversal fix**: Added `validatePluginPath()` in `plugins.ts` — regex whitelist + base-dir assertion on both `enablePlugin` and `disablePlugin`
+  - **15 core tool tests**: Created `tests/skills.test.ts`, `tests/learnings.test.ts`, `tests/tasks.test.ts` — all passing with isolated temp DB per suite
+- **Why**: QA 5-lens review found 4 🔴 critical issues: unauthenticated API, broken FTS search, path traversal in plugin file writes, zero test coverage
