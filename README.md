@@ -46,7 +46,7 @@ npm install
     "servers": {
       "ingenium": {
         "command": "node",
-        "args": ["/path/to/ingenium/services/ingenium-server/scripts/mcp-server.js"],
+        "args": ["/path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js"],
         "cwd": "/path/to/ingenium",
         "disabled": false,
         "env": {
@@ -60,7 +60,7 @@ npm install
 }
 ```
 
-**Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/scripts/mcp-server.js`. The server speaks stdio MCP with 23 tools. No HTTP port, no network config.
+**Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js`. The server speaks stdio MCP with 23 tools. No HTTP port, no network config.
 
 **Open the dashboard** — Navigate to `http://localhost:3000` in your browser. The Next.js dashboard provides visual management for all six feature areas.
 

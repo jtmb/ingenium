@@ -38,9 +38,9 @@
     "ingenium": {
       "type": "local",
       "command": "node",
-      "args": ["services/ingenium-server/scripts/mcp-server.js"],
+      "args": ["services/ingenium-server/dist/scripts/mcp-server.js"],
       "cwd": "/home/brajam/repos/gh-llm-bootstrap",
-      "enabled": false,
+      "enabled": true,
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
         "INGENIUM_API_TIMEOUT": "10000",

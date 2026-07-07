@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node scripts/mcp-server.js",
+    "start": "node dist/scripts/mcp-server.js",
     "dev": "tsx watch scripts/mcp-server.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
