@@ -28,6 +28,16 @@ This is NOT the Next.js you know. This version may have breaking changes — API
 - **Custom hooks over repeated patterns.** If two components share stateful logic, extract a hook.
 - **Prefer Server Components by default.** Only add `"use client"` when you need interactivity, event handlers, or browser APIs.
 
+## 🔴 HARD RULE — Styling Guide Required
+
+Every Next.js dashboard project MUST have a `STYLING-GUIDE.md` in its service directory. This guide documents:
+- All design tokens (colors, spacing, fonts, shadows)
+- Layout grid and breakpoints
+- Component-level styles (nav, cards, buttons, forms)
+- Rules that must not be changed without updating the guide
+
+The guide is auto-generated from a screenshot of the running dashboard when visual changes are made. If a component's styles change, `STYLING-GUIDE.md` must be updated in the same commit.
+
 ## Global Stylesheet Rules
 
 - **All global CSS lives in `src/app/globals.css`.** Colors, typography, spacing variables, resets, utility classes — one file.

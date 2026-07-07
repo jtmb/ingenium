@@ -35,6 +35,13 @@ Invoke this skill to generate project documentation from templates. Useful after
 - Note error handling patterns
 - Document git and PR conventions if contributing docs exist
 
+### STYLING-GUIDE.md (for dashboard/frontend projects)
+- Captured from a screenshot of the running dashboard
+- Documents all Tailwind classes used per component
+- Catalogues design tokens (colors, spacing, fonts)
+- Lists layout rules and grid breakpoints
+- Includes a "Do Not Break" section of immutable rules
+
 ## Output Format
 
 For each doc generated:
