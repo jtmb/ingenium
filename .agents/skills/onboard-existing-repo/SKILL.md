@@ -1,6 +1,6 @@
 ---
 name: onboard-existing-repo
-description: "Onboard an existing repository to the ingenium skill system. Launches parallel subagents to explore structure/languages/CI/docs, maps findings to applicable skills, copies deploy payload, generates docs from templates. Use when user says 'onboard this repo', 'add skill system to this project', or 'bootstrap this existing codebase'."
+description: "Onboard an existing repository to the ingenium skill system. Launches parallel subagents to explore structure/languages/CI/docs, maps findings to applicable skills, registers skills in the MCP server, generates docs from templates. Use when user says 'onboard this repo', 'add skill system to this project', or 'bootstrap this existing codebase'."
 ---
 
 # Onboard Existing Repository
@@ -13,7 +13,7 @@ description: "Onboard an existing repository to the ingenium skill system. Launc
 - **Always run `/audit-skills` after applying** to verify consistency
 - **Always update AGENTS.md skill catalog** to only list actually-copied skills
 - **Never modify existing source code** — this skill adds `.agents/` and `docs/` only
-- **Ask the user for `$BOOTSTRAP_REPO` path** if it's not provided — default: path to local clone of `jtmb/ingenium`
+- **Skills are sourced from the local `.agents/skills/` directory** — no external bootstrap repo needed. `PROJECT_ROOT` points to the project being onboarded.
 
 ## When to Use
 
@@ -24,7 +24,7 @@ Invoke this skill when the user says any of:
 - "Set up `.agents/` for this project"
 - "Migrate this project to use ingenium"
 
-This skill is for **existing repos with existing code**. For fresh project scaffolds, use `bootstrap.sh` instead.
+This skill is for **existing repos with existing code**.
 
 ## How It Works — Four Phases
 
@@ -39,7 +39,7 @@ This skill is for **existing repos with existing code**. For fresh project scaff
             ▼                    ▼                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Phase 2: Skill Mapping — cross-reference findings vs        │
-│ bootstrap catalog, produce list of applicable skills        │
+│ skill catalog, produce list of applicable skills        │
 └──────────────────────────┬──────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
@@ -138,7 +138,7 @@ Instructions for the subagent:
 
 ## Phase 2 — Map Findings to Skills
 
-Collect reports from all 3 subagents, then cross-reference against the bootstrap catalog.
+Collect reports from all 3 subagents, then cross-reference against SKILL-INDEX.md.
 
 ### Data-Driven Skill Selection
 
@@ -171,7 +171,7 @@ Collect reports from all 3 subagents, then cross-reference against the bootstrap
 - `error-interpretation` — error diagnosis
 
 **Instructions:**
-- `skill-load` — 🔴 mandatory bootstrap payload
+- `skill-load` — 🔴 mandatory session init
 - `help` — skill catalog reference
 - `repo-context` — project identity
 - `debugging-patterns` — systematic debugging
@@ -217,10 +217,10 @@ mkdir -p .agents/{skills,instructions,tools,hooks} docs/
 For each skill in the "Skills to copy" list from Phase 2:
 
 ```bash
-cp -r "$BOOTSTRAP_REPO/.agents/skills/<skill-name>/" ".agents/skills/<skill-name>/"
+cp -r "PROJECT_ROOT/.agents/skills/<skill-name>/" ".agents/skills/<skill-name>/"
 ```
 
-Where `$BOOTSTRAP_REPO` is the path to the cloned bootstrap repo.
+Where `PROJECT_ROOT` is the project being onboarded. Skills are sourced from the local `.agents/skills/` directory.
 
 ### 3.3 Copy Applicable Instructions
 
@@ -230,7 +230,7 @@ Always copy all these instructions (they're the session management layer):
 for instr in skill-load help repo-context debugging-patterns self-correction-patterns \
              local-models update-skills audit-skills update-skill-index \
              generate-docs write-docs thread-auto-context; do
-  cp -r "$BOOTSTRAP_REPO/.agents/instructions/$instr/" ".agents/instructions/$instr/"
+  cp -r "PROJECT_ROOT/.agents/instructions/$instr/" ".agents/instructions/$instr/"
 done
 ```
 
@@ -241,8 +241,8 @@ Copy tools based on project needs (from Phase 2 mapping):
 ```bash
 # Always copy github-issues (low cost, high value)
 for tool in chrome-devtools playwright-mcp web-design-reviewer github-issues; do
-  if [[ -d "$BOOTSTRAP_REPO/.agents/tools/$tool/" ]]; then
-    cp -r "$BOOTSTRAP_REPO/.agents/tools/$tool/" ".agents/tools/$tool/"
+  if [[ -d "PROJECT_ROOT/.agents/tools/$tool/" ]]; then
+    cp -r "PROJECT_ROOT/.agents/tools/$tool/" ".agents/tools/$tool/"
   fi
 done
 ```
@@ -250,13 +250,13 @@ done
 ### 3.5 Copy Hooks (Always — All 3)
 
 ```bash
-cp "$BOOTSTRAP_REPO/.agents/hooks/"*.json ".agents/hooks/"
+cp "PROJECT_ROOT/.agents/hooks/"*.json ".agents/hooks/"
 ```
 
 ### 3.6 Copy and Customize AGENTS.md
 
 ```bash
-cp "$BOOTSTRAP_REPO/AGENTS.md" "AGENTS.md"
+cp "PROJECT_ROOT/AGENTS.md" "AGENTS.md"
 ```
 
 Then **edit AGENTS.md** to update the quick-reference tables:
@@ -272,7 +272,7 @@ Then **edit AGENTS.md** to update the quick-reference tables:
 ```bash
 for doc in README.md ARCHITECTURE.md TECH-STACK.md CONVENTIONS.md; do
   if [[ ! -f "docs/$doc" ]] || grep -q "<!-- TODO -->" "docs/$doc"; then
-    cp "$BOOTSTRAP_REPO/docs/$doc" "docs/$doc"
+    cp "PROJECT_ROOT/docs/$doc" "docs/$doc"
   fi
 done
 ```
@@ -350,17 +350,17 @@ Provide a summary:
 
 ---
 
-## Reference: Bootstrap Repo Paths
+## Reference: Local Skill Paths
 
 | Artifact | Source Path |
 |----------|-------------|
-| AGENTS.md | `$BOOTSTRAP_REPO/AGENTS.md` |
-| Skills | `$BOOTSTRAP_REPO/.agents/skills/<name>/` |
-| Instructions | `$BOOTSTRAP_REPO/.agents/instructions/<name>/` |
-| Tools | `$BOOTSTRAP_REPO/.agents/tools/<name>/` |
-| Hooks | `$BOOTSTRAP_REPO/.agents/hooks/` |
-| Docs templates | `$BOOTSTRAP_REPO/docs/` |
-| Hook bootstrap script | `$BOOTSTRAP_REPO/.agents/scripts/hook-bootstrap.sh` |
-| CI workflow | `$BOOTSTRAP_REPO/.agents/workflows/ci.yml` |
+| AGENTS.md | `PROJECT_ROOT/AGENTS.md` |
+| Skills | `PROJECT_ROOT/.agents/skills/<name>/` |
+| Instructions | `PROJECT_ROOT/.agents/instructions/<name>/` |
+| Tools | `PROJECT_ROOT/.agents/tools/<name>/` |
+| Hooks | `PROJECT_ROOT/.agents/hooks/` |
+| Docs templates | `PROJECT_ROOT/docs/` |
+| Skill registration | The onboarding subagent checks for `.agents/skills/` directory and registers each skill |
+| CI workflow | `PROJECT_ROOT/.agents/workflows/ci.yml` |
 
-Default `$BOOTSTRAP_REPO`: path to local clone of `jtmb/ingenium`
+`PROJECT_ROOT` points to the project being onboarded. Skills are already present in the local `.agents/skills/` directory.

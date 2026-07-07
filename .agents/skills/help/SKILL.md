@@ -65,7 +65,7 @@ When invoked, display this entire file as the response. It is the canonical inde
 
 | Skill | Trigger / Command | What it does |
 |-------|-------------------|--------------|
-| `audit-skills` | `/audit-skills` | Cross-reference audit: skills dir ↔ README ↔ mermaid ↔ bootstrap.sh ↔ AGENTS.md ↔ USAGE.md. Auto-fixes + commits + logs to learnings. Quick audit: `comm -23 <(ls -d .agents/skills/*/ ...) <(grep -oP '\.agents/skills/...' bootstrap.sh)` |
+| `audit-skills` | `/audit-skills` | Cross-reference audit: skills dir ↔ README ↔ mermaid ↔ SKILL-INDEX.md ↔ AGENTS.md ↔ USAGE.md. Auto-fixes + commits + logs to learnings. Quick audit: `comm -23 <(ls -d .agents/skills/*/ | sed 's|.*/||;s|/||' | sort) <(grep -oP '(?<=\[)[^]]+(?=\]\(\.agents/skills/)' SKILL-INDEX.md | sort)` |
 | `create-readme` | `/create-readme` | Review project, generate Markdown README with Quick Start, Usage, Configuration, Architecture link |
 | `generate-docs` | `/generate-docs` | Scan codebase → populate `docs/ARCHITECTURE.md`, `TECH-STACK.md`, `CONVENTIONS.md` |
 | `gh-cli` | GitHub operations | `gh auth status`, `gh pr list/create/view/merge`, `gh issue list/create/close`, `gh release create`, `gh gist create`, `gh search repos/issues`, `gh api` |
@@ -103,7 +103,7 @@ When invoked, display this entire file as the response. It is the canonical inde
 
 | Task | Command |
 |------|---------|
-| **Audit consistency** | `/audit-skills` or `comm -23 <(ls -d .agents/skills/*/ \| sed 's\|.*/\|\|;s\|/\|\|' \| sort) <(grep -oP '\.agents/skills/\K[^/]+(?=/SKILL\.md)' .agents/scripts/bootstrap.sh \| sort)` |
+| **Audit consistency** | `/audit-skills` or `comm -23 <(ls -d .agents/skills/*/ \| sed 's\|.*/\|\|;s\|/\|\|' \| sort) <(grep -oP '(?<=\[)[^]]+(?=\]\(\.agents/skills/)' SKILL-INDEX.md \| sort)` |
 | **Create/update skill** | `/update-skills` |
 | **Regenerate skill index** | `/update-skill-index` |
 | **View changelog** | `cat .agents/skills/learnings.md` |

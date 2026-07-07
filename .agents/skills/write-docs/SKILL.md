@@ -10,7 +10,7 @@ description: "Write high-quality documentation — READMEs, API docs, ADRs, arch
 **This skill should be proactively invoked after ANY change to:**
 
 - `.agents/skills/*/SKILL.md` — skill added, removed, or modified
-- `.agents/scripts/` — bootstrap or hook scripts changed
+- `.agents/scripts/` — hook scripts changed
 - `tests/` — test infrastructure changed
 - Project root files — `README.md`, `USAGE.md`, `AGENTS.md`
 - `.opencode/agents/*.md` — agents added, removed, or modified
