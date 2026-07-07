@@ -14,6 +14,7 @@ The monorepo has 4 packages:
 
 | Doc | Purpose |
 |-----|---------|
+| `docs/GETTING-STARTED.md` | Step-by-step setup guide for OpenCode |
 | `docs/ARCHITECTURE.md` | Project structure, key components, data flow |
 | `docs/TECH-STACK.md` | Dependencies, versions, why each was chosen |
 | `docs/CONVENTIONS.md` | Naming, file organization, error handling, git practices |
