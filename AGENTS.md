@@ -1,6 +1,6 @@
 # AGENTS.md — Skill System Protocol for gh-llm-bootstrap
 
-This is the **bootstrap source repo** for the Ingenium skill system. Skills live in `.agents/skills/` — all 44 are deployed via `bootstrap.sh` from the repo root. Edit source files here.
+This is the **bootstrap source repo** for the Ingenium skill system. Skills live in `.agents/skills/` — all 46 are deployed via `bootstrap.sh` from the repo root. Edit source files here.
 
 > 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
 
@@ -49,11 +49,11 @@ These are not optional. Skip none of them.
 ## Testing
 
 ```bash
-bash tests/test-self-improving.sh        # all 7 tests
+bash tests/test-self-improving.sh        # all 5 tests
 bash tests/test-self-improving.sh -v     # verbose output
 ```
 
-Tests: dependency gap detection, missing coverage, skill count consistency, frontmatter validity.
+Tests: dependency gap detection, missing coverage, skill enumeration, frontmatter validity, manual verification guide.
 
 ---
 

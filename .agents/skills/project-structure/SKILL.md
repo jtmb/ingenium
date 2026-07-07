@@ -144,6 +144,36 @@ graph TD
 
 ---
 
+## The API-as-Authority Monorepo Pattern
+
+For projects where a single API service owns all data access:
+
+```
+project-root/
+├── packages/
+│   └── core/                    # Library consumed by API ONLY
+│       ├── lib/                 # DB, tools, schemas, seed
+│       └── data/migrations/
+├── services/
+│   ├── api/                     # REST API — ⚡ SOLE DB AUTHORITY
+│   │   ├── scripts/api-server.ts
+│   │   ├── lib/routes/          # Calls core lib functions
+│   │   └── lib/middleware/       # Auth, validation, rate limits
+│   ├── server/                  # MCP transport — calls API over HTTP
+│   │   ├── scripts/server.ts    # ZERO core imports
+│   │   └── lib/client.ts        # Single HTTP client to API
+│   └── dashboard/               # Frontend — calls API over HTTP
+│       └── src/lib/api.ts       # Single HTTP client to API
+```
+
+**Rules**:
+- **API owns the database.** No other service imports core or any DB library.
+- **Server talks to API via HTTP.** Even on localhost. Centralizes all validation.
+- **Dashboard talks to API via HTTP.** Same pattern, same URL, same client.
+- **CI enforces**: `grep -r "db\\|sqlite" services/server/ services/dashboard/` must return zero results.
+
+---
+
 ## When to Create a New Service
 
 Start with one service. Split when:

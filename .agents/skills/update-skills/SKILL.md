@@ -74,6 +74,10 @@ Before every coding session — and whenever you touch a new area of a project �
 - Comments that say "remember to..." or "always..." (these are unwritten conventions)
 - PR review comments that repeat the same feedback
 - A `CONTRIBUTING.md` or wiki page with rules not in any skill
+- A `packages/core/` directory with shared tool logic → needs `project-structure` skill
+- A `services/api/` directory with route files + middleware → needs `api-design` skill
+- A `services/dashboard/` directory that only calls an API → needs `nextjs-conventions` skill
+- A `services/server/` directory with MCP transport logic → needs `api-design` + `project-structure` skills
 - `eslintrc`, `.prettierrc`, `pyproject.toml [tool.ruff]` — every customized rule is a convention worth documenting
 - CI pipeline steps that enforce project-specific checks
 - `.env.example` or config files with project-specific environment variables
@@ -93,6 +97,9 @@ Before every coding session — and whenever you touch a new area of a project �
 - `**/test/` or `**/__tests__/` with patterns → no test conventions skill
 - `**/i18n/` or `**/locales/` → no internationalization skill
 - `**/*.env*` files → no environment config skill
+- `packages/*/lib/tools/` files exist → no shared-library conventions skill
+- `services/*/lib/middleware/` files exist → no middleware conventions skill
+- `services/*/lib/routes/` files organized by resource → `api-design` skill should be active
 
 ### Signal 4 — Deprecated or Drifted Content
 
@@ -366,10 +373,10 @@ Before making any change, understand which layer you're touching:
 .agents/skills/kubernetes/SKILL.md → k8s/helm/chart YAML files
 .agents/skills/typescript-standalone/SKILL.md → .ts/.tsx files (non-Next.js)
 
-.agents/instructions/repo-context/SKILL.md → task: project identity and context
-.agents/instructions/generate-docs/SKILL.md → task: populate docs/ from codebase
-.agents/instructions/write-docs/SKILL.md → task: write READMEs, API docs, ADRs
-.agents/instructions/update-skills/SKILL.md → task: create, update, retire skills
+.agents/skills/repo-context/SKILL.md → task: project identity and context
+.agents/skills/generate-docs/SKILL.md → task: populate docs/ from codebase
+.agents/skills/write-docs/SKILL.md → task: write READMEs, API docs, ADRs
+.agents/skills/update-skills/SKILL.md → task: create, update, retire skills
 
 .agents/hooks/ → lifecycle enforcement
 .agents/scripts/bootstrap.sh → copies skills into target projects

@@ -1,0 +1,24 @@
+version: "3.9"
+services:
+  ingenium-api:
+    build: ./services/ingenium-api
+    ports:
+      - "4097:4097"
+    environment:
+      - INGENIUM_HOME=/data/ingenium
+      - INGENIUM_API_PORT=4097
+      - INGENIUM_API_RATE_LIMIT=100
+    volumes:
+      - ingenium-data:/data/ingenium
+
+  ingenium-dashboard:
+    build: ./services/ingenium-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4097/api/v1
+    depends_on:
+      - ingenium-api
+
+volumes:
+  ingenium-data:

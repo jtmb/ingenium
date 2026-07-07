@@ -34,6 +34,17 @@
         "THREAD_REQUEST_TIMEOUT": "10",
         "THREAD_API_TOKEN": "eyJhbGciOiJIUzI1NiIsInR5cCI6IlRIUkVBRCJ9.eyJzdWIiOiJhZG1pbiIsImlhdCI6MTc4MzIyMjQzMX0.ULrWu0TAj8A-6q3Uf5PnOw70RIPIwRDETitq-Mopf0k"
       }
+    },
+    "ingenium": {
+      "type": "local",
+      "command": ["node", "services/ingenium-server/scripts/mcp-server.js"],
+      "enabled": false,
+      "cwd": "/home/brajam/repos/gh-llm-bootstrap",
+      "environment": {
+        "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+        "INGENIUM_API_TIMEOUT": "10000",
+        "LOG_LEVEL": "info"
+      }
     }
   }
 }

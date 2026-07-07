@@ -69,7 +69,7 @@ Every plan you produce MUST follow this format so the orchestrator can parse and
 
 ### Required Sections
 
-**TL;DR** — What, why, how. One paragraph.
+**📊 Subagent Research Summary** — A markdown table summarizing every research subagent spawned. Columns: Subagent / Research Task / Findings. See 🔴 HARD RULE below. Only include subagents actually spawned — omit unused rows.
 
 **Orchestrator Instructions** — A table with these columns: Phase / Step / Subagent / Task. Include which steps are parallel (same phase) and which are blocked on prior phases. The orchestrator uses this table to mechanically plan its subagent spawns.
 
@@ -84,6 +84,8 @@ Every plan you produce MUST follow this format so the orchestrator can parse and
 **Relevant Files** — Table: File / Action / Description.
 
 **Verification** — Specific grep/diff/test commands. NOT generic statements.
+
+**TL;DR** — A one-paragraph executive summary that goes LAST. Write it as "here's what we're building and why" — it's for someone who already read the plan and wants the condensed version.
 
 **Decisions** — Assumptions, scope boundaries, what's deliberately excluded.
 
@@ -144,7 +146,7 @@ Before delegating ANY research, you MUST validate your understanding with the us
     - Testing strategy
     - Documentation updates needed (with trigger table from generic-conventions/SKILL.md)
 5. **Populate kaban board** — For each step in the Orchestrator Instructions table, create a kaban task with subagent assigned and dependencies set. Use `kaban_add_task_checked` for duplicate detection.
-6. **Hand off** — Include the full plan in your response text. Tell the user: "Plan saved to kaban board with N tasks. Handing off to @ingenium-orchestrator."
+6. **Hand off** — Produce the 📊 Subagent Research Summary (see 🔴 HARD RULE above). Then include the full plan + summary in your response text. Tell the user: "Plan saved to kaban board with N tasks. Handing off to @ingenium-orchestrator."
 
 ## 🔴 HARD RULE — Plan Tasks Go on the Kaban Board
 
@@ -157,6 +159,22 @@ After producing the step-by-step plan, you MUST populate the kaban board with ta
 - **Dependencies**: Match the "Blocked by" column from the Orchestrator Instructions table
 
 Use `kaban_init` first if no `.kaban/board.db` exists. Use `kaban_add_task_checked` (with duplicate detection) for all tasks. After adding all tasks, run `kaban_status` to confirm and report the board state.
+
+## 🔴 HARD RULE — Subagent Research Summary
+
+After all research subagents complete, you MUST produce a markdown table summarizing what each subagent did. This table goes at the END of your plan handoff, just before the "Handing off to @ingenium-orchestrator" message.
+
+| Subagent | Research Task | Findings |
+|----------|--------------|----------|
+| `@ingenium-explore` | {what was searched} | {N files found, key discoveries} |
+| `@ingenium-scout` | {what context was checked} | {N Thread entries, decisions found} |
+| `@ingenium-security-auditor` | {what was audited} | {findings summary} |
+| `@ingenium-prompt-engineer` | {what prompt was analyzed} | {key improvements made} |
+
+**Rules:**
+- Only include subagents that were actually spawned — omit unused ones
+- Each row's **Findings** column must be a concise 1-2 line summary, not the full output
+- The table MUST be produced before the handoff message — never after
 
 ## 🔴 FEATURE REQUEST → KABAN TASK FLOW
 
