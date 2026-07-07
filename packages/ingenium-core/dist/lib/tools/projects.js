@@ -22,6 +22,17 @@ export function createProject(name) {
         return db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
     });
 }
+export function deleteProject(name) {
+    return execTransaction(() => {
+        const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+        const existing = db.prepare("SELECT * FROM projects WHERE name = ?").get(name);
+        if (!existing)
+            return false;
+        db.prepare("DELETE FROM projects WHERE name = ?").run(name);
+        checkpointAfterWrite();
+        return true;
+    });
+}
 export function getProject(name) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM projects WHERE name = ?").get(name);

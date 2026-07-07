@@ -17,3 +17,12 @@ projectsRouter.post("/", (req, res) => {
   const project = projects.createProject(name);
   res.status(201).json({ data: project });
 });
+
+projectsRouter.delete("/:name", (req, res) => {
+  const deleted = projects.deleteProject(req.params.name!);
+  if (!deleted) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${req.params.name}' not found` } });
+    return;
+  }
+  res.status(204).send();
+});

@@ -19,8 +19,8 @@ import * as contextTools from "../lib/tools/context.js";
 import * as projectTools from "../lib/tools/projects.js";
 import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
-/** Shared optional project parameter — defaults to "default" when omitted. */
-const projectParam = z.string().optional().default("default");
+/** Shared required project parameter. Projects must be created explicitly via ingenium_project_init or the dashboard. */
+const projectParam = z.string();
 const server = new McpServer({ name: config.mcpName, version: config.mcpVersion }, { capabilities: { tools: {}, resources: {} } });
 // ── Skills ──────────────────────────────────────────────
 server.registerTool("ingenium_skill_list", { description: "List all skills for a project.", inputSchema: { project: projectParam } }, async ({ project }) => skillTools.skillList(project));
@@ -82,6 +82,7 @@ server.registerTool("ingenium_context_search", { description: "Full-text search 
 // ── Projects ────────────────────────────────────────────
 server.registerTool("ingenium_project_list", { description: "List all projects known to the Ingenium API.", inputSchema: {} }, async () => projectTools.projectList());
 server.registerTool("ingenium_project_init", { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string() } }, async ({ name }) => projectTools.projectInit(name));
+server.registerTool("ingenium_project_delete", { description: "Delete a project by name.", inputSchema: { name: z.string() } }, async ({ name }) => projectTools.projectDelete(name));
 // ── Plugins ─────────────────────────────────────────────
 server.registerTool("ingenium_plugin_list", { description: "List all plugins available for a project.", inputSchema: { project: projectParam } }, async ({ project }) => pluginTools.pluginList(project));
 server.registerTool("ingenium_plugin_enable", { description: "Enable a plugin for a project.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => pluginTools.pluginEnable(project, name));

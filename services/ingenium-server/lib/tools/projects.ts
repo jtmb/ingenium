@@ -1,6 +1,6 @@
 /**
  * MCP tool handlers for project management.
- * Supports listing all projects and initializing new ones.
+ * Supports listing, initializing, and deleting projects.
  */
 import { api } from "../client.js";
 
@@ -14,4 +14,10 @@ export async function projectList() {
 export async function projectInit(name: string) {
   const res = await api.post("/projects", { name });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Delete a project by name. */
+export async function projectDelete(name: string) {
+  const res = await api.del(`/projects/${encodeURIComponent(name)}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: res.ok }) }] };
 }

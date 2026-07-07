@@ -1,1 +1,1 @@
-{"version":3,"file":"projects.d.ts","sourceRoot":"","sources":["../../../lib/tools/projects.ts"],"names":[],"mappings":"AAMA,mDAAmD;AACnD,wBAAsB,WAAW;;;;;GAGhC;AAED,oDAAoD;AACpD,wBAAsB,WAAW,CAAC,IAAI,EAAE,MAAM;;;;;GAG7C"}
+{"version":3,"file":"projects.d.ts","sourceRoot":"","sources":["../../../lib/tools/projects.ts"],"names":[],"mappings":"AAMA,mDAAmD;AACnD,wBAAsB,WAAW;;;;;GAGhC;AAED,oDAAoD;AACpD,wBAAsB,WAAW,CAAC,IAAI,EAAE,MAAM;;;;;GAG7C;AAED,gCAAgC;AAChC,wBAAsB,aAAa,CAAC,IAAI,EAAE,MAAM;;;;;GAG/C"}

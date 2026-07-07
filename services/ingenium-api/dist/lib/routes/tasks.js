@@ -1,15 +1,19 @@
 import { Router } from "express";
 import { tasks } from "ingenium-core";
-import { resolveProjectId } from "../helpers.js";
+import { requireProject } from "../helpers.js";
 export const tasksRouter = Router();
 tasksRouter.get("/", (req, res) => {
-    const projectId = resolveProjectId(req.query.project ?? "default");
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
     const columnId = req.query.column_id;
     const list = tasks.listTasks(projectId, columnId);
     res.json({ data: list, total: list.length });
 });
 tasksRouter.post("/", (req, res) => {
-    const projectId = resolveProjectId(req.query.project ?? "default");
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
     const { title, description, assigned_to } = req.body;
     const task = tasks.createTask(projectId, title, description, assigned_to);
     res.status(201).json({ data: task });
@@ -26,7 +30,9 @@ tasksRouter.patch("/:id", (req, res) => {
     res.json({ data: updated });
 });
 tasksRouter.get("/next", (req, res) => {
-    const projectId = resolveProjectId(req.query.project ?? "default");
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
     const task = tasks.getNextTask(projectId);
     if (!task) {
         res.json({ data: null });

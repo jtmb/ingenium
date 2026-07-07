@@ -1,6 +1,6 @@
 /**
  * MCP tool handlers for project management.
- * Supports listing all projects and initializing new ones.
+ * Supports listing, initializing, and deleting projects.
  */
 import { api } from "../client.js";
 /** List all projects known to the Ingenium API. */
@@ -12,4 +12,9 @@ export async function projectList() {
 export async function projectInit(name) {
     const res = await api.post("/projects", { name });
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Delete a project by name. */
+export async function projectDelete(name) {
+    const res = await api.del(`/projects/${encodeURIComponent(name)}`);
+    return { content: [{ type: "text", text: JSON.stringify({ deleted: res.ok }) }] };
 }
