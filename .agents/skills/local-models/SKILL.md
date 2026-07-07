@@ -803,6 +803,9 @@ printf '{"model":"'"$MODEL"'","messages":[{"role":"user","content":[{"type":"tex
     ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
     -d @/tmp/vp.json \
   && rm -f /tmp/vp.json
+
+# Some models (Gemma 4, DeepSeek) output the answer in "reasoning_content" instead of "content"
+# Extract from either field: python3 -c "import json,sys; d=json.load(sys.stdin); m=d['choices'][0]['message']; print(m.get('content','') or m.get('reasoning_content',''))"
 ```
 
 **Steps:**
