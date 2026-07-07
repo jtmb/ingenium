@@ -39,7 +39,7 @@ def main():
 
     # Build request
     payload = {
-        "model": os.environ.get("VISION_MODEL", "google/gemma-4-12b-qat"),
+        "model": os.environ.get("VISION_MODEL", "gemma-4-12b-qat"),
         "messages": [
             {
                 "role": "user",

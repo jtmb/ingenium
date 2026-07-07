@@ -1,6 +1,6 @@
 ---
 name: local-models
-description: "Local LLM management — model profiles (Qwen, Gemma, DeepSeek), command safety rules (no &, timeout wrappers), local provider API reference (LM Studio, Ollama, vLLM), vision bridge for blind models, and cross-model strategy guide. Use when running, configuring, or debugging local inference."
+description: "Local LLM management — model profiles (Qwen, Gemma, DeepSeek), command safety rules (no &, timeout wrappers), local provider API reference (LM Studio, Ollama, vLLM), and cross-model strategy guide. Use when running, configuring, or debugging local inference."
 alwaysApply: true
 tags: ["local-models", "llm", "inference", "qwen", "gemma", "deepseek", "lm-studio", "terminal"]
 ---
@@ -775,69 +775,7 @@ curl -s -X POST http://192.168.0.13:1234/v1/embeddings \
   }'
 ```
 
-### 🔴 Vision Bridge — Blind Model Image Analysis
-
-**Preferred approach**: Use `@ingenium-vision` if available — paste the image
-directly in chat with `@ingenium-vision describe this`. The vision agent has
-a vision-capable model and processes images natively.
-
-**Fallback (when vision agent is unavailable)**: Use the curl command below
-to call a local vision model via API.
-
-When a blind model (no vision capability) needs to analyze an image, use the user's configured vision model. Read the provider config from `~/.config/opencode/opencode.jsonc` to find the local provider's base URL. This works with any OpenAI-compatible local provider (LM Studio, Ollama, vLLM, llama.cpp).
-
-#### 🔴 The Exact Command
-
-Substitute the actual PNG path and vision model name:
-
-```bash
-# Read provider config for base URL and API key
-BASE_URL=$(grep -A5 '"lmstudio\|"ollama\|"local' ~/.config/opencode/opencode.jsonc 2>/dev/null \
-  | grep baseURL | sed 's/.*"\(.*\)".*/\1/' || echo "http://localhost:1234/v1")
-
-API_KEY=$(grep -A5 '"lmstudio\|"ollama\|"local' ~/.config/opencode/opencode.jsonc 2>/dev/null \
-  | grep apiKey | sed 's/.*"\(.*\)".*/\1/' || echo "")  # empty = no auth header sent
-
-# Set the vision model name (must be loaded in the provider)
-MODEL="google/gemma-4-12b-qat"  # ← set to whichever vision-capable model is loaded
-
-# Build and send the vision request
-printf '{"model":"'"$MODEL"'","messages":[{"role":"user","content":[{"type":"text","text":"Describe this screenshot in detail: layout, colors, text content, visible elements, interactive elements."},{"type":"image_url","image_url":{"url":"data:image/png;base64,' > /tmp/vp.json \
-  && base64 -w0 /path/to/screenshot.png >> /tmp/vp.json \
-  && printf '"}}]}],"max_tokens":1000}' >> /tmp/vp.json \
-  && curl -s "${BASE_URL}/chat/completions" \
-    -H "Content-Type: application/json" \
-    ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
-    -d @/tmp/vp.json \
-  && rm -f /tmp/vp.json
-
-# Some models (Gemma 4, DeepSeek) output the answer in "reasoning_content" instead of "content"
-# Extract from either field: python3 -c "import json,sys; d=json.load(sys.stdin); m=d['choices'][0]['message']; print(m.get('content','') or m.get('reasoning_content',''))"
-```
-
-**Steps:**
-1. Find the PNG file path (from Playwright screenshot, user attachment, or failed view_image)
-2. Replace `/path/to/screenshot.png` with the actual path
-3. Replace `$MODEL` with a vision-capable model loaded in the user's provider
-4. Run the command. Read the output. Continue your task.
-
-#### Finding the Right Model
-
-Check what vision-capable models are loaded on your provider:
-
-```bash
-# LM Studio / OpenAI-compatible
-curl -s "${BASE_URL}/models" | python3 -m json.tool
-```
-
-Common vision models: `google/gemma-4-12b-qat`, `qwen/qwen-2.5-vl-7b`, `llava`, `cogvlm2`.
-
-#### 🔴 Rules
-
-- **DO NOT** use Playwright for the API call — the curl command is all you need
-- **DO NOT** extract base64 yourself — `base64 -w0` does it
-- **DO NOT** guess image contents — you're blind, use the command
-- **DO NOT** ask the user to describe the image — use the command
+<!-- Vision Bridge section removed — was invoking LM Studio API externally -->
 
 ### Provider Configuration
 
