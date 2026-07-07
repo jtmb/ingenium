@@ -46,6 +46,10 @@ function runMigrations(db: Database.Database): void {
 }
 
 export function execTransaction<T>(fn: () => T, retries = WRITE_MAX_RETRIES): T {
+  // Ensure DB is initialized before transaction
+  if (!db) {
+    db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+  }
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
       const result = db!.transaction(fn)();

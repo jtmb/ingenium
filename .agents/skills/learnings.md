@@ -809,7 +809,7 @@ ENDOFFILE && echo "Learnings entry written"
 
 ## 2026-07-07 — Ingenium MCP Server v1 architecture built
 
-- **Commit**: `{run git rev-parse --short HEAD after git add/commit}`
+- **Commit**: `28bbd23`
 - **Category**: architecture
 - **Changes**:
   - Monorepo scaffolded: root package.json (workspaces), tsconfig.base.json, docker-compose.yml, 4 docs

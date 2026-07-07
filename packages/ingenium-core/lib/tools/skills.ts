@@ -29,10 +29,13 @@ export function createSkill(projectId: string, name: string, description: string
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
     const id = randomUUID();
-    db.prepare(
+    const result = db.prepare(
       `INSERT INTO skills (id, project_id, name, description, content, category, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, projectId, name, description, content, category ?? null, now, now);
+    // Sync FTS5 index: use lastInsertRowid (integer) for FTS5 rowid
+    db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
+      .run(result.lastInsertRowid, content, description);
     checkpointAfterWrite();
     return getSkill(projectId, name)!;
   });
@@ -42,8 +45,23 @@ export function updateSkill(projectId: string, name: string, content: string): S
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
+    // Get current rowid for FTS5 sync
+    const current = db.prepare("SELECT rowid FROM skills WHERE project_id = ? AND name = ?")
+      .get(projectId, name) as { rowid: number } | undefined;
+    if (!current) return undefined;
+
+    // Remove old entry from FTS index
+    db.prepare("DELETE FROM skills_fts WHERE rowid = ?")
+      .run(current.rowid);
+
+    // Update the skill content
     db.prepare("UPDATE skills SET content = ?, updated_at = ? WHERE project_id = ? AND name = ?")
       .run(content, now, projectId, name);
+
+    // Re-insert into FTS index
+    db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
+      .run(current.rowid, content, getSkill(projectId, name)?.description ?? "");
+
     checkpointAfterWrite();
     return getSkill(projectId, name);
   });
