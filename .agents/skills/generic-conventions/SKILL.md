@@ -181,11 +181,12 @@ Invoke this skill when working on files that don't match any framework-specific 
 ## Testing
 
 Before declaring any change complete:
-1. **Lint & type-check** — fix every error
-2. **Build check** — ensure it succeeds with no warnings
-3. **Run and verify** — If the change involves an application (API, server, CLI), **start it and verify it works** (health check, key endpoint, `--help` flag, or similar). Never skip app-level verification — tests alone don't prove the app boots.
-4. **Existing tests** — fix any that break
-5. **Add tests** — at least one test for new logic
+1. **Use run.sh if it exists** — Check for `run.sh` at the project root. If present, use `./run.sh check` for typechecks, `./run.sh test` for tests, `./run.sh dev` to start the app.
+2. **Lint & type-check** — fix every error
+3. **Build check** — ensure it succeeds with no warnings
+4. **Run and verify** — If the change involves an application (API, server, CLI), **start it and verify it works** (health check, key endpoint, `--help` flag, or similar). Never skip app-level verification — tests alone don't prove the app boots.
+5. **Existing tests** — fix any that break
+6. **Add tests** — at least one test for new logic
 
 ## Naming Conventions
 
