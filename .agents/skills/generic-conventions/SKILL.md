@@ -27,6 +27,7 @@ Invoke this skill when working on files that don't match any framework-specific 
 | `.agents/scripts/` (bootstrap or hooks changed) | `docs/ARCHITECTURE.md` |
 | `tests/` (test infra changed) | `docs/TECH-STACK.md` |
 | `README.md`, `USAGE.md`, `AGENTS.md` (project root docs) | `docs/README.md` |
+| New feature page, tab, or route added to a dashboard or service | `docs/HOW-TO/<feature>.md` |
 
 **Workflow:**
 1. Finish the code change

@@ -42,6 +42,12 @@ Invoke this skill to generate project documentation from templates. Useful after
 - Lists layout rules and grid breakpoints
 - Includes a "Do Not Break" section of immutable rules
 
+### HOW-TO/ (for projects with multiple features/tabs)
+- One `.md` file per feature or user-facing tab
+- Follows the HOW-TO template: purpose, usage steps, API endpoints, code location, related docs
+- Generated when a new page, route, or tab is detected in the project
+- Lives in `docs/HOW-TO/<feature-name>.md`
+
 ## Output Format
 
 For each doc generated:
