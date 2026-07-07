@@ -18,6 +18,7 @@ permission:
     "ingenium-explore": "allow"
     "ingenium-scout": "allow"
     "ingenium-security-auditor": "allow"
+    "ingenium-prompt-engineer": "allow"
   mcp:
     "kaban_kaban_add_task": "allow"
     "kaban_kaban_add_task_checked": "allow"
@@ -182,6 +183,7 @@ When the user asks to add a feature (any size):
 | Codebase search, file discovery | `@ingenium-explore` | Find relevant files, patterns, structure, dependencies |
 | Context retrieval, decision history | `@ingenium-scout` | Past decisions, preferences, constraints from Thread |
 | Security analysis, vulnerability assessment | `@ingenium-security-auditor` | Any change touching auth, secrets, CI/CD, data |
+| Prompt analysis, prompt improvement | `@ingenium-prompt-engineer` | When the plan involves writing, analyzing, or improving prompts or agent instructions |
 | Docs structure review, doc needs | `@ingenium-explore` | Understanding documentation requirements for the plan |
 
 **Exception:** The planner may `read` specific files that subagents have identified as relevant. This is synthesis, not research.
@@ -200,6 +202,7 @@ When the user asks to add a feature (any size):
 - `@ingenium-explore` — codebase search (read-only)
 - `@ingenium-scout` — Thread context (read-only)
 - `@ingenium-security-auditor` — security analysis (read-only)
+- `@ingenium-prompt-engineer` — prompt analysis and improvement (read-only)
 
 ### ❌ Forbidden:
 - Using any subagent to edit, write, or rename files
