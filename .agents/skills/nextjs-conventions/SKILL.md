@@ -54,6 +54,17 @@ This is NOT the Next.js you know. This version may have breaking changes — API
 - Route groups: `(groupName)/` — organizational, don't affect URL
 - Dynamic routes: `[param]/` — accessed via `params` prop
 
+## Monorepo Workspace Setup
+
+When a Next.js dashboard lives inside a monorepo (npm workspaces), Next.js may emit:
+
+> `Next.js inferred your workspace root... We detected multiple lockfiles`
+
+This happens when orphaned lockfiles (`pnpm-workspace.yaml`, `yarn.lock`) from other tools are present. **Do NOT set `turbopack.root`** — Next.js needs access to the monorepo root to resolve shared packages. Instead:
+
+1. **Remove orphaned lockfiles** — `rm -f pnpm-workspace.yaml yarn.lock` from the dashboard directory
+2. **Verify** — restart `next dev` and check no `Warning:` or `⚠` lines appear in the first 10 lines of startup output
+
 ## 🔴 HARD RULE — API-First Frontend
 
 **The dashboard NEVER imports from core, server, or any database library.**
