@@ -45,9 +45,7 @@ npm install
   "mcp": {
     "servers": {
       "ingenium": {
-        "command": "node",
-        "args": ["/path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js"],
-        "cwd": "/path/to/ingenium",
+        "command": ["node", "/path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js"],
         "disabled": false,
         "env": {
           "INGENIUM_API_URL": "http://localhost:4097/api/v1",
