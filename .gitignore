@@ -28,6 +28,11 @@ playwright-report/
 test-results/
 playwright/.cache/
 
+# ── Build outputs ─────────────────────────────────────────
+.next/
+dist/
+build/
+
 # ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env
 .vscode
