@@ -29,6 +29,7 @@ Invoke this skill when working on files that don't match any framework-specific 
 | `README.md`, `USAGE.md`, `AGENTS.md` (project root docs) | `docs/README.md` |
 | New feature page, tab, or route added to a dashboard or service | `docs/HOW-TO/<feature>.md` |
 | Any file adds a `process.env` or environment variable reference | `docs/VARIABLES.md` |
+| Setup process changes (build, MCP config, start command, editor setup) | `docs/GETTING-STARTED.md` |
 
 **Workflow:**
 1. Finish the code change

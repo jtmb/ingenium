@@ -35,6 +35,13 @@ Invoke this skill to generate project documentation from templates. Useful after
 - Note error handling patterns
 - Document git and PR conventions if contributing docs exist
 
+### docs/GETTING-STARTED.md (always)
+- Step-by-step setup guide from scratch (prerequisites → clone → build → configure → run → verify)
+- Includes editor/IDE MCP configuration example (OpenCode, Cline, Claude Desktop)
+- Covers troubleshooting table for common setup failures
+- Updated when build steps, MCP config format, or start commands change
+- Lives at `docs/GETTING-STARTED.md`
+
 ### docs/VARIABLES.md (always)
 - Every `process.env` reference in the codebase must have a corresponding entry
 - Lists variable name, default value, consuming files, and purpose

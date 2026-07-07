@@ -155,6 +155,19 @@ What becomes easier? Harder? What are the tradeoffs?
 - Always include "what we didn't choose and why"
 - Link to superseded ADRs when reversing decisions
 
+## 🔴 HARD RULE — GETTING-STARTED.md Required
+
+Every project MUST have a `docs/GETTING-STARTED.md` covering setup from scratch. It walks a new user through:
+- Prerequisites (language runtime, package manager, editor)
+- Clone and install
+- Build steps
+- Editor/IDE configuration (MCP setup for OpenCode, Cline, Claude Desktop, etc.)
+- Starting the application
+- Verification checks (dashboard loads, API responds, MCP tools visible)
+- Troubleshooting common issues
+
+**Trigger**: When the project's setup process changes (new build step, different MCP config format, different start command), update GETTING-STARTED.md in the same commit.
+
 ## 🔴 HARD RULE — VARIABLES.md Required
 
 Every project MUST have a `docs/VARIABLES.md` documenting ALL environment variables. Each entry lists:
