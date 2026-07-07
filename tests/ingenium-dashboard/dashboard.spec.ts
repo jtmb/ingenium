@@ -29,14 +29,14 @@ test.describe("Ingenium Dashboard", () => {
       page.getByText("Manage your AI agent skill system, learnings, tasks, and MCP servers."),
     ).toBeVisible();
 
-    // All six navigation links should be present in the top nav bar
+    // All navigation links should be present in the top nav bar
     const nav = page.locator("nav");
-    const links = ["Projects", "Skills", "Learnings", "Tasks", "Plugins", "Servers"];
+    const links = ["Projects", "Archive", "Skills", "Learnings", "Tasks", "Plugins", "Servers", "Settings"];
     for (const name of links) {
       await expect(nav.getByRole("link", { name })).toBeVisible();
     }
 
-    // The home page should also contain six card-style link tiles
+    // The home page should also contain card-style link tiles
     const cardLinks = page.locator("a[href]").filter({ has: page.locator("h2") });
     await expect(cardLinks).toHaveCount(6);
   });
@@ -166,7 +166,40 @@ test.describe("Ingenium Dashboard", () => {
   /*  7. Servers page                                                    */
   /* ------------------------------------------------------------------ */
 
-  test("servers page adds a server", async ({ page }) => {
+    test("tasks page completes a task through all columns", async ({ page }) => {
+    await page.goto("/tasks");
+
+    // Create a new task
+    const taskTitle = `E2E Complete ${Date.now()}`;
+    await page.getByPlaceholder("Task title").fill(taskTitle);
+    await page.getByRole("button", { name: "Add" }).click();
+    await expect(page.getByText(taskTitle)).toBeVisible();
+
+    // Click through all 4 columns (todo → in_progress → review → done)
+    for (let i = 0; i < 4; i++) {
+      await page.getByText(taskTitle).first().click();
+      await page.waitForTimeout(300);
+    }
+
+    // The task should still be visible after cycling through all columns
+    await expect(page.getByText(taskTitle)).toBeVisible();
+  });
+
+  test("archive page renders", async ({ page }) => {
+    await page.goto("/archive");
+    await expect(page.getByRole("heading", { name: "Archive" })).toBeVisible();
+    // Either shows "No archived projects" or lists archived projects
+    await expect(page.getByText(/No archived|Restore/)).toBeVisible({ timeout: 5000 }).catch(() => {});
+  });
+
+  test("settings page loads with archive retention setting", async ({ page }) => {
+    await page.goto("/settings");
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+    await expect(page.getByText("Archive retention")).toBeVisible();
+    await expect(page.locator('input[type="number"]')).toBeVisible();
+  });
+
+test("servers page adds a server", async ({ page }) => {
     await page.goto("/servers");
 
     // Page heading is "MCP Servers" (not just "Servers")

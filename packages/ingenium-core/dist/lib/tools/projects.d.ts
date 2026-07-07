@@ -1,6 +1,9 @@
 import { Project } from "../schema.js";
 export declare function listProjects(): Project[];
 export declare function createProject(name: string): Project;
-export declare function deleteProject(name: string): boolean;
+export declare function archiveProject(name: string): boolean;
+export declare function unarchiveProject(name: string): boolean;
+export declare function listArchivedProjects(): Project[];
+export declare function purgeExpiredProjects(retentionDays: number): number;
 export declare function getProject(name: string): Project | undefined;
 //# sourceMappingURL=projects.d.ts.map

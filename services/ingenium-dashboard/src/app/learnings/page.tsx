@@ -11,15 +11,21 @@ export default function LearningsPage() {
   const [learnings, setLearnings] = useState<Learning[]>([]);
   const [content, setContent] = useState("");
   const [type, setType] = useState("pattern");
+  const [error, setError] = useState("");
 
   useEffect(() => { api.learnings.list().then((r) => setLearnings(r.data)).catch(() => {}); }, []);
 
   /** Submits a new learning entry and prepends it to the list. */
   const log = async () => {
     if (!content) return;
-    const res = await api.learnings.create(type, content);
-    setLearnings([res.data, ...learnings]);
-    setContent("");
+    try {
+      setError("");
+      const res = await api.learnings.create(type, content);
+      setLearnings([res.data, ...learnings]);
+      setContent("");
+    } catch (err) {
+      setError("Failed to log learning. Please check that a project exists.");
+    }
   };
 
   return (
@@ -35,6 +41,7 @@ export default function LearningsPage() {
         </select>
         <textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="What did you learn?" className="border p-2 rounded w-full h-24" />
         <button onClick={log} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Log Learning</button>
+        {error && <div className="text-red-600 text-sm">{error}</div>}
       </div>
       <div className="space-y-2">
         {learnings.map((l) => (

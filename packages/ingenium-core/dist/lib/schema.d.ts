@@ -3,6 +3,7 @@ export declare const ProjectSchema: z.ZodObject<{
     id: z.ZodString;
     name: z.ZodString;
     path: z.ZodOptional<z.ZodString>;
+    archived_at: z.ZodOptional<z.ZodString>;
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
@@ -11,12 +12,14 @@ export declare const ProjectSchema: z.ZodObject<{
     created_at: string;
     updated_at: string;
     path?: string | undefined;
+    archived_at?: string | undefined;
 }, {
     id: string;
     name: string;
     created_at: string;
     updated_at: string;
     path?: string | undefined;
+    archived_at?: string | undefined;
 }>;
 export type Project = z.infer<typeof ProjectSchema>;
 export declare const SkillSchema: z.ZodObject<{
