@@ -24,7 +24,6 @@ permission:
     "ingenium-software-engineer-fast": "allow"
     "ingenium-software-engineer-premium": "allow"
     "ingenium-plan-file": "allow"
-    "ingenium-vision": "allow"
   mcp:
     "kaban_kaban_add_task": "allow"
     "kaban_kaban_add_task_checked": "allow"
