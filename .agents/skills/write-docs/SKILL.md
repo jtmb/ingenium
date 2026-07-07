@@ -155,6 +155,18 @@ What becomes easier? Harder? What are the tradeoffs?
 - Always include "what we didn't choose and why"
 - Link to superseded ADRs when reversing decisions
 
+## 🔴 HARD RULE — Per-Feature HOW-TO Required
+
+Every project with multiple features or tabs MUST have a `docs/HOW-TO/` directory with one `.md` file per feature. Each HOW-TO covers:
+
+- **What It Does** — one-sentence purpose
+- **How to Use** — step-by-step instructions
+- **API Endpoints** — list of REST endpoints the feature calls
+- **Code Location** — where the page, API client, route handler, and core module live
+- **Related Docs** — links to STYLING-GUIDE, API docs, or other relevant documentation
+
+**Trigger**: When a new feature, page, or tab is added to a dashboard or service, create its HOW-TO document in the same commit. Do NOT wait for the user to ask.
+
 ## After Writing
 
 1. Re-read `generic-conventions/SKILL.md` and verify your docs comply
