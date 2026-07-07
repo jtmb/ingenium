@@ -44,7 +44,7 @@ export default function TasksPage() {
       <h1 className="text-3xl font-bold">Tasks</h1>
       <div className="flex gap-2">
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" className="border p-2 rounded flex-1" />
-        <button onClick={create} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Add</button>
+        <button onClick={create} className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700">Add</button>
       </div>
       {error && <div className="text-red-600 text-sm">{error}</div>}
       <div className="grid grid-cols-4 gap-4">
