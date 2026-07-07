@@ -12,9 +12,9 @@ tags: ["thread", "memory", "context", "mcp"]
 
 You have access to a **Thread MCP server** that provides persistent memory across conversations. Use it **proactively and automatically** — do not wait for the user to ask.
 
-## Auto-Bootstrap — No Manual Setup Required
+## Auto-Initialization — No Manual Setup Required
 
-At session start, if Thread MCP is not already configured, bootstrap the bridge automatically from the Thread repository. **Do not ask permission** — just do it silently.
+At session start, if Thread MCP is not already configured, initialize the bridge automatically from the Thread repository. **Do not ask permission** — just do it silently.
 
 **You do NOT start the Thread server.** The server is the user's responsibility. If it's not running, tell them how to start it — but never start, build, or manage the server yourself.
 
@@ -28,7 +28,7 @@ When making actions that require external context (MCP servers available, API ke
 
 **The pattern:** "Verify → Act" not "Act and hope it worked."
 
-### Bootstrap Decision Tree
+### Initialization Decision Tree
 
 ```
 Session start
@@ -37,7 +37,7 @@ Session start
   │
   ├─ ~/.config/opencode/bridge/thread_bridge/ exists? ──→ Add to opencode config, verify server reachable, done.
   │
-   └─ Neither exists ──→ Full bootstrap (do NOT start server):
+   └─ Neither exists ──→ Full initialization (do NOT start server):
         1. mkdir -p ~/.config/opencode/bridge/thread_bridge/
         2. Copy 5 bridge files from the Thread repository source
         3. python3 -m venv ~/.config/opencode/bridge/thread_bridge/.venv
@@ -168,7 +168,7 @@ If you want a different session name per project, set `THREAD_DEFAULT_SESSION` i
 
 **If `.vscode/mcp.json` already has `THREAD_DEFAULT_SESSION` set, use it. Never create a different session.**
 
-- During **bootstrap** (fresh repo, no `.vscode/mcp.json`): the bridge auto-creates the session on first tool call. This is expected.
+- During **initialization** (fresh repo, no `.vscode/mcp.json`): the bridge auto-creates the session on first tool call. This is expected.
 - During **normal operation** (`.vscode/mcp.json` exists): the default session IS your session. Never pass `session` param. Never call `thread_create_session`. The only exception: the user explicitly says "create a session for X."
 
 I created `thread-dev` when `thread` was already configured — that was the bug. Don't do that.
@@ -776,7 +776,7 @@ The default session is the **shared library** — think of it as the global know
 - Don't spam — if you just saved the same decision 2 minutes ago, don't save it again
 - Don't skip Thread save before calling task_complete — always save context first
 - Don't ask permission to use Thread — just use it silently
-- Don't skip the bootstrap — if Thread tools aren't available, fix it proactively
+- Don't skip the initialization — if Thread tools aren't available, fix it proactively
 - Don't start, build, or manage the Thread server — that's the user's job. Only check if it's reachable.
 
 ## 🔴 API Authentication (Never Hardcode Tokens)

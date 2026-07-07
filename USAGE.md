@@ -1,333 +1,124 @@
-# USAGE.md — How to Apply and Maintain AI Rules
+# Ingenium Dashboard User Guide
 
-This is your handbook for working with the layered agent instruction system. When you think *"I need to add a rule, where does it go?"* — start here.
+Ingenium's dashboard provides visual management for all your AI agent development tools.
+Access it at **http://localhost:3000** after starting the app with `./run.sh dev`.
 
----
+## Getting Started
 
-## Quick Start
+Start the application:
 
-See **[Getting Started](./README.md#getting-started)** in the README for installation options:
-
-- **Manual Install** — clone and run `bootstrap.sh`
-- **Manual Bootstrap (with framework detection)** — smart setup with `bootstrap.sh`
-
-**What you get in every project:** the full `.agents/skills/` (44 items total), `AGENTS.md`, `SKILL-INDEX.md`, and `docs/` templates — all auto-detected to match your framework.
-
----
-
-## Decision Tree: Where Do I Put This Rule?
-
-Use this flowchart to determine which file type a new rule belongs in.
-
-```mermaid
-graph TD
-    START[I need to add a rule...] --> Q1{Applies to ALL code, ALL the time?}
-    Q1 -->|Yes| GENERIC[".agents/skills/generic-conventions/SKILL.md"]
-    Q1 -->|No| Q2{Applies to specific FILE PATTERNS?}
-    Q2 -->|Yes| SKILL[".agents/skills/{name}/SKILL.md"]
-    Q2 -->|No| Q3{Applies to a specific TASK?}
-    Q3 -->|Yes| TASKSKILL[".agents/skills/{name}/SKILL.md\nInvocable via /command"]
-    Q3 -->|No| Q4{Uses browser or GitHub CLI?}
-    Q4 -->|Yes| TOOL[".agents/skills/{name}/SKILL.md\nBrowser automation or GitHub ops"]
-    Q4 -->|No| Q5{Must be ENFORCED deterministically?}
-    Q5 -->|Yes| HOOK[".agents/hooks/{name}.json\nRuns at agent lifecycle events"]
-    Q5 -->|No| Q6{Multi-step WORKFLOW with assets?}
-    Q6 -->|Yes| COMPLEXSKILL[".agents/skills/{name}/SKILL.md\nBundles scripts + references"]
-    Q6 -->|No| RECONSIDER[Reconsider -- maybe it doesn't need an AI rule]
+```bash
+./run.sh dev
 ```
 
-### Quick Reference Table
+This starts all 3 services: API (port 4097), Dashboard (port 3000), and MCP Server (stdio-ready).
 
-| Intent | File Type | Location | Has Frontmatter? |
-|--------|-----------|----------|------------------|
-| "All code must have comments" | Core rule | `.agents/skills/generic-conventions/SKILL.md` | Yes (`name`, `description`) |
-| "Python files must use type hints" | Framework skill | `.agents/skills/python-conventions/SKILL.md` | Yes (`name`, `description`) |
-| "Generate test cases for this file" | Task instruction | `.agents/skills/gen-tests/SKILL.md` | Yes (`name`, `description`) |
-| "Use Playwright to test the UI" | Browser tool | `.agents/skills/playwright-mcp/SKILL.md` | Yes (`name`, `description`) |
-| "Block `rm -rf` without approval" | Hook | `.agents/hooks/pre-tool-use.json` | N/A (JSON) |
-| "Full database migration workflow" | Domain skill | `.agents/skills/sql-database/SKILL.md` | Yes (`name`, `description`) |
+## Projects
 
----
+**What it does**: Browse and manage project configurations. Each project has its own context, skills, and learnings isolated in per-project SQLite databases.
 
-## Directory Structure Reference
+**How to use**:
+- View all projects on the Projects tab
+- Create a new project with a name (auto-resolved to UUID)
+- Select a project to see its skills, learnings, and tasks
 
-```
-your-project/
-├── USAGE.md                                     ← This file — how to use and maintain rules
-├── README.md                                    ← Project overview (hand-written)
-├── docs/                                        ← Pre-seeded documentation database
-│   ├── README.md                                ←   Index of all docs (AI-discoverable)
-│   ├── ARCHITECTURE.md                          ←   Project structure & data flow
-│   ├── TECH-STACK.md                            ←   Dependencies & version decisions
-│   └── CONVENTIONS.md                           ←   Naming, patterns, file organization
-├── .agents/
-│   ├── skills/                                  ← ALL conventions (44 items)
-│   │   ├── generic-conventions/
-│   │   │   └── SKILL.md                         ←   Fallback for any file type
-│   │   ├── nextjs-conventions/
-│   │   │   └── SKILL.md                         ←   Next.js/TypeScript conventions
-│   │   ├── python-conventions/
-│   │   │   └── SKILL.md                         ←   Python conventions
-│   │   ├── go-conventions/
-│   │   │   └── SKILL.md                         ←   Go conventions
-│   │   ├── rust-conventions/
-│   │   │   └── SKILL.md                         ←   Rust conventions
-│   │   ├── containers/
-│   │   │   └── SKILL.md                         ←   Docker/Compose conventions
-│   │   ├── shell-scripts/
-│   │   │   └── SKILL.md                         ←   Shell script conventions
-│   │   ├── sql-database/
-│   │   │   └── SKILL.md                         ←   SQL & migration conventions
-│   │   ├── api-design/
-│   │   │   └── SKILL.md                         ←   REST API design conventions
-│   │   ├── kubernetes/
-│   │   │   └── SKILL.md                         ←   Kubernetes/Helm conventions
-│   │   ├── typescript-standalone/
-│   │   │   └── SKILL.md                         ←   Standalone TypeScript conventions
-│   │   ├── skill-load/
-│   │   │   └── SKILL.md                         ←   Session bootstrap protocol
-│   │   ├── repo-context/
-│   │   │   └── SKILL.md                         ←   Project context overview
-│   │   ├── update-skills/
-│   │   │   └── SKILL.md                         ←   Self-improvement pipeline
-│   │   ├── audit-skills/
-│   │   │   └── SKILL.md                         ←   Consistency audit
-│   │   ├── debugging-patterns/
-│   │   │   └── SKILL.md                         ←   Systematic debugging
-│   │   ├── local-models/
-│   │   │   ├── SKILL.md                         ←   Model profiles, terminal safety, LM Studio API
-│   │   │   └── scripts/vision_call.py           ←   Vision bridge script
-│   │   ├── self-correction-patterns/
-│   │   │   └── SKILL.md                         ←   AI recovery patterns
-│   │   ├── generate-docs/
-│   │   │   └── SKILL.md                         ←   Populate docs/ from codebase
-│   │   ├── write-docs/
-│   │   │   └── SKILL.md                         ←   Write READMEs, API docs, ADRs
-│   │   ├── update-skill-index/
-│   │   │   └── SKILL.md                         ←   Regenerate SKILL-INDEX.md
-│   │   ├── thread-auto-context/
-│   │   │   └── SKILL.md                         ←   Persistent memory
-│   │   ├── chrome-devtools/
-│   │   │   └── SKILL.md                         ←   Browser debugging/screenshots
-│   │   ├── playwright-mcp/
-│   │   │   └── SKILL.md                         ←   Playwright automation
-│   │   ├── gh-cli/
-│   │   │   └── SKILL.md                         ←   GitHub CLI operations
-│   │   ├── web-design-reviewer/
-│   │   │   └── SKILL.md                         ←   UI/UX inspection
-│   │   ├── onboard-existing-repo/
-│   │   │   └── SKILL.md                         ←   Repo onboarding
-│   │   └── ... (44 total)
-│   ├── hooks/                                   ← Deterministic enforcement (JSON)
-│   │   ├── session-start.json                   ←   Auto-bootstrap on session start
-│   │   ├── pre-tool-use.json                    ←   Validate before tool calls
-│   │   └── post-tool-use.json                   ←   Auto-lint after file edits
-│   └── scripts/                                 ← Bootstrap engine
-│       └── bootstrap.sh                         ←   Scaffold projects with selected skills
-```
+**API**: GET /api/v1/projects, POST /api/v1/projects, GET /api/v1/projects/:id
 
----
+**Code**: services/ingenium-dashboard/src/app/projects/page.tsx → services/ingenium-api/routes/projects.ts → packages/ingenium-core/lib/tools/projects.ts
 
-## Step-by-Step Guides
+**Docs**: docs/HOW-TO/projects.md
 
-### Add a New Framework Skill
+## Skills
 
-Adding support for a new language or framework (e.g., Ruby, Elixir, Zig):
+**What it does**: Browse and search all 46+ AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns.
 
-1. **Create the skill directory** at `.agents/skills/{framework}-conventions/`:
-   ```yaml
-   ---
-   name: {framework}-conventions
-   description: "Use when working with {Framework} files. Covers conventions, build commands, and testing."
-   ---
-   # {Framework} Conventions
-   ...
-   ```
+**How to use**:
+- View all skills in the Skills tab
+- Search by name, tag, or keyword
+- Click to view full skill content
+- Skills auto-load on session start via /skill-load
 
-2. **Add the framework** to the table in this `USAGE.md`.
+**API**: GET /api/v1/skills, GET /api/v1/skills/:id, GET /api/v1/skills/search?q=...
 
-3. **Update `bootstrap.sh`** — add the skill to the framework-specific overlay section.
+**Code**: services/ingenium-dashboard/src/app/skills/page.tsx → services/ingenium-api/routes/skills.ts → packages/ingenium-core/lib/tools/skills.ts
 
-4. **Update `docs/TECH-STACK.md`** if relevant.
+**Docs**: docs/HOW-TO/skills.md
 
-5. **Test**: `./bootstrap.sh --dry-run --framework {name} /tmp/test` — verify the correct files are selected.
+## Learnings
 
-### Add a New Task Instruction or Tool
+**What it does**: Log, search, and discover patterns in your learnings. Uses FTS5 full-text search with type/tag categorization. The self-improving knowledge base.
 
-For task skills (like update-skills, generate-docs) or tools (like chrome-devtools, gh-cli):
+**How to use**:
+- View recent learnings in the Learnings tab
+- Search with FTS5 queries (prefix*, phrase "search", -negation)
+- Filter by type (skill, agent, hook, plugin, config, architecture, bug, pattern)
 
-1. **Create the directory** at `.agents/skills/{name}/SKILL.md`.
+**API**: GET /api/v1/learnings, POST /api/v1/learnings, SEARCH /api/v1/learnings/search?q=...
 
-2. **Use proper frontmatter** (same format as skills):
-   ```yaml
-   ---
-   name: {name}
-   description: "What this skill does and when to use it"
-   ---
-   ```
+**Code**: services/ingenium-dashboard/src/app/learnings/page.tsx → services/ingenium-api/routes/learnings.ts → packages/ingenium-core/lib/tools/learnings.ts
 
-3. **For tools**, ensure any MCP or tool references are documented in the SKILL.md.
+**Docs**: docs/HOW-TO/learnings.md
 
-4. **Update `bootstrap.sh`** if the new item should be deployable.
+## Tasks
 
-5. **Update the relevant tables** in `USAGE.md` and `SKILL-INDEX.md`.
+**What it does**: A full Kanban-style task board with todo → in_progress → review → done workflow. Tasks can have descriptions, files, labels, dependencies, and agent assignments.
 
-### Add a Project-Specific Rule
+**How to use**:
+- View tasks by column (todo, in_progress, review, done)
+- Create tasks with descriptions, labels, and file references
+- Set dependencies to enforce execution order
+- Move tasks through the workflow as work progresses
 
-When your project has a rule that isn't framework-generic (e.g., "never import X in Y layer"):
+**API**: GET /api/v1/tasks, POST /api/v1/tasks, PUT /api/v1/tasks/:id, DELETE /api/v1/tasks/:id
 
-1. **Identify the right primitive** using the decision tree above.
+**Code**: services/ingenium-dashboard/src/app/tasks/page.tsx → services/ingenium-api/routes/tasks.ts → packages/ingenium-core/lib/tools/tasks.ts
 
-2. **Create the skill** in `.agents/skills/{name}/SKILL.md` with proper frontmatter:
-   - `name` (must match folder name)
-   - `description` (keyword-rich for discovery)
+**Docs**: docs/HOW-TO/tasks.md
 
-3. **For hooks**: valid JSON with `type: "command"`.
+## Plugins
 
-4. **Add to the docs map** — if the rule is significant, add an entry in `docs/ARCHITECTURE.md` or `docs/CONVENTIONS.md`.
+**What it does**: Manage OpenCode plugin lifecycle — enable, disable, and configure plugins. Track which plugins are active and their lifecycle hooks.
 
-6. **Validate frontmatter** — YAML between `---` markers, no unescaped colons, spaces (not tabs). Silent failures happen with bad frontmatter.
+**How to use**:
+- View all plugins with their current status
+- Toggle plugins on/off
+- See lifecycle hooks each plugin registers for
 
-### Modify Core Rules
+**API**: GET /api/v1/plugins, POST /api/v1/plugins/:id/activate, POST /api/v1/plugins/:id/deactivate
 
-When you need to change a core rule in `.agents/skills/generic-conventions/SKILL.md`:
+**Code**: services/ingenium-dashboard/src/app/plugins/page.tsx → services/ingenium-api/routes/plugins.ts → packages/ingenium-core/lib/tools/plugins.ts
 
-1. **Read `generic-conventions`** — understand the current rule set.
+**Docs**: docs/HOW-TO/plugins.md
 
-2. **Check all framework skills** for conflicts. A change to the "test before done" core rule should not contradict a framework skill's test command.
+## Servers
 
-3. **Make the change** to `generic-conventions/SKILL.md`.
+**What it does**: Configure and manage MCP servers through a proxy engine. Start, stop, restart, and monitor MCP server configurations.
 
-4. **Update any affected framework skills** — if you changed a generalized concept, ensure each skill still makes sense.
+**How to use**:
+- View all configured MCP servers
+- Start/stop servers through the proxy engine
+- View server status and logs
+- Add new MCP server configurations
 
-5. **Update `docs/CONVENTIONS.md`** if the change affects project conventions.
+**API**: GET /api/v1/servers, POST /api/v1/servers, POST /api/v1/servers/:id/start, POST /api/v1/servers/:id/stop
 
-6. **Run verification**: check that the new rule doesn't create impossible requirements when combined with a skill.
+**Code**: services/ingenium-dashboard/src/app/servers/page.tsx → services/ingenium-api/routes/servers.ts → packages/ingenium-core/lib/tools/servers.ts
 
-### Add a New Skill
+**Docs**: docs/HOW-TO/servers.md
 
-Skills are the primary mechanism for adding conventions and tasks. Choose the right directory:
+## API Access
 
-| Category | Location | Example |
-|----------|----------|---------|
-| Framework/domain convention | `.agents/skills/{name}/` | `.agents/skills/ruby-conventions/SKILL.md` |
-| Task skill (invocable via command) | `.agents/skills/{name}/` | `.agents/skills/db-migrate/SKILL.md` |
-| Browser/GitHub tool | `.agents/skills/{name}/` | `.agents/skills/my-browser-tool/SKILL.md` |
+All dashboard features are backed by a REST API on port 4097. You can use the API directly:
 
-1. **Create the directory** with a `SKILL.md` file:
+```bash
+# List all projects
+curl http://localhost:4097/api/v1/projects
 
-   ```yaml
-   ---
-   name: {skill-name}
-   description: "What this skill does and when to use it"
-   ---
-   # Skill Title
-   Instructions for the AI...
-   ```
+# Search learnings
+curl "http://localhost:4097/api/v1/learnings/search?q=debugging"
 
-2. **For complex skills** (multi-step, has scripts/templates):
-   ```
-   .agents/skills/{skill-name}/
-   ├── SKILL.md           ← name must match folder
-   ├── scripts/           ← executable code
-   └── references/        ← docs loaded as needed
-   ```
-   The `SKILL.md` `name` field MUST match the folder name. Test by typing `/` in chat.
-
----
-
-## Common Pitfalls
-
-| Pitfall | Why It Happens | Fix |
-|---------|---------------|-----|
-| **Missing `description` in SKILL.md** | Forgot to add frontmatter | Always include `name` and `description` frontmatter |
-| **YAML frontmatter silent failure** | Unescaped colons, tabs, missing `---` fences | Always quote descriptions with colons; use spaces not tabs |
-| **Mixing concerns in one file** | "I'll just add this here..." | One concern per skill — separate testing rules from styling rules |
-| **Contradictory rules** | Core says "run tests", overlay says "skip tests in CI" | Check all skills when adding any rule |
-| **`name` mismatch in SKILL.md** | Renamed folder but not `name` field | `name` must match folder exactly; mismatch = skill won't load |
-| **Duplicating docs in skills** | Copying README content into skill files | Link to docs instead: `See docs/TESTING.md for conventions` |
-
----
-
-## Monorepo Setup
-
-For repositories with multiple languages/frameworks (e.g., Next.js frontend + Python backend):
-
-```
-monorepo/
-├── .agents/
-│   └── skills/
-│       ├── nextjs-conventions/
-│       │   └── SKILL.md
-│       ├── python-conventions/
-│       │   └── SKILL.md
-│       └── generic-conventions/
-│           └── SKILL.md
+# Get all skills
+curl http://localhost:4097/api/v1/skills
 ```
 
-Key: the `generic-conventions` skill covers the whole repo. Framework skills are invoked when editing matching files.
-
----
-
-## User-Level vs Project-Level Rules
-
-| Scope | Location | Use For |
-|-------|----------|---------|
-| **Project** (team-shared) | `.agents/` in the repo | Rules everyone on the team should follow |
-| **User** (personal) | `~/.config/ai/user-rules/` or editor-specific config | Personal preferences that roam across all your projects |
-
-User-level examples: "I prefer single quotes", "Always use async/await over .then()", "Never suggest class components in React". These belong in your user profile, not in every project's `.agents/`.
-
----
-
-## Framework Skills
-
-| Framework | Skill | Sections Covered |
-|-----------|-------|------------------|
-| Next.js | `nextjs-conventions` | Build/Test, Component Architecture, Global CSS, App Router, Secure Coding, Testing & QA, Naming |
-| Python | `python-conventions` | Build/Test, Type Hints, Docstrings, Project Structure, Testing, Code Quality, Imports, Secure Coding, Naming |
-| Go | `go-conventions` | Build/Test, Comments, Error Handling, Project Layout, Testing, Concurrency, General Practices, Secure Coding, Naming |
-| Rust | `rust-conventions` | Build/Test, Documentation, Error Handling, Project Layout, Ownership, Testing, Clippy, General Practices, Secure Coding, Naming |
-
-## Domain Skills
-
-| Domain | Skill | Sections Covered |
-|--------|-------|------------------|
-| Containers | `containers` | Multi-stage builds, Non-root user, Layer caching, .dockerignore, Digest pinning, HEALTHCHECK, Signal handling, Secrets hygiene, Image size, Compose conventions |
-| Shell | `shell-scripts` | `set -euo pipefail`, Quoting, Error handling, Temp files, Portability, Secrets, Organization |
-| SQL | `sql-database` | Parameterized queries, Migration safety, Indexing, Connection pooling, Transactions, N+1 prevention, Query performance, Schema design |
-| API Design | `api-design` | Status codes, Error shape, Versioning, Auth, Pagination, Rate limiting, Idempotency, HTTP methods |
-| Kubernetes | `kubernetes` | Security context, Resource limits, Probes, Network policies, Labels, Deployments, Services, Ingress, ConfigMaps, Helm |
-| TypeScript | `typescript-standalone` | Strict config, Type safety, Error handling, Async patterns, Module system, Node.js conventions, Testing, Styling |
-
-The `generic-conventions` skill covers all other file types with 13 sections — docs, comments, testing, DRY, secure coding, error handling, configuration, naming, and more. For the full skill catalog, see [`SKILL-INDEX.md`](SKILL-INDEX.md).
-
----
-
-## Agent Pipeline
-
-This bootstrap repo defines **11 agents** (2 primary, 9 subagents) for OpenCode. See [`docs/agents.md`](docs/agents.md) for the full architecture.
-
-### Planner is Read-Only
-
-The `@ingenium-planner` agent is **read-only** — it researches requirements and produces plans, but NEVER executes work. It may ONLY spawn research subagents:
-- `@ingenium-explore` — codebase search
-- `@ingenium-scout` — Thread/RAG context
-- `@ingenium-security-auditor` — security scope check
-
-### Orchestrator-to-Kaban Workflow
-
-The `@ingenium-orchestrator` uses a **kaban board** for structured work tracking:
-
-1. **Get next task** — `kaban_get_next_task` reads highest-priority item from `todo` column
-2. **Claim task** — `kaban_move_task <id> in-progress` marks task as active
-3. **Spawn subagent** — delegates to the appropriate agent (software-engineer, qa, docs, etc.)
-4. **Move to review** — `kaban_move_task <id> review` after subagent completes
-5. **Complete** — `kaban_complete_task <id>` after QA approval
-6. **Archive** — `kaban_archive_tasks` at session end
-
-The kaban board is authoritative; `todowrite` mirrors state for OpenCode visibility.
-
-### Models Configuration (`.agents/models.yaml`)
-
-Model assignments for all agents are centralized in **`.agents/models.yaml`** — the human-editable source of truth. It defines model aliases (`fast`, `capable`, `premium`, `local`), per-agent model mappings, and reasoning effort overrides. Changes should be made here first, then propagated to each agent's `.md` frontmatter.
+See each HOW-TO doc for the full API reference for each feature.

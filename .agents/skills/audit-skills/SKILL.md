@@ -1,6 +1,6 @@
 ---
 name: audit-skills
-description: "Audit the skill system for consistency — cross-reference .agents/skills/ against README.md, AGENTS.md, USAGE.md, bootstrap.sh, and mermaid diagrams. Find orphans, missing entries, stale paths, and frontmatter issues. Auto-applies fixes without asking. Use after adding or removing skills, or when docs look out of date."
+description: "Audit the skill system for consistency — cross-reference .agents/skills/ against README.md, AGENTS.md, USAGE.md, and mermaid diagrams. Find orphans, missing entries, stale paths, and frontmatter issues. Auto-applies fixes without asking. Use after adding or removing skills, or when docs look out of date."
 ---
 
 # Audit Skills
@@ -94,7 +94,7 @@ The audit checks 10 integration points. Every skill should appear in ALL of them
 | **1. Directory exists** | `.agents/skills/{name}/SKILL.md` | Frontmatter present, `name` matches folder |
 | **2. README table** | `README.md` → Always-Included Skills or Task Skills tables | Skill listed with correct emoji, description matches SKILL.md |
 | **3. README mermaid** | `README.md` → mermaid graph TD | Node exists with skill name, connected to `D` (decision node) |
-| **4. bootstrap.sh** | `.agents/scripts/bootstrap.sh` → FILES array | Entry exists with correct condition (`always`, `optional`, `framework:*`) |
+| **4. SKILL-INDEX.md** | `SKILL-INDEX.md` (repo root) | Entry exists, description matches SKILL.md, no stale or duplicate entries |
 | **5. AGENTS.md index** | `AGENTS.md` | Points to `/help` — no stale references to deleted skills or docs |
 | **6. USAGE.md** | `USAGE.md` → skill listings, directory trees | Skill appears in tree diagrams and reference tables |
 | **7. SKILL-INDEX.md** | `SKILL-INDEX.md` (repo root) | Skill is listed in the correct table, total count matches `ls -d .agents/skills/*/ \| wc -l` |
@@ -143,16 +143,17 @@ Compare the directory list against:
 | `*-conventions` (framework: nextjs, python, go, rust) | Framework Detection |
 | `project-structure`, `containers`, `shell-scripts`, `sql-database`, `api-design`, `kubernetes`, `typescript-standalone`, `agent-pipelines` | Always-Included Skills |
 | `generate-docs`, `write-docs`, `repo-context`, `update-skills`, `create-readme`, `audit-skills`, `gh-cli`, `thread-auto-context` | Task Skills |
-| `generic-conventions` | Core (listed in bootstrap table, not skills tables) |
+| `generic-conventions` | Core (always loaded, not in task/framework tables) |
 
-### Step 4 — Cross-Reference bootstrap.sh
+### Step 4 — Cross-Reference SKILL-INDEX.md
 
-Check the FILES array in `.agents/scripts/bootstrap.sh`:
+Check that SKILL-INDEX.md is up to date:
 
-- Every `always`-tier skill must be in the FILES array
-- Every framework skill must be in the `case "$FRAMEWORK"` block
-- `optional` skills (task skills, hooks) should be in FILES but may be `optional`
-- No orphan entries — if a FILES entry points to a nonexistent skill, flag it
+- Does every skill in `.agents/skills/` have an entry in SKILL-INDEX.md?
+- Does every entry in SKILL-INDEX.md correspond to an actual skill directory?
+- Check descriptions: do any reference deleted files or obsolete concepts?
+
+If stale, run `/update-skill-index` to regenerate from skill files.
 
 ### Step 5 — Cross-Reference Mermaid Diagram
 
@@ -167,7 +168,7 @@ If a skill is missing from the diagram, the AI won't know when to invoke it base
 
 - Any README/USAGE reference to a skill that no longer exists?
 - Any stale path (`old-skill/`) in the mermaid diagram?
-- Any bootstrap.sh entry pointing to a deleted directory?
+- Any SKILL-INDEX.md entry pointing to a deleted skill?
 - Any AGENTS.md cross-reference to a removed skill?
 
 ### Step 7 — Cross-Reference SKILL-INDEX.md
@@ -221,9 +222,8 @@ When the audit finds issues, **fix them immediately**. Then commit and log.
 |-------|-----|
 | Skill missing from README | Add row to appropriate table with emoji and description from SKILL.md |
 | Skill missing from mermaid | Add `D -->\|trigger\| XN[skill-name]` and `XN --> J` |
-| Skill not in bootstrap.sh | Add FILES entry: `".agents/skills/{name}/SKILL.md\|.agents/skills/{name}/SKILL.md\|{condition}"` |
 | Name mismatch | Fix `name:` field in SKILL.md frontmatter |
-| Stale reference | Remove the reference from README, USAGE.md, or bootstrap.sh |
+| Stale reference | Remove the reference from README, USAGE.md, or SKILL-INDEX.md |
 | Orphan skill (no SKILL.md) | Create SKILL.md from template or delete empty directory |
 | Skill missing from AGENTS.md | Not applicable — AGENTS.md is a redirect to `/help`. No per-skill rows needed. |
 | Badge count wrong | Update `skills-17%20files` to match actual count |
@@ -262,13 +262,11 @@ AFTER=$(git rev-parse --short HEAD)
 ## Quick Audit Command
 
 ```bash
-# One-liner to compare skills directory vs bootstrap.sh
-comm -23 \
-  <(ls -d .agents/skills/*/ | sed 's|.*/||;s|/||' | sort) \
-  <(grep -oP '\.agents/skills/\K[^/]+(?=/SKILL\.md)' .agents/scripts/bootstrap.sh | sort)
-```
+# One-liner to compare skills directory vs SKILL-INDEX.md
+diff <(ls -d .agents/skills/*/ | sed 's|.agents/skills/||;s|/||' | sort) \
+     <(grep -oP '(?<=\.agents/skills/)\w+' SKILL-INDEX.md | sort)
 
-This shows skills that exist as directories but are NOT in bootstrap.sh. Reverse `comm -13` to find bootstrap.sh entries pointing to nonexistent directories.
+This shows differences between the actual skill directories and SKILL-INDEX.md entries. No output means they're in sync.
 
 ---
 
@@ -281,9 +279,9 @@ This shows skills that exist as directories but are NOT in bootstrap.sh. Reverse
 
 ## Verification
 
-- Run the quick audit command — zero discrepancies in `comm -23` output
+- Run the quick audit command — zero discrepancies in `diff` output
 - Every skill directory has a frontmatter-valid SKILL.md
 - README.md badge count matches `ls -d .agents/skills/*/ | wc -l`
-- `grep -c '|\.agents/skills/.*|\.agents/skills/' .agents/scripts/bootstrap.sh` matches expected count
+- SKILL-INDEX.md entries count matches `ls -d .agents/skills/*/ | wc -l`
 - Mermaid diagram has one node per domain skill
 - Self-learning: learnings.md exists and AGENTS.md has "Self-Improvement — Grow the System" section

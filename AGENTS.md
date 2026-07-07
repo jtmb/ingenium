@@ -1,8 +1,10 @@
-# AGENTS.md — Skill System Protocol for gh-llm-bootstrap
+# AGENTS.md — Ingenium MCP Server Agent Protocol
 
-This is the **bootstrap source repo** for the Ingenium skill system. Skills live in `.agents/skills/` — all 46 are deployed via `bootstrap.sh` from the repo root. Edit source files here.
+This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded from the Ingenium SQLite database via the MCP server. The skill source files live at `.agents/skills/` for editing.
 
 > 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
+
+> **Dashboard**: Skills can be managed through the Ingenium Dashboard at [http://localhost:3000](http://localhost:3000).
 
 ---
 
@@ -38,7 +40,7 @@ After ANY code change, you MUST run the applicable self-improvement commands:
 | Command | Action |
 |---------|--------|
 | `/update-skills` | Detects gaps and creates/retires skills |
-| `/audit-skills` | Cross-references skills against README, bootstrap.sh, mermaid |
+| `/audit-skills` | Cross-references skills against README, mermaid, skill index |
 | `/update-skill-index` | Regenerates `SKILL-INDEX.md` from all skill files |
 | All changes | Log to `.agents/skills/learnings.md` with before/after commit hashes |
 

@@ -34,47 +34,6 @@
 - **Changes**: Added `"*": "deny"` as first entry in `task:` permission blocks for 6 agent files that lacked them: ingenium-docs, ingenium-plan-file, ingenium-qa, ingenium-explore, ingenium-scout, ingenium-security-auditor. The 5 agents that already had `"*": "deny"` were already correct (ingenium-software-engineer, engineer-fast, engineer-premium, orchestrator, scrum).
 - **Why**: Prevents subagent leakage (OpenCode issue #6527) — ensures only explicitly listed agents are accessible via the `task` tool, and agents without any task permissions cannot spawn subagents.
 
-## 2026-07-06 — Remove stale sec-ops/ directory
-
-- **Commit**: `35efa0a` (after)
-- **Category**: cleanup
-- **Changes**: Removed `sec-ops/` directory — an orphaned variant structure containing stale agent definitions (ingenium-docs, ingenium-qa, ingenium-explore, ingenium-scout, ingenium-security-auditor under `execution/`, `research/`, `security/` subdirectories).
-- **Audit results**: Four grep searches confirmed zero stale references to `software-dev`, `dev-ops`, `deploy/`, `Copilot`, or `.github/` patterns across source files.
-- **Why**: Leftover from old variant structure that had been superseded by the main `.opencode/agents/` layout.
-
-## 2026-07-04 — Thread bootstrap + OpenCode doc compliance
-
-- **Thread bootstrap** — Updated `.vscode/mcp.json` `THREAD_DEFAULT_SESSION` from `"default"` to `"gh-llm-bootstrap"`. Created root `opencode.json` with `mcp.thread` entry. Verified server reachable.
-- **OpenCode compliance** — Refactored `AGENTS.md` to follow OpenCode docs recommendation ([rules → Manual Instructions in AGENTS.md](https://opencode.ai/docs/rules/#manual-instructions-in-agentsmd)):
-  - Moved detailed skill catalog to `.agents/SKILL-CATALOG.md`
-  - AGENTS.md is now concise with core protocol + lazy-load `@` references
-  - Mirror updated in `deploy/`
-- **Token regeneration** — Old pre-generated `THREAD_API_TOKEN` was invalidated by a Thread server restart (changed `THREAD_AUTH_SECRET_KEY`). Generated a fresh no-expiry API token from within the container via `create_token('admin', expiry_seconds=0)`. Updated in both `.vscode/mcp.json` and `opencode.json`.
-
-## 2026-07-04 — Full documentation audit after skills/ merge
-
-- **Before**: `b0c9318` (snapshot before fixes)
-- **After**: `bfee2c9`
-- **Fixed**: 16 discrepancies found and fixed
-  - **SKILL-INDEX.md**: All 20+ stale `.agents/instructions/` and `.agents/tools/` paths updated to `.agents/skills/`. Removed separate instructions/tools sections. Updated total count and table structure.
-  - **README.md**: Badge count 43→45. Removed all references to `.agents/instructions/` and `.agents/tools/` directories. Merged task/tool skill tables into single list. Updated mermaid diagram labels.
-  - **AGENTS.md**: Removed `.agents/instructions/` and `.agents/tools/` references from common foundation, session checklist, skill system instructions, and directory tree. Updated to reflect single `.agents/skills/` structure.
-  - **USAGE.md**: Updated decision tree locations, directory tree, task/tool creation guides, and count references. Removed instructions/tools path distinctions.
-  - **opencode.json**: Updated `instructions` glob from `[".agents/instructions/*/SKILL.md", ".agents/tools/*/SKILL.md"]` to `[".agents/skills/*/SKILL.md"]`.
-  - **Deploy mirror**: All deploy files synced to match source changes.
-- **All source/docs in sync**: 46 skills, frontmatter valid, hooks valid JSON, deploy mirrors match.
-
-## 2026-07-04 — Create ingenium agent pipeline (build + explore + scout)
-
-- **Commit**: `6daca03`
-- **Added**:
-  - `.opencode/agents/ingenium-build.md` — Primary agent replaces broken `agent.build` in `opencode.json`. Has `permission.task` to delegate to both subagents. Moved to markdown so all agents are in `.opencode/agents/`.
-  - `.opencode/agents/ingenium-explore.md` — Read-only subagent for fast codebase searches (grep, glob, find). No edit/write. Delegated by `ingenium-build` via Task tool or invoked via `@ingenium-explore`.
-  - `.opencode/agents/ingenium-scout.md` — Thread/RAG subagent with `thread_*` MCP tool permissions. Reads past context, saves decisions, searches via Thread API. Invoked via `@ingenium-scout`.
-- **Removed**: `agent.build` block from `opencode.json` (both source and deploy)
-- **Updated**: `AGENTS.md` and `deploy/AGENTS.md` — added Custom Agents table documenting all 6 custom agents
-- **Pipeline**: `ingenium-build` (primary) → delegates to `ingenium-explore` (code search) and `ingenium-scout` (Thread RAG). Users can also `@`-mention subagents directly.
-
 ## 2026-07-04 — Reduce startup instructions + global LM Studio provider
 
 - **Before**: `7cd4429`
@@ -869,3 +828,44 @@ ENDOFFILE && echo "Learnings entry written"
   - `.gitignore`: added `.next/`, `dist/`, `build/` to prevent build artifact leaks
   - Amended previous commit: `git rm --cached` for all `.next/` artifacts
 - **Why**: User wanted single-file env var doc in `docs/`, not project root
+
+## 2026-07-07 — test-results moved into tests/
+
+- **Commit**: `8a921eb` (after)
+- **Before**: `acd9326`
+- **Category**: pattern | tests | config
+- **Changes**:
+  - `playwright.config.ts`: added `outputDir: "./tests/test-results"` so Playwright outputs into `tests/` directory
+  - `.gitignore`: changed `test-results/` to `tests/test-results/` to match new location
+  - `useful-tests/SKILL.md`: added `outputDir` to Playwright config template so future agents follow the convention
+  - Deleted stale root-level `test-results/` directory from disk
+- **Why**: User wanted test output artifacts inside `tests/`, not leaking to project root
+
+## 2026-07-07 — Regenerated SKILL-INDEX.md (clean Ingenium MCP Server)
+
+- **Commit**: `CHANGES_NOT_YET_COMMITTED`
+- **Category**: docs | skill-index
+- **Changes**:
+  - Rewrote SKILL-INDEX.md with new structure: Invocable Task Skills, Framework Conventions, Always-Included Domain Skills, Core, Quick Command Reference, Skill System Maintenance, Skill Links
+  - Added `typescript-standalone` to Framework Conventions table (was missing)
+  - Removed ALL bootstrap.sh, "bootstrap repo maintenance", and "bootstrap this existing codebase" references
+  - Eliminated duplicated skill entries across multiple tables
+  - Fixed YAML block scalar rendering issues for gh-cli and thread-auto-context descriptions
+  - Reframed all descriptions for standalone Ingenium MCP Server (not bootstrap repo)
+- **Why**: Skill system is now a standalone Ingenium MCP Server; index needed cleanup of stale bootstrap references
+
+## 2026-07-07 — Identity Transition: Bootstrap → Standalone App
+
+- **Commit**: (pending)
+- **Before**: Repository identity was a "bootstrap source repo" for deploying skills into target projects
+- **Category**: architecture | pattern
+- **Changes**:
+  - Deleted 4 bootstrap files: `bootstrap.sh`, `hook-bootstrap.sh`, `session-start.json`, `pre-tool-use.json`
+  - Rewrote `README.md` → standalone Ingenium identity: "All your AI agent dev tools in one place. One MCP server, hundreds of tools."
+  - Rewrote `AGENTS.md` → Ingenium MCP Server Agent Protocol
+  - Rewrote `USAGE.md` → Ingenium Dashboard User Guide (6-tab walkthrough)
+  - Rewrote `docs/README.md` → clean standalone docs index
+  - Updated 9 skills to remove bootstrap/deploy references: audit-skills, update-skills, onboard-existing-repo, write-docs, generic-conventions, thread-auto-context, help, learnings.md
+  - Regenerated `SKILL-INDEX.md` to drop all bootstrap.sh references
+  - 7/7 self-improving tests pass; 7/7 agent validation tests pass
+- **Why**: Project evolved from a bootstrap deployment tool to a standalone MCP Server app; docs no longer reflected reality
