@@ -2,7 +2,7 @@
 name: ingenium-explore
 description: "Fast read-only agent for codebase exploration — find files, search code, understand project structure, locate patterns. Invoke via @ingenium-explore when you need to quickly navigate the codebase without making changes."
 mode: subagent
-# model: opencode/deepseek-v4-flash-free
+model: opencode/deepseek-v4-flash-free
 reasoningEffort: "high"
 permission:
   read: allow

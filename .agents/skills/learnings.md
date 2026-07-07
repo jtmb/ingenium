@@ -747,3 +747,40 @@ ENDOFFILE && echo "Learnings entry written"
 - /audit-skills — verify all 46 skills in README/bootstrap.sh/mermaid (all consistent)  
 - /update-skill-index — regenerate SKILL-INDEX.md (already up to date, count matches 46)
 
+## 2026-07-07 — prompt-expansion → custom OpenCode agent
+
+- **Commit**: `11ab9e1` (after)
+- **Category**: agent
+- **Changes**: Converted `.agents/prompts/prompt-expansion.md` (Prompt Engineer chat mode) into `.opencode/agents/prompt-engineer.md` as a proper OpenCode subagent definition
+- **Why**: User requested the prompt template be a custom agent instead of a static prompt file
+- **What was removed from the original**: `<reasoning>` XML tag sections, JSON output format bias, "DO NOT USE CODE BLOCKS" restriction
+- **What was created**: `.opencode/agents/prompt-engineer.md` with `mode: subagent`, read-only permissions, analysis framework as natural markdown bullet points
+- **Deleted**: `.agents/prompts/prompt-expansion.md` and the now-empty `.agents/prompts/` directory
+
+## 2026-07-07 — Added prompt-engineer to ingenium-planner subagents
+
+- **Commit**: `11ab9e1` (after)
+- **Category**: agent
+- **Changes**: Added `"prompt-engineer": "allow"` to ingenium-planner's task permission block, added prompt-engineer row to the delegation table, added prompt-engineer to the Allowed subagent usage section
+- **Why**: User requested prompt-engineer be callable by the planner for prompt analysis tasks during planning
+
+
+## 2026-07-07 — Fixed 4 pre-existing agent validation test failures
+
+- **Commit**: `11ab9e1`
+- **Category**: agent
+- **Changes**: Uncommented `model: opencode/deepseek-v4-flash-free` in 4 agent frontmatters (ingenium-docs, ingenium-qa, ingenium-explore, ingenium-scout)
+- **Why**: All 4 agents had the `model` field commented out with `# model:`, causing Test 1 (Frontmatter Validity) to fail. The field is required by the agent validation test.
+- **Files changed**: `.opencode/agents/execution/ingenium-docs.md`, `.opencode/agents/execution/ingenium-qa.md`, `.opencode/agents/research/ingenium-explore.md`, `.opencode/agents/research/ingenium-scout.md`
+
+## 2026-07-07 — Synced models.yaml with actual agent configurations
+
+- **Commit**: `11ab9e1`
+- **Category**: agent
+- **Changes**: Updated `.agents/models.yaml` to match actual model + reasoningEffort values from all 12 agent .md files
+- **What changed**:
+  - Added `opencode-free` alias (`opencode/deepseek-v4-flash-free`) — used by 4 agents on OpenCode's free tier
+  - Fixed agent assignments: ingenium-docs, ingenium-qa, ingenium-explore, ingenium-scout → opencode-free; ingenium-security-auditor → fast
+  - Added `other` section with prompt-engineer → premium
+  - Removed `review` section (agents redistributed)
+  - Reasoning section now only includes agents with actual reasoningEffort in their .md; added security-auditor → high, fixed orchestrator → xhigh, explore → high

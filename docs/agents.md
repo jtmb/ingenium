@@ -2,7 +2,7 @@
 
 ## Overview
 
-Eleven agents total: 2 primary, 9 subagents. The **planner** researches and produces plans (read-only), populating the kaban board with tasks. The planner ONLY spawns research subagents (explore, scout, security-auditor) — it never executes work directly. The **orchestrator** coordinates execution — it NEVER writes code directly, always delegating to subagents. Nine specialized subagents handle search, context, implementation (3 tiers), review, documentation, plan management, and security.
+Twelve agents total: 2 primary, 10 subagents. The **planner** researches and produces plans (read-only), populating the kaban board with tasks. The planner ONLY spawns research subagents (explore, scout, security-auditor) — it never executes work directly. The **orchestrator** coordinates execution — it NEVER writes code directly, always delegating to subagents. Ten specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, plan management, and security.
 
 ```mermaid
 flowchart TB
@@ -56,6 +56,7 @@ flowchart TB
 |-------|------|-------|----------|--------|---------|
 | **ingenium-planner** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | Planner — plans sprints, decomposes feature requests, populates kaban board |
 | **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-flash` | DeepSeek API | Full R/W | Coordinator — delegates ALL work to subagents, never writes code directly |
+| **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
 | **ingenium-plan-file** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (plan.md only) | Single-purpose — manages `plan.md` at project root. Created/updated/deleted only by planner instruction |
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `lmstudio/qwopus3.5-9b-coder` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
@@ -157,7 +158,7 @@ flowchart LR
 | **Access** | Read-only |
 | **Invoked by** | User (Tab key) |
 | **Triggers** | User request: "Plan X", "Analyze Y", "Research Z" |
-| **Can spawn** | `@ingenium-explore`, `@ingenium-scout`, `@ingenium-security-auditor` (research agents only) |
+| **Can spawn** | `@ingenium-explore`, `@ingenium-scout`, `@ingenium-security-auditor`, `@ingenium-prompt-engineer` (read-only agents only) |
 
 | Phase | Action | Delegates to |
 |-------|--------|-------------|
@@ -177,7 +178,7 @@ flowchart LR
 The `question` tool is used for structured choice questions; freeform text for open-ended ones. The agent waits for user responses before proceeding — no research happens before probe completion.
 
 **Planner HARD RULEs:**
-- 🔴 **You Are a Planner, NOT an Executor** — You ONLY spawn READ-ONLY research agents (explore, scout, security-auditor). You NEVER write code, edit files, or run implementation agents.
+- 🔴 **You Are a Planner, NOT an Executor** — You ONLY spawn READ-ONLY agents (explore, scout, security-auditor, ingenium-prompt-engineer). You NEVER write code, edit files, or run implementation agents.
 - 🔴 Never search code, grep, or glob directly — always delegate to explore
 - 🔴 Never access general subagent or circumvent read-only restrictions
 - 🔴 **Ask Before You Plan** — Never spawn research subagents without first asking clarifying questions. Ambiguous requests must be resolved before delegation
@@ -194,7 +195,7 @@ The `question` tool is used for structured choice questions; freeform text for o
 | **Access** | Full R/W |
 | **Invoked by** | User (Tab key) |
 | **Triggers** | User: "Execute", "Go ahead", "Implement", or provides a plan |
-| **Can spawn** | ALL 9 subagents (explore, scout, security-auditor, software-engineer, software-engineer-fast, software-engineer-premium, qa, docs, plan-file) plus the Multi-Model software engineer variants (fast, premium) |
+| **Can spawn** | ALL 10 subagents (ingenium-prompt-engineer, explore, scout, security-auditor, software-engineer, software-engineer-fast, software-engineer-premium, qa, docs, plan-file) plus the Multi-Model software engineer variants (fast, premium) |
 | **Direct bash** | ONLY: `git add/commit/push`, `git rev-parse`, test/build verification |
 
 | Phase | Action | Delegates to |
@@ -415,7 +416,7 @@ flowchart LR
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
 | DeepSeek V4 Pro (API) | `ingenium-planner`, `ingenium-software-engineer-premium` | 2 | Paid |
-| DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor` | 3 | Paid |
+| DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor`, `ingenium-prompt-engineer` | 4 | Paid |
 | DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-plan-file` | 5 | Free |
 | qwopus 3.5 9B Coder (LM Studio) | `ingenium-scout` | 1 | Local |
 
@@ -429,6 +430,7 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 |----------|-------------|--------|--------------|
 | ingenium-explore | `@ingenium-explore` | Read-only | planner + orchestrator + user |
 | ingenium-scout | `@ingenium-scout` | Read-only | planner + orchestrator + user |
+| ingenium-prompt-engineer | `@ingenium-prompt-engineer` | Read-only | planner + user |
 | ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | planner + orchestrator + user |
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
 | ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Read/Write | orchestrator only |
