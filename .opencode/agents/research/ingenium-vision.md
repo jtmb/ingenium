@@ -60,7 +60,18 @@ printf '{"model":"'"$MODEL"'","messages":[{"role":"user","content":[{"type":"tex
   && rm -f /tmp/vp.json
 ```
 
-4. **Return the description** — Present the vision model's response clearly to the caller. If the API fails, report the error and suggest checking which models are loaded.
+4. **Return the description** — Some models (like Gemma 4) may put the answer in `reasoning_content` instead of `content`. Use Python to extract from either:
+
+```bash
+python3 -c "
+import json,sys
+data = json.load(sys.stdin)
+msg = data['choices'][0]['message']
+print(msg.get('content','') or msg.get('reasoning_content',''))
+"
+```
+
+Present the description clearly to the caller. If the API fails, report the error and suggest checking which models are loaded.
 
 ## What You Don't Do
 
