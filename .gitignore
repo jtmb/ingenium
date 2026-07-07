@@ -10,6 +10,8 @@ credentials.json
 
 # ── AI-generated files ────────────────────────────────────
 .agents/skills/*/SKILL.md.bak
+.agents.old/
+.ingenium/
 
 # ── Dependencies ──────────────────────────────────────────
 node_modules/
