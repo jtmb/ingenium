@@ -1,6 +1,18 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { writeFileSync, unlinkSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, isAbsolute, relative } from "node:path";
+function validatePluginPath(filePath) {
+    if (!/^[a-zA-Z0-9_\-./]+$/.test(filePath)) {
+        throw new Error(`Invalid plugin file path: ${filePath}`);
+    }
+    const baseDir = resolve(process.cwd(), ".opencode/plugins");
+    const resolved = resolve(baseDir, filePath);
+    const rel = relative(baseDir, resolved);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+        throw new Error(`Plugin path escapes base directory: ${filePath}`);
+    }
+    return filePath;
+}
 export function listPlugins(projectId) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM plugins WHERE project_id = ?").all(projectId);
@@ -15,8 +27,8 @@ export function enablePlugin(projectId, name) {
             .get(projectId, name);
         // Write the .ts file to disk
         if (plugin?.source_content) {
-            const filePath = resolve(process.cwd(), ".opencode/plugins", plugin.file_path);
-            writeFileSync(filePath, plugin.source_content);
+            const filePath = validatePluginPath(plugin.file_path);
+            writeFileSync(resolve(process.cwd(), ".opencode/plugins", filePath), plugin.source_content);
         }
         checkpointAfterWrite();
         return plugin;
@@ -32,9 +44,10 @@ export function disablePlugin(projectId, name) {
             .get(projectId, name);
         // Remove the .ts file from disk
         if (plugin) {
-            const filePath = resolve(process.cwd(), ".opencode/plugins", plugin.file_path);
-            if (existsSync(filePath))
-                unlinkSync(filePath);
+            const filePath = validatePluginPath(plugin.file_path);
+            const resolvedPath = resolve(process.cwd(), ".opencode/plugins", filePath);
+            if (existsSync(resolvedPath))
+                unlinkSync(resolvedPath);
         }
         checkpointAfterWrite();
         return plugin;

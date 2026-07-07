@@ -183,7 +183,7 @@ Invoke this skill when working on files that don't match any framework-specific 
 Before declaring any change complete:
 1. **Lint & type-check** — fix every error
 2. **Build check** — ensure it succeeds with no warnings
-3. **Manual smoke test** — hit the affected path at least once
+3. **Run and verify** — If the change involves an application (API, server, CLI), **start it and verify it works** (health check, key endpoint, `--help` flag, or similar). Never skip app-level verification — tests alone don't prove the app boots.
 4. **Existing tests** — fix any that break
 5. **Add tests** — at least one test for new logic
 
