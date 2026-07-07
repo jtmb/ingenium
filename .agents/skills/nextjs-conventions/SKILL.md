@@ -62,7 +62,7 @@ When a Next.js dashboard lives inside a monorepo (npm workspaces), Next.js may e
 
 This happens when orphaned lockfiles (`pnpm-workspace.yaml`, `yarn.lock`) from other tools are present. **Do NOT set `turbopack.root`** — Next.js needs access to the monorepo root to resolve shared packages. Instead:
 
-1. **Remove orphaned lockfiles** — `rm -f pnpm-workspace.yaml yarn.lock` from the dashboard directory
+1. **Remove orphaned lockfiles** — `rm -f pnpm-workspace.yaml pnpm-lock.yaml yarn.lock` from the dashboard directory
 2. **Verify** — restart `next dev` and check no `Warning:` or `⚠` lines appear in the first 10 lines of startup output
 
 ## 🔴 HARD RULE — API-First Frontend
