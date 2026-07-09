@@ -291,7 +291,7 @@ The orchestrator can choose between three software engineer agents depending on 
 
 All three variants share the same permissions (`edit: allow`, `write: allow`) and skill set. The differentiation is purely in model capability and reasoning effort. The orchestrator's delegation table provides tier guidance: fast for standard work, premium for complex/risky, default when unsure.
 
-Model assignments are centralized in `.agents/models.yaml` — the human-editable source of truth for all agent model configurations. See `docs/ARCHITECTURE.md` for the full model configuration convention.
+Model assignments are defined per-agent in their `.md` agent profile file (stored in `.opencode/agents/` and the DB `agents` table).
 
 ### @ingenium-qa — Review & Testing
 
@@ -338,12 +338,12 @@ Model assignments are centralized in `.agents/models.yaml` — the human-editabl
 
 | Changed files | Update these docs |
 |--------------|------------------|
-| `.agents/skills/*/SKILL.md` | `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/README.md` |
-| `.agents/scripts/` | `docs/ARCHITECTURE.md` |
+| `seed/skills/*/SKILL.md` or `.opencode/skills/*/SKILL.md` | `SKILL-INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `README.md` |
+| `.opencode/plugins/*.ts` | `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md` |
 | `tests/` (test infra) | `docs/TECH-STACK.md` |
 | `README.md`, `USAGE.md`, `AGENTS.md` | `docs/README.md` |
 | `.opencode/agents/*.md` | `docs/agents.md`, `docs/ARCHITECTURE.md` |
-| `.agents/hooks/*.json` | `docs/ARCHITECTURE.md` |
+| `.opencode/skills/*/` | `SKILL-INDEX.md`, `AGENTS.md` skill table |
 | Any significant change | Log via `ingenium_learning_log` MCP tool |
 
 ### @ingenium-security-auditor — Security Audit
@@ -420,7 +420,7 @@ flowchart LR
 | DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-plan-file` | 5 | Free |
 | qwopus 3.5 9B Coder (LM Studio) | `ingenium-scout` | 1 | Local |
 
-**Model configuration source of truth**: All model assignments are centralized in `.agents/models.yaml`. This file defines model aliases (`fast`, `capable`, `premium`, `local`, `budget`), agent-to-model mappings, and reasoning effort overrides per agent. Changes should be made here first, then propagated to each agent's `.md` frontmatter `model:` field. See `docs/ARCHITECTURE.md` for the full model configuration convention.
+**Model configuration**: Model assignments are defined per-agent in their `.md` agent profile files (stored in `.opencode/agents/` and the DB `agents` table). Each agent's frontmatter includes a `model:` field. Agent definitions can be managed via the Ingenium Dashboard at `/agents` or via the `ingenium_agent_*` MCP tools.
 
 ## Subagent Invocation
 

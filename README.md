@@ -7,8 +7,8 @@
 ### All your AI agent development tools in one place. One MCP server, hundreds of tools.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-46%20total-green?style=flat-square" alt="46 skills — all in .agents/skills/" />
-  <img src="https://img.shields.io/badge/MCP%20tools-23-blue?style=flat-square" alt="23 MCP tools" />
+  <img src="https://img.shields.io/badge/skills-17%20total-green?style=flat-square" alt="17 skills — seed/skills/" />
+  <img src="https://img.shields.io/badge/MCP%20tools-48-blue?style=flat-square" alt="48 MCP tools" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
 
@@ -18,7 +18,7 @@
 
 **Ingenium** is a self-learning AI agent skill system and MCP server. It provides skills, learnings, tasks, context, plugins, and server management through a single MCP stdio transport, with a Next.js dashboard for visual management.
 
-Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to 23 tools spanning project management, skill management, task boards, full-text knowledge search, plugin lifecycle, and server configuration. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
+Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to 48 tools spanning project management, skill management, task boards, full-text knowledge search, plugin lifecycle, agent management, server configuration, and settings. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
 **The system learns from you.** Patterns you teach, conventions you establish, and decisions you make are stored in a searchable knowledge base. The `update-skills` agent autonomously detects new dependencies, repeated patterns, missing coverage, and stale content — creating, updating, or retiring skills as your codebase evolves. Every change is logged with before/after commit hashes for full auditability.
 
@@ -36,6 +36,9 @@ npm install
 
 # Start all services (API on :4097, dashboard on :3000, MCP server on stdio)
 ./run.sh dev
+
+# Or use Docker
+docker compose up --build
 ```
 
 **OpenCode global MCP config** — Add this entry to `~/.config/opencode/opencode.jsonc` to make Ingenium available across all your projects:
@@ -58,7 +61,7 @@ npm install
 }
 ```
 
-**Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js`. The server speaks stdio MCP with 23 tools. No HTTP port, no network config.
+**Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js`. The server speaks stdio MCP with 48 tools. No HTTP port, no network config.
 
 **Open the dashboard** — Navigate to `http://localhost:3000` in your browser. The Next.js dashboard provides visual management for all six feature areas.
 
@@ -69,11 +72,11 @@ Multi-project configuration with name→UUID resolution and per-project SQLite d
 → [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md)
 
 ### 📚 Skills
-AI agent conventions engine — 46+ skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained `SKILL.md` file in `.agents/skills/` that describes when and how to apply its conventions. The system auto-invokes matching skills based on file type, framework detection, and slash commands.
+AI agent conventions engine — 17 skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained split-skill format (SKILL.md + metadata.json + references/) stored at `seed/skills/` (canonical source) and `.opencode/skills/` (written to disk from DB). Skills are loaded from the SQLite database via the MCP server and auto-invoked based on file type, framework detection, and slash commands. The `file_tree` column stores a JSON map of relative paths → content for complete data round-trips.
 → [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md)
 
 ### 🧠 Learnings
-Self-improving knowledge base with FTS5 full-text search, type/tag categorization, and before/after commit hashes. Every decision, pattern discovery, and bug fix is automatically logged. Search across all learnings using full-text queries with BM25 ranking, prefix matching, and negation.
+Self-improving knowledge base with FTS5 full-text search, type/tag categorization, and before/after commit hashes. Every decision, pattern discovery, and bug fix is automatically logged. An automated pipeline (OpenCode plugin at `.opencode/plugins/learnings.ts`) reads pending learnings from the API, classifies them (add-pattern/update-rule/noop), and edits skill files. Learnings are DB-only with a file fallback at `.opencode/skills/learnings.md`.
 → [docs/HOW-TO/learnings.md](docs/HOW-TO/learnings.md)
 
 ### 📋 Tasks
@@ -81,7 +84,7 @@ Kanban-style task board with `todo` → `in_progress` → `review` → `done` wo
 → [docs/HOW-TO/tasks.md](docs/HOW-TO/tasks.md)
 
 ### 🔌 Plugins
-OpenCode plugin lifecycle management — enable, disable, configure plugins that extend the MCP server's capabilities. Plugin state is persisted across restarts.
+OpenCode plugin lifecycle management — enable, disable, configure plugins that extend the MCP server's capabilities. Plugin state is persisted across restarts with auto-config sync between DB and `opencode.json`.
 → [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md)
 
 ### 🖥️ Servers
@@ -93,29 +96,36 @@ MCP server configuration and proxy engine — start, stop, configure MCP servers
 ```
 ingenium/
 ├── packages/
-│   └── ingenium-core/        # Shared library: SQLite WAL + FTS5, 7 tool modules, Zod schemas
+│   └── ingenium-core/        # Shared library: SQLite WAL + FTS5, 8 tool modules, Zod schemas
 ├── services/
 │   ├── ingenium-api/          # Express REST gateway on port 4097. Sole database authority.
-│   ├── ingenium-server/       # MCP stdio server with 23 tools. Calls API via HTTP. Zero DB access.
-│   └── ingenium-dashboard/    # Next.js 16 App Router frontend with 6 feature pages. Calls API via HTTP.
-├── .agents/skills/            # 46+ skills in SKILL.md format, auto-invoked by file type
+│   ├── ingenium-server/       # MCP stdio server with 48 tools. Calls API via HTTP. Zero DB access.
+│   └── ingenium-dashboard/    # Next.js 16 App Router frontend with 10 feature pages. Calls API via HTTP.
+├── seed/
+│   ├── skills/                # 17 canonical skill sources in split-skill format (SKILL.md + metadata.json + references/)
+│   └── plugins/               # 4 seed plugins (.ts files)
+├── .opencode/
+│   ├── skills/                # Skills written to disk from DB (split-skill format)
+│   ├── plugins/               # Plugin .ts files synced from DB
+│   └── agents/                # Agent .md files synced from DB
 ├── docs/                      # Project documentation database
-├── run.sh                     # Unified dev/test/build/check runner
-└── docker-compose.yml         # Containerised deployment with all services
+├── run.sh                     # Unified dev/test/build/check/seed runner
+├── docker-compose.yml         # Single-container deployment (supervisord: API + dashboard + opencode-server)
+└── Dockerfile                 # Multi-stage build for containerised deployment
 ```
 
 **Data flow:** The MCP server (`ingenium-server`) accepts stdio MCP protocol and forwards requests as HTTP to the API (`ingenium-api`), which is the sole database authority. The dashboard (`ingenium-dashboard`) also calls the API via HTTP. This ensures consistent data access — the database is never accessed directly by the MCP server or frontend.
 
 ```mermaid
 graph LR
-    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>23 tools]
+    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>48 tools]
     B -->|HTTP| C[ingenium-api<br/>port 4097]
     D[Browser<br/>Dashboard] -->|HTTP| C
     C -->|SQLite WAL| E[(SQLite<br/>FTS5)]
     
-    F[Agent Session] -->|skill-load| G[.agents/skills/<br/>46+ SKILL.md]
+    F[Agent Session] -->|skill-load| G[seed/skills/<br/>17 skills]
     G -->|update-skills| H[Self-learning<br/>engine]
-    H -->|Logs to| I[(SQLite DB<br/>FTS5 searchable)]
+    H -->|Logs to| E
 ```
 
 ## Documentation
@@ -128,13 +138,15 @@ graph LR
 | [docs/VARIABLES.md](docs/VARIABLES.md) | All environment variables with defaults |
 | [docs/agents.md](docs/agents.md) | Agent profiles and pipeline lifecycle |
 | [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md) | Project management feature guide |
-| [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md) | Skill system usage and conventions |
-| [docs/HOW-TO/learnings.md](docs/HOW-TO/learnings.md) | Knowledge base and self-learning guide |
+| [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md) | Skill system usage and file_tree format |
+| [docs/HOW-TO/learnings.md](docs/HOW-TO/learnings.md) | Knowledge base and self-learning pipeline |
 | [docs/HOW-TO/tasks.md](docs/HOW-TO/tasks.md) | Kanban task board feature guide |
 | [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md) | Plugin lifecycle management guide |
 | [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md) | MCP server configuration guide |
-| [USAGE.md](./USAGE.md) | How to add your own skills and custom workflows |
+| [docs/HOW-TO/settings.md](docs/HOW-TO/settings.md) | Settings management guide |
+| [USAGE.md](./USAGE.md) | Dashboard user guide and API access reference |
 | [AGENTS.md](./AGENTS.md) | Skill system protocol — agent entry point |
+| [services/ingenium-dashboard/STYLING-GUIDE.md](./services/ingenium-dashboard/STYLING-GUIDE.md) | Dashboard styling conventions and component design |
 
 ## Development
 

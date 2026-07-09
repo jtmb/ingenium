@@ -8,12 +8,27 @@ MCP Server → HTTP → API → Core → SQLite
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport for OpenCode. It talks to the API over HTTP.
-- `ingenium-dashboard` is a Next.js 16 frontend. It talks to the API over HTTP.
+- `ingenium-server` runs as an MCP stdio transport with **48 tools**. It talks to the API over HTTP. Zero DB access.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **10 pages**. It talks to the API over HTTP.
 
 ## Skill System
 
-Skills are loaded from the Ingenium SQLite database via the MCP server. The canonical source files for editing live at `.agents/skills/<name>/SKILL.md`. The MCP server provides tools for listing, loading, searching, creating, and updating skills. The `update-skill-index` workflow regenerates `SKILL-INDEX.md` from all skill files.
+Skills are loaded from the Ingenium SQLite database via the MCP server. The canonical source files for editing live at `seed/skills/<name>/` with a split-skill format (SKILL.md + metadata.json + references/). When created or updated via API, skills are written to disk at `.opencode/skills/<name>/` for agent access.
+
+### file_tree Column
+
+The `skills` table has a `file_tree` column (TEXT, stores JSON map of relative paths → content). This enables complete data round-trips:
+
+- **`writeSkillToDisk()`** — After DB create/update, reads `file_tree` JSON and writes every file under the skill directory. Always writes SKILL.md (with YAML frontmatter) and metadata.json.
+- **`syncSkillFromDisk()`** — Reads SKILL.md, parses frontmatter, reads metadata.json, and walks the directory tree to rebuild `file_tree`. If skill doesn't exist in DB, creates it; otherwise updates.
+
+This means a skill can contain any number of auxiliary files (reference docs, examples, configs) that are fully preserved in the DB's `file_tree` and round-tripped to disk.
+
+### Skill Seeds
+
+17 skills live at `seed/skills/` and are loaded into the DB via `./run.sh seed` (uses `INSERT OR IGNORE` for idempotency). Each seed skill directory contains `SKILL.md` (with frontmatter), `metadata.json`, and any `references/` subdirectory.
+
+The MCP server provides tools for listing, loading, searching, creating, updating, deleting, enabling, disabling, and syncing skills. The `update-skill-index` workflow regenerates `SKILL-INDEX.md` from all skill files.
 
 ## Plugin System
 
@@ -31,7 +46,8 @@ Learning entries provide cross-session persistent memory. Each entry records a p
 - **Storage**: SQLite with FTS5 full-text search for BM25-ranked queries
 - **Zod schema**: `LearningSchema` with `entry_type: z.enum(["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "plugin", "architecture"])` — expanded from 5 to 11 types to cover all skill system evolution categories
 - **MCP tools**: `ingenium_learning_log` (create), `ingenium_learning_search` (FTS5 query), `ingenium_learning_list` (list recent), `ingenium_skill_from_learnings` (manual batch scan)
-- **Logging requirement**: Every change must be logged via the `ingenium_learning_log` MCP tool (searchable database). Enforced by 🔴 HARD RULEs in `generic-conventions` and `orchestrator-primer`. Learnings are DB-only — the old `.agents/skills/learnings.md` file has been removed.
+- **Logging requirement**: Every change must be logged via the `ingenium_learning_log` MCP tool (searchable database). Enforced by 🔴 HARD RULEs in `generic-conventions` and `orchestrator-primer`.
+- **File fallback**: If the API is down, agents append to `.opencode/skills/learnings.md`. On the next session start, `importLearningsFromFile()` syncs file entries into the DB, marking them as processed.
 - **Auto-detection pipeline**: After every `POST /learnings`, the system fire-and-forgets `detectSkillGap()` which:
   1. Extracts top 10 keywords (stopword filter + frequency)
   2. FTS5 OR-searches existing skills
@@ -50,15 +66,17 @@ Both paths ensure skill coverage stays in sync with learnings. See `.opencode/ag
 
 ### MCP Tool Count
 
-The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **36 tools** (was 35 after Plan 12, now +1 for `ingenium_skill_from_learnings`). Tool categories:
-- Settings: 2
-- Skills: 6 (list, load, search, create, update, skill_from_learnings)
+The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **48 tools**. Tool categories:
+- Settings: 2 (get, set)
+- Skills: 9 (list, load, search, create, update, delete, enable, disable, sync)
 - Learnings: 4 (log, search, list, skill_from_learnings)
 - Tasks: 5 (create, list, move, complete, next)
-- Plans: 3 (save, search, list)
+- Plans (Context): 3 (save, search, list)
 - Projects: 6 (list, init, delete, restore, list_archived, purge)
 - Plugins: 7 (list, get, enable, disable, create, delete, update)
 - Servers: 3 (list, add, remove)
+- Agents: 8 (list, get, create, update, delete, enable, disable, sync)
+- Plus: `process_learnings` (from learnings plugin)
 
 | Type | When used |
 |------|-----------|
@@ -73,3 +91,31 @@ The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **36 t
 | `hook` | Hook lifecycle trigger created or modified |
 | `plugin` | Plugin created, enabled, or disabled |
 | `architecture` | Architecture decision or structural change |
+
+---
+
+## Docker Deployment
+
+The project ships as a single Docker container via `Dockerfile` (multi-stage build, root) and `docker-compose.yml` (single service):
+
+```yaml
+services:
+  ingenium:
+    build: .
+    ports:
+      - "4097:4097"   # API
+      - "3000:3000"   # Dashboard
+      - "4096:4096"   # opencode-server
+    volumes:
+      - ingenium_data:/app/.ingenium/data
+```
+
+Inside the container, **supervisord** manages three processes:
+1. **API** (Express on :4097)
+2. **Dashboard** (Next.js on :3000)
+3. **opencode-server** (on :4096)
+
+Start with:
+```bash
+docker compose up --build
+```

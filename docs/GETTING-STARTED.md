@@ -89,7 +89,7 @@ To make Ingenium available in **all** your OpenCode projects, add the same entry
 
 Add the `ingenium` entry under the `mcp.servers` section, using the same JSON structure from Step 3. The global config uses JSONC format (supports comments), so you can add explanatory notes.
 
-Once added, every OpenCode project on your machine will have access to Ingenium's 23 MCP tools.
+Once added, every OpenCode project on your machine will have access to Ingenium's 48 MCP tools.
 
 ---
 
@@ -105,19 +105,29 @@ This starts three services in parallel:
 |---------|----------------|------|
 | **API** | http://localhost:4097 | REST API gateway — sole database authority |
 | **Dashboard** | http://localhost:3000 | Next.js 16 App Router frontend |
-| **MCP Server** | stdio | 23 tools via MCP protocol |
+| **MCP Server** | stdio | 48 tools via MCP protocol |
 
 The script will:
 1. Verify Node.js 22+ and npm are installed
 2. Install dependencies if needed
 3. Build `packages/ingenium-core` (migrations and shared types)
-4. Run `./run.sh seed` to initialize the first project, create its database, and seed 3 OpenCode plugins (`planner-handoff`, `post-tool-use`, `session-start`)
+4. Run `./run.sh seed` to initialize the first project, create its database, and seed 17 skills, 4 OpenCode plugins (`planner-handoff`, `post-tool-use`, `session-start`, `learnings`), and 9 agents
 5. Start each service with health-check polling
 6. Print confirmation when all services are ready
 
 Press `Ctrl+C` to stop all services gracefully.
 
-> **Note:** You can re-run `./run.sh seed` manually at any time — it is idempotent and will only seed plugins that don't already exist.
+> **Note:** You can re-run `./run.sh seed` manually at any time — it is idempotent (uses `INSERT OR IGNORE`) and will only seed items that don't already exist.
+
+### Docker Quick Start
+
+```bash
+# Single-container deployment with all 3 services
+docker compose up --build
+
+# This starts API (:4097), Dashboard (:3000), and opencode-server (:4096)
+# managed by supervisord inside the container
+```
 
 ## Step 6 — Verify
 
@@ -125,13 +135,17 @@ Run these checks to confirm everything is working:
 
 ### 1. Open the Dashboard
 
-Navigate to [http://localhost:3000](http://localhost:3000). You should see 6 tabs:
+Navigate to [http://localhost:3000](http://localhost:3000). You should see 10 pages:
+- **Home** — dashboard overview with feature cards
 - **Projects** — manage project configurations
 - **Skills** — browse and search AI agent skills
 - **Learnings** — log and search learning entries
 - **Tasks** — Kanban task board
 - **Plugins** — plugin lifecycle management
+- **Agents** — agent profile management
 - **Servers** — MCP server configuration
+- **Settings** — application settings
+- **Archive** — purged/archived project management
 
 ### 2. Check the API Health
 
@@ -167,8 +181,9 @@ If the tools don't appear, restart your OpenCode session (the MCP server list is
 
 Once everything is running:
 
-- **Explore the dashboard** — open [http://localhost:3000](http://localhost:3000) and click through all 6 tabs
-- **Read feature guides** — see `docs/HOW-TO/` for per-feature instructions (projects, skills, learnings, tasks, plugins, servers)
+- **Explore the dashboard** — open [http://localhost:3000](http://localhost:3000) and click through all 10 pages
+- **Read feature guides** — see `docs/HOW-TO/` for per-feature instructions (projects, skills, learnings, tasks, plugins, servers, settings)
+- **Initialize a project** — use the `/init-project` command to create a project, skills, agents, and plugins from seed sources
 - **Understand the architecture** — read `docs/ARCHITECTURE.md` for the full system design, data flow, and component responsibilities
 - **Configure environment** — read `docs/VARIABLES.md` for all environment variable options and defaults
-- **Learn conventions** — read `docs/CONVENTIONS.md` for naming, file organization, and git practices
+- **Learn conventions** — read `docs/CONVENTIONS.md` for naming, file organization, git practices, and file_tree format

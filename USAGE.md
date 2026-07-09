@@ -1,17 +1,21 @@
 # Ingenium Dashboard User Guide
 
 Ingenium's dashboard provides visual management for all your AI agent development tools.
-Access it at **http://localhost:3000** after starting the app with `./run.sh dev`.
+Access it at **http://localhost:3000** after starting the app.
 
 ## Getting Started
 
-Start the application:
-
 ```bash
+# Local development
 ./run.sh dev
+
+# Or Docker
+docker compose up --build
 ```
 
-This starts all 3 services: API (port 4097), Dashboard (port 3000), and MCP Server (stdio-ready).
+This starts 3 services: API (port 4097), Dashboard (port 3000), and MCP Server (stdio-ready, 48 tools).
+
+For Docker, a single container runs all 3 via supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096).
 
 ## Projects
 
@@ -30,7 +34,7 @@ This starts all 3 services: API (port 4097), Dashboard (port 3000), and MCP Serv
 
 ## Skills
 
-**What it does**: Browse and search all 46+ AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns.
+**What it does**: Browse and search all 17 AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns. Stored in split-skill format (SKILL.md + metadata.json + references/) with `file_tree` support for auxiliary files.
 
 **How to use**:
 - View all skills in the Skills tab
