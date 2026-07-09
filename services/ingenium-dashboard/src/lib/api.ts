@@ -1,4 +1,5 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4097/api/v1";
+const DEFAULT_PROJECT = "gh-llm-bootstrap";
 
 /** Internal fetch wrapper that handles errors and content types uniformly. */
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -63,71 +64,71 @@ export const api = {
     listArchived: () => request<{ data: Project[] }>("/projects/archive"),
   },
   skills: {
-    list: (project = "ingenium") => request<{ data: Skill[] }>(`/skills?project=${project}`),
-    get: (name: string, project = "ingenium") => request<{ data: Skill }>(`/skills/${name}?project=${project}`),
-    create: (name: string, description: string, content: string, project = "ingenium") =>
+    list: (project = DEFAULT_PROJECT) => request<{ data: Skill[] }>(`/skills?project=${project}`),
+    get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Skill }>(`/skills/${name}?project=${project}`),
+    create: (name: string, description: string, content: string, project = DEFAULT_PROJECT) =>
       request<{ data: Skill }>(`/skills?project=${project}`, { method: "POST", body: JSON.stringify({ name, description, content }) }),
-    update: (name: string, content: string, project = "ingenium") =>
+    update: (name: string, content: string, project = DEFAULT_PROJECT) =>
       request<{ data: Skill }>(`/skills/${name}?project=${project}`, { method: "PATCH", body: JSON.stringify({ content }) }),
   },
   learnings: {
-    list: (project = "ingenium") => request<{ data: Learning[] }>(`/learnings?project=${project}`),
-    create: (entry_type: string, content: string, tags?: string, project = "ingenium") =>
+    list: (project = DEFAULT_PROJECT) => request<{ data: Learning[] }>(`/learnings?project=${project}`),
+    create: (entry_type: string, content: string, tags?: string, project = DEFAULT_PROJECT) =>
       request<{ data: Learning }>(`/learnings?project=${project}`, { method: "POST", body: JSON.stringify({ entry_type, content, tags }) }),
   },
   tasks: {
-    list: (project = "ingenium") => request<{ data: Task[] }>(`/tasks?project=${project}`),
-    create: (title: string, project = "ingenium") =>
+    list: (project = DEFAULT_PROJECT) => request<{ data: Task[] }>(`/tasks?project=${project}`),
+    create: (title: string, project = DEFAULT_PROJECT) =>
       request<{ data: Task }>(`/tasks?project=${project}`, { method: "POST", body: JSON.stringify({ title }) }),
-    move: (id: string, column_id: string, project = "ingenium") =>
+    move: (id: string, column_id: string, project = DEFAULT_PROJECT) =>
       request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: JSON.stringify({ column_id }) }),
-    complete: (id: string, project = "ingenium") =>
+    complete: (id: string, project = DEFAULT_PROJECT) =>
       request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: "{}" }),
   },
   plugins: {
-    list: (project = "ingenium") => request<{ data: Plugin[] }>(`/plugins?project=${project}`),
-    get: (name: string, project = "ingenium") => request<{ data: Plugin }>(`/plugins/${name}?project=${project}`),
-    create: (name: string, file_path: string, source_content?: string, project = "ingenium") =>
+    list: (project = DEFAULT_PROJECT) => request<{ data: Plugin[] }>(`/plugins?project=${project}`),
+    get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Plugin }>(`/plugins/${name}?project=${project}`),
+    create: (name: string, file_path: string, source_content?: string, project = DEFAULT_PROJECT) =>
       request<{ data: Plugin }>(`/plugins?project=${project}`, {
         method: "POST", body: JSON.stringify({ name, file_path, source_content }),
       }),
-    update: (name: string, data: { file_path?: string; source_content?: string }, project = "ingenium") =>
+    update: (name: string, data: { file_path?: string; source_content?: string }, project = DEFAULT_PROJECT) =>
       request<{ data: Plugin }>(`/plugins/${name}?project=${project}`, {
         method: "PUT", body: JSON.stringify(data),
       }),
-    delete: (name: string, project = "ingenium") =>
+    delete: (name: string, project = DEFAULT_PROJECT) =>
       request(`/plugins/${name}?project=${project}`, { method: "DELETE" }),
-    enable: (name: string, project = "ingenium") =>
+    enable: (name: string, project = DEFAULT_PROJECT) =>
       request<{ data: Plugin }>(`/plugins/${name}/enable?project=${project}`, { method: "POST" }),
-    disable: (name: string, project = "ingenium") =>
+    disable: (name: string, project = DEFAULT_PROJECT) =>
       request<{ data: Plugin }>(`/plugins/${name}/disable?project=${project}`, { method: "POST" }),
   },
   agents: {
-    list: (project = "ingenium", category?: string) => {
+    list: (project = DEFAULT_PROJECT, category?: string) => {
       const url = category ? `/agents?project=${project}&category=${encodeURIComponent(category)}` : `/agents?project=${project}`;
       return request<{ data: Agent[]; total?: number }>(url);
     },
-    get: (name: string, project = "ingenium") =>
+    get: (name: string, project = DEFAULT_PROJECT) =>
       request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}?project=${project}`),
-    create: (data: { name: string; content: string; description?: string; category?: string; mode?: string; model?: string }, project = "ingenium") =>
+    create: (data: { name: string; content: string; description?: string; category?: string; mode?: string; model?: string }, project = DEFAULT_PROJECT) =>
       request<{ data: Agent }>(`/agents?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
-    update: (name: string, data: { description?: string; category?: string; mode?: string; model?: string; content?: string }, project = "ingenium") =>
+    update: (name: string, data: { description?: string; category?: string; mode?: string; model?: string; content?: string }, project = DEFAULT_PROJECT) =>
       request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}?project=${project}`, { method: "PUT", body: JSON.stringify(data) }),
-    delete: (name: string, project = "ingenium") =>
+    delete: (name: string, project = DEFAULT_PROJECT) =>
       request(`/agents/${encodeURIComponent(name)}?project=${project}`, { method: "DELETE" }),
-    enable: (name: string, project = "ingenium") =>
+    enable: (name: string, project = DEFAULT_PROJECT) =>
       request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/enable?project=${project}`, { method: "POST" }),
-    disable: (name: string, project = "ingenium") =>
+    disable: (name: string, project = DEFAULT_PROJECT) =>
       request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/disable?project=${project}`, { method: "POST" }),
   },
   servers: {
-    list: (project = "ingenium") => request<{ data: Server[] }>(`/servers?project=${project}`),
-    create: (name: string, command: string, project = "ingenium") =>
+    list: (project = DEFAULT_PROJECT) => request<{ data: Server[] }>(`/servers?project=${project}`),
+    create: (name: string, command: string, project = DEFAULT_PROJECT) =>
       request<{ data: Server }>(`/servers?project=${project}`, { method: "POST", body: JSON.stringify({ name, command }) }),
   },
   settings: {
-    get: (key: string, project = "ingenium") => request<{ data: { key: string; value: string } }>(`/settings?project=${project}&key=${key}`),
-    set: (key: string, value: string, project = "ingenium") =>
+    get: (key: string, project = DEFAULT_PROJECT) => request<{ data: { key: string; value: string } }>(`/settings?project=${project}&key=${key}`),
+    set: (key: string, value: string, project = DEFAULT_PROJECT) =>
       request<{ data: { key: string; value: string } }>(`/settings?project=${project}`, { method: "POST", body: JSON.stringify({ key, value }) }),
   },
 };
