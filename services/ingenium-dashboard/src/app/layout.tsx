@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import "highlight.js/styles/github-dark.css";
+import "highlight.js/styles/github.css";
+import "./hljs-dark.css";
 
 /** Global metadata for the Ingenium Dashboard app. */
 export const metadata: Metadata = {
