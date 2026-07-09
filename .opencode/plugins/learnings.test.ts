@@ -73,4 +73,17 @@ describe("importLearningsFromFile", () => {
     const unprocessed = content.split("\n").filter((l: string) => /^\d{4}-\d{2}-\d{2}/.test(l) && !l.includes("[PROCESSED]"))
     expect(unprocessed.length).toBe(0)
   })
+
+  it("should handle non-pipe entries without crashing", async () => {
+    const learningsPath = path.join(TEST_DIR, ".opencode", "skills", "learnings.md")
+    // Non-pipe entry (free text, no | delimiters)
+    fs.writeFileSync(learningsPath, "# Test\n\n2026-07-09 | test | model | valid pipe entry | file.md | before:a after:b\n2026-07-09 This is a free text entry without pipes\n")
+    const result = await importLearningsFromFile(TEST_DIR)
+    expect(typeof result.imported).toBe("number")
+    expect(typeof result.skipped).toBe("number")
+    // Both entries should be in the file
+    const content = fs.readFileSync(learningsPath, "utf-8")
+    const processedLines = content.split("\n").filter((l: string) => l.includes("[PROCESSED]"))
+    expect(processedLines.length).toBeGreaterThanOrEqual(1)
+  })
 })
