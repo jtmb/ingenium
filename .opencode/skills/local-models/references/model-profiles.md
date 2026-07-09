@@ -130,6 +130,7 @@ Bridge generation between Qwen2.5 and Qwen 3.6. The 35B variant outperforms Qwen
 - **Qwen 3.5 9B**: Strong upgrade over Qwen2.5 7B. Use for everyday coding, debugging (bisect method), documentation, single-file tasks.
 - **All Qwen 3.5**: Benefit from explicit output formatting. Be specific about expected output format.
 
+- **pattern: pipeline-test — verify section detection**
 #### Older Qwen Generations (brief mentions)
 
 | Generation | Guidance |
@@ -178,3 +179,6 @@ When making an MCP tool call with OpenAI-compatible format (used by LM Studio, O
 - **Context size is set by the user or harness**: The context window is configured by the inference engine (Ollama, vLLM, llama.cpp) or API provider — not baked into the model. Always check the running configuration rather than assuming a model's full capability.
 - **When in doubt, prefer the larger model OR the newer generation**: Newer Qwen generations consistently outperform older larger models. A Qwen 3.5 35B beats Qwen2.5 72B on most tasks.
 - **Smaller models (2B–9B)** are more prone to backgrounding because they don't reason about terminal lifecycle. Larger models (27B+) still do it but less frequently.
+
+
+### 🔴 Training paradigm correction: encode patterns, not fixes

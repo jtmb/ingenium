@@ -1,24 +1,21 @@
-version: "3.9"
 services:
-  ingenium-api:
-    build: ./services/ingenium-api
+  ingenium:
+    build: .
     ports:
-      - "4097:4097"
+      - "3000:3000"   # Dashboard
+      - "4096:4096"   # OpenCode server
+      - "4097:4097"   # API
     environment:
-      - INGENIUM_HOME=/data/ingenium
-      - INGENIUM_API_PORT=4097
-      - INGENIUM_API_RATE_LIMIT=100
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OpenCode server password required}
     volumes:
-      - ingenium-data:/data/ingenium
-
-  ingenium-dashboard:
-    build: ./services/ingenium-dashboard
-    ports:
-      - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:4097/api/v1
-    depends_on:
-      - ingenium-api
+      - ingenium-data:/app/.ingenium
+      - ./opencode.json:/app/opencode.json:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4097/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   ingenium-data:

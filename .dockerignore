@@ -1,0 +1,20 @@
+# Secrets
+.env .env.* *.key *.pem secrets/
+# Version control
+.git .gitignore .gitmodules
+# Dependencies (installed inside build)
+node_modules/ .opencode/node_modules/ vendor/ __pycache__/ .venv/
+# Build artifacts
+dist/ build/ .next/ target/ *.tsbuildinfo
+# Docs
+*.md AGENTS.md docs/ ARCHITECTURE.md CONVENTIONS.md
+# Config
+.dockerignore docker-compose*.yml Dockerfile* supervisord.conf .editorconfig
+# Test artifacts
+coverage/ .nyc_output/ test-results/
+# Archive
+.agents.old/
+# OpenCode local data
+.opencode/
+# Misc
+.turbo/ .cache/ .DS_Store

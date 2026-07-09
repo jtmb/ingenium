@@ -6,6 +6,7 @@ export interface LearningsEntry {
   description: string
   file: string
   shaRange: string
+  isPipeFormat?: boolean
 }
 
 export type ActionType = "new-skill" | "add-pattern" | "update-rule" | "new-reference" | "noop"
@@ -50,21 +51,18 @@ async function fetchUnprocessedLearnings(project: string): Promise<LearningsEntr
   const result = await apiFetch(`/learnings?project=${project}&status=pending&limit=50`)
   const entries = result.data ?? []
   return entries
-    .filter((e: any) => {
-      // Parse the pipe-delimited content to extract structured fields
-      const parts = (e.content || "").split(" | ")
-      return parts.length >= 4 // At minimum: date | context | model | description
-    })
     .map((e: any) => {
-      const parts = e.content.split(" | ")
+      const parts = (e.content || "").split(" | ")
+      const isPipe = parts.length >= 4
       return {
         id: e.id,
         date: parts[0]?.trim() || "",
         benchmark: parts[1]?.trim() || "",
         model: parts[2]?.trim() || "",
-        description: parts[3]?.trim() || "",
+        description: isPipe ? parts[3]?.trim() || "" : (e.content || "(free-text)").substring(0, 80),
         file: parts[4]?.trim() || "",
         shaRange: parts[5]?.trim() || "",
+        isPipeFormat: isPipe,
       } as LearningsEntry
     })
 }
@@ -332,11 +330,24 @@ export async function processAll(worktree: string): Promise<ProcessResult> {
   let newSkillsCreated = false
 
   for (const entry of entries) {
-    const action = classifyAction(entry.description, entry.file)
-    const result = executeAction(worktree, entry, action)
-    actions.push(result)
+    let result: ActionResult
+    
+    if (!entry.isPipeFormat) {
+      // Free-text entry — can't auto-classify, mark as noop
+      result = {
+        entry: `(free-text) ${entry.description}`,
+        action: "noop",
+        files: [],
+        notes: "Not pipe-delimited — marked processed without action"
+      }
+      actions.push(result)
+    } else {
+      const action = classifyAction(entry.description, entry.file)
+      result = executeAction(worktree, entry, action)
+      actions.push(result)
 
-    if (result.files.length > 0) newSkillsCreated = true
+      if (result.files.length > 0) newSkillsCreated = true
+    }
 
     // Mark as processed in the DB
     try {
