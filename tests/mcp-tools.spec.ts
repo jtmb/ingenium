@@ -32,6 +32,13 @@ test.describe("MCP Tools — Projects", () => {
     expect(Array.isArray(body.data)).toBeTruthy();
     expect(body.data.some((p: any) => p.name === PROJECT)).toBeTruthy();
   });
+
+  test("project_list_archived returns array", async ({ request }) => {
+    const res = await request.get(`${API}/projects/archive?project=${PROJECT}`);
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(Array.isArray(body.data)).toBeTruthy();
+  });
 });
 
 test.describe("MCP Tools — Skills", () => {
@@ -91,6 +98,13 @@ test.describe("MCP Tools — Learnings", () => {
 
   test("learning_search searches learnings", async ({ request }) => {
     const res = await request.get(`${API}/learnings/search?project=${PROJECT}&q=E2E`);
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(Array.isArray(body.data)).toBeTruthy();
+  });
+
+  test("learning_list returns entries", async ({ request }) => {
+    const res = await request.get(`${API}/learnings?project=${PROJECT}`);
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
     expect(Array.isArray(body.data)).toBeTruthy();
@@ -161,12 +175,57 @@ test.describe("MCP Tools — Context", () => {
   });
 });
 
+test.describe("MCP Tools — Plans", () => {
+  test("plan_list returns entries", async ({ request }) => {
+    const res = await request.get(`${API}/context?project=${PROJECT}`);
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(Array.isArray(body.data)).toBeTruthy();
+  });
+});
+
 test.describe("MCP Tools — Plugins", () => {
+  const pluginName = `e2e-plugin-${Date.now()}`;
+  const pluginPath = `${pluginName}.ts`;
+  const pluginContent = `// ${pluginName} e2e plugin\nexport default { name: "${pluginName}" };\n`;
+
   test("plugin_list returns plugins", async ({ request }) => {
     const res = await request.get(`${API}/plugins?project=${PROJECT}`);
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
     expect(Array.isArray(body.data)).toBeTruthy();
+  });
+
+  test("plugin_create creates a plugin", async ({ request }) => {
+    const res = await request.post(`${API}/plugins?project=${PROJECT}`, {
+      data: { name: pluginName, file_path: pluginPath, source_content: pluginContent },
+    });
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body.data.name).toBe(pluginName);
+    expect(body.data.file_path).toBe(pluginPath);
+    expect(body.data.source_content).toBe(pluginContent);
+  });
+
+  test("plugin_get fetches a single plugin", async ({ request }) => {
+    const res = await request.get(`${API}/plugins/${pluginName}?project=${PROJECT}`);
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body.data.name).toBe(pluginName);
+  });
+
+  test("plugin_update updates a plugin", async ({ request }) => {
+    const res = await request.put(`${API}/plugins/${pluginName}?project=${PROJECT}`, {
+      data: { source_content: "// updated content" },
+    });
+    expect(res.ok()).toBeTruthy();
+    const body = await res.json();
+    expect(body.data.source_content).toBe("// updated content");
+  });
+
+  test("plugin_delete deletes a plugin", async ({ request }) => {
+    const res = await request.delete(`${API}/plugins/${pluginName}?project=${PROJECT}`);
+    expect(res.status()).toBe(204);
   });
 });
 

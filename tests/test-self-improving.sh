@@ -61,8 +61,6 @@ extract_skill_coverage() {
     for skill_dir in "$dir"/*/; do
         local name
         name=$(basename "$skill_dir")
-        # Skip learnings.md (it's not a skill dir but could be a file)
-        [[ "$name" == "learnings.md" ]] && continue
         [[ ! -f "$skill_dir/SKILL.md" ]] && continue
 
         local desc

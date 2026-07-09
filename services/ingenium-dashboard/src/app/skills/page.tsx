@@ -1,6 +1,8 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { api, Skill } from "../../lib/api";
+import Overlay from "../components/Overlay";
+import MarkdownViewer from "../components/MarkdownViewer";
 
 /**
  * Skills browser page.
@@ -12,6 +14,7 @@ export default function SkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [search, setSearch] = useState("");
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { api.skills.list().then((r) => setSkills(r.data)).catch(() => {}); }, []);
@@ -61,12 +64,23 @@ export default function SkillsPage() {
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {filtered.map((s) => (
-          <div key={s.id} className="bg-white p-4 rounded border">
+          <div key={s.id} onClick={() => setSelectedSkill(s)} className="bg-white p-4 rounded border hover:shadow-md transition-shadow cursor-pointer">
             <h3 className="font-medium">{s.name}</h3>
             <p className="text-sm text-gray-500 truncate">{s.description}</p>
           </div>
         ))}
       </div>
+
+      <Overlay
+        isOpen={selectedSkill !== null}
+        onClose={() => setSelectedSkill(null)}
+        title={selectedSkill?.name ?? ""}
+        subtitle={selectedSkill?.description}
+      >
+        {selectedSkill && (
+          <MarkdownViewer content={selectedSkill.content} isMarkdown={true} />
+        )}
+      </Overlay>
     </div>
   );
 }

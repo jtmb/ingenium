@@ -12,6 +12,7 @@ import { contextRouter } from "../lib/routes/context.js";
 import { pluginsRouter } from "../lib/routes/plugins.js";
 import { serversRouter } from "../lib/routes/servers.js";
 import { settingsRouter } from "../lib/routes/settings.js";
+import { agentsRouter } from "../lib/routes/agents.js";
 
 const app = express();
 
@@ -34,6 +35,7 @@ app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/plugins", pluginsRouter);
 app.use("/api/v1/servers", serversRouter);
 app.use("/api/v1/settings", settingsRouter);
+app.use("/api/v1/agents", agentsRouter);
 
 // Error handler
 app.use(errorHandler);

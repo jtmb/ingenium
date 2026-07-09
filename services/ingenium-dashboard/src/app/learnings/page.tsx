@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { api, Learning } from "../../lib/api";
+import Overlay from "../components/Overlay";
 
 /**
  * Learnings log page.
@@ -12,6 +13,7 @@ export default function LearningsPage() {
   const [content, setContent] = useState("");
   const [type, setType] = useState("pattern");
   const [error, setError] = useState("");
+  const [selectedLearning, setSelectedLearning] = useState<any>(null);
 
   useEffect(() => { api.learnings.list().then((r) => setLearnings(r.data)).catch(() => {}); }, []);
 
@@ -45,7 +47,7 @@ export default function LearningsPage() {
       </div>
       <div className="space-y-2">
         {learnings.map((l) => (
-          <div key={l.id} className="bg-white p-4 rounded border">
+          <div key={l.id} className="bg-white p-4 rounded border cursor-pointer" onClick={() => setSelectedLearning(l)}>
             <div className="flex gap-2 items-center mb-1">
               <span className={`text-xs px-2 py-0.5 rounded ${
                 l.entry_type === "bug" ? "bg-red-100 text-red-700" :
@@ -59,6 +61,46 @@ export default function LearningsPage() {
           </div>
         ))}
       </div>
+      <Overlay
+        isOpen={selectedLearning !== null}
+        onClose={() => setSelectedLearning(null)}
+        title={`Learning #${selectedLearning?.id ?? ""}`}
+        subtitle={selectedLearning?.entry_type ? `Type: ${selectedLearning.entry_type}` : undefined}
+      >
+        {selectedLearning && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="font-semibold">Type:</span>{" "}
+                <span className={`inline-block px-2 py-0.5 rounded text-xs ${
+                  selectedLearning.entry_type === "bug" ? "bg-red-100 text-red-800" :
+                  selectedLearning.entry_type === "decision" ? "bg-purple-100 text-purple-800" :
+                  selectedLearning.entry_type === "pattern" ? "bg-green-100 text-green-800" :
+                  selectedLearning.entry_type === "skill" ? "bg-blue-100 text-blue-800" :
+                  selectedLearning.entry_type === "architecture" ? "bg-orange-100 text-orange-800" :
+                  "bg-gray-100 text-gray-600"
+                }`}>{selectedLearning.entry_type}</span>
+              </div>
+              <div><span className="font-semibold">Priority:</span> <span className="text-gray-600">{selectedLearning.priority ?? 5}/10</span></div>
+              <div><span className="font-semibold">Created:</span> <span className="text-gray-600">{new Date(selectedLearning.created_at).toLocaleString()}</span></div>
+              {selectedLearning.tags && <div><span className="font-semibold">Tags:</span> <span className="text-gray-600">{selectedLearning.tags}</span></div>}
+            </div>
+            <div>
+              <h3 className="font-semibold mb-1">Content</h3>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+                  <span className="px-3 py-1 text-sm rounded bg-gray-200 text-gray-400 cursor-not-allowed">Preview</span>
+                  <span className="px-3 py-1 text-sm rounded bg-blue-600 text-white">Source</span>
+                  <span className="text-xs text-gray-400 ml-auto">Plain text — not markdown</span>
+                </div>
+                <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                  {selectedLearning.content}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
+      </Overlay>
     </div>
   );
 }

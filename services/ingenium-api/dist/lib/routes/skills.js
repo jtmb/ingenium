@@ -51,3 +51,47 @@ skillsRouter.patch("/:name", (req, res) => {
     }
     res.json({ data: updated });
 });
+skillsRouter.delete("/:name", (req, res) => {
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
+    const deleted = skills.deleteSkill(projectId, req.params.name);
+    if (!deleted) {
+        res.status(404).json({ error: { code: "NOT_FOUND", message: `Skill '${req.params.name}' not found` } });
+        return;
+    }
+    res.status(204).send();
+});
+skillsRouter.post("/:name/enable", (req, res) => {
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
+    const skill = skills.enableSkill(projectId, req.params.name);
+    if (!skill) {
+        res.status(404).json({ error: { code: "NOT_FOUND", message: `Skill '${req.params.name}' not found` } });
+        return;
+    }
+    res.json({ data: skill });
+});
+skillsRouter.post("/:name/disable", (req, res) => {
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
+    const skill = skills.disableSkill(projectId, req.params.name);
+    if (!skill) {
+        res.status(404).json({ error: { code: "NOT_FOUND", message: `Skill '${req.params.name}' not found` } });
+        return;
+    }
+    res.json({ data: skill });
+});
+skillsRouter.post("/:name/sync", (req, res) => {
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
+    const skill = skills.syncSkillFromDisk(projectId, req.params.name);
+    if (!skill) {
+        res.status(404).json({ error: { code: "NOT_FOUND", message: `Skill '${req.params.name}' not found on disk` } });
+        return;
+    }
+    res.json({ data: skill });
+});

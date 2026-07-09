@@ -1,6 +1,11 @@
 {
   "$schema": "https://opencode.ai/config.json",
-"permission": {
+  "skills": {
+    "paths": [
+      ".opencode/skills"
+    ]
+  },
+  "permission": {
     "read": "allow",
     "edit": "ask",
     "bash": "allow",
@@ -9,9 +14,13 @@
     "list": "allow"
   },
   "mcp": {
-"thread": {
+    "thread": {
       "type": "local",
-      "command": ["/home/brajam/.thread-bridge/.venv/bin/python", "-m", "thread_bridge.bridge"],
+      "command": [
+        "/home/brajam/.thread-bridge/.venv/bin/python",
+        "-m",
+        "thread_bridge.bridge"
+      ],
       "cwd": "/home/brajam/.thread-bridge",
       "enabled": true,
       "environment": {
@@ -23,13 +32,27 @@
     },
     "ingenium": {
       "type": "local",
-      "command": ["node", "/home/brajam/repos/gh-llm-bootstrap/services/ingenium-server/dist/scripts/mcp-server.js"],
+      "command": [
+        "node",
+        "/home/brajam/repos/gh-llm-bootstrap/services/ingenium-server/dist/scripts/mcp-server.js"
+      ],
       "enabled": true,
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
         "INGENIUM_API_TIMEOUT": "10000",
         "LOG_LEVEL": "info"
       }
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@latest",
+        "--caps=vision"
+      ],
+      "enabled": true
     }
-  }
+  },
+  "plugin": []
 }

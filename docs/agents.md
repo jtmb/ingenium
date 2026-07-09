@@ -43,7 +43,7 @@ flowchart TB
         AUDITOR --> MERGE
         MERGE --> VERIFY["✅ Verify · tests · type-check"]
         VERIFY --> DOC["🔴 Spawn @ingenium-docs after EVERY change"]
-        DOC --> LEARN["📋 Log to learnings.md"]
+        DOC --> LEARN["📋 Log via ingenium_learning_log"]
         LEARN --> COMMIT["git add/commit/push"]
     end
 
@@ -64,7 +64,7 @@ flowchart TB
 | **ingenium-software-engineer-fast** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes, performance-critical code |
 | **ingenium-qa** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Edit (`edit: allow`) | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code |
-| **ingenium-docs** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates + learnings.md entries |
+| **ingenium-docs** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates + `ingenium_learning_log` entries |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | Security audit + git-history leak scanning |
 
 ---
@@ -79,9 +79,9 @@ flowchart TB
 | 4 | **Code writing** | Implementation needed | Orchestrator → **Software-Engineer** | Implements code, self-verifies (tests/type-check), returns results |
 | 5 | **Review + test** | Code written | Orchestrator → **QA** | Reviews quality, writes tests, returns findings |
 | 6 | **Security audit** | Sensitive changes | Orchestrator → **Security-Auditor** | Scans for secrets, auth issues, CI vulnerabilities |
-| 7 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/, logs to learnings.md — mandatory, never skipped |
+| 7 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/, logs via `ingenium_learning_log` — mandatory, never skipped |
 | 8 | **Commit** | All subagents done | Orchestrator (bash) | `git add/commit/push` — the ONLY bash the orchestrator runs |
-| 9 | **Learnings** | After commit | Orchestrator → **Docs** | Captures hash, appends to learnings.md |
+| 9 | **Learnings** | After commit | Orchestrator → **Docs** | Captures hash, logs via `ingenium_learning_log` |
 
 ---
 
@@ -207,7 +207,7 @@ The `question` tool is used for structured choice questions; freeform text for o
 | 5. QA gate | QA passes → call `kaban_complete_task <id>`; QA fails → re-delegate | qa |
 | 6. Verify | Run tests and type-checks via bash | — |
 | 7. Document | 🔴 Mandatory: spawn docs after every change | docs |
-| 8. Learnings | Log to learnings.md with commit hash | docs |
+| 8. Learnings | Log via `ingenium_learning_log` with commit hash | docs |
 | 9. Board closure | Call `kaban_archive_tasks` + `kaban_export_markdown`, clear `plan.md` | plan-file |
 | 10. Commit | git add/commit/push | — |
 
@@ -219,7 +219,7 @@ The `question` tool is used for structured choice questions; freeform text for o
 | 2. ⚡ Pre-Action Gate | "Should a subagent do this?" check before ANY tool use | Every tool call |
 | 3. 🔴 Anti-Patterns table | 7 common violations with before/after examples | Read at session start |
 | 4. 🔴 Periodic Self-Audit | "Am I following delegation rules?" — now includes kaban board check | Every 5 tool calls |
-| 5. Post-tool-use hook | "📋 Log to learnings.md" reminder | Every 5 calls |
+| 5. Post-tool-use hook | "📋 Call `ingenium_learning_log`" reminder | Every 5 calls |
 | 6. 🔴 Kaban Board | Board-based work tracking — `kaban_get_next_task` → move through columns → `kaban_complete_task` | Every work unit |
 
 ### @ingenium-explore — Codebase Search
@@ -331,7 +331,7 @@ Model assignments are centralized in `.agents/models.yaml` — the human-editabl
 | 2. Map changes | Use trigger table from generic-conventions to determine affected docs | `read` |
 | 3. Update docs | Targeted updates — never regenerate entire docs | `write`, `edit` |
 | 4. Run skill workflows | `update-skills`, `update-skill-index`, `audit-skills` | `read` + `write` |
-| 5. Write learnings | Append to `.agents/skills/learnings.md` with commit hash | `edit` |
+| 5. Write learnings | Log via `ingenium_learning_log` MCP tool with commit hash | `ingenium_learning_log` |
 | 6. Report | Tell orchestrator what was updated | — |
 
 **Trigger Table:**
@@ -344,7 +344,7 @@ Model assignments are centralized in `.agents/models.yaml` — the human-editabl
 | `README.md`, `USAGE.md`, `AGENTS.md` | `docs/README.md` |
 | `.opencode/agents/*.md` | `docs/agents.md`, `docs/ARCHITECTURE.md` |
 | `.agents/hooks/*.json` | `docs/ARCHITECTURE.md` |
-| Any significant change | `.agents/skills/learnings.md` |
+| Any significant change | Log via `ingenium_learning_log` MCP tool |
 
 ### @ingenium-security-auditor — Security Audit
 
@@ -404,7 +404,7 @@ flowchart LR
     MERGE --> KREV["📋 Move to review<br/>kaban_move_task <id> review"]
     KREV --> DOC["🔴 @docs"]
     DOC --> KCOMPLETE["📋 Complete task<br/>kaban_complete_task"]
-    KCOMPLETE --> LEARN["learnings.md"]
+    KCOMPLETE --> LEARN["ingenium_learning_log"]
     LEARN --> KARCHIVE["📋 Archive + export<br/>kaban_archive_tasks"]
     KARCHIVE --> COMMIT["git commit"]
 ```
@@ -465,7 +465,7 @@ You have **two primary agents** — switch between them with the **Tab** key:
      • @ingenium-software-engineer — writes production code
      • @ingenium-qa                — reviews code + writes tests
      • @ingenium-security-auditor   — audits for secrets/vulnerabilities
-     • @ingenium-docs               — updates docs + learnings.md (mandatory after every change)
+• @ingenium-docs — updates docs + logs via `ingenium_learning_log` (mandatory after every change)
      • git commit                   — the ONLY bash the orchestrator runs directly
 ```
 

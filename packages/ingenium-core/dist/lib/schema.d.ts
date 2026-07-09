@@ -57,9 +57,10 @@ export type Skill = z.infer<typeof SkillSchema>;
 export declare const LearningSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
-    entry_type: z.ZodEnum<["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "plugin", "architecture"]>;
+    entry_type: z.ZodEnum<["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "learning", "plugin", "architecture"]>;
     content: z.ZodString;
     tags: z.ZodOptional<z.ZodString>;
+    status: z.ZodDefault<z.ZodEnum<["pending", "processed", "failed"]>>;
     priority: z.ZodDefault<z.ZodNumber>;
     session_id: z.ZodOptional<z.ZodString>;
     created_at: z.ZodString;
@@ -68,9 +69,10 @@ export declare const LearningSchema: z.ZodObject<{
     id: number;
     created_at: string;
     updated_at: string;
+    status: "pending" | "processed" | "failed";
     project_id: string;
     content: string;
-    entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "plugin" | "architecture";
+    entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "learning" | "plugin" | "architecture";
     priority: number;
     tags?: string | undefined;
     session_id?: string | undefined;
@@ -80,7 +82,8 @@ export declare const LearningSchema: z.ZodObject<{
     updated_at: string;
     project_id: string;
     content: string;
-    entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "plugin" | "architecture";
+    entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "learning" | "plugin" | "architecture";
+    status?: "pending" | "processed" | "failed" | undefined;
     tags?: string | undefined;
     priority?: number | undefined;
     session_id?: string | undefined;
@@ -217,4 +220,51 @@ export declare const PluginSchema: z.ZodObject<{
     source_content?: string | undefined;
 }>;
 export type Plugin = z.infer<typeof PluginSchema>;
+export declare const AgentSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    name: z.ZodString;
+    description: z.ZodDefault<z.ZodString>;
+    category: z.ZodDefault<z.ZodEnum<["primary", "execution", "research", "security"]>>;
+    mode: z.ZodDefault<z.ZodEnum<["primary", "subagent"]>>;
+    model: z.ZodOptional<z.ZodString>;
+    reasoning_effort: z.ZodOptional<z.ZodString>;
+    permissions: z.ZodDefault<z.ZodString>;
+    skills: z.ZodDefault<z.ZodString>;
+    content: z.ZodString;
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    name: string;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    description: string;
+    content: string;
+    category: "research" | "primary" | "execution" | "security";
+    enabled: boolean;
+    mode: "primary" | "subagent";
+    permissions: string;
+    skills: string;
+    model?: string | undefined;
+    reasoning_effort?: string | undefined;
+}, {
+    id: string;
+    name: string;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    content: string;
+    description?: string | undefined;
+    category?: "research" | "primary" | "execution" | "security" | undefined;
+    enabled?: boolean | undefined;
+    mode?: "primary" | "subagent" | undefined;
+    model?: string | undefined;
+    reasoning_effort?: string | undefined;
+    permissions?: string | undefined;
+    skills?: string | undefined;
+}>;
+export type Agent = z.infer<typeof AgentSchema>;
 //# sourceMappingURL=schema.d.ts.map

@@ -5,16 +5,9 @@ mode: subagent
 model: deepseek/deepseek-v4-flash
 permission:
   read: allow
-  glob: allow
-  grep: allow
-  list: allow
-  edit: deny
   write: deny
   bash: deny
-  task:
-    "*": "deny"
-  skill:
-    "*": "allow"
+skills:
 ---
 
 # Prompt Engineer

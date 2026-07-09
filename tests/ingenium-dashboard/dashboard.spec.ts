@@ -38,7 +38,7 @@ test.describe("Ingenium Dashboard", () => {
 
     // The home page should also contain card-style link tiles
     const cardLinks = page.locator("a[href]").filter({ has: page.locator("h2") });
-    await expect(cardLinks).toHaveCount(6);
+    await expect(cardLinks).toHaveCount(7);
   });
 
   /* ------------------------------------------------------------------ */
@@ -130,10 +130,9 @@ test.describe("Ingenium Dashboard", () => {
     // The task should appear on the board after creation
     await expect(page.getByText(taskTitle)).toBeVisible();
 
-    // Click the task to advance it to "in progress"
-    // The task element's onClick handler computes the next column via modulo
-    // arithmetic: todo → in_progress → review → done
-    await page.getByText(taskTitle).click();
+    // Click the Advance → button inside the task card to move it to "in progress"
+    const taskCard = page.getByText(taskTitle).first();
+    await taskCard.locator("..").getByRole("button", { name: /Advance/i }).click();
 
     // Wait for the PATCH request that moves the task to complete
     await page.waitForResponse(
@@ -151,7 +150,7 @@ test.describe("Ingenium Dashboard", () => {
   /*  6. Plugins page                                                    */
   /* ------------------------------------------------------------------ */
 
-  test("plugins page renders", async ({ page }) => {
+  test("plugins page renders with heading and Add Plugin button", async ({ page }) => {
     await page.goto("/plugins");
 
     // Page heading
@@ -159,7 +158,18 @@ test.describe("Ingenium Dashboard", () => {
       page.getByRole("heading", { name: "Plugins" }),
     ).toBeVisible();
 
-    // Page heading is already verified above — the page structure loaded correctly
+    // Add Plugin button should be present
+    await expect(page.getByRole("button", { name: /Add Plugin/i })).toBeVisible();
+  });
+
+  test("plugins page creates and shows a plugin", async ({ page }) => {
+    const ts = Date.now().toString();
+    await page.goto("/plugins");
+    await page.getByRole("button", { name: /Add Plugin/i }).click();
+    await page.getByPlaceholder("my-plugin", { exact: true }).fill(`e2e-plugin-${ts}`);
+    await page.getByPlaceholder("my-plugin.ts").fill(`e2e-plugin-${ts}.ts`);
+    await page.getByRole("button", { name: /Upload & Create/i }).click();
+    await expect(page.getByText(`e2e-plugin-${ts}`).first()).toBeVisible({ timeout: 5000 });
   });
 
   /* ------------------------------------------------------------------ */
@@ -175,9 +185,9 @@ test.describe("Ingenium Dashboard", () => {
     await page.getByRole("button", { name: "Add" }).click();
     await expect(page.getByText(taskTitle)).toBeVisible();
 
-    // Click through all 4 columns (todo → in_progress → review → done)
+    // Click the Advance → button through all 4 columns (todo → in_progress → review → done)
     for (let i = 0; i < 4; i++) {
-      await page.getByText(taskTitle).first().click();
+      await page.getByRole("button", { name: /Advance/ }).first().click();
       await page.waitForTimeout(300);
     }
 

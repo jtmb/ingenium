@@ -1,0 +1,5 @@
+{
+  "name": "skill-maintenance",
+  "description": "Create, update, retire, index, and audit skills as projects evolve. Detects patterns and creates new skills autonomously.",
+  "tags": ["skill", "maintenance", "creation", "audit", "index"]
+}

@@ -35,6 +35,9 @@ playwright/.cache/
 dist/
 build/
 
+# ── Learnings — DB-managed only, not on disk ──────────────
+.agents/skills/learnings.md
+
 # ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env
 .vscode

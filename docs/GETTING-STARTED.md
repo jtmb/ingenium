@@ -111,12 +111,13 @@ The script will:
 1. Verify Node.js 22+ and npm are installed
 2. Install dependencies if needed
 3. Build `packages/ingenium-core` (migrations and shared types)
-4. Start each service with health-check polling
-5. Print confirmation when all services are ready
+4. Run `./run.sh seed` to initialize the first project, create its database, and seed 3 OpenCode plugins (`planner-handoff`, `post-tool-use`, `session-start`)
+5. Start each service with health-check polling
+6. Print confirmation when all services are ready
 
 Press `Ctrl+C` to stop all services gracefully.
 
----
+> **Note:** You can re-run `./run.sh seed` manually at any time — it is idempotent and will only seed plugins that don't already exist.
 
 ## Step 6 — Verify
 

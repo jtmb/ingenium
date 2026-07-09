@@ -26,9 +26,10 @@ export type Skill = z.infer<typeof SkillSchema>;
 export const LearningSchema = z.object({
   id: z.number(),
   project_id: z.string(),
-  entry_type: z.enum(["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "plugin", "architecture"]),
+  entry_type: z.enum(["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "learning", "plugin", "architecture"]),
   content: z.string().min(1),
   tags: z.string().optional(),
+  status: z.enum(["pending", "processed", "failed"]).default("pending"),
   priority: z.number().min(0).max(10).default(5),
   session_id: z.string().optional(),
   created_at: z.string().datetime(),
@@ -88,3 +89,21 @@ export const PluginSchema = z.object({
   updated_at: z.string().datetime(),
 });
 export type Plugin = z.infer<typeof PluginSchema>;
+
+export const AgentSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  name: z.string().min(1).max(64),
+  description: z.string().default(""),
+  category: z.enum(["primary", "execution", "research", "security"]).default("execution"),
+  mode: z.enum(["primary", "subagent"]).default("subagent"),
+  model: z.string().optional(),
+  reasoning_effort: z.string().optional(),
+  permissions: z.string().default("{}"),
+  skills: z.string().default("[]"),
+  content: z.string().min(1),
+  enabled: z.coerce.boolean().default(true),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+export type Agent = z.infer<typeof AgentSchema>;

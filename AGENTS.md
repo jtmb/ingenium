@@ -42,7 +42,7 @@ After ANY code change, you MUST run the applicable self-improvement commands:
 | `/update-skills` | Detects gaps and creates/retires skills |
 | `/audit-skills` | Cross-references skills against README, mermaid, skill index |
 | `/update-skill-index` | Regenerates `SKILL-INDEX.md` from all skill files |
-| All changes | Log to `.agents/skills/learnings.md` with before/after commit hashes |
+| All changes | Log via `ingenium_learning_log` MCP tool with `entry_type`, tags, and content |
 
 These are not optional. Skip none of them.
 

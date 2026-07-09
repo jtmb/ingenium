@@ -1,0 +1,6 @@
+{
+  "name": "devops-conventions",
+  "description": "Unified DevOps conventions — CLI toolkit (jq, curl, sed, awk, find, grep), Docker container authoring and ecosystem management, and Kubernetes manifests.",
+  "tags": ["devops", "docker", "kubernetes", "cli", "shell", "containers"],
+  "alwaysApply": true
+}

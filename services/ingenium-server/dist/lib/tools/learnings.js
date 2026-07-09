@@ -13,3 +13,13 @@ export async function learningSearch(project, query) {
     const res = await api.get("/learnings/search", { project, q: query });
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }
+/** List all learning entries for a project. */
+export async function learningList(project) {
+    const res = await api.get(`/learnings?project=${project}`);
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Scan recent learnings for skill gaps and auto-create tasks for AI engineers to write missing skills. */
+export async function skillFromLearnings(project) {
+    const res = await api.post(`/learnings/skill-from-learnings?project=${project}`);
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}

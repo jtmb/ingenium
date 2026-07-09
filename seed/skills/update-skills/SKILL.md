@@ -112,21 +112,7 @@ Before every coding session — and whenever you touch a new area of a project �
 - A skill hasn't been updated in months but the codebase is active
 - Build/lint/test commands in the skill differ from what CI actually runs
 
-### Signal 5 — Unlogged Changes
-
-**Trigger:** Files changed in agents, hooks, plugins, deploy, or config but no corresponding entry was added to `.agents/skills/learnings.md`.
-
-**Detection checklist:**
-- `git diff --name-only HEAD~1` shows `.opencode/agents/` changes but no learnings.md entry for agent changes
-- `git diff --name-only HEAD~1` shows `.agents/hooks/` changes but no learnings.md entry for hook changes
-- `git diff --name-only HEAD~1` shows `.opencode/plugins/` changes but no learnings.md entry for plugin changes
-- `git diff --name-only HEAD~1` shows `opencode.json` changes but no learnings.md entry for config changes
-- `git diff --name-only HEAD~1` shows `.agents/` changes across multiple categories but no learnings.md entries
-- A `git log --oneline -5` shows commits that mention "agent", "plugin", "config", "hook" but no corresponding commit touches `.agents/skills/learnings.md`
-
-**The fix:** Run `git log --oneline -5` and `git diff --name-only HEAD~1` to identify what changed, then create the missing learnings.md entry. If the changes were already committed, still log to learnings.md with the commit hash — the entry documents what happened even if it's retrospective.
-
-### Signal 6 — Documentation Drift
+### Signal 5 — Documentation Drift
 
 **Trigger:** The project's documentation (`docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `docs/TECH-STACK.md`, `docs/agents.md`, `docs/README.md`) is out of sync with the actual file structure, agent definitions, or skill content.
 
@@ -264,7 +250,7 @@ Tests for the skill system itself — validation scripts, audit helpers, self-im
 
 **If `tests/` doesn't exist, create it.** The `useful-tests` skill covers testing conventions; any test script added to `tests/` should follow those patterns.
 
-### Step 5 — Commit, Then Log to learnings.md
+### Step 5 — Commit, Then Log Via MCP
 
 **Always commit changes before logging.** This ensures every learnings entry has a verifiable commit hash.
 
@@ -279,21 +265,12 @@ Tests for the skill system itself — validation scripts, audit helpers, self-im
    git rev-parse --short HEAD
    ```
 
-3. **Append to `.agents/skills/learnings.md`** with the change details. Use this expanded template that covers all categories:
-
-```markdown
-## YYYY-MM-DD — {short-topic}
-
-- **Commit**: `{short-hash}` (after)
-- **Before**: `{short-hash}` (if reverting, snapshot before)
-- **Category**: skill | agent | hook | plugin | deploy | config | architecture | bug | pattern
-- **Changes**: {one-line summary of what changed}
-- **Why**: {what triggered this change}
-```
-
-This creates a changelog where every entry is traceable to a specific commit. The category tag enables grep-based filtering:
-- `grep "Category: skill" .agents/skills/learnings.md` — all skill changes
-- `grep "Category: agent" .agents/skills/learnings.md` — all agent changes
+3. **Call `ingenium_learning_log`** with the change details:
+   - `project`: `"ingenium"`
+   - `entry_type`: `"skill"` (or match the category)
+   - `content`: Category, commit hash(es), what changed, and why
+   - `tags`: `"skill"`
+   - `priority`: `5`
 
 ### Step 6 — Validate
 

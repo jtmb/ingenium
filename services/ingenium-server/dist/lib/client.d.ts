@@ -10,6 +10,11 @@ export declare const api: {
         status: number;
         data: any;
     }>;
+    put: (path: string, body?: unknown, params?: Record<string, string>) => Promise<{
+        ok: boolean;
+        status: number;
+        data: any;
+    }>;
     patch: (path: string, body?: unknown, params?: Record<string, string>) => Promise<{
         ok: boolean;
         status: number;

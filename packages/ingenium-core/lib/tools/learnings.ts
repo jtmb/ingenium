@@ -38,3 +38,40 @@ export function recentLearnings(projectId: string, limit = 20): Learning[] {
     "SELECT * FROM learnings WHERE project_id = ? ORDER BY created_at DESC LIMIT ?"
   ).all(projectId, limit) as Learning[];
 }
+
+export function getLearnings(projectId: string, status?: string, limit = 50): Learning[] {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  if (status) {
+    return db.prepare(
+      "SELECT * FROM learnings WHERE project_id = ? AND status = ? ORDER BY created_at DESC LIMIT ?"
+    ).all(projectId, status, limit) as Learning[];
+  }
+  return db.prepare(
+    "SELECT * FROM learnings WHERE project_id = ? ORDER BY created_at DESC LIMIT ?"
+  ).all(projectId, limit) as Learning[];
+}
+
+export function updateLearning(learningId: number, data: Partial<Pick<Learning, "status" | "entry_type" | "content" | "tags" | "priority">>): Learning | null {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const now = new Date().toISOString();
+
+  const sets: string[] = ["updated_at = ?"];
+  const params: any[] = [now];
+
+  if (data.status !== undefined) { sets.push("status = ?"); params.push(data.status); }
+  if (data.entry_type !== undefined) { sets.push("entry_type = ?"); params.push(data.entry_type); }
+  if (data.content !== undefined) { sets.push("content = ?"); params.push(data.content); }
+  if (data.tags !== undefined) { sets.push("tags = ?"); params.push(data.tags); }
+  if (data.priority !== undefined) { sets.push("priority = ?"); params.push(data.priority); }
+
+  params.push(learningId);
+
+  return execTransaction(() => {
+    const result = db.prepare(
+      `UPDATE learnings SET ${sets.join(", ")} WHERE id = ?`
+    ).run(...params);
+    if (result.changes === 0) return null;
+    checkpointAfterWrite();
+    return db.prepare("SELECT * FROM learnings WHERE id = ?").get(learningId) as Learning;
+  });
+}

@@ -12,4 +12,18 @@ export declare function learningSearch(project: string, query: string): Promise<
         text: string;
     }[];
 }>;
+/** List all learning entries for a project. */
+export declare function learningList(project: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Scan recent learnings for skill gaps and auto-create tasks for AI engineers to write missing skills. */
+export declare function skillFromLearnings(project: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=learnings.d.ts.map

@@ -15,3 +15,9 @@ export async function planSearch(project: string, query: string) {
   const res = await api.get("/context/search", { project, q: query });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** List all context entries for a project. */
+export async function planList(project: string) {
+  const res = await api.get(`/context?project=${project}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

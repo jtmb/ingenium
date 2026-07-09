@@ -115,7 +115,7 @@ graph LR
     
     F[Agent Session] -->|skill-load| G[.agents/skills/<br/>46+ SKILL.md]
     G -->|update-skills| H[Self-learning<br/>engine]
-    H -->|Logs to| I[learnings.md<br/>FTS5 searchable]
+    H -->|Logs to| I[(SQLite DB<br/>FTS5 searchable)]
 ```
 
 ## Documentation
