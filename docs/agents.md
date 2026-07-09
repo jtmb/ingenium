@@ -114,14 +114,14 @@ flowchart LR
 
 | Column | State | Who moves | Description |
 |--------|-------|-----------|-------------|
-| `todo` | Pending | Planner (create) | Work not yet started, ordered by priority |
+| \`todo\` | Pending | Orchestrator (create) | Work not yet started, ordered by priority |
 | `in-progress` | Active | Orchestrator | Subagent is actively working on this task |
 | `review` | Under review | Orchestrator | QA review or peer verification needed |
 | `done` | Complete | Orchestrator | Finished, verified, ready for archive |
 
 ### Rules
 
-- **Planner creates all tasks** during planning — orchestrator never creates tasks, only reads and moves them
+- **Orchestrator creates all tasks** during planning, derived from the plan in conversation context — subagents never create tasks
 - **Orchestrator reads** `ingenium_task_next` before starting each work unit — never picks work from memory
 - **Tasks flow through** `todo → in-progress → review → done` — no skipping columns
 - **The board is authoritative** — All task state lives in the task management system; `todowrite` is a secondary mirror for in-session OpenCode visibility
@@ -131,43 +131,6 @@ flowchart LR
 ---
 
 ## Per-Agent Profiles
-
-### @ingenium-planner — Planner
-
-| Property | Value |
-|----------|-------|
-| **Model** | DeepSeek V4 Pro |
-| **Access** | Read-only |
-| **Invoked by** | User (Tab key) |
-| **Triggers** | User request: "Plan X", "Analyze Y", "Research Z" |
-| **Can spawn** | `@ingenium-explore`, `@ingenium-scout`, `@ingenium-security-auditor`, `@ingenium-prompt-engineer` (read-only agents only) |
-
-| Phase | Action | Delegates to |
-|-------|--------|-------------|
-| 0. Resume check | Check for `plan.md` at project root — may be resuming interrupted plan | explore |
-| 1. Understand | Parse user request, identify scope and constraints | — |
-| 1.5. Probe | Ask clarifying questions before research; restate understanding, list assumptions, define scope boundaries | — |
-| 2. Delegate | Spawn 2-4 subagents in parallel | explore ×2, scout, security-auditor |
-| 3. Analyze | Read files subagents identified, synthesize findings | — |
-| 4. Plan | Produce step-by-step plan (files, subagents, order, tests, docs) | — |
-| 5. Persist & hand off | Save plan to `plan.md`, hand off to orchestrator | plan-file |
-
-**Probing workflow (§1.5):** Before spawning ANY research subagents, the planner must validate its understanding with the user. This prevents wasted research on misunderstood requirements. The probe step requires at least 3 of 9 clarifying questions (priority, constraints, success criteria, stakeholders, deadlines, risks, out-of-scope, testing preferences, sprint split). It also runs three validation checks:
-1. **Restatement** — "Here's what I understand you want. Is that correct?"
-2. **Assumptions** — "I am assuming X, Y, Z. Are these safe?"
-3. **Scope** — "I will NOT work on A, B. Confirm?"
-
-The `question` tool is used for structured choice questions; freeform text for open-ended ones. The agent waits for user responses before proceeding — no research happens before probe completion.
-
-**Planner HARD RULEs:**
-- 🔴 **You Are a Planner, NOT an Executor** — You ONLY spawn READ-ONLY agents (explore, scout, security-auditor, ingenium-prompt-engineer). You NEVER write code, edit files, or run implementation agents.
-- 🔴 Never search code, grep, or glob directly — always delegate to explore
-- 🔴 Never access general subagent or circumvent read-only restrictions
-- 🔴 **Ask Before You Plan** — Never spawn research subagents without first asking clarifying questions. Ambiguous requests must be resolved before delegation
-- 🔴 Produce the full plan in the handoff message for the orchestrator to read
-- 🔴 Persist the plan to `plan.md` via @ingenium-plan-file after every plan
-- 🔴 Populate tasks via `ingenium_task_create` after every plan
-- 🔴 Every plan must include a **Risks** section with likelihood/impact/mitigation for each identified risk
 
 ### @ingenium-orchestrator — Coordinator
 
@@ -182,7 +145,7 @@ The `question` tool is used for structured choice questions; freeform text for o
 
 | Phase | Action | Delegates to |
 |-------|--------|-------------|
-| 1. Detect plan + board | Scan messages for planner's plan + check `plan.md` + call `ingenium_task_next` | explore (reads plan.md) |
+| 1. Detect plan + board | Scan messages for the plan + check \`plan.md\` + call \`ingenium_task_next\` | explore (reads plan.md) |
 | 2. Split + create tasks | Identify subagents needed, parallelize, call `ingenium_task_create` for each work unit | — |
 | 3. Delegate | Spawn subagents for ALL work, call `ingenium_task_move <id> in-progress` for each | explore, software-engineer, qa, docs, security-auditor, scout |
 | 4. Merge + review | Collect findings, resolve conflicts, call `ingenium_task_move <id> review`, spawn QA | qa |
@@ -210,7 +173,7 @@ The `question` tool is used for structured choice questions; freeform text for o
 |----------|-------|
 | **Model** | DeepSeek V4 Flash |
 | **Access** | Read-only |
-| **Invoked by** | Planner, Orchestrator, or user `@` mention |
+| **Invoked by** | Orchestrator or user \`@\` mention |
 | **Triggers** | "Find files X", "Search for pattern Y", "Explore codebase Z" |
 
 | Capability | Tools | Output |
@@ -226,7 +189,7 @@ The `question` tool is used for structured choice questions; freeform text for o
 |----------|-------|
 | **Model** | qwopus 3.5 9B Coder (LM Studio) |
 | **Access** | Read-only |
-| **Invoked by** | Planner, Orchestrator, or user `@` mention |
+| **Invoked by** | Orchestrator or user \`@\` mention |
 | **Triggers** | "Check past decisions", "What did we do before?", "Search Thread for X" |
 
 | Capability | Tools | Output |
@@ -334,7 +297,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 |----------|-------|
 | **Model** | DeepSeek V4 Flash |
 | **Access** | Bash + read-only (`write: deny`) |
-| **Invoked by** | Planner, Orchestrator, or user `@` mention |
+| **Invoked by** | Orchestrator or user \`@\` mention |
 | **Triggers** | "Audit X", "Check for secrets", "Security review of Y" |
 
 | Phase | Action | Tools |
@@ -347,21 +310,13 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 
 ## Workflow
 
-### Phase 1: Planner (Research → Plan → Kaban Board)
+### Phase 1: Plan Mode (Conversation → Plan)
 
 ```mermaid
 flowchart LR
-    REQ["User Request"] -->     P["Planner"]
-    P -->|parallel| E1["@explore #1<br/>Find relevant files"]
-    P -->|parallel| E2["@explore #2<br/>Find dependencies"]
-    P -->|parallel| SC["@scout<br/>Past decisions"]
-    P -->|parallel| SA["@security-auditor<br/>Scope check"]
-    E1 --> SYNTH["Synthesize → Plan"]
-    E2 --> SYNTH
-    SC --> SYNTH
-    SA --> SYNTH
-    SYNTH --> TASK["📋 Create tasks<br/>ingenium_task_create"]
-    TASK --> HANDOFF["Hand off → User switches tab"]
+    REQ["User Request"] --> PLANMODE["OpenCode Plan mode"]
+    PLANMODE --> PLAN["📋 Plan generated in conversation context"]
+    PLAN --> HANDOFF["User switches to Orchestrator tab"]
 ```
 
 ### Phase 2: Orchestrator (Execute → Commit)
@@ -395,7 +350,7 @@ flowchart LR
 
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
-| DeepSeek V4 Pro (API) | `ingenium-planner`, `ingenium-software-engineer-premium` | 2 | Paid |
+| DeepSeek V4 Pro (API) | \`ingenium-software-engineer-premium\` | 1 | Paid |
 | DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor`, `ingenium-prompt-engineer` | 4 | Paid |
 | DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-plan-file` | 5 | Free |
 | qwopus 3.5 9B Coder (LM Studio) | `ingenium-scout` | 1 | Local |
@@ -408,46 +363,46 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 
 | Subagent | `@` mention | Access | Invokable by |
 |----------|-------------|--------|--------------|
-| ingenium-explore | `@ingenium-explore` | Read-only | planner + orchestrator + user |
-| ingenium-scout | `@ingenium-scout` | Read-only | planner + orchestrator + user |
-| ingenium-prompt-engineer | `@ingenium-prompt-engineer` | Read-only | planner + user |
-| ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | planner + orchestrator + user |
+| ingenium-explore | \`@ingenium-explore\` | Read-only | orchestrator + user |
+| ingenium-scout | \`@ingenium-scout\` | Read-only | orchestrator + user |
+| ingenium-prompt-engineer | \`@ingenium-prompt-engineer\` | Read-only | orchestrator + user |
+| ingenium-security-auditor | \`@ingenium-security-auditor\` | Bash + read-only | orchestrator + user |
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
 | ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Read/Write | orchestrator only |
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |
 | ingenium-qa | `@ingenium-qa` | Edit (`edit: allow`) | orchestrator only |
 | ingenium-docs | `@ingenium-docs` | Edit + Write (`edit: allow, write: allow, bash: deny`) | orchestrator only |
-| ingenium-plan-file | `@ingenium-plan-file` | Read/Write (plan.md only) | planner only |
+| ingenium-plan-file | \`@ingenium-plan-file\` | Read/Write (plan.md only) | orchestrator only |
 
 ## How to Use the Pipeline
 
 ### Switching Primary Agents
 
-You have **two primary agents** — switch between them with the **Tab** key:
+Use **Plan mode** (OpenCode built-in) to generate a plan, then **Tab** to the orchestrator to execute it:
 
-| Primary | Tab to | Use when you want to... |
-|---------|--------|------------------------|
-| **ingenium-planner** | Tab | Sprint planning, research, produce plan, create tasks. Read-only — no accidental edits. |
-| **ingenium-orchestrator** | Tab | Execute the plan. Coordinates subagents — never writes code directly. |
+| Mode | How to use | When to use |
+|------|-----------|-------------|
+| **Plan mode** | OpenCode built-in | Sprint planning, research, produce a plan in conversation context. |
+| **ingenium-orchestrator** | Tab to orchestrator | Execute the plan. Coordinates subagents — never writes code directly. |
 
 ### Typical Workflow
 
 ```
-1. Tab → ingenium-planner
+1. OpenCode Plan mode
    You: "Plan the addition of OAuth to the API"
-    Planner: auto-invokes @ingenium-explore (×2), @ingenium-scout, @ingenium-security-auditor
-             returns a step-by-step plan with files, subagent assignments, testing strategy
-             creates tasks via `ingenium_task_create`
+    Plan mode: generates a step-by-step plan with files, subagent assignments, testing strategy
 
 2. Tab → ingenium-orchestrator  
    You: "Execute that plan"
-   Orchestrator: runs ⚡ Pre-Action Gate for every step:
+   Orchestrator: reads the plan from conversation context
+                 creates tasks via `ingenium_task_create`
+                 runs ⚡ Pre-Action Gate for every step:
      • @ingenium-explore           — finds relevant files
      • @ingenium-software-engineer — writes production code
      • @ingenium-qa                — reviews code + writes tests
-     • @ingenium-security-auditor   — audits for secrets/vulnerabilities
-• @ingenium-docs — updates docs + logs via `ingenium_learning_log` (mandatory after every change)
-     • git commit                   — the ONLY bash the orchestrator runs directly
+     • @ingenium-security-auditor  — audits for secrets/vulnerabilities
+     • @ingenium-docs              — updates docs + logs via `ingenium_learning_log` (mandatory after every change)
+     • git commit                  — the ONLY bash the orchestrator runs directly
 ```
 
 ### Manual Subagent Invocation
@@ -465,11 +420,11 @@ This opens a child session. Navigate with:
 - **Left** → previous child session  
 - **Up** → return to parent session
 
-### Automatic Delegation Examples
+### Orchestrator Delegation Examples
 
-| You say... | Planner auto-delegates | Orchestrator auto-delegates |
-|------------|----------------------|---------------------------|
-| "Plan the addition of OAuth" | explore (×2), scout, security-auditor, task creation | — |
-| "Execute that plan" | — | explore, software-engineer, qa, docs, security-auditor, scout |
-| "Add rate limiting to auth routes" | explore (find routes), scout (past context) | explore, software-engineer (implement), qa (review+test), docs, scout |
-| "Audit the repo for security issues" | security-auditor, explore | security-auditor, explore, scout |
+| You say... | Orchestrator auto-delegates |
+|------------|---------------------------|
+| "Execute that plan" | explore, software-engineer, qa, docs, security-auditor, scout |
+| "Add rate limiting to auth routes" | explore, software-engineer (implement), qa (review+test), docs, scout |
+| "Audit the repo for security issues" | security-auditor, explore, scout |
+| "Plan the addition of OAuth" | (use Plan mode first, then orchestrator reads the plan) |

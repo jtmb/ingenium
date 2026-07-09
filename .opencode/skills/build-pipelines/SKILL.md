@@ -67,7 +67,7 @@ Agents communicate through a central REST API, not through shared state or direc
 ### Pattern
 
 ```
-Agent A (planner) → POST /api/v1/ideas → API (stores) → GET /api/v1/ideas/random → Agent B (builder)
+Agent A (plan-phase) → POST /api/v1/ideas → API (stores) → GET /api/v1/ideas/random → Agent B (builder)
 Agent B (builder) → POST /api/v1/projects → API (stores)
 ```
 

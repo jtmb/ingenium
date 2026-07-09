@@ -42,10 +42,10 @@ agent-service/
 
 ```yaml
 services:
-  agent-planner:
-    build: ./agent-planner
+  agent-designer:
+    build: ./agent-designer
     volumes:
-      - planner-data:/app/data
+      - designer-data:/app/data
     environment:
       - LLM_ENDPOINT=http://lm-studio:1234/v1
       - ORCHESTRATOR_URL=http://orchestrator:3444
@@ -82,7 +82,7 @@ networks:
     driver: bridge
 
 volumes:
-  planner-data:
+  designer-data:
   builder-data:
   orchestrator-data:
 ```
