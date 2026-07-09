@@ -23,14 +23,14 @@ export async function skillSearch(project: string, query: string) {
 }
 
 /** Create a new skill. */
-export async function skillCreate(project: string, name: string, description: string, content: string, category?: string, tags?: string, always_apply?: number) {
-  const res = await api.post("/skills", { name, description, content, category, tags, always_apply }, { project });
+export async function skillCreate(project: string, name: string, description: string, content: string, category?: string, tags?: string, always_apply?: number, files?: string) {
+  const res = await api.post("/skills", { name, description, content, category, tags, always_apply, files }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
 /** Update an existing skill's content. */
-export async function skillUpdate(project: string, name: string, content: string, description?: string, tags?: string, always_apply?: number) {
-  const res = await api.patch(`/skills/${encodeURIComponent(name)}`, { content, description, tags, always_apply }, { project });
+export async function skillUpdate(project: string, name: string, content: string, description?: string, tags?: string, always_apply?: number, files?: string) {
+  const res = await api.patch(`/skills/${encodeURIComponent(name)}`, { content, description, tags, always_apply, files }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
