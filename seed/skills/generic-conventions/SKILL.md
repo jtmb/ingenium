@@ -42,9 +42,9 @@ Invoke this skill when working on files that don't match any framework-specific 
 
 ## 🔴 HARD RULE — Learnings Must Be Logged After EVERY Change
 
-**After ANY code change that is more than a trivial edit (skills, agents, hooks, plugins, deploy structure, config, architecture decisions, pattern discoveries, bug fixes, domain conversions), you MUST append an entry to `.agents/skills/learnings.md`.** This is not optional. This is not "if you remember." This is mandatory and applies whether you're working on the bootstrap repo or a target project.
+**After ANY code change that is more than a trivial edit (skills, agents, hooks, plugins, deploy structure, config, architecture decisions, pattern discoveries, bug fixes, domain conversions), you MUST call the `ingenium_learning_log` MCP tool to record a learning entry in the Ingenium database.** This is not optional. This is not "if you remember." This is mandatory and applies whether you're working on the bootstrap repo or a target project.
 
-**Triggers — after making any of these changes, append to learnings.md:**
+**Triggers — after making any of these changes, log a learning entry:**
 
 | Change category | What to log |
 |----------------|-------------|
@@ -60,12 +60,12 @@ Invoke this skill when working on files that don't match any framework-specific 
 **Workflow:**
 1. Finish and commit the code change (commit first so you have a hash)
 2. Run `git rev-parse --short HEAD` to capture the commit hash
-3. Append to `.agents/skills/learnings.md` with:
-    - Date and short topic heading
-    - Category tag
-    - Commit hash(es) (before and/or after)
-    - What changed and why (2-5 bullet points)
-    - Any related files or decisions
+3. Call `ingenium_learning_log` with:
+    - `project`: `"ingenium"` (always)
+    - `entry_type`: match the change category from the trigger table
+    - `content`: date, topic, category, commit hash(es), what changed and why (2-5 bullet points)
+    - `tags`: comma-separated categories
+    - `priority`: 5 (default)
 
 **The entry format should be:**
 
@@ -79,18 +79,18 @@ Invoke this skill when working on files that don't match any framework-specific 
 - **Why**: {what triggered this change}
 ```
 
-### 🔴 Dual-Write: Also Log Via MCP Tool
+### 🔴 Log Via MCP Tool — DB-Only
 
-In addition to appending to `.agents/skills/learnings.md`, you MUST also call the `ingenium_learning_log` MCP tool to record every learning entry in the Ingenium database. This makes learnings searchable across sessions via FTS5.
+The `ingenium_learning_log` MCP tool is the ONLY required mechanism for recording learning entries. There is no file-based audit trail — the database is the permanent, searchable record. Every entry is traceable to a specific commit.
 
 **Parameters for every learning_log call:**
 - `project`: `"ingenium"` (always)
 - `entry_type`: match the change category from the trigger table
-- `content`: same 2-5 bullet points you logged to learnings.md
+- `content`: same 2-5 bullet points you identified
 - `tags`: comma-separated categories
 - `priority`: 5 (default)
 
-**Triggers — same as the learnings.md table:**
+**Triggers — same table:**
 
 | Change category | entry_type | tags |
 |----------------|-----------|------|
@@ -102,9 +102,7 @@ In addition to appending to `.agents/skills/learnings.md`, you MUST also call th
 | Architecture decisions | `architecture` | `architecture` |
 | Bug fix | `bug` | `bug` |
 
-**Do NOT skip this step.** The file-based learnings.md is for audit trail. The MCP-based learning_log is for searchable knowledge. Both are required.
-
-**If you skip logging to learnings.md, you have violated this rule.** The purpose is to create an auditable changelog of all skill system evolution — every entry is traceable to a specific commit.
+**Do NOT skip this step.** The learning database is the permanent record of skill system evolution — every entry is traceable to a specific commit.
 
 ## 🔴 HARD RULE — Comments Are Mandatory
 
@@ -224,18 +222,4 @@ Before declaring any change complete:
 - **Boolean variables read as a question.** `isLoading`, `hasError`, `canSubmit`.
 
 
-### 🔴 Append-Only Files Rule
-
-**Never overwrite `.agents/skills/learnings.md` via MCP write tool or bash `>` redirection.** Use:
-- `cat >> .agents/skills/learnings.md << EOF` (bash heredoc with append)
-- Or use the `.agents/skills/learnings.sh` helper script (preferred)
-- If accidental overwrite occurs: restore from git + log recovery in learnings.md itself
-
-### Cross-references
-
-| Path | Purpose |
-|------|---------|
-| `.agents/skills/learnings.sh` | Helper script that enforces proper append formatting and verification |
-| `docs/CONVENTIONS.md` (see "Append-Only Files" section) | Main conventions documentation — see "Git Practices" for learnings.md rules |
-| `.agents/skills/orchestrator-primer/SKILL.md` | Orchestrator's delegation rules — see Kaban Tracking table |
 

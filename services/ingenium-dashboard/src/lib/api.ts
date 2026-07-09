@@ -28,7 +28,22 @@ export type Learning = { id: number; entry_type: string; content: string; tags?:
 export type Task = { id: string; title: string; description?: string; column_id: string; assigned_to?: string; created_at: string; completed_at?: string };
 
 /** An MCP plugin registered in the system. */
-export type Plugin = { id: string; name: string; file_path: string; enabled: boolean };
+export type Plugin = { id: string; name: string; file_path: string; enabled: boolean; source_content?: string };
+
+/** An AI agent definition synced to OpenCode. */
+export type Agent = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  mode: string;
+  model?: string;
+  reasoning_effort?: string;
+  content: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+};
 
 /** An MCP server configuration. */
 export type Server = { id: string; name: string; command: string; running: boolean; enabled: boolean };
@@ -71,8 +86,39 @@ export const api = {
   },
   plugins: {
     list: (project = "ingenium") => request<{ data: Plugin[] }>(`/plugins?project=${project}`),
-    enable: (name: string, project = "ingenium") => request<{ data: Plugin }>(`/plugins/${name}/enable?project=${project}`, { method: "POST" }),
-    disable: (name: string, project = "ingenium") => request<{ data: Plugin }>(`/plugins/${name}/disable?project=${project}`, { method: "POST" }),
+    get: (name: string, project = "ingenium") => request<{ data: Plugin }>(`/plugins/${name}?project=${project}`),
+    create: (name: string, file_path: string, source_content?: string, project = "ingenium") =>
+      request<{ data: Plugin }>(`/plugins?project=${project}`, {
+        method: "POST", body: JSON.stringify({ name, file_path, source_content }),
+      }),
+    update: (name: string, data: { file_path?: string; source_content?: string }, project = "ingenium") =>
+      request<{ data: Plugin }>(`/plugins/${name}?project=${project}`, {
+        method: "PUT", body: JSON.stringify(data),
+      }),
+    delete: (name: string, project = "ingenium") =>
+      request(`/plugins/${name}?project=${project}`, { method: "DELETE" }),
+    enable: (name: string, project = "ingenium") =>
+      request<{ data: Plugin }>(`/plugins/${name}/enable?project=${project}`, { method: "POST" }),
+    disable: (name: string, project = "ingenium") =>
+      request<{ data: Plugin }>(`/plugins/${name}/disable?project=${project}`, { method: "POST" }),
+  },
+  agents: {
+    list: (project = "ingenium", category?: string) => {
+      const url = category ? `/agents?project=${project}&category=${encodeURIComponent(category)}` : `/agents?project=${project}`;
+      return request<{ data: Agent[]; total?: number }>(url);
+    },
+    get: (name: string, project = "ingenium") =>
+      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}?project=${project}`),
+    create: (data: { name: string; content: string; description?: string; category?: string; mode?: string; model?: string }, project = "ingenium") =>
+      request<{ data: Agent }>(`/agents?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
+    update: (name: string, data: { description?: string; category?: string; mode?: string; model?: string; content?: string }, project = "ingenium") =>
+      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}?project=${project}`, { method: "PUT", body: JSON.stringify(data) }),
+    delete: (name: string, project = "ingenium") =>
+      request(`/agents/${encodeURIComponent(name)}?project=${project}`, { method: "DELETE" }),
+    enable: (name: string, project = "ingenium") =>
+      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/enable?project=${project}`, { method: "POST" }),
+    disable: (name: string, project = "ingenium") =>
+      request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/disable?project=${project}`, { method: "POST" }),
   },
   servers: {
     list: (project = "ingenium") => request<{ data: Server[] }>(`/servers?project=${project}`),

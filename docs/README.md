@@ -23,7 +23,7 @@ The monorepo has 4 packages:
 | `docs/STYLING-GUIDE.md` | Dashboard design tokens and immutable style rules |
 | `docs/HOW-TO/projects.md` | Manage project configurations |
 | `docs/HOW-TO/skills.md` | Browse and search AI agent skills |
-| `docs/HOW-TO/learnings.md` | Log and search learning entries with FTS5 |
+| `docs/HOW-TO/learnings.md` | Log via `ingenium_learning_log`, search with FTS5 |
 | `docs/HOW-TO/tasks.md` | Kanban task board workflow |
 | `docs/HOW-TO/plugins.md` | Plugin lifecycle management |
 | `docs/HOW-TO/servers.md` | MCP server configuration and proxy engine |

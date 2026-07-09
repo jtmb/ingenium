@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-    for (const file of ["001_init.sql", "002_archive.sql"]) {
+    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info(`Applied migration ${file}`);
@@ -50,8 +50,26 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "002_archive.sql"), "utf-8");
       db.exec(sql);
       logger.info("Applied migration 002_archive.sql");
-    } else {
-      logger.debug("Database already initialized, skipping migration");
+    }
+
+    // Check if agents table exists (migration 003)
+    const agentsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='agents'"
+    ).get() as { count: number };
+    if (agentsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "003_agents.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 003_agents.sql");
+    }
+
+    // Check if status column exists on learnings (migration 004)
+    const statusColCheck = db.prepare(
+      "SELECT count(*) as count FROM pragma_table_info('learnings') WHERE name = 'status'"
+    ).get() as { count: number };
+    if (statusColCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "004_learnings_status.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 004_learnings_status.sql");
     }
   }
 }

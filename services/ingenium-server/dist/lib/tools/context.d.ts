@@ -12,4 +12,11 @@ export declare function planSearch(project: string, query: string): Promise<{
         text: string;
     }[];
 }>;
+/** List all context entries for a project. */
+export declare function planList(project: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=context.d.ts.map

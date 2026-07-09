@@ -113,7 +113,7 @@ These skills are directly invocable via `/command` patterns. See `help/SKILL.md`
 | **Regenerate skill index** | `/update-skill-index` |
 | **Generate docs templates** | `/generate-docs` |
 | **Write new documentation** | `/write-docs` |
-| **View changelog** | `cat .agents/skills/learnings.md` |
+| **View changelog** | `ingenium_learning_search` via MCP tool |
 | **List all skills** | `ls -d .agents/skills/*/ \| sed 's\|.*/\|\|;s\|/\|\|' \| sort` |
 | **Check skill frontmatter** | `head -5 .agents/skills/{name}/SKILL.md` |
 

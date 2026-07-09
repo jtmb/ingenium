@@ -19,9 +19,18 @@ import * as contextTools from "../lib/tools/context.js";
 import * as projectTools from "../lib/tools/projects.js";
 import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
+import { settingGet, settingSet } from "../lib/tools/settings.js";
+import { projectRestore, projectListArchived, projectPurge } from "../lib/tools/projects.js";
+import { learningList, skillFromLearnings } from "../lib/tools/learnings.js";
+import { pluginGet } from "../lib/tools/plugins.js";
+import { planList } from "../lib/tools/context.js";
+import * as agentTools from "../lib/tools/agents.js";
 /** Shared required project parameter. Projects must be created explicitly via ingenium_project_init or the dashboard. */
 const projectParam = z.string();
 const server = new McpServer({ name: config.mcpName, version: config.mcpVersion }, { capabilities: { tools: {}, resources: {} } });
+// ── Settings ─────────────────────────────────────────────
+server.registerTool("ingenium_setting_get", { description: "Get a setting value by key", inputSchema: { project: projectParam, key: z.string() } }, async ({ project, key }) => settingGet(project, key));
+server.registerTool("ingenium_setting_set", { description: "Set a setting value", inputSchema: { project: projectParam, key: z.string(), value: z.string() } }, async ({ project, key, value }) => settingSet(project, key, value));
 // ── Skills ──────────────────────────────────────────────
 server.registerTool("ingenium_skill_list", { description: "List all skills for a project.", inputSchema: { project: projectParam } }, async ({ project }) => skillTools.skillList(project));
 server.registerTool("ingenium_skill_load", { description: "Load a single skill by name.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillLoad(project, name));
@@ -40,6 +49,10 @@ server.registerTool("ingenium_skill_update", {
     description: "Update an existing skill's content.",
     inputSchema: { project: projectParam, name: z.string(), content: z.string() },
 }, async ({ project, name, content }) => skillTools.skillUpdate(project, name, content));
+server.registerTool("ingenium_skill_delete", { description: "Delete a skill by name.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillDelete(project, name));
+server.registerTool("ingenium_skill_enable", { description: "Enable a skill and sync to disk.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillEnable(project, name));
+server.registerTool("ingenium_skill_disable", { description: "Disable a skill and remove from disk.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillDisable(project, name));
+server.registerTool("ingenium_skill_sync", { description: "Sync a skill from its .md file on disk to the DB — edits made directly to the file are persisted.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillSync(project, name));
 // ── Learnings ───────────────────────────────────────────
 server.registerTool("ingenium_learning_log", {
     description: "Log a new learning entry with optional tags, priority, and session association.",
@@ -53,6 +66,8 @@ server.registerTool("ingenium_learning_log", {
     },
 }, async ({ project, entry_type, content, tags, priority, session_id }) => learningTools.learningLog(project, entry_type, content, tags, priority, session_id));
 server.registerTool("ingenium_learning_search", { description: "Full-text search across learning entries.", inputSchema: { project: projectParam, query: z.string() } }, async ({ project, query }) => learningTools.learningSearch(project, query));
+server.registerTool("ingenium_learning_list", { description: "List learning entries.", inputSchema: { project: projectParam } }, async ({ project }) => learningList(project));
+server.registerTool("ingenium_skill_from_learnings", { description: "Scan recent learnings for skill gaps and auto-create tasks for AI engineers to write missing skills.", inputSchema: { project: projectParam } }, async ({ project }) => skillFromLearnings(project));
 // ── Tasks ───────────────────────────────────────────────
 server.registerTool("ingenium_task_create", {
     description: "Create a new task with optional description and assignee.",
@@ -79,14 +94,28 @@ server.registerTool("ingenium_plan_save", {
     inputSchema: { project: projectParam, content: z.string(), tags: z.string().optional(), priority: z.number().optional() },
 }, async ({ project, content, tags, priority }) => contextTools.planSave(project, content, tags, priority));
 server.registerTool("ingenium_plan_search", { description: "Full-text search across context entries.", inputSchema: { project: projectParam, query: z.string() } }, async ({ project, query }) => contextTools.planSearch(project, query));
+server.registerTool("ingenium_plan_list", { description: "List plan/context entries.", inputSchema: { project: projectParam } }, async ({ project }) => planList(project));
 // ── Projects ────────────────────────────────────────────
 server.registerTool("ingenium_project_list", { description: "List all projects known to the Ingenium API.", inputSchema: {} }, async () => projectTools.projectList());
 server.registerTool("ingenium_project_init", { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string() } }, async ({ name }) => projectTools.projectInit(name));
 server.registerTool("ingenium_project_delete", { description: "Delete a project by name.", inputSchema: { name: z.string() } }, async ({ name }) => projectTools.projectDelete(name));
+server.registerTool("ingenium_project_restore", { description: "Restore an archived project.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => projectRestore(project, name));
+server.registerTool("ingenium_project_list_archived", { description: "List archived projects.", inputSchema: { project: projectParam } }, async ({ project }) => projectListArchived(project));
+server.registerTool("ingenium_project_purge", { description: "Purge old projects.", inputSchema: { project: projectParam, retentionDays: z.number().optional() } }, async ({ project, retentionDays }) => projectPurge(project, retentionDays));
 // ── Plugins ─────────────────────────────────────────────
 server.registerTool("ingenium_plugin_list", { description: "List all plugins available for a project.", inputSchema: { project: projectParam } }, async ({ project }) => pluginTools.pluginList(project));
+server.registerTool("ingenium_plugin_get", { description: "Get a single plugin by name.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => pluginGet(project, name));
 server.registerTool("ingenium_plugin_enable", { description: "Enable a plugin for a project.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => pluginTools.pluginEnable(project, name));
 server.registerTool("ingenium_plugin_disable", { description: "Disable a plugin for a project.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => pluginTools.pluginDisable(project, name));
+server.registerTool("ingenium_plugin_create", {
+    description: "Create a new plugin for a project.",
+    inputSchema: { project: projectParam, name: z.string(), filePath: z.string(), sourceContent: z.string().optional() }
+}, async ({ project, name, filePath, sourceContent }) => pluginTools.pluginCreate(project, name, filePath, sourceContent));
+server.registerTool("ingenium_plugin_delete", { description: "Delete a plugin from a project.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => pluginTools.pluginDelete(project, name));
+server.registerTool("ingenium_plugin_update", {
+    description: "Update a plugin's file path or source content.",
+    inputSchema: { project: projectParam, name: z.string(), file_path: z.string().optional(), source_content: z.string().optional() }
+}, async ({ project, name, file_path, source_content }) => pluginTools.pluginUpdate(project, name, { file_path, source_content }));
 // ── Servers ─────────────────────────────────────────────
 server.registerTool("ingenium_server_list", { description: "List all registered child MCP servers for a project.", inputSchema: { project: projectParam } }, async ({ project }) => serverTools.serverList(project));
 server.registerTool("ingenium_server_add", {
@@ -103,6 +132,21 @@ server.registerTool("ingenium_server_remove", {
     description: "Remove a child MCP server definition.",
     inputSchema: { project: projectParam, name: z.string() },
 }, async ({ project, name }) => serverTools.serverRemove(project, name));
+// ── Agents ──────────────────────────────────────────────
+server.registerTool("ingenium_agent_list", { description: "List all agents for a project, optionally filtered by category.", inputSchema: { project: projectParam, category: z.string().optional() } }, async ({ project, category }) => agentTools.agentList(project, category));
+server.registerTool("ingenium_agent_get", { description: "Get an agent by name.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => agentTools.agentGet(project, name));
+server.registerTool("ingenium_agent_create", {
+    description: "Create a new agent with YAML-frontmatter content.",
+    inputSchema: { project: projectParam, name: z.string(), content: z.string(), description: z.string().optional(), category: z.string().optional(), mode: z.string().optional(), model: z.string().optional() },
+}, async (args) => agentTools.agentCreate(args.project, args.name, args.content, args.description, args.category, args.mode, args.model));
+server.registerTool("ingenium_agent_update", {
+    description: "Update an existing agent's metadata or content.",
+    inputSchema: { project: projectParam, name: z.string(), description: z.string().optional(), category: z.string().optional(), mode: z.string().optional(), model: z.string().optional(), content: z.string().optional() },
+}, async (args) => agentTools.agentUpdate(args.project, args.name, args));
+server.registerTool("ingenium_agent_delete", { description: "Delete an agent by name.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => agentTools.agentDelete(project, name));
+server.registerTool("ingenium_agent_enable", { description: "Enable an agent and write its .md file to disk.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => agentTools.agentEnable(project, name));
+server.registerTool("ingenium_agent_disable", { description: "Disable an agent and remove its .md file from disk.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => agentTools.agentDisable(project, name));
+server.registerTool("ingenium_agent_sync", { description: "Sync an agent from its .md file on disk to the DB — edits made directly to the file are persisted.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => agentTools.agentSync(project, name));
 // ── Start ───────────────────────────────────────────────
 async function main() {
     const transport = new StdioServerTransport();

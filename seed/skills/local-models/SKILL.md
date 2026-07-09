@@ -153,7 +153,7 @@ From local-models skill:
 1. **Check server health**: `curl http://localhost:5000/api/v1/health`  
 2. **Parse response properly** — don't just check HTTP status code  
 3. **Use Python for complex operations** that involve long strings or multiple API calls  
-4. **Document mistakes in learnings.md and this skill** so future sessions avoid the same errors
+4. **Document mistakes via `ingenium_learning_log` and in this skill** so future sessions avoid the same errors
 
 **Why:** This is a pattern of making assumptions about where code exists without verification first. The same mistake happens everywhere:
 - Assuming a server is running → no health check before curl

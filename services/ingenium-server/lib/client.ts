@@ -75,6 +75,11 @@ export const api = {
     const json = await res.json();
     return { ok: res.ok, status: res.status, data: json.data ?? json };
   },
+  put: async (path: string, body?: unknown, params?: Record<string, string>) => {
+    const res = await request(path, { method: "PUT", body, params });
+    const json = await res.json();
+    return { ok: res.ok, status: res.status, data: json.data ?? json };
+  },
   patch: async (path: string, body?: unknown, params?: Record<string, string>) => {
     const res = await request(path, { method: "PATCH", body, params });
     const json = await res.json();

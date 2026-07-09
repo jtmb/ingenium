@@ -5,34 +5,9 @@ mode: subagent
 model: opencode/deepseek-v4-flash-free
 permission:
   read: allow
-  glob: allow
-  grep: allow
-  list: allow
-  websearch: allow
-  webfetch: allow
-  thread_thread_create_entry: allow
-  thread_thread_read_entries: allow
-  thread_thread_search: allow
-  thread_thread_get_stats: allow
-  thread_thread_get_tags: allow
-  thread_thread_list_sessions: allow
-  thread_thread_delete_entry: allow
-  thread_thread_update_entry: allow
-  thread_thread_upload_file: allow
-  thread_thread_bulk_create_entries: allow
-  thread_thread_read_entries_batch: allow
-  thread_thread_create_session: allow
-  edit: deny
   write: deny
   bash: deny
-  task:
-    "*": "deny"                           # No subagent delegation allowed
-  skill:
-    "*": "allow"
 skills:
-- thread-auto-context
-- self-correction-patterns
-- local-models
 ---
 
 # Ingenium Scout

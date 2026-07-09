@@ -10,7 +10,7 @@
     "./lib/*": { "import": "./dist/lib/*.js", "types": "./dist/lib/*.d.ts" }
   },
   "scripts": {
-    "build": "tsc && cp -r data dist/data",
+    "build": "tsc && rm -rf dist/data && cp -r data dist/data",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

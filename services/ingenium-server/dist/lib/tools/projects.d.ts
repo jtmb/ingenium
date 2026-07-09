@@ -19,4 +19,25 @@ export declare function projectDelete(name: string): Promise<{
         text: string;
     }[];
 }>;
+/** Restore a previously deleted project. */
+export declare function projectRestore(project: string, name: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** List all archived (deleted) projects. */
+export declare function projectListArchived(project: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Purge old projects based on retention period. */
+export declare function projectPurge(project: string, retentionDays?: number): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=projects.d.ts.map

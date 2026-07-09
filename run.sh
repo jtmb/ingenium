@@ -181,7 +181,7 @@ main() {
     info "Seeding skills from seed/skills/..."
     NODE_ENV=production node -e "
       const { getDb } = require('/home/brajam/repos/gh-llm-bootstrap/packages/ingenium-core/dist/lib/db.js');
-      const { seedSkills } = require('/home/brajam/repos/gh-llm-bootstrap/packages/ingenium-core/dist/lib/seed.js');
+      const { seedAgents, seedSkills, seedPlugins } = require('/home/brajam/repos/gh-llm-bootstrap/packages/ingenium-core/dist/lib/seed.js');
       process.env.INGENIUM_CORE_DB_PATH = '/home/brajam/repos/gh-llm-bootstrap/.ingenium/data';
       const db = getDb(process.env.INGENIUM_CORE_DB_PATH);
       const project = db.prepare(\"SELECT id FROM projects WHERE name = 'ingenium'\").get();
@@ -191,10 +191,15 @@ main() {
         );
         const p2 = db.prepare(\"SELECT id FROM projects WHERE name = 'ingenium'\").get();
         seedSkills(p2.id, '/home/brajam/repos/gh-llm-bootstrap/seed/skills');
-        console.log('Created ingenium project and seeded skills');
+        const p = seedPlugins(p2.id, '/home/brajam/repos/gh-llm-bootstrap/seed/plugins');
+        const a = seedAgents(p2.id, '/home/brajam/repos/gh-llm-bootstrap/.opencode/agents');
+        console.log('Created ingenium project and seeded skills and', p, 'plugins and', a, 'agents');
       } else {
         const c = seedSkills(project.id, '/home/brajam/repos/gh-llm-bootstrap/seed/skills');
         console.log('Seeded', c, 'skills');
+        const p = seedPlugins(project.id, '/home/brajam/repos/gh-llm-bootstrap/seed/plugins');
+        const a = seedAgents(project.id, '/home/brajam/repos/gh-llm-bootstrap/.opencode/agents');
+        console.log('Seeded', p, 'plugins and', a, 'agents');
       }
     "
     ok "Skills seeded"

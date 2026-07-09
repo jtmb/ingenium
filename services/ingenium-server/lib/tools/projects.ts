@@ -21,3 +21,21 @@ export async function projectDelete(name: string) {
   const res = await api.del(`/projects/${encodeURIComponent(name)}`);
   return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: res.ok }) }] };
 }
+
+/** Restore a previously deleted project. */
+export async function projectRestore(project: string, name: string) {
+  const res = await api.post(`/projects/${name}/restore?project=${project}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** List all archived (deleted) projects. */
+export async function projectListArchived(project: string) {
+  const res = await api.get(`/projects/archive?project=${project}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Purge old projects based on retention period. */
+export async function projectPurge(project: string, retentionDays?: number) {
+  const res = await api.post(`/projects/purge?project=${project}`, { retention_days: retentionDays });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

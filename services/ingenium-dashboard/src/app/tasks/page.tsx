@@ -1,19 +1,22 @@
 "use client";
 import { useState, useEffect } from "react";
 import { api, Task } from "../../lib/api";
+import Overlay from "../components/Overlay";
 
 /** Kanban-style column ordering: left to right workflow. */
 const columns = ["todo", "in_progress", "review", "done"] as const;
 
 /**
  * Kanban task board page.
- * Tasks are grouped by column. Clicking a task advances it to the next column.
+ * Tasks are grouped by column. Clicking a task opens a detail overlay.
+ * Each card has an "Advance →" button to move it to the next column.
  * A form at the top allows creating new tasks that start in "todo".
  */
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   useEffect(() => { api.tasks.list().then((r) => setTasks(r.data)).catch(() => {}); }, []);
 
@@ -36,6 +39,26 @@ export default function TasksPage() {
     setTasks(tasks.map((t) => t.id === id ? { ...t, column_id: col } : t));
   };
 
+  /** Maps column IDs to Tailwind color classes for the status badge. */
+  const columnColors: Record<string, string> = {
+    todo: "bg-gray-100 text-gray-600",
+    in_progress: "bg-blue-100 text-blue-700",
+    review: "bg-amber-100 text-amber-700",
+    done: "bg-green-100 text-green-700",
+  };
+
+  /** Advances a task to the next column in the workflow. */
+  const handleAdvance = (task: Task) => {
+    const advanceMap: Record<string, string> = {
+      todo: "in_progress",
+      in_progress: "review",
+      review: "done",
+      done: "todo",
+    };
+    const nextCol = advanceMap[task.column_id] ?? "todo";
+    move(task.id, nextCol);
+  };
+
   /** Groups tasks by their current column. */
   const grouped = Object.fromEntries(columns.map((c) => [c, tasks.filter((t) => t.column_id === c)]));
 
@@ -53,19 +76,67 @@ export default function TasksPage() {
             <h3 className="font-medium text-sm uppercase mb-2">{col.replace("_", " ")}</h3>
             <div className="space-y-2">
               {(grouped[col] ?? []).map((t) => (
-                <div key={t.id} className="bg-white p-2 rounded text-sm border cursor-pointer transition-shadow hover:shadow-md"
-                     onClick={() => {
-                       // Modulo arithmetic guarantees a valid index (0..3) for 4-element columns array
-                        const nextCol = columns[(columns.indexOf(col) + 1) % columns.length]!;
-                        move(t.id, nextCol);
-                     }}>
-                  {t.title}
+                <div
+                  key={t.id}
+                  className="bg-white p-2 rounded text-sm border hover:shadow-md transition-shadow cursor-pointer"
+                  onClick={() => setSelectedTask(t)}
+                >
+                  <div className="font-medium truncate">{t.title}</div>
+                  {t.assigned_to && <div className="text-xs text-gray-500 mt-1">{t.assigned_to}</div>}
+                  <div className="flex items-center justify-between mt-2">
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${columnColors[t.column_id] || "bg-gray-100 text-gray-600"}`}>
+                      {t.column_id || "todo"}
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleAdvance(t); }}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                      title="Advance to next column"
+                    >
+                      Advance →
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         ))}
       </div>
+
+      <Overlay
+        isOpen={selectedTask !== null}
+        onClose={() => setSelectedTask(null)}
+        title={selectedTask?.title ?? ""}
+        subtitle={`Status: ${selectedTask?.column_id ?? "todo"}`}
+      >
+        {selectedTask && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="font-semibold">Assigned to:</span>{" "}
+                <span className="text-gray-600">{selectedTask.assigned_to || "Unassigned"}</span>
+              </div>
+              <div>
+                <span className="font-semibold">Created:</span>{" "}
+                <span className="text-gray-600">{new Date(selectedTask.created_at).toLocaleString()}</span>
+              </div>
+              {selectedTask.completed_at && (
+                <div>
+                  <span className="font-semibold">Completed:</span>{" "}
+                  <span className="text-gray-600">{new Date(selectedTask.completed_at).toLocaleString()}</span>
+                </div>
+              )}
+            </div>
+            {selectedTask.description && (
+              <div>
+                <h3 className="font-semibold mb-1">Description</h3>
+                <pre className="bg-gray-50 p-3 rounded border text-sm whitespace-pre-wrap font-sans">
+                  {selectedTask.description}
+                </pre>
+              </div>
+            )}
+          </div>
+        )}
+      </Overlay>
     </div>
   );
 }

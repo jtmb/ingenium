@@ -1,0 +1,5 @@
+{
+  "name": "agent-checkpoints",
+  "description": "State checkpoint patterns for autonomous AI agents — JSON state persistence, crash recovery flow, atomic state updates, iteration tracking. Use when building agent loops that need to survive restarts or resume from failures.",
+  "tags": ["agents", "checkpoints", "state", "crash-recovery", "persistence"]
+}
