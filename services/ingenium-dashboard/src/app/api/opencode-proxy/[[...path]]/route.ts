@@ -29,6 +29,9 @@ async function handler(req: NextRequest) {
     const responseHeaders = new Headers(resp.headers);
     responseHeaders.delete("content-encoding");
     responseHeaders.delete("transfer-encoding");
+    responseHeaders.delete("content-security-policy");
+    responseHeaders.delete("x-content-security-policy");
+    responseHeaders.delete("x-webkit-csp");
 
     // If HTML, rewrite absolute paths to go through the proxy
     if (contentType.includes("text/html")) {
