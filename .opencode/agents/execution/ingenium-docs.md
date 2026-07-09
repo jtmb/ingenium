@@ -12,6 +12,7 @@ permission:
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
+    "@local-models": allow
     "@mcp-tooling": allow
     "@skill-maintenance": allow
     "@configuring-opencode": allow
