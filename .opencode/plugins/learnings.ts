@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import { processAll } from "./learnings-core"
+import { processAll, importLearningsFromFile } from "./learnings-core"
 
 // Configuration
 const DEFAULT_INTERVAL = 0
@@ -20,6 +20,19 @@ export const LearningsPlugin = async (ctx: { worktree: string; client: any }) =>
   return {
     event: async ({ event }: { event: any }) => {
       if (event.type === "session.created") {
+        // Step 1: Import any locally-saved entries into the DB
+        const fileResult = await importLearningsFromFile(worktree)
+        if (fileResult.imported > 0) {
+          await ctx.client.app.log({
+            body: {
+              service: "learnings-pipeline",
+              level: "info",
+              message: `Imported ${fileResult.imported} learning(s) from learnings.md (${fileResult.skipped} skipped)`,
+            },
+          })
+        }
+
+        // Step 2: Process all pending DB entries
         const result = await processAll(worktree)
         if (result.processed > 0) {
           await ctx.client.app.log({

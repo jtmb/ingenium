@@ -78,6 +78,70 @@ async function markProcessed(entry: LearningsEntry): Promise<void> {
 }
 
 /**
+ * Import unprocessed entries from learnings.md into the DB via API.
+ * This handles the "API was down, agent saved locally" fallback.
+ * Returns { imported: number, skipped: number }
+ */
+export async function importLearningsFromFile(worktree: string): Promise<{ imported: number; skipped: number }> {
+  const pathModule = require("path")
+  const fs = require("fs")
+
+  const learningsPath = pathModule.join(worktree, ".opencode", "skills", "learnings.md")
+  if (!fs.existsSync(learningsPath)) return { imported: 0, skipped: 0 }
+
+  const content = fs.readFileSync(learningsPath, "utf-8")
+
+  // Parse unprocessed entries (date-prefixed lines without [PROCESSED])
+  const lines = content.split("\n")
+  const unprocessed: string[] = []
+  const lineIndices: number[] = []
+
+  lines.forEach((line: string, i: number) => {
+    if (/^\d{4}-\d{2}-\d{2}/.test(line) && !line.includes("[PROCESSED]")) {
+      unprocessed.push(line)
+      lineIndices.push(i)
+    }
+  })
+
+  if (unprocessed.length === 0) return { imported: 0, skipped: 0 }
+
+  let imported = 0
+  let skipped = 0
+
+  for (const entry of unprocessed) {
+    try {
+      const res = await apiFetch("/learnings?project=" + DEFAULT_PROJECT, {
+        method: "POST",
+        body: JSON.stringify({
+          entry_type: "learning",
+          content: entry,
+          priority: 5,
+          tags: "imported-from-file",
+        }),
+      })
+      if (res?.data?.id) imported++
+      else skipped++
+    } catch {
+      // API still down — skip for now
+      skipped++
+    }
+  }
+
+  // Mark imported entries as [PROCESSED] in the file
+  if (imported > 0) {
+    const updatedLines = lines.map((line: string, i: number) => {
+      if (lineIndices.includes(i) && !line.includes("[PROCESSED]")) {
+        return line + " [PROCESSED]"
+      }
+      return line
+    })
+    fs.writeFileSync(learningsPath, updatedLines.join("\n"), "utf-8")
+  }
+
+  return { imported, skipped }
+}
+
+/**
  * Try to find and read a skill file from the workspace.
  * Tries .opencode/skills/<file> first, then just <file>.
  */
