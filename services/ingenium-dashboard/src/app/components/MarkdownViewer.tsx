@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import hljs from "highlight.js/lib/common";
 
 type MarkdownViewerProps = {
   content: string;
@@ -15,14 +16,15 @@ function renderSimpleMarkdown(text: string): string {
     .replace(/>/g, "&gt;");
 
   // Code blocks (fenced with ```)
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
-    return `<pre class="bg-gray-100 p-3 rounded overflow-x-auto text-sm font-mono">${code.trim()}</pre>`;
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
+    const langClass = lang ? `language-${lang.toLowerCase()}` : "";
+    return `<pre class="bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto text-sm"><code class="${langClass}">${code.trim()}</code></pre>`;
   });
 
   // Inline code
   html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 rounded text-sm font-mono">$1</code>');
 
-  // Headings (## and ### — agent files use ## for sections, ### for subsections)
+  // Headings
   html = html.replace(/^### (.+)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
   html = html.replace(/^## (.+)$/gm, '<h2 class="text-xl font-bold mt-6 mb-3">$1</h2>');
   html = html.replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold mt-6 mb-3">$1</h1>');
@@ -55,11 +57,21 @@ function renderSimpleMarkdown(text: string): string {
 
 export default function MarkdownViewer({ content, isMarkdown = true }: MarkdownViewerProps) {
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const renderedHtml = useMemo(() => {
     if (!isMarkdown) return "";
     return renderSimpleMarkdown(content);
   }, [content, isMarkdown]);
+
+  // Apply syntax highlighting to code blocks after render
+  useEffect(() => {
+    if (containerRef.current && isMarkdown && viewMode === "preview") {
+      containerRef.current.querySelectorAll("pre code[class*='language-']").forEach((block) => {
+        try { hljs.highlightElement(block as HTMLElement); } catch {}
+      });
+    }
+  }, [renderedHtml, isMarkdown, viewMode]);
 
   return (
     <div className="space-y-4">
@@ -104,6 +116,7 @@ export default function MarkdownViewer({ content, isMarkdown = true }: MarkdownV
       {/* Content */}
       {isMarkdown && viewMode === "preview" ? (
         <div
+          ref={containerRef}
           className="prose prose-sm max-w-none text-gray-800 leading-relaxed"
           dangerouslySetInnerHTML={{ __html: renderedHtml }}
         />
