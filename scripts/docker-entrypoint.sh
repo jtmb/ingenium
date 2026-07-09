@@ -7,10 +7,12 @@ if [ -z "${OPENCODE_SERVER_PASSWORD:-}" ]; then
   exit 1
 fi
 
-# DB directory is pre-created; ensure it's writable
-if [ ! -d /app/.ingenium ]; then
-  mkdir -p /app/.ingenium
-fi
+# Ensure writable directories exist
+for dir in /app/.ingenium /app/.opencode/skills; do
+  if [ ! -d "$dir" ]; then
+    mkdir -p "$dir"
+  fi
+done
 
 # Use the pre-created opencode.json if user hasn't mounted one
 # (a container-default opencode.json is baked into the image at /app/opencode.json)

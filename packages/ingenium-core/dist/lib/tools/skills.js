@@ -27,23 +27,40 @@ function writeSkillToDisk(skill) {
     const dir = resolve(getSkillsDir(), skill.name);
     if (!existsSync(dir))
         mkdirSync(dir, { recursive: true });
-    writeFileSync(resolve(dir, "SKILL.md"), skill.content);
+    // Write SKILL.md with YAML frontmatter
+    const frontmatter = `---
+name: ${skill.name}
+description: "${(skill.description || "").replace(/"/g, '\\"')}"
+---
+`;
+    writeFileSync(resolve(dir, "SKILL.md"), frontmatter + "\n" + skill.content);
+    // Write metadata.json
+    const tags = skill.tags ? skill.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+    const meta = JSON.stringify({ tags, alwaysApply: skill.always_apply === 1 }, null, 2);
+    writeFileSync(resolve(dir, "metadata.json"), meta);
 }
 function removeSkillFromDisk(name) {
-    const filePath = resolve(getSkillsDir(), name, "SKILL.md");
+    const dir = resolve(getSkillsDir(), name);
+    const filePath = resolve(dir, "SKILL.md");
+    const metaPath = resolve(dir, "metadata.json");
     try {
         if (existsSync(filePath))
             unlinkSync(filePath);
     }
     catch { }
+    try {
+        if (existsSync(metaPath))
+            unlinkSync(metaPath);
+    }
+    catch { }
 }
-export function createSkill(projectId, name, description, content, category) {
+export function createSkill(projectId, name, description, content, category, tags, alwaysApply) {
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
         const now = new Date().toISOString();
         const id = randomUUID();
-        const result = db.prepare(`INSERT INTO skills (id, project_id, name, description, content, category, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, name, description, content, category ?? null, now, now);
+        const result = db.prepare(`INSERT INTO skills (id, project_id, name, description, content, category, tags, always_apply, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, name, description, content, category ?? null, tags ?? null, alwaysApply ?? 0, now, now);
         // Sync FTS5 index: use lastInsertRowid (integer) for FTS5 rowid
         db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
             .run(result.lastInsertRowid, content, description);
@@ -52,7 +69,7 @@ export function createSkill(projectId, name, description, content, category) {
         return getSkill(projectId, name);
     });
 }
-export function updateSkill(projectId, name, content) {
+export function updateSkill(projectId, name, content, description, tags, alwaysApply) {
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
         const now = new Date().toISOString();
@@ -64,9 +81,10 @@ export function updateSkill(projectId, name, content) {
         // Remove old entry from FTS index
         db.prepare("DELETE FROM skills_fts WHERE rowid = ?")
             .run(current.rowid);
+        const desc = description ?? getSkill(projectId, name)?.description ?? "";
         // Update the skill content
-        db.prepare("UPDATE skills SET content = ?, updated_at = ? WHERE project_id = ? AND name = ?")
-            .run(content, now, projectId, name);
+        db.prepare(`UPDATE skills SET content = ?, description = ?, tags = ?, always_apply = ?, updated_at = ?
+       WHERE project_id = ? AND name = ?`).run(content, desc, tags ?? null, alwaysApply ?? 0, now, projectId, name);
         // Re-insert into FTS index
         db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
             .run(current.rowid, content, getSkill(projectId, name)?.description ?? "");
@@ -129,6 +147,20 @@ export function syncSkillFromDisk(projectId, name) {
         const descMatch = content.match(/^description:\s*"(.+)"$/m);
         const diskName = nameMatch?.[1] ?? name;
         const description = descMatch?.[1] ?? "";
+        // Read metadata.json
+        const metaPath = resolve(filePath, "..", "metadata.json");
+        let diskTags = "";
+        let diskAlwaysApply = 0;
+        if (existsSync(metaPath)) {
+            try {
+                const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+                if (Array.isArray(meta.tags))
+                    diskTags = meta.tags.join(",");
+                if (meta.alwaysApply === true)
+                    diskAlwaysApply = 1;
+            }
+            catch { }
+        }
         // Check if skill exists in DB
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
         const existing = db.prepare("SELECT * FROM skills WHERE project_id = ? AND name = ?")
@@ -137,8 +169,8 @@ export function syncSkillFromDisk(projectId, name) {
             // Create new skill from disk file
             const now = new Date().toISOString();
             const id = randomUUID();
-            db.prepare(`INSERT INTO skills (id, project_id, name, description, content, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, diskName, description, content, now, now);
+            db.prepare(`INSERT INTO skills (id, project_id, name, description, content, tags, always_apply, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, diskName, description, content, diskTags, diskAlwaysApply, now, now);
             // Sync FTS5
             const inserted = db.prepare("SELECT rowid FROM skills WHERE id = ?").get(id);
             db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
@@ -152,8 +184,8 @@ export function syncSkillFromDisk(projectId, name) {
             // Remove old FTS entry
             db.prepare("DELETE FROM skills_fts WHERE rowid = ?").run(row.rowid);
             // Update skill
-            db.prepare("UPDATE skills SET content = ?, description = ?, updated_at = ? WHERE id = ?")
-                .run(content, description, now, existing.id);
+            db.prepare("UPDATE skills SET content = ?, description = ?, tags = ?, always_apply = ?, updated_at = ? WHERE id = ?")
+                .run(content, description, diskTags, diskAlwaysApply, now, existing.id);
             // Re-insert FTS
             db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
                 .run(row.rowid, content, description);

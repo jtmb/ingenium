@@ -20,14 +20,14 @@ export declare function skillSearch(project: string, query: string): Promise<{
     }[];
 }>;
 /** Create a new skill. */
-export declare function skillCreate(project: string, name: string, description: string, content: string, category?: string): Promise<{
+export declare function skillCreate(project: string, name: string, description: string, content: string, category?: string, tags?: string, always_apply?: number): Promise<{
     content: {
         type: "text";
         text: string;
     }[];
 }>;
 /** Update an existing skill's content. */
-export declare function skillUpdate(project: string, name: string, content: string): Promise<{
+export declare function skillUpdate(project: string, name: string, content: string, description?: string, tags?: string, always_apply?: number): Promise<{
     content: {
         type: "text";
         text: string;

@@ -29,6 +29,8 @@ export declare const SkillSchema: z.ZodObject<{
     description: z.ZodString;
     content: z.ZodString;
     category: z.ZodOptional<z.ZodString>;
+    tags: z.ZodOptional<z.ZodString>;
+    always_apply: z.ZodDefault<z.ZodNumber>;
     enabled: z.ZodDefault<z.ZodBoolean>;
     created_at: z.ZodString;
     updated_at: z.ZodString;
@@ -40,8 +42,10 @@ export declare const SkillSchema: z.ZodObject<{
     project_id: string;
     description: string;
     content: string;
+    always_apply: number;
     enabled: boolean;
     category?: string | undefined;
+    tags?: string | undefined;
 }, {
     id: string;
     name: string;
@@ -51,6 +55,8 @@ export declare const SkillSchema: z.ZodObject<{
     description: string;
     content: string;
     category?: string | undefined;
+    tags?: string | undefined;
+    always_apply?: number | undefined;
     enabled?: boolean | undefined;
 }>;
 export type Skill = z.infer<typeof SkillSchema>;

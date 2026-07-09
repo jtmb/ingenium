@@ -19,13 +19,13 @@ export async function skillSearch(project, query) {
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }
 /** Create a new skill. */
-export async function skillCreate(project, name, description, content, category) {
-    const res = await api.post("/skills", { name, description, content, category }, { project });
+export async function skillCreate(project, name, description, content, category, tags, always_apply) {
+    const res = await api.post("/skills", { name, description, content, category, tags, always_apply }, { project });
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }
 /** Update an existing skill's content. */
-export async function skillUpdate(project, name, content) {
-    const res = await api.patch(`/skills/${encodeURIComponent(name)}`, { content }, { project });
+export async function skillUpdate(project, name, content, description, tags, always_apply) {
+    const res = await api.patch(`/skills/${encodeURIComponent(name)}`, { content, description, tags, always_apply }, { project });
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }
 /** Delete a skill by name. */

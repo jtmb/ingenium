@@ -23,12 +23,26 @@ export function seedSkills(projectId, skillsDir) {
             const content = readFileSync(skillPath, "utf-8");
             const nameMatch = content.match(/^name:\s*(.+)$/m);
             const descMatch = content.match(/^description:\s*"(.+)"$/m);
+            // Read metadata.json if it exists
+            const metaPath = resolve(skillsDir, entry.name, "metadata.json");
+            let metaTags = "";
+            let metaAlwaysApply = 0;
+            if (existsSync(metaPath)) {
+                try {
+                    const meta = JSON.parse(readFileSync(metaPath, "utf-8"));
+                    if (Array.isArray(meta.tags))
+                        metaTags = meta.tags.join(",");
+                    if (meta.alwaysApply === true)
+                        metaAlwaysApply = 1;
+                }
+                catch { }
+            }
             const name = nameMatch?.[1] ?? entry.name;
             const description = descMatch?.[1] ?? "";
             const now = new Date().toISOString();
             const id = randomUUID();
-            const result = db.prepare(`INSERT OR IGNORE INTO skills (id, project_id, name, description, content, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, name, description, content, now, now);
+            const result = db.prepare(`INSERT OR IGNORE INTO skills (id, project_id, name, description, content, tags, always_apply, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, name, description, content, metaTags, metaAlwaysApply, now, now);
             // Sync FTS5 index if this was a new insert (not ignored)
             if (result.changes > 0) {
                 db.prepare("INSERT OR IGNORE INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
