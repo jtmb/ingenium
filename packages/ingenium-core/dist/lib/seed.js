@@ -37,12 +37,35 @@ export function seedSkills(projectId, skillsDir) {
                 }
                 catch { }
             }
+            // Read entire file tree (all auxiliary files)
+            let fileTree = "";
+            try {
+                const tree = {};
+                const walkDir = (dir, base) => {
+                    const entries = readdirSync(dir, { withFileTypes: true });
+                    for (const e of entries) {
+                        if (e.isDirectory()) {
+                            walkDir(resolve(dir, e.name), base + e.name + "/");
+                        }
+                        else if (e.isFile()) {
+                            const relPath = base + e.name;
+                            if (relPath === "SKILL.md" || relPath === "metadata.json")
+                                continue;
+                            tree[relPath] = readFileSync(resolve(dir, e.name), "utf-8");
+                        }
+                    }
+                };
+                walkDir(resolve(skillsDir, entry.name), "");
+                if (Object.keys(tree).length > 0)
+                    fileTree = JSON.stringify(tree);
+            }
+            catch { }
             const name = nameMatch?.[1] ?? entry.name;
             const description = descMatch?.[1] ?? "";
             const now = new Date().toISOString();
             const id = randomUUID();
-            const result = db.prepare(`INSERT OR IGNORE INTO skills (id, project_id, name, description, content, tags, always_apply, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, name, description, content, metaTags, metaAlwaysApply, now, now);
+            const result = db.prepare(`INSERT OR IGNORE INTO skills (id, project_id, name, description, content, tags, always_apply, file_tree, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, name, description, content, metaTags, metaAlwaysApply, fileTree, now, now);
             // Sync FTS5 index if this was a new insert (not ignored)
             if (result.changes > 0) {
                 db.prepare("INSERT OR IGNORE INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")

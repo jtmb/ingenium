@@ -16,6 +16,7 @@ export const SkillSchema = z.object({
     category: z.string().optional(),
     tags: z.string().optional(),
     always_apply: z.coerce.number().default(0),
+    file_tree: z.string().optional(),
     enabled: z.coerce.boolean().default(true),
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
