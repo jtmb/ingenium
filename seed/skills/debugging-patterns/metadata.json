@@ -1,0 +1,5 @@
+{
+  "name": "debugging-patterns",
+  "description": "Systematic debugging methodology — isolation, bisection, log-driven analysis, error interpretation, and AI self-correction patterns.",
+  "tags": ["debugging", "error-interpretation", "self-correction", "bisect", "isolation"]
+}

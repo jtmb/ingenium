@@ -1,0 +1,6 @@
+{
+  "name": "development-conventions",
+  "description": "Unified development conventions — README creation, API design, Next.js 16 App Router, and Python conventions.",
+  "tags": ["development", "conventions", "readme", "api", "nextjs", "python"],
+  "alwaysApply": true
+}

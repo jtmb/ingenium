@@ -1,0 +1,5 @@
+{
+  "name": "containerized-agents",
+  "description": "Docker containerization for AI agent services — service skeleton structure, multi-stage Dockerfiles, Docker Compose multi-agent orchestration, bridge networking, named volumes. Use when deploying agent services in containers.",
+  "tags": ["agents", "docker", "containers", "docker-compose", "orchestration"]
+}
