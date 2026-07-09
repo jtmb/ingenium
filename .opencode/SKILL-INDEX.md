@@ -1,6 +1,6 @@
 # Skill Index
 
-> Auto-maintained index of all skills. Total: **19 skills**.
+> Auto-maintained index of all skills. Total: **17 skills**.
 
 ## Meta Skills
 

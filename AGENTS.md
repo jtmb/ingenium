@@ -31,7 +31,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded fr
 
 ### 🔴 MANDATORY Skills (load before ANY action)
 
-`generic-conventions` `local-models` `debugging-patterns` `useful-tests` `project-structure` `error-interpretation` `self-correction-patterns` `skill-load` `api-design` `shell-scripts` `sql-database` `typescript-standalone` `agent-pipelines` `gitignore` `postgresql-optimization` `code-review-checklist` `refactoring-recipes` `cli-toolkit` `regex-reference` `web-design-reviewer` `playwright-mcp` `thread-auto-context` `update-skills` `help`
+`agent-checkpoints` `build-pipelines` `configuring-opencode` `containerized-agents` `customize-opencode` `debugging-patterns` `development-conventions` `devops-conventions` `github-cli` `local-models` `mcp-tooling` `skill-maintenance`
 
 ### 🔴 MANDATORY — Self-Improvement
 

@@ -7,7 +7,7 @@ Ingenium is a self-learning AI agent skill system and MCP server. It provides sk
 The monorepo has 4 packages:
 - `packages/ingenium-core` — shared library (SQLite WAL + FTS5, 7 tool modules, Zod schemas). Consumed by API only.
 - `services/ingenium-api` — Express REST API gateway on port 4097. Sole database authority.
-- `services/ingenium-server` — MCP stdio server with 23 tools. Calls API via HTTP. Zero DB access.
+- `services/ingenium-server` — MCP stdio server with 48 tools. Calls API via HTTP. Zero DB access.
 - `services/ingenium-dashboard` — Next.js 16 App Router frontend with 6 feature pages. Calls API via HTTP. Zero DB access.
 
 ## Documentation Index
@@ -21,6 +21,8 @@ The monorepo has 4 packages:
 | `docs/VARIABLES.md` | All environment variables, defaults, and consuming files |
 | `docs/agents.md` | Agent profiles, pipeline lifecycle, and subagent invocation |
 | `docs/STYLING-GUIDE.md` | Dashboard design tokens and immutable style rules |
+| `docs/USAGE.md` | Tool usage patterns and best practices |
+| `docs/AGENTS.md` | Agent protocol and mandatory skill loading rules |
 | `docs/HOW-TO/projects.md` | Manage project configurations |
 | `docs/HOW-TO/skills.md` | Browse and search AI agent skills |
 | `docs/HOW-TO/learnings.md` | Log via `ingenium_learning_log`, search with FTS5 |
