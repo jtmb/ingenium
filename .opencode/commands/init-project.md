@@ -1,6 +1,6 @@
 ---
 description: "Initialize the Ingenium project — sync all skills, agents, and plugins into the DB via MCP tools"
-agent: ingenium-orchestrator
+agent: primary/ingenium-orchestrator
 ---
 
 Initialize this project for Ingenium. Everything is done via MCP tools — no shell, no container access.
