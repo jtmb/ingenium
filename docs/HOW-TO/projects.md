@@ -1,21 +1,26 @@
 # HOW-TO: Projects
 
 ## What It Does
-Manages project configurations. Each project has its own SQLite database containing skills, learnings, tasks, and servers.
+Manages project configurations. Each project has its own SQLite database containing skills, learnings, tasks, and servers. The dashboard provides Active/Archived tab views with rename, archive, restore, and purge actions.
 
 ## How to Use
 1. Navigate to `/projects` from the dashboard nav bar
-2. Type a project name in the input field
-3. Click **Create** to initialize a new project
-4. The project appears in the list below with its name and filesystem path
+2. Type a project name in the input field and click **Create** to initialize a new project
+3. The project appears in the Active list with its name and creation date
+4. Toggle to the **Archived** tab to view archived projects
+5. Use action buttons on each card:
+   - **Rename** — update the project name inline
+   - **Archive** — soft-delete (moves to Archived tab)
+   - **Restore** — move back to Active (from Archived tab)
 
 ## API Endpoints
-- `GET /api/v1/projects` — list all projects
+- `GET /api/v1/projects` — list all active projects
 - `POST /api/v1/projects` — create a new project (body: `{ name }`)
-- `POST /api/v1/projects/:name/archive` — archive a project
-- `GET /api/v1/projects/archived` — list archived projects
+- `PATCH /api/v1/projects/:name` — rename a project (body: `{ name: newName }`)
+- `DELETE /api/v1/projects/:name` — archive a project
 - `POST /api/v1/projects/:name/restore` — restore an archived project
-- `DELETE /api/v1/projects/:name` — purge a project (query: `?retentionDays=7`)
+- `GET /api/v1/projects/archive` — list archived projects
+- `POST /api/v1/projects/purge` — purge expired projects (body: `{ retention_days }`)
 
 ## MCP Tools
 
@@ -26,7 +31,7 @@ Manages project configurations. Each project has its own SQLite database contain
 | `ingenium_project_delete` | `name` | Delete a project |
 | `ingenium_project_list_archived` | — | List archived projects |
 | `ingenium_project_restore` | `name` | Restore an archived project |
-| `ingenium_project_purge` | `name, retentionDays?` | Permanently purge a project (with optional retention period in days) |
+| `ingenium_project_purge` | `project, retentionDays?` | Permanently purge expired projects |
 
 ## Code Location
 - Page: `services/ingenium-dashboard/src/app/projects/page.tsx`

@@ -4,6 +4,8 @@ Auto-maintained index of all skills. Updated via `/update-skill-index`.
 
 **Total: 17 skills** (canonical sources at `seed/skills/`, written to `.opencode/skills/`)
 
+Skills use a `file_tree` column (TEXT JSON) that stores auxiliary files (reference docs, examples, configs) as a map of relative paths → content. This enables complete data round-trips between DB and disk. See [docs/ARCHITECTURE.md#file_tree-column](docs/ARCHITECTURE.md) for details.
+
 ---
 
 ## Skill Table

@@ -22,7 +22,7 @@ Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium
 
 **The system learns from you.** Patterns you teach, conventions you establish, and decisions you make are stored in a searchable knowledge base. The `update-skills` agent autonomously detects new dependencies, repeated patterns, missing coverage, and stale content — creating, updating, or retiring skills as your codebase evolves. Every change is logged with before/after commit hashes for full auditability.
 
-Six dashboard pages provide visual management for every feature. Each page is a standalone feature with its own documentation.
+Ten dashboard pages provide visual management for every feature. Each page is a standalone feature with its own documentation.
 
 ## Quick Start
 
@@ -37,7 +37,7 @@ npm install
 # Start all services (API on :4097, dashboard on :3000, MCP server on stdio)
 ./run.sh dev
 
-# Or use Docker
+# Or use Docker (API :4097, dashboard :3000, opencode-server :4096 managed by supervisord)
 docker compose up --build
 ```
 
@@ -63,16 +63,16 @@ docker compose up --build
 
 **Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js`. The server speaks stdio MCP with 48 tools. No HTTP port, no network config.
 
-**Open the dashboard** — Navigate to `http://localhost:3000` in your browser. The Next.js dashboard provides visual management for all six feature areas.
+**Open the dashboard** — Navigate to `http://localhost:3000` in your browser. The Next.js dashboard provides visual management for all feature areas.
 
 ## Features
 
 ### 📁 Projects
-Multi-project configuration with name→UUID resolution and per-project SQLite databases. Manage project identities, switch between active projects, and keep knowledge isolated per project.
+Multi-project configuration with name→UUID resolution and per-project SQLite databases. Manage project identities with Active/Archived tab views, rename projects, archive/unarchive, and purge expired projects. Keep knowledge isolated per project.
 → [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md)
 
 ### 📚 Skills
-AI agent conventions engine — 17 skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained split-skill format (SKILL.md + metadata.json + references/) stored at `seed/skills/` (canonical source) and `.opencode/skills/` (written to disk from DB). Skills are loaded from the SQLite database via the MCP server and auto-invoked based on file type, framework detection, and slash commands. The `file_tree` column stores a JSON map of relative paths → content for complete data round-trips.
+AI agent conventions engine — 17 skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained split-skill format (SKILL.md + metadata.json + references/) stored at `seed/skills/` (canonical source) and `.opencode/skills/` (written to disk from DB). Skills are loaded from the SQLite database via the MCP server and auto-invoked based on file type, framework detection, and slash commands. The `file_tree` column stores a JSON map of relative paths → content for complete data round-trips. The dashboard provides a split-pane skill viewer with file tree navigation sidebar, inline editing, and syntax highlighting (highlight.js) in both Preview and Source views.
 → [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md)
 
 ### 🧠 Learnings
@@ -80,7 +80,7 @@ Self-improving knowledge base with FTS5 full-text search, type/tag categorizatio
 → [docs/HOW-TO/learnings.md](docs/HOW-TO/learnings.md)
 
 ### 📋 Tasks
-Kanban-style task board with `todo` → `in_progress` → `review` → `done` workflow, dependency tracking, priority scoring, and full audit history. Tasks can be created, assigned, moved, linked, and archived. The kaban MCP server provides 20+ tools for task management directly from your AI agent.
+Kanban-style task board with `todo` → `in_progress` → `review` → `done` workflow, dependency tracking, priority scoring, and full audit history. Tasks can be created, assigned, moved, linked, and archived via the ingenium-server MCP tools or the dashboard.
 → [docs/HOW-TO/tasks.md](docs/HOW-TO/tasks.md)
 
 ### 🔌 Plugins
@@ -90,6 +90,17 @@ OpenCode plugin lifecycle management — enable, disable, configure plugins that
 ### 🖥️ Servers
 MCP server configuration and proxy engine — start, stop, configure MCP servers from the dashboard. The server proxy routes client requests to the appropriate backend, handling lifecycle and configuration.
 → [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md)
+
+### 👤 Agents
+Agent profile management — create, enable, disable, and configure AI agent profiles. Each agent has a model assignment, access permissions, category, and skill bindings. Manage agent profiles via the dashboard or `ingenium_agent_*` MCP tools.
+→ [docs/agents.md](docs/agents.md)
+
+### ⚙️ Settings
+Application settings management — configure key-value settings at the project level. Settings control archive retention, API behavior, and other project-scoped preferences.
+→ [docs/HOW-TO/settings.md](docs/HOW-TO/settings.md)
+
+### 🗄️ Archive
+Project archiving and lifecycle management — view archived projects, restore them to active status, or purge expired projects. Archive tab in the Projects page provides Active/Archived toggle with rename, archive, and restore actions.
 
 ## Architecture
 
@@ -107,7 +118,8 @@ ingenium/
 ├── .opencode/
 │   ├── skills/                # Skills written to disk from DB (split-skill format)
 │   ├── plugins/               # Plugin .ts files synced from DB
-│   └── agents/                # Agent .md files synced from DB
+│   ├── agents/                # Agent categories (primary, research, execution, security)
+│   └── commands/              # OpenCode custom commands
 ├── docs/                      # Project documentation database
 ├── run.sh                     # Unified dev/test/build/check/seed runner
 ├── docker-compose.yml         # Single-container deployment (supervisord: API + dashboard + opencode-server)

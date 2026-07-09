@@ -111,7 +111,7 @@ The script will:
 1. Verify Node.js 22+ and npm are installed
 2. Install dependencies if needed
 3. Build `packages/ingenium-core` (migrations and shared types)
-4. Run `./run.sh seed` to initialize the first project, create its database, and seed 17 skills, 4 OpenCode plugins (`planner-handoff`, `post-tool-use`, `session-start`, `learnings`), and 9 agents
+4. Run `./run.sh seed` to initialize the first project, create its database, and seed 17 skills, 3 OpenCode plugins (`post-tool-use`, `session-start`, `learnings`), and 8 agents
 5. Start each service with health-check polling
 6. Print confirmation when all services are ready
 
@@ -135,7 +135,7 @@ Run these checks to confirm everything is working:
 
 ### 1. Open the Dashboard
 
-Navigate to [http://localhost:3000](http://localhost:3000). You should see 10 pages:
+Navigate to [http://localhost:3000](http://localhost:3000). You should see these pages in the nav bar:
 - **Home** — dashboard overview with feature cards
 - **Projects** — manage project configurations
 - **Skills** — browse and search AI agent skills
@@ -174,6 +174,7 @@ If the tools don't appear, restart your OpenCode session (the MCP server list is
 | `EADDRINUSE` / port conflict | Another process on port 4097 or 3000 | Kill the existing process, or change `INGENIUM_API_PORT` in environment |
 | MCP tools return errors | API URL mismatch | Verify `INGENIUM_API_URL` in `opencode.json` matches `http://localhost:4097/api/v1` |
 | SQLite errors on startup | Missing data directory | Ensure `.ingenium/data/` exists in the repo root (created automatically by `run.sh`) |
+| Large skill upload fails | Payload exceeds 2MB limit | Reduce skill file size or increase `express.json({ limit: "2mb" })` in `api-server.ts` |
 
 ---
 

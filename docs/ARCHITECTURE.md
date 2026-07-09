@@ -94,6 +94,32 @@ The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **48 t
 
 ---
 
+## API Configuration
+
+The Express API uses `express.json({ limit: "2mb" })` for request body parsing. This allows large skill payloads (when uploading skills with file_tree data) without hitting the default 100KB limit. Other middleware includes helmet for security headers, CORS (configurable via `CORS_ORIGIN`), and optional bearer token auth.
+
+## Dashboard Features
+
+### Project Management
+The Projects page at `/projects` features Active/Archived tab views. Users can:
+- View active projects or toggle to see archived projects
+- Rename projects inline
+- Archive projects (soft-delete with timestamp)
+- Restore archived projects
+- Purge expired projects (configurable retention via Settings)
+
+### Skill File Tree Navigation
+When viewing a skill detail overlay, a split-pane layout is used:
+- **Left sidebar** (`FileTree` component) — renders the skill's `file_tree` JSON as a navigable tree with SKILL.md, metadata.json, and any reference files/folders
+- **Right pane** (`MarkdownViewer` component) — displays file content with Preview/Source toggle and highlight.js syntax highlighting
+- **Inline editing** — click Edit to modify any file (SKILL.md or reference files) directly in the overlay, with Save persisting to the DB via PATCH
+
+### Syntax Highlighting
+highlight.js is used in two modes:
+- **Preview mode** — auto-highlights `<code>` blocks inside rendered markdown
+- **Source mode** — highlights the entire code block content based on file extension
+Styles: `github.css` for light theme, `hljs-dark.css` for dark variant.
+
 ## Docker Deployment
 
 The project ships as a single Docker container via `Dockerfile` (multi-stage build, root) and `docker-compose.yml` (single service):
