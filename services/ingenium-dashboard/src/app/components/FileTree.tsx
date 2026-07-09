@@ -6,6 +6,8 @@ type FileTreeProps = {
   fileTreeJson: string | undefined;
   skillContent: string;
   skillName: string;
+  tags?: string;
+  alwaysApply?: number;
   onSelectFile: (path: string, content: string) => void;
   selectedFile: string;
 };
@@ -17,14 +19,16 @@ type TreeNode = {
   children: TreeNode[];
 };
 
-function parseTree(json: string | undefined, skillContent: string, skillName: string): TreeNode[] {
+function parseTree(json: string | undefined, skillContent: string, skillName: string, tags?: string, alwaysApply?: number): TreeNode[] {
   const nodes: TreeNode[] = [];
   
   // Root: SKILL.md
   nodes.push({ name: "SKILL.md", path: "SKILL.md", content: skillContent, children: [] });
   
-  // Root: metadata.json (generated)
-  nodes.push({ name: "metadata.json", path: "metadata.json", content: "", children: [] });
+  // Root: metadata.json — generated from skill fields
+  const tagList = tags ? tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [];
+  const metaContent = JSON.stringify({ tags: tagList, alwaysApply: alwaysApply === 1 }, null, 2);
+  nodes.push({ name: "metadata.json", path: "metadata.json", content: metaContent, children: [] });
   
   // Parse file_tree JSON
   if (!json) return nodes;
@@ -94,8 +98,8 @@ function TreeNodeItem({ node, depth, onSelect, selectedFile }: { node: TreeNode;
   );
 }
 
-export default function FileTree({ fileTreeJson, skillContent, skillName, onSelectFile, selectedFile }: FileTreeProps) {
-  const tree = parseTree(fileTreeJson, skillContent, skillName);
+export default function FileTree({ fileTreeJson, skillContent, skillName, tags, alwaysApply, onSelectFile, selectedFile }: FileTreeProps) {
+  const tree = parseTree(fileTreeJson, skillContent, skillName, tags, alwaysApply);
 
   return (
     <div className="border-r border-gray-200 h-full overflow-y-auto bg-gray-50 min-w-[220px] max-w-[300px]">

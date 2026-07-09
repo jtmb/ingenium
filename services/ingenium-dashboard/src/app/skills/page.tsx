@@ -149,6 +149,8 @@ export default function SkillsPage() {
                 fileTreeJson={selectedSkill.file_tree}
                 skillContent={selectedSkill.content}
                 skillName={selectedSkill.name}
+                tags={selectedSkill.tags}
+                alwaysApply={selectedSkill.always_apply}
                 onSelectFile={handleSelectFile}
                 selectedFile={selectedFile}
               />
