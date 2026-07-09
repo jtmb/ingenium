@@ -43,6 +43,22 @@ Show disk usage (`df -h`) before any destructive operation. Always confirm with 
 
 Multi-command shell statements must follow `set -euo pipefail` safety patterns. Quote all variable expansions, use `|| true` tolerance for commands that may fail, never background processes with `&`.
 
+### 🔴 NEVER Append Output Redirection to Terminal Commands
+
+Never append `2>&1`, `>/dev/null`, `&>/dev/null`, or any standard output/error redirection to commands. All tool outputs must stream raw text back to the shell environment. Hiding output prevents error detection and debugging.
+
+```bash
+# ❌ WRONG — hiding output breaks error detection
+curl http://localhost:4097/health 2>&1 | grep ok
+docker ps 2>/dev/null
+npm test &>/dev/null
+
+# ✅ CORRECT — full output, handle errors explicitly
+curl http://localhost:4097/health
+docker ps
+npm test
+```
+
 ### 🔴 Use `docker compose`, NOT `docker-compose`
 
 The `docker-compose` standalone binary (with hyphen) is deprecated. Always use the modern Docker Compose plugin:
@@ -59,6 +75,24 @@ docker compose ps
 ```
 
 The hyphen variant is a legacy Python script that may not exist on the system. The space variant is built into the Docker CLI as a plugin. Always use `docker compose` (space).
+
+### 🔴 Use `docker compose` for Container Lifecycle — Not Raw `docker run`
+
+All container lifecycle management must go through `docker compose` — never raw `docker run`, `docker rm`, or `docker stop` commands. The `docker compose` tool manages networks, volumes, and dependencies correctly.
+
+```bash
+# ❌ WRONG — raw docker commands bypass compose orchestration
+docker run -d --name myapp ...
+docker rm -f myapp
+docker stop myapp
+
+# ✅ CORRECT — compose handles networking, volumes, healthchecks, dependencies
+docker compose up -d
+docker compose down
+docker compose restart
+docker compose logs
+docker compose ps
+```
 
 ## Reference Files
 
