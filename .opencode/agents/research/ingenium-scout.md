@@ -7,7 +7,9 @@ permission:
   read: allow
   write: deny
   bash: deny
-skills:
+  skill:
+    "@local-models": allow
+    "*": deny
 ---
 
 # Ingenium Scout

@@ -10,6 +10,7 @@ permission:
   edit: deny
   bash: deny
   skill:
+    "@local-models": allow
     "*": deny
 ---
 
