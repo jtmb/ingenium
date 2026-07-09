@@ -14,6 +14,19 @@ projectsRouter.post("/", (req, res) => {
     const project = projects.createProject(name);
     res.status(201).json({ data: project });
 });
+projectsRouter.patch("/:name", (req, res) => {
+    const { name: newName } = req.body;
+    if (!newName || typeof newName !== "string") {
+        res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "name is required in body" } });
+        return;
+    }
+    const updated = projects.updateProject(req.params.name, newName);
+    if (!updated) {
+        res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${req.params.name}' not found` } });
+        return;
+    }
+    res.json({ data: updated });
+});
 projectsRouter.get("/archive", (_req, res) => {
     const list = projects.listArchivedProjects();
     res.json({ data: list });

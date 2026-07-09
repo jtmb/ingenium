@@ -20,7 +20,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export type Project = { id: string; name: string; path?: string; archived_at?: string; created_at: string; updated_at: string };
 
 /** An AI agent skill with its full content. */
-export type Skill = { id: string; name: string; description: string; content: string; category?: string; enabled: boolean };
+export type Skill = { id: string; name: string; description: string; content: string; category?: string; enabled: boolean; tags?: string; always_apply?: number; file_tree?: string };
 
 /** A learning entry — decisions, patterns, bugs, or preferences. */
 export type Learning = { id: number; entry_type: string; content: string; tags?: string; priority: number; created_at: string };
@@ -62,14 +62,19 @@ export const api = {
     purge: (retentionDays?: number) =>
       request<{ data: { purged_count: number } }>("/projects/purge", { method: "POST", body: JSON.stringify({ retention_days: retentionDays ?? 7 }) }),
     listArchived: () => request<{ data: Project[] }>("/projects/archive"),
+    update: (currentName: string, newName: string) =>
+      request<{ data: Project }>(`/projects/${encodeURIComponent(currentName)}`, { method: "PATCH", body: JSON.stringify({ name: newName }) }),
   },
   skills: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Skill[] }>(`/skills?project=${project}`),
     get: (name: string, project = DEFAULT_PROJECT) => request<{ data: Skill }>(`/skills/${name}?project=${project}`),
     create: (name: string, description: string, content: string, project = DEFAULT_PROJECT) =>
       request<{ data: Skill }>(`/skills?project=${project}`, { method: "POST", body: JSON.stringify({ name, description, content }) }),
-    update: (name: string, content: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Skill }>(`/skills/${name}?project=${project}`, { method: "PATCH", body: JSON.stringify({ content }) }),
+    update: (name: string, content: string, extra?: { tags?: string; always_apply?: number; files?: string }, project = DEFAULT_PROJECT) =>
+      request<{ data: Skill }>(`/skills/${encodeURIComponent(name)}?project=${project}`, { 
+        method: "PATCH", 
+        body: JSON.stringify({ content, ...(extra || {}) })
+      }),
   },
   learnings: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Learning[] }>(`/learnings?project=${project}`),
