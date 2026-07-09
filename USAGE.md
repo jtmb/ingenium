@@ -22,11 +22,14 @@ For Docker, a single container runs all 3 via supervisord: API (:4097), Dashboar
 **What it does**: Browse and manage project configurations. Each project has its own context, skills, and learnings isolated in per-project SQLite databases.
 
 **How to use**:
-- View all projects on the Projects tab
+- View active projects or toggle to the "Archived" tab for archived projects
 - Create a new project with a name (auto-resolved to UUID)
-- Select a project to see its skills, learnings, and tasks
+- Rename a project inline (click "Rename" on any project card)
+- Archive a project (soft-deletes with timestamp; appears in Archived tab)
+- Restore an archived project from the Archived tab
+- Purge expired projects (configurable retention period in Settings)
 
-**API**: GET /api/v1/projects, POST /api/v1/projects, GET /api/v1/projects/:id
+**API**: GET /api/v1/projects, POST /api/v1/projects, PATCH /api/v1/projects/:name, DELETE /api/v1/projects/:name, GET /api/v1/projects/archive, POST /api/v1/projects/:name/restore, POST /api/v1/projects/purge
 
 **Code**: services/ingenium-dashboard/src/app/projects/page.tsx → services/ingenium-api/routes/projects.ts → packages/ingenium-core/lib/tools/projects.ts
 
@@ -37,12 +40,17 @@ For Docker, a single container runs all 3 via supervisord: API (:4097), Dashboar
 **What it does**: Browse and search all 17 AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns. Stored in split-skill format (SKILL.md + metadata.json + references/) with `file_tree` support for auxiliary files.
 
 **How to use**:
-- View all skills in the Skills tab
+- View all skills in the Skills tab (card grid, 3 columns on desktop)
 - Search by name, tag, or keyword
-- Click to view full skill content
+- Click a skill card to open a split-pane overlay with:
+  - **File tree** — left sidebar navigates the skill's files (SKILL.md, metadata.json, references/)
+  - **Content viewer** — right pane shows file content with syntax highlighting (highlight.js)
+  - **Preview/Source toggle** — switch between rendered markdown and raw source
+  - **Inline editing** — click Edit to modify any file directly in the overlay, Save persists to the DB
+- Upload a skill from a `.md` file (frontmatter-parsed) using the Upload button
 - Skills auto-load on session start via /skill-load
 
-**API**: GET /api/v1/skills, GET /api/v1/skills/:id, GET /api/v1/skills/search?q=...
+**API**: GET /api/v1/skills, GET /api/v1/skills/:id, GET /api/v1/skills/search?q=..., POST /api/v1/skills, PATCH /api/v1/skills/:id
 
 **Code**: services/ingenium-dashboard/src/app/skills/page.tsx → services/ingenium-api/routes/skills.ts → packages/ingenium-core/lib/tools/skills.ts
 

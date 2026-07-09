@@ -172,3 +172,54 @@ The general grid rule (Rule #1) sets `md:grid-cols-3` for card grids. Two pages 
 | Tasks (Kanban) | `grid-cols-4` | Kanban board needs 4 columns (Todo, In Progress, Review, Done). This is the only exception. |
 
 **If any page needs a different column count, document it here and update Rule #1.**
+
+---
+
+## Skill Detail Overlay (Split-Pane)
+
+The skill detail overlay uses a fixed position overlay with a split-pane layout.
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Overlay Container | Fixed fullscreen, centered | `fixed inset-0 z-50 flex items-start justify-center` |
+| Overlay Backdrop | 50% black | `bg-black/50` |
+| Overlay Card | White, max width | `relative w-11/12 max-w-7xl` |
+| Max Height | 90vh scrollable | `max-h-[90vh]` |
+| Split Layout | Flex row, left + right | `flex flex-1 overflow-hidden` |
+
+### File Tree (Left Sidebar)
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Width | 220-300px | `min-w-[220px] max-w-[300px]` |
+| Background | Light gray | `bg-gray-50` |
+| Border | Right border | `border-r border-gray-200` |
+| Item Height | Compact 32px | `px-2 py-1` |
+| Selected Item | Blue highlight | `bg-blue-100 text-blue-800` |
+| Hover | Light gray | `hover:bg-gray-100` |
+| Indentation | 16px per depth level | `paddingLeft: depth * 16 + 8px` |
+
+### Syntax Highlighting
+
+highlight.js is loaded globally in `layout.tsx`:
+- **Import**: `highlight.js/styles/github.css` (light), `hljs-dark.css` (dark, loaded after)
+- **Preview mode**: `hljs.highlightElement()` called on `<pre><code>` blocks after rendered markdown is mounted
+- **Source mode**: `hljs.highlightElement()` called on the entire `<code>` element with dynamic `language-{ext}` class
+
+| Mode | Trigger | Target |
+|------|---------|--------|
+| Preview | `useEffect` on `renderedHtml` change | All `pre code` blocks in the container |
+| Source | `useEffect` on `content`/`language` change | Single `<code>` element with `language-{ext}` class |
+
+### Projects Page — Active/Archived Tabs
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Tab Bar | Flex row, no wrapping | `flex gap-2 items-center` |
+| Active Tab | Blue filled pill | `bg-blue-600 text-white px-4 py-1 rounded` |
+| Inactive Tab | Ghost gray pill | `text-gray-600 hover:bg-gray-100 px-4 py-1 rounded` |
+| Archived Badge | Small, red | `text-xs text-red-500` |
+| Action Buttons | Small border pills | `text-xs px-2 py-1 border rounded hover:bg-gray-100` |
+| Rename Button | Default gray | — |
+| Archive Button | Red tint on hover | `hover:bg-red-50 text-red-600` |
+| Restore Button | Green tint on hover | `hover:bg-green-50 text-green-600` |
