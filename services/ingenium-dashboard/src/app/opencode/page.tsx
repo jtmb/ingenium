@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 export default function OpenCodePage() {
   const pass = process.env.OPENCODE_SERVER_PASSWORD ?? "";
   const iframeUrl = pass
-    ? `http://user:${encodeURIComponent(pass)}@localhost:4096/`
+    ? `http://opencode:${encodeURIComponent(pass)}@localhost:4096/`
     : "http://localhost:4096/";
 
   return (
