@@ -63,21 +63,21 @@ When multiple agents share a single LLM backend (local LM Studio, single API key
 
 ```
 sequenceDiagram
-    participant A as Agent A (planner)
+    participant A as Agent A (designer)
     participant O as Orchestrator
     participant B as Agent B (builder)
     
-    A->>O: POST /check-in (role=planner)
-    O->>A: { allowed: true, turn: "planner" }
+    A->>O: POST /check-in (role=designer)
+    O->>A: { allowed: true, turn: "designer" }
     A->>A: Run batch (N iterations)
-    A->>O: POST /progress { role: "planner", done: true }
+    A->>O: POST /progress { role: "designer", done: true }
     O->>O: Flip turn to "builder"
     
     B->>O: POST /check-in (role=builder)
     O->>B: { allowed: true, turn: "builder" }
     B->>B: Run batch (N iterations)
     B->>O: POST /progress { role: "builder", done: true }
-    O->>O: Flip turn to "planner"
+    O->>O: Flip turn to "designer"
 ```
 
 ### Orchestrator API
@@ -93,14 +93,14 @@ sequenceDiagram
 - **Exponential backoff on denial.** When `allowed: false`, sleep 5s → 10s → 20s → 30s (max 10 retries).
 - **State persists to disk.** Orchestrator writes to JSON file — survives restarts.
 - **BATCH_SIZE controls turn length.** After N iterations, agent calls `/progress` to flip the turn.
-- **One agent type per turn.** If planner holds the turn, builder is blocked (and vice versa).
+- **One agent type per turn.** If designer holds the turn, builder is blocked (and vice versa).
 
 ### Orchestrator State File
 
 ```json
 {
-  "currentTurn": "planner",
-  "plannerIterations": 3,
+  "currentTurn": "designer",
+  "designerIterations": 3,
   "builderIterations": 0,
   "batchSize": 6,
   "lastFlipAt": "2026-07-02T10:00:00Z"
