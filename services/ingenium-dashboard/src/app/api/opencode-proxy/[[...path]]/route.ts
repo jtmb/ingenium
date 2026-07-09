@@ -25,9 +25,24 @@ async function handler(req: NextRequest) {
       redirect: "manual",
     });
 
+    const contentType = resp.headers.get("content-type") ?? "";
     const responseHeaders = new Headers(resp.headers);
     responseHeaders.delete("content-encoding");
     responseHeaders.delete("transfer-encoding");
+
+    // If HTML, rewrite absolute paths to go through the proxy
+    if (contentType.includes("text/html")) {
+      let html = await resp.text();
+      html = html.replace(
+        /(src|href|action)="\/(?!\/|api\/opencode-proxy)/g,
+        '$1="/api/opencode-proxy/'
+      );
+      return new NextResponse(html, {
+        status: resp.status,
+        statusText: resp.statusText,
+        headers: responseHeaders,
+      });
+    }
 
     return new NextResponse(resp.body, {
       status: resp.status,
