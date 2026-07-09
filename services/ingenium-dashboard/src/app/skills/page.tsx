@@ -100,6 +100,7 @@ export default function SkillsPage() {
   };
 
   const isMarkdown = selectedFile.endsWith(".md") || selectedFile === "SKILL.md";
+  const lang = selectedFile.split(".").pop() || "";
 
   return (
     <div className="space-y-8">
@@ -175,7 +176,7 @@ export default function SkillsPage() {
                 {editMode ? (
                   <textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="w-full h-full min-h-[400px] p-4 border rounded font-mono text-sm resize-none" />
                 ) : (
-                  <MarkdownViewer content={fileContent} isMarkdown={isMarkdown} />
+                  <MarkdownViewer content={fileContent} isMarkdown={isMarkdown} language={lang} />
                 )}
               </div>
             </div>

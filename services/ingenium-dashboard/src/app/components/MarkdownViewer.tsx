@@ -6,6 +6,7 @@ import hljs from "highlight.js/lib/common";
 type MarkdownViewerProps = {
   content: string;
   isMarkdown?: boolean;
+  language?: string;
 };
 
 function renderSimpleMarkdown(text: string): string {
@@ -55,23 +56,34 @@ function renderSimpleMarkdown(text: string): string {
   return html;
 }
 
-export default function MarkdownViewer({ content, isMarkdown = true }: MarkdownViewerProps) {
+export default function MarkdownViewer({ content, isMarkdown = true, language }: MarkdownViewerProps) {
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
   const containerRef = useRef<HTMLDivElement>(null);
+  const sourceRef = useRef<HTMLElement>(null);
 
   const renderedHtml = useMemo(() => {
     if (!isMarkdown) return "";
     return renderSimpleMarkdown(content);
   }, [content, isMarkdown]);
 
-  // Apply syntax highlighting to code blocks after render
+  // Apply syntax highlighting to code blocks in Preview mode
   useEffect(() => {
     if (containerRef.current && isMarkdown && viewMode === "preview") {
-      containerRef.current.querySelectorAll("pre code[class*='language-']").forEach((block) => {
+      containerRef.current.querySelectorAll("pre code").forEach((block) => {
         try { hljs.highlightElement(block as HTMLElement); } catch {}
       });
     }
   }, [renderedHtml, isMarkdown, viewMode]);
+
+  // Apply syntax highlighting to entire Source view
+  useEffect(() => {
+    if (sourceRef.current && viewMode === "source") {
+      try { hljs.highlightElement(sourceRef.current); } catch {}
+    }
+  }, [content, isMarkdown, viewMode, language]);
+
+  // Derive language class from extension
+  const langClass = language ? language.replace(".", "") : "";
 
   return (
     <div className="space-y-4">
@@ -121,8 +133,10 @@ export default function MarkdownViewer({ content, isMarkdown = true }: MarkdownV
           dangerouslySetInnerHTML={{ __html: renderedHtml }}
         />
       ) : (
-        <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
-          {content}
+        <pre className="bg-gray-900 text-gray-100 p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+          <code ref={sourceRef} className={langClass ? `language-${langClass}` : ""}>
+            {content}
+          </code>
         </pre>
       )}
     </div>
