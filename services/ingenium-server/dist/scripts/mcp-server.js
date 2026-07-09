@@ -43,12 +43,14 @@ server.registerTool("ingenium_skill_create", {
         description: z.string(),
         content: z.string(),
         category: z.string().optional(),
+        tags: z.string().optional(),
+        always_apply: z.number().optional(),
     },
-}, async ({ project, name, description, content, category }) => skillTools.skillCreate(project, name, description, content, category));
+}, async ({ project, name, description, content, category, tags, always_apply }) => skillTools.skillCreate(project, name, description, content, category, tags, always_apply));
 server.registerTool("ingenium_skill_update", {
     description: "Update an existing skill's content.",
-    inputSchema: { project: projectParam, name: z.string(), content: z.string() },
-}, async ({ project, name, content }) => skillTools.skillUpdate(project, name, content));
+    inputSchema: { project: projectParam, name: z.string(), content: z.string(), description: z.string().optional(), tags: z.string().optional(), always_apply: z.number().optional() },
+}, async ({ project, name, content, description, tags, always_apply }) => skillTools.skillUpdate(project, name, content, description, tags, always_apply));
 server.registerTool("ingenium_skill_delete", { description: "Delete a skill by name.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillDelete(project, name));
 server.registerTool("ingenium_skill_enable", { description: "Enable a skill and sync to disk.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillEnable(project, name));
 server.registerTool("ingenium_skill_disable", { description: "Disable a skill and remove from disk.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillDisable(project, name));

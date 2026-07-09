@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql"]) {
+    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info(`Applied migration ${file}`);
@@ -70,6 +70,16 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "004_learnings_status.sql"), "utf-8");
       db.exec(sql);
       logger.info("Applied migration 004_learnings_status.sql");
+    }
+
+    // Check if tags column exists on skills (migration 005)
+    const tagsColCheck = db.prepare(
+      "SELECT count(*) as count FROM pragma_table_info('skills') WHERE name = 'tags'"
+    ).get() as { count: number };
+    if (tagsColCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "005_skills_metadata.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 005_skills_metadata.sql");
     }
   }
 }

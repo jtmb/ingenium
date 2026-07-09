@@ -79,19 +79,21 @@ server.registerTool(
       description: z.string(),
       content: z.string(),
       category: z.string().optional(),
+      tags: z.string().optional(),
+      always_apply: z.number().optional(),
     },
   },
-  async ({ project, name, description, content, category }) =>
-    skillTools.skillCreate(project, name, description, content, category),
+  async ({ project, name, description, content, category, tags, always_apply }) =>
+    skillTools.skillCreate(project, name, description, content, category, tags, always_apply),
 );
 
 server.registerTool(
   "ingenium_skill_update",
   {
     description: "Update an existing skill's content.",
-    inputSchema: { project: projectParam, name: z.string(), content: z.string() },
+    inputSchema: { project: projectParam, name: z.string(), content: z.string(), description: z.string().optional(), tags: z.string().optional(), always_apply: z.number().optional() },
   },
-  async ({ project, name, content }) => skillTools.skillUpdate(project, name, content),
+  async ({ project, name, content, description, tags, always_apply }) => skillTools.skillUpdate(project, name, content, description, tags, always_apply),
 );
 
 server.registerTool(

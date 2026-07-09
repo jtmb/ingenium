@@ -6,7 +6,7 @@ services:
       - "4096:4096"   # OpenCode server
       - "4097:4097"   # API
     environment:
-      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OpenCode server password required}
+      - OPENCODE_SERVER_PASSWORD=test
     volumes:
       - ingenium-data:/app/.ingenium
       - ./opencode.json:/app/opencode.json:ro

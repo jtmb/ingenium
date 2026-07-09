@@ -36,15 +36,16 @@ skillsRouter.post("/", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)
         return;
-    const { name, description, content, category } = req.body;
-    const skill = skills.createSkill(projectId, name, description, content, category);
+    const { name, description, content, category, tags, always_apply } = req.body;
+    const skill = skills.createSkill(projectId, name, description, content, category, tags, always_apply);
     res.status(201).json({ data: skill });
 });
 skillsRouter.patch("/:name", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)
         return;
-    const updated = skills.updateSkill(projectId, req.params.name, req.body.content);
+    const { content, description, tags, always_apply } = req.body;
+    const updated = skills.updateSkill(projectId, req.params.name, content, description, tags, always_apply);
     if (!updated) {
         res.status(404).json({ error: { code: "NOT_FOUND", message: `Skill '${req.params.name}' not found` } });
         return;

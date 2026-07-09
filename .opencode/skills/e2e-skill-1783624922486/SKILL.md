@@ -1,3 +1,0 @@
-# Updated
-
-Updated content
