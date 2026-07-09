@@ -19,7 +19,7 @@ function renderSimpleMarkdown(text: string): string {
   // Code blocks (fenced with ```)
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
     const langClass = lang ? `language-${lang.toLowerCase()}` : "";
-    return `<pre class="bg-gray-900 text-gray-100 p-3 rounded overflow-x-auto text-sm"><code class="${langClass}">${code.trim()}</code></pre>`;
+    return `<pre class="bg-gray-100 border p-3 rounded overflow-x-auto text-sm font-mono"><code class="${langClass}">${code.trim()}</code></pre>`;
   });
 
   // Inline code
@@ -133,7 +133,7 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
           dangerouslySetInnerHTML={{ __html: renderedHtml }}
         />
       ) : (
-        <pre className="bg-gray-900 text-gray-100 p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+        <pre className="bg-gray-50 border p-4 rounded overflow-x-auto text-sm font-mono whitespace-pre-wrap">
           <code ref={sourceRef} className={langClass ? `language-${langClass}` : ""}>
             {content}
           </code>
