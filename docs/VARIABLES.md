@@ -37,6 +37,14 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 |----------|---------|---------|-------------|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4097/api/v1` | `src/lib/api.ts` | API URL for the dashboard HTTP client |
 
+## Docker / opencode-server
+
+| Variable | Default | Used By | Description |
+|----------|---------|---------|-------------|
+| `OPENCODE_SERVER_PASSWORD` | _(none, required for Docker)_ | `scripts/start.sh`, Docker entrypoint | Password for opencode-server HTTP/SSE transport |
+| `INGENIUM_CORE_DB_PATH` | `./.ingenium/data.db` | Core `db.ts` | Path to the SQLite database (must map volume in Docker) |
+| `THREAD_API_TOKEN` | _(none)_ | OpenCode config | API token for Thread MCP server |
+
 ---
 
 ## 🔴 Rules

@@ -1,6 +1,6 @@
 # AGENTS.md — Ingenium MCP Server Agent Protocol
 
-This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded from the Ingenium SQLite database via the MCP server. The skill source files live at `.agents/skills/` for editing.
+This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded from the Ingenium SQLite database via the MCP server. Skill source files live at `seed/skills/<name>/` (canonical editing location) and are written to disk at `.opencode/skills/<name>/` with a split-skill format (SKILL.md + metadata.json + references/).
 
 > 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
 
@@ -14,7 +14,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded fr
 
 ### Session Startup
 1. **Match skills** — Check the catalog against the request and files you might edit
-2. **Load matching skills** — Read `.agents/skills/<name>/SKILL.md` for each match
+2. **Load matching skills** — Read `.opencode/skills/<name>/SKILL.md` (or `seed/skills/<name>/SKILL.md` if not yet written) for each match
 3. **Note 🔴 HARD RULEs** — These take priority over everything else
 4. **Run `/repo-context`** for project identity
 

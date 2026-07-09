@@ -36,7 +36,7 @@ tags: [validation, checklist, testing]
 - [ ] Cross-references related skills at the end
 
 ### Registration
-- [ ] Added to `.agents/SKILL-CATALOG.md` in the correct section
+- [ ] Added to `SKILL-INDEX.md` in the correct section
 - [ ] Added to `SKILL-INDEX.md` (numbered list + category sections)
 - [ ] Skill count header incremented in SKILL-INDEX.md
 - [ ] AGENTS.md updated if needed

@@ -18,11 +18,11 @@ Every service with a frontend (Next.js dashboard) must have a `STYLING-GUIDE.md`
 
 The guide is generated from a live screenshot using the vision API and updated whenever visual changes are made.
 
-## Learning Logging — MCP Tool Only
+## Learning Logging — MCP Tool + File Fallback
 
 Every change that modifies skills, agents, hooks, plugins, config, or architecture MUST be logged via the `ingenium_learning_log` MCP tool. This writes to the Ingenium SQLite database with FTS5 indexing for cross-session searchability.
 
-Learnings are **DB-only** — the old `.agents/skills/learnings.md` file has been removed. The MCP tool is the single source of truth.
+Learnings are **DB-primary** with a **file fallback**: if the API is down, agents append to `.opencode/skills/learnings.md`. On the next session start, `importLearningsFromFile()` in the learnings plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
 
 **entry_type enum** (Zod schema, `packages/ingenium-core/lib/schema.ts`):
 
@@ -67,3 +67,13 @@ Key rules:
 - Dedup checks that no similar-title task already exists in `todo` or `in_progress` columns.
 - Manual batch scanning via `ingenium_skill_from_learnings` MCP tool processes the last 20 learnings.
 - The orchestrator's step 4a 🔴 HARD RULE runs both automated detection and manual LLM eye review after every batch of task completions.
+
+## Skill file_tree Convention
+
+Every skill in the DB has a `file_tree` column (TEXT, JSON map of relative paths → file content). This ensures complete data round-trips between DB and disk:
+
+- **Writing to disk**: `writeSkillToDisk()` always writes SKILL.md (with YAML frontmatter) + metadata.json, then writes every file in the `file_tree` JSON to the skill directory.
+- **Reading from disk**: `syncSkillFromDisk()` reads SKILL.md + metadata.json, walks the directory tree for all auxiliary files (excluding SKILL.md and metadata.json), and stores them as `file_tree` JSON.
+- **Split-skill format on disk**: Each skill is a directory with `SKILL.md` (main content + YAML frontmatter), `metadata.json` (tags, alwaysApply), and optional `references/` directory for auxiliary docs.
+- **Seed skills at `seed/skills/`** are the canonical source — edit SKILL.md here, then use the dashboard or `ingenium_skill_sync` to persist changes to the DB.
+- **Runtime copy at `.opencode/skills/`** is automatically written from the DB. Do not edit — changes will be overwritten unless synced back.

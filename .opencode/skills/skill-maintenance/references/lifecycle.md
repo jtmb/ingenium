@@ -24,10 +24,9 @@ After creating the SKILL.md file, register it in ALL of these places:
 
 | Location | Action |
 |----------|--------|
-| `.agents/SKILL-CATALOG.md` | Add entry to the appropriate table |
 | `SKILL-INDEX.md` (repo root) | Add to numbered list AND category section |
 | `AGENTS.md` | If mandatory or in Pre-Flight Check table |
-| `.agents/skills/learnings.md` | Log with commit hash |
+| `docs/CONVENTIONS.md` | Add learning→skill detection references |
 
 Update the skill count in SKILL-INDEX.md. AGENTS.md may also reference the count in text.
 

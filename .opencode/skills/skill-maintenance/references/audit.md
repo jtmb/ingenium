@@ -18,7 +18,7 @@ The audit checks 8 integration points. Every skill should appear in all of them 
 | **5. Cross-references** | Other SKILL.md files | Any skill that references this skill uses correct path |
 | **6. Agent files** | `.opencode/agents/*.md` | If skill is listed in Required Skills, description matches |
 | **7. Frontmatter validity** | Each SKILL.md | `name` matches folder, `description` present |
-| **8. learnings.md** | `.agents/skills/learnings.md` | Recent changes logged with Before/After hashes |
+| **8. Learnings DB** | `ingenium_learning_search` / `ingenium_learning_log` MCP tools | Recent changes logged with Before/After hashes via MCP tool |
 
 ### Quick Audit Command
 
@@ -73,4 +73,4 @@ When the audit finds issues, fix them immediately. Follow the HARD RULEs: commit
 - Run quick audit command — zero discrepancies
 - Every skill directory has frontmatter-valid SKILL.md
 - SKILL-INDEX.md count matches directory count
-- learnings.md exists with recent entries
+- DB has recent learning entries (check via `ingenium_learning_list`)
