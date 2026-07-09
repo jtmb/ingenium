@@ -6,4 +6,5 @@ export declare function unarchiveProject(name: string): boolean;
 export declare function listArchivedProjects(): Project[];
 export declare function purgeExpiredProjects(retentionDays: number): number;
 export declare function getProject(name: string): Project | undefined;
+export declare function updateProject(currentName: string, newName: string): Project | undefined;
 //# sourceMappingURL=projects.d.ts.map

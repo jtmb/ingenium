@@ -70,3 +70,15 @@ export function getProject(name: string): Project | undefined {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   return db.prepare("SELECT * FROM projects WHERE name = ?").get(name) as Project | undefined;
 }
+
+export function updateProject(currentName: string, newName: string): Project | undefined {
+  return execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existing = db.prepare("SELECT * FROM projects WHERE name = ?").get(currentName) as Project | undefined;
+    if (!existing) return undefined;
+    const now = new Date().toISOString();
+    db.prepare("UPDATE projects SET name = ?, updated_at = ? WHERE name = ?").run(newName, now, currentName);
+    checkpointAfterWrite();
+    return db.prepare("SELECT * FROM projects WHERE id = ?").get(existing.id) as Project;
+  });
+}
