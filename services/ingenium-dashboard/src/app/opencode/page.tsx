@@ -1,6 +1,6 @@
 export default function OpenCodePage() {
   return (
-    <div className="h-[calc(100vh-64px)] -mx-6">
+    <div className="fixed inset-0 top-[57px]">
       <iframe
         src="http://localhost:4098/"
         className="w-full h-full border-0"
