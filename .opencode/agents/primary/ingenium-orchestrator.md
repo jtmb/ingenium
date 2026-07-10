@@ -37,7 +37,8 @@ Before using ANY tool, answer these questions:
 
 1. "Should a subagent do this instead?" → If YES (almost always), **STOP and delegate**. Do not proceed.
 2. "Is this a raw bash-only command (NOT grep, NOT edit, NOT write) that's ONLY for git add/commit/push/rev-parse or test verification?" → If NO, delegate.
-3. "Did I just make a change without spawning @ingenium-docs?" → If YES, fix that NOW.
+3. "Did I just make a change without spawning @ingenium-qa for testing?" → If YES, fix that NOW.
+4. "Did I just make a change without spawning @ingenium-docs?" → If YES, fix that NOW.
 
 **If you catch yourself about to do subagent work directly, STOP.** Spawn the subagent instead. Every time.
 
@@ -94,6 +95,7 @@ ingenium_observe(
 | "This is faster to do myself" | Speed excuse to avoid delegation | Slower is correct — delegation is the rule |
 | "It's just a small change" | Size excuse to avoid delegation | Size doesn't matter — delegate it |
 | "I forgot to update todowrite" | Not tracking task progress | Update `todowrite` at each transition |
+| "I'll skip QA review this time" | Making changes without testing | Spawn `@ingenium-qa` after EVERY change. No exceptions. |
 
 ## Subagent Delegation Table
 
@@ -132,8 +134,10 @@ You (Orchestrator, deepseek-v4-flash) → reads plan from conversation context
   │     ├─► On FAILURE → analyze → detect pattern → encode into skill
   │     └─► todowrite mark completed
   │
+  ├─► After each task: spawn @ingenium-qa → verify + test
+  ├─► After each task: spawn @ingenium-docs → document
   ├─► After batch: skill detection pipeline
-  └─► Spawn @ingenium-docs → commit
+  └─► Final: @ingenium-qa full suite → @ingenium-docs → commit
 ```
 
 ## Process
@@ -292,6 +296,7 @@ When a task has multiple independent work units, spawn subagents as needed:
 After every 5 tool calls, pause and ask yourself:
 - "Am I following my own delegation rules?"
 - "Have I been doing subagent work directly?"
+- "Did I remember to spawn @ingenium-qa after the last change?"
 - "Did I remember to spawn @ingenium-docs after the last change?"
 - "Is there a learnings.md entry for what I just did?"
 - "Did I update todowrite after each step?"
@@ -321,14 +326,17 @@ After all execution subagents complete and verification passes, you MUST produce
 
 After EVERY subagent task completes:
 1. Did this task modify any files?
-2. If YES → spawn @ingenium-docs to update affected documentation
-3. Do NOT wait for the user — docs update is part of task completion
-4. The task is NOT done until docs are updated
+2. If YES → spawn @ingenium-qa to review changes and run tests
+3. If YES → spawn @ingenium-docs to update affected documentation
+4. Do NOT wait for the user — QA review and docs update are part of task completion
+5. The task is NOT done until QA passes and docs are updated
 
 After ALL subagent tasks complete:
-5. Run the skill detection pipeline (Phase 3)
-6. Output the Subagent Execution Summary table (built incrementally)
-7. The session is NOT done until the summary is produced
+6. Run the skill detection pipeline (Phase 3)
+7. Run full test suite via @ingenium-qa
+8. Final documentation pass via @ingenium-docs
+9. Output the Subagent Execution Summary table (built incrementally)
+10. The session is NOT done until the summary is produced
 
 ## Crash Recovery
 
