@@ -66,3 +66,45 @@ The `file_tree` column (TEXT, JSON) enables complete data round-trips between DB
 - STYLING-GUIDE.md — card grid and search input styling
 - SKILL-INDEX.md — auto-maintained index of all skills
 - AGENTS.md — protocol for loading skills at session startup
+
+---
+
+## 🔴 Skill Sync Pattern (Client-Side)
+
+After any skill mutation via MCP tools (`ingenium_skill_create`, `update`, or `enable`), persist changes locally using this pattern:
+
+### Steps
+1. **Call `ingenium_skill_load(project, name)`** — Pull the full skill object from DB including content and file_tree
+2. **Use `write` tool** to write files at `.opencode/skills/<name>/`:
+   - Write `SKILL.md` with YAML frontmatter + content body (from loaded skill)
+   - Write `metadata.json` with `{name, description, tags, alwaysApply}` from loaded metadata
+3. **Verify persistence** — Optionally read back files to confirm they match the DB state
+
+### Why This Pattern?
+- The local-persistence skill (`alwaysApply: true`) enforces this automatically when loaded before mutations
+- Client-side equivalent of server-side `writeSkillToDisk()` function
+- Prevents "disconnected config" bugs where DB has changes but disk doesn't reflect them
+- Essential for skills with `always_apply: true` which must be present on disk
+
+### Example Workflow
+```typescript
+// After calling ingenium_skill_create or update via MCP tool:
+const skill = await ingenium_skill_load(project, "my-skill"); // Step 1: Load from DB
+
+await write({
+  filePath: ".opencode/skills/my-skill/SKILL.md",
+  content: `---\nname: my-skill\n${skill.frontmatter.content}\n---` + skill.body
+});
+
+await write({
+  filePath: ".opencode/skills/my-skill/metadata.json", 
+  content: JSON.stringify(skill.metadata, null, 2)
+}); // Step 2: Write to disk
+
+// Optional verification - read back and compare (Step 3):
+const loaded = await ingenium_skill_load(project, "my-skill");
+```
+
+### Related Skills
+- `local-persistence` (alwaysApply: true) — Enforces client-side sync after skill mutations and observation errors; writes fallback to `.opencode/skills/observations.md` when API is down
+- `sqlite-wal-safety`, `parallel-session-hygiene` — Other synthesized skills following the same pattern

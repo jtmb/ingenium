@@ -71,6 +71,41 @@ This is a SUCCESSFUL completion, not a failure. Example:
 Never hang or return empty waiting to finish everything. The orchestrator
 expects partial batches and will re-spawn you for the remaining files.
 
+### 9. HARD STOP — Maximum 2 Edits Per Execution
+
+You MUST count your successful edits. After completing 2 files (2 successful
+edit/write operations, each verified), STOP and return immediately.
+
+**Hard limit is 2. Not 3. Not "just one more." Stop at 2.**
+
+After your 2nd verified edit:
+1. Do NOT read another file
+2. Do NOT make another edit
+3. IMMEDIATELY return "Completed X and Y. Remaining: Z needs follow-up."
+
+The orchestrator will spawn a fresh task for the remaining files. Each
+task = at most 2 files. This is by design to prevent looping.
+
+**Counter:** Track `edits_done = 0`. After each verified edit: `edits_done += 1`.
+If `edits_done >= 2`: RETURN. No exceptions.
+
+### 10. MAX 2 RETRIES — Edit Failure = Give Up
+
+If an `edit` or `write` tool call fails (oldString not found, file already
+exists, etc.), you get EXACTLY 2 attempts to fix it.
+
+After 2 failed attempts:
+1. STOP trying
+2. Report the failure: "Edit on file X failed — could not match content."
+3. Move to the next file
+
+**Do NOT** retry 5+ times with different oldString guesses. Each retry
+wastes 10+ seconds. If you fail twice, your context is wrong. Read the
+file fresh to get the exact text before retrying.
+
+**Pattern:** Edit fails → read the file to find exact text → retry once.  
+If that also fails → report and move on. Never retry 3+ times.
+
 ---
 
 ## Known Failure Patterns
@@ -84,6 +119,8 @@ expects partial batches and will re-spawn you for the remaining files.
 | **URL retry loop** | API/URL call fails, keeps retrying the same URL | Max 1 retry. If it fails, proceed with available data. |
 | **Confident hallucination** | States file contents, agent models, or config values without reading the actual source file | Read the source file BEFORE claiming. Pattern: read → state. Never: state → hope. |
 | **Partial-work hang** | Completed some files but won't return because not all are done | Return partial results immediately. "Updated X of Y files" is success. Do not wait to finish everything. |
+| **Edit overshoot** | Made 3+ edits when hard limit was 2, then looped | Stop at EXACTLY 2 edits. Track `edits_done`. Return after the 2nd. Orchestrator re-spawns for remaining. |
+| **Edit retry loop** | Edit fails (oldString mismatch), model retries 5+ times with guessed variations | Max 2 retries. After 2 failures: report and move on. Read the file fresh to find exact text before retrying. |
 
 ---
 

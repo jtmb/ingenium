@@ -46,7 +46,7 @@ cd ../..
 
 This produces `services/ingenium-server/dist/scripts/mcp-server.js` — the MCP server entry point.
 
-> **Note:** If you later run `./run.sh dev`, the build step is handled automatically. This manual build is only needed if you're configuring the MCP server separately.
+> **Note:** Docker builds handle this automatically with `docker compose up --build`. Manual build is only needed for local development without Docker.
 
 ---
 
@@ -96,29 +96,33 @@ Once added, every OpenCode project on your machine will have access to Ingenium'
 
 ## Step 5 — Start the Services
 
+### Docker Deployment (Recommended)
+
+```bash
+docker compose up --build
+```
+
+This starts all services in a single container:
+- **API** on http://localhost:4097 — REST API gateway, sole database authority  
+- **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend  
+- **opencode-server** on stdio (port :4096) — MCP server with 61 tools
+
+The container runs supervisord managing all processes. Press `Ctrl+C` to stop gracefully.
+
+### Local Development Setup
+
+For local development without Docker:
 ```bash
 ./run.sh dev
 ```
 
-This starts three services in parallel:
+This starts services locally and will:
+1. Verify Node.js 22+ and npm are installed  
+2. Install dependencies if needed  
+3. Build the MCP server (`npx tsc` in `services/ingenium-server/`)  
+4. Run seed script to initialize first project, database, skills, plugins, and agents  
 
-| Service | URL / Protocol | Role |
-|---------|----------------|------|
-| **API** | http://localhost:4097 | REST API gateway — sole database authority |
-| **Dashboard** | http://localhost:3000 | Next.js 16 App Router frontend |
-| **MCP Server** | stdio | 48 tools via MCP protocol |
-
-The script will:
-1. Verify Node.js 22+ and npm are installed
-2. Install dependencies if needed
-3. Build `packages/ingenium-core` (migrations and shared types)
-4. Run `./run.sh seed` to initialize the first project, create its database, and seed 17 skills, 3 OpenCode plugins (`post-tool-use`, `session-start`, `learnings`), and 8 agents
-5. Start each service with health-check polling
-6. Print confirmation when all services are ready
-
-Press `Ctrl+C` to stop all services gracefully.
-
-> **Note:** You can re-run `./run.sh seed` manually at any time — it is idempotent (uses `INSERT OR IGNORE`) and will only seed items that don't already exist.
+> **Note:** The Docker deployment is now primary — all services run containerized with supervisord for consistency across environments.
 
 ### Docker Quick Start
 

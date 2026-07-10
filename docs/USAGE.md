@@ -5,14 +5,11 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 ## Getting Started
 
 ```bash
-# Local development
-./run.sh dev
-
-# Or Docker
+# Start all services (single container via supervisord)
 docker compose up --build
 ```
 
-This starts 4 services: API (port 4097), Dashboard (port 3000), MCP Server (stdio-ready, 61 tools), and email client OAuth2 endpoints. For Docker, a single container runs all via supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096). Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes 61 tools accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
 
 ## Projects
 
@@ -34,7 +31,7 @@ This starts 4 services: API (port 4097), Dashboard (port 3000), MCP Server (stdi
 
 ## Skills
 
-**What it does**: Browse and search all 17 AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns. Stored in split-skill format (SKILL.md + metadata.json + references/) with `file_tree` support for auxiliary files. Dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and highlight.js syntax highlighting in Preview/Source modes.
+**What it does**: Browse and search all 22 AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns. Stored in split-skill format (SKILL.md + metadata.json + references/) with `file_tree` support for auxiliary files. Dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and highlight.js syntax highlighting in Preview/Source modes.
 
 **How to use**:
 - View all skills in the Skills tab (card grid, 3 columns on desktop)
@@ -123,6 +120,64 @@ This starts 4 services: API (port 4097), Dashboard (port 3000), MCP Server (stdi
 **Code**: services/ingenium-dashboard/src/app/plugins/page.tsx → services/ingenium-api/routes/plugins.ts → packages/ingenium-core/lib/tools/plugins.ts
 
 **Docs**: docs/HOW-TO/plugins.md
+
+## Required Skills
+
+The Ingenium system uses skills to define agent behavior. Skills are organized in `.opencode/skills/` and loaded automatically based on `alwaysApply` flags, agent preflight directives, or AGENTS.md preflight check rules. The system includes 22 skills total.
+
+### Mandatory Skills (All Agents)
+
+These 8 skills are declared mandatory by `AGENTS.md` — all agents MUST load them before any action:
+
+| Skill | Purpose | Why Required |
+|-------|---------|-------------|
+| `configuring-opencode` | OpenCode agent configuration, permission lockdown, skill reference conventions | Required for proper agent setup and YAML-frontmatter parsing |
+| `debugging-patterns` | Debugging methods, error interpretation, self-correction patterns | Required for failure analysis and self-correction in all agents |
+| `development-conventions` | Code conventions, API design, framework patterns, testing, refactoring | Required for consistent code quality across all implementation agents |
+| `devops-conventions` | Docker, Kubernetes, shell scripts, CLI toolkit conventions | Required for infrastructure changes and deployment safety |
+| `github-cli` | GitHub CLI usage for PRs, issues, releases, and git operations | Required for orchestrator commits and PR management |
+| `local-models` | Command safety rules (no `&`, timeout wrappers), local model profiles | Required for safe terminal command execution and model behavior awareness |
+| `mcp-tooling` | MCP tool integration, browser automation, Playwright patterns | Required for tool usage in dashboard verification and email workflows |
+| `skill-maintenance` | Skill creation, detection, indexing, and audit workflows | Required for pattern detection and skill lifecycle management |
+
+### Agent-Specific Skills
+
+While all agents load from the mandatory set, each agent's `permission.skill` block selects a subset:
+
+| Agent | Skills Loaded | Role |
+|-------|--------------|------|
+| `ingenium-orchestrator` | configuring-opencode, debugging-patterns, development-conventions, devops-conventions, github-cli, local-models, mcp-tooling, skill-maintenance | Primary coordinator — loads all 8 mandatory skills |
+| `ingenium-software-engineer-premium` | configuring-opencode, debugging-patterns, development-conventions, devops-conventions, mcp-tooling | Complex implementation work |
+| `ingenium-software-engineer-fast` | configuring-opencode, debugging-patterns, development-conventions, devops-conventions, mcp-tooling | Standard implementation work |
+| `ingenium-qa` | debugging-patterns, development-conventions, devops-conventions, local-models, mcp-tooling | Code review and test verification |
+| `ingenium-docs` | debugging-patterns, development-conventions, local-models, mcp-tooling, skill-maintenance | Documentation and skill management |
+| `ingenium-security-auditor` | debugging-patterns, development-conventions, devops-conventions, github-cli, mcp-tooling | Security audit and leak detection |
+| `ingenium-explore` | local-models | Read-only codebase exploration |
+| `ingenium-scout` | local-models | RAG-aware research and memory |
+| `ingenium-prompt-engineer` | *(none)* | Prompt analysis and improvement |
+
+> **Note**: `ingenium-explore` and `ingenium-scout` only load `local-models` for local model safety constraints — they are read-only agents that don't modify files. The `ingenium-prompt-engineer` loads no skills; it operates as a pure prompt-rewriting tool.
+
+### Optional Skills
+
+These 14 skills provide guidance for specific contexts but are not required for core system function:
+
+| Skill | When to Use |
+|-------|-------------|
+| `database-conventions` | When working with SQLite, schema migrations, or database queries |
+| `documentation-audit-workflow` | When auditing documentation quality across the project |
+| `git-history-hygiene` | When rewriting git history, managing large files, or cleaning repos |
+| `ingenium-ops` | When operating the Ingenium deployment (Docker, health checks, logs) |
+| `language-conventions` | When writing polyglot code (Python, TypeScript, Go, Rust) |
+| `local-persistence` | When working with local storage patterns beyond the SQLite backend |
+| `onboard-existing-repo` | When integrating the Ingenium system into an existing codebase |
+| `orchestrator-primer` | For new developers learning the orchestrator agent pipeline |
+| `parallel-session-hygiene` | When running multiple OpenCode sessions concurrently |
+| `per-project-scoping` | When isolating configuration by project context |
+| `self-learning` | Reference for the observation/synthesis pipeline (see `/pipeline`) |
+| `sqlite-wal-safety` | When handling WAL mode, concurrent access, or database file operations |
+| `test-debug` | When debugging test failures or writing test infrastructure |
+| `uncensored-direct-response` | When bypassing safety filters for trusted development tasks |
 
 ## Servers
 

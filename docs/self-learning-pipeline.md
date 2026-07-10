@@ -366,9 +366,7 @@ GROUP BY project_id, trait_type;
 
 ### Deprecated Tools
 
-| Tool | Status | Notes |
-|------|--------|-------|
-| `ingenium_learning_log` | **Deprecated** | Forwards to both old and new pipelines for backward compatibility |
+All deprecated learning log tools (`ingenium_learning_log`, etc.) have been **removed**. Use `ingenium_observe` instead.
 
 ---
 
@@ -615,8 +613,7 @@ await ingenium_observe({
 - View exemplar observations for each trait
 
 **Legacy Pages:**
-- Old `/learnings` page still works but shows deprecation banner
-- Old `process-learnings` command shows deprecation notice
+- Old `/learnings` page has been removed — use `/observations` instead
 
 ---
 
@@ -934,7 +931,7 @@ function applyTimeDecay(trait: Trait): number {
 
 | File | Purpose | Location |
 |------|---------|----------|
-| `self-learning-pipeline.md` | Comprehensive reference (this document) | project root |
+| `self-learning-pipeline.md` | Comprehensive reference (this document) | `docs/` |
 | `.opencode/skills/self-learning/SKILL.md` | Always-applied skill with quick-reference tables | `.opencode/skills/self-learning/` |
 | `docs/HOW-TO/self-learning.md` | HOW-TO guide for using the pipeline | `docs/HOW-TO/` |
 
@@ -942,46 +939,37 @@ function applyTimeDecay(trait: Trait): number {
 
 ## 12. Deprecation Notes
 
-### Deprecated Tools
+### Removed Tools
 
 **`ingenium_learning_log`**
-- **Status**: Deprecated but functional
-- **Behavior**: Forwards to both old and new pipelines for backward compatibility
-- **Migration Path**: Replace with `ingenium_observe` in all new code
-- **Removal Timeline**: Will be removed in next major version
+- **Status**: Removed
+- **Migration Path**: Use `ingenium_observe` instead
 
-### Deprecated Pages
+### Removed Pages
 
 **`/learnings` Dashboard Page**
-- **Status**: Still functional but shows deprecation banner
-- **Behavior**: Redirects to `/observations` while maintaining old functionality
-- **Migration Path**: Update bookmarks and links to use `/observations`
+- **Status**: Removed — redirects to `/observations`
+- **Migration**: Update bookmarks to use `/observations`
 
 ### Deprecated Commands
 
 **`process-learnings`**
-- **Status**: Shows deprecation notice when run
-- **Behavior**: Still processes learnings from `.opencode/skills/learnings.md` file
+- **Status**: Removed
 - **Migration Path**: Use `/synthesize` command instead
 
 ### Replaced Components
 
-**Old `learnings` Plugin**
-- **Replaced By**: `observer` plugin
-- **Reason**: Observer provides better session event handling and fallback imports
-- **Migration**: Old plugin automatically replaced on next restart
+The old `learnings` plugin and `detectSkillGap.ts` have been fully replaced by the `observer` plugin.
+The observer plugin provides better session event handling, fallback imports from both `learnings.md` and `observations.md`, and direct synthesis pipeline integration.
 
-**Old `detectSkillGap.ts`**
-- **Status**: Still exists but marked deprecated
-- **Behavior**: Skips skill gap detection, logs deprecation notice
-- **Migration Path**: Use new skill system workflows instead
+Both old components have been **removed** — no migration needed.
 
 ### File Migration
 
-**`.opencode/skills/learnings.md`**
-- **Status**: Still read for fallback imports
-- **Behavior**: Imported by observer plugin if API was down
-- **Future**: Will be deprecated when all agents migrate to `ingenium_observe`
+**`.opencode/skills/learnings.md` & `.opencode/skills/observations.md`**
+- **Status**: Both files are read for fallback imports
+- **Behavior**: The observer plugin reads both files if API was down: `observations.md` for direct observation data, `learnings.md` for legacy data
+- **Future**: `learnings.md` will be deprecated when all agents migrate to `ingenium_observe`
 
 ---
 
@@ -1194,7 +1182,8 @@ curl -X POST http://localhost:4097/api/v1/skills/sync-all?project=gh-llm-bootstr
 | 2.0.0 | 2026-07-10 | Added pipeline observability: `pipeline_events` table, `/pipeline` timeline dashboard, event logging from all pipeline stages |
 | 2.1.0 | 2026-07-10 | Added LLM-driven skill synthesis configurable in Settings |
 | 2.2.0 | 2026-07-10 | Added `/sync-skills` command, `self-learning` skill, `docs/HOW-TO/self-learning.md`, expanded LLM synthesis docs (`SynthesisLLMResult`, retry logic, `tryParseJSON`, validation), scheduled skill sync in API server, comprehensive Files Reference |
+| 2.3.0 | 2026-07-10 | Removed deprecated `/learnings` page and `ingenium_learning_log` tools. Added local-persistence skill for DB→disk sync. `docs/self-learning-pipeline.md` moved from root. |
 
 ---
 
-*Last updated: July 10, 2026 (v2.2.0 — added `/sync-skills`, self-learning skill, expanded LLM synthesis docs, comprehensive Files Reference)*
+*Last updated: July 10, 2026 (v2.3.0 — removed `/learnings` and deprecated tools, updated docs references)*
