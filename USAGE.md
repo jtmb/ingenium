@@ -15,16 +15,16 @@ docker compose up --build
 
 This starts 3 services: API (port 4097), Dashboard (port 3000), and MCP Server (stdio-ready, 48 tools).
 
-For Docker, a single container runs all 3 via supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096).
+For Docker, a single container runs all 3 via supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096). Build-time UID matching ensures write access to workspace.
 
 ## Projects
 
-**What it does**: Browse and manage project configurations. Each project has its own context, skills, and learnings isolated in per-project SQLite databases.
+**What it does**: Browse and manage project configurations. Each project has its own context, skills, and learnings isolated in per-project SQLite databases. Dashboard provides Active/Archived tab views with inline rename, archive/unarchive, and purge actions.
 
 **How to use**:
 - View active projects or toggle to the "Archived" tab for archived projects
 - Create a new project with a name (auto-resolved to UUID)
-- Rename a project inline (click "Rename" on any project card)
+- Rename a project inline (PATCH /projects/:name)
 - Archive a project (soft-deletes with timestamp; appears in Archived tab)
 - Restore an archived project from the Archived tab
 - Purge expired projects (configurable retention period in Settings)
@@ -37,16 +37,16 @@ For Docker, a single container runs all 3 via supervisord: API (:4097), Dashboar
 
 ## Skills
 
-**What it does**: Browse and search all 17 AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns. Stored in split-skill format (SKILL.md + metadata.json + references/) with `file_tree` support for auxiliary files.
+**What it does**: Browse and search all 17 AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns. Stored in split-skill format (SKILL.md + metadata.json + references/) with `file_tree` support for auxiliary files. Dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and highlight.js syntax highlighting in Preview/Source modes.
 
 **How to use**:
 - View all skills in the Skills tab (card grid, 3 columns on desktop)
 - Search by name, tag, or keyword
 - Click a skill card to open a split-pane overlay with:
-  - **File tree** — left sidebar navigates the skill's files (SKILL.md, metadata.json, references/)
+  - **File tree** — left sidebar (FileTree component) navigates the skill's files as a collapsible tree (SKILL.md, metadata.json, references/)
   - **Content viewer** — right pane shows file content with syntax highlighting (highlight.js)
   - **Preview/Source toggle** — switch between rendered markdown and raw source
-  - **Inline editing** — click Edit to modify any file directly in the overlay, Save persists to the DB
+  - **Inline editing** — click Edit to modify any file directly in the overlay, Save persists to the DB via PATCH
 - Upload a skill from a `.md` file (frontmatter-parsed) using the Upload button
 - Skills auto-load on session start via /skill-load
 
