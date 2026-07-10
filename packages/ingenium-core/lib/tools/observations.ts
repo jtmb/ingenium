@@ -28,9 +28,9 @@ export function storeObservation(
       now,
       now,
     );
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM observations WHERE id = ?").get(insertResult.lastInsertRowid) as Observation;
   });
+  checkpointAfterWrite();
 
   // Fire pipeline event for observability (outside transaction to avoid nesting)
   try {

@@ -20,7 +20,7 @@ permission:
 Before reading, globbing, or grepping for ANY query, you MUST:
 
 1. Load the `@local-models` skill
-2. Read `seed/skills/local-models/references/qwen-3.5-9b.md`
+2. Read `.opencode/skills/local-models/references/qwen-3.5-9b.md`
 3. Follow rules 3, 5, and 7 (stop-after-5-reads, no-batch-reading,
    prompt-size-awareness)
 

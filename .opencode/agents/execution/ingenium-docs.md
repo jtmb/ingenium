@@ -30,7 +30,7 @@ You create and maintain project documentation and the skill system.
 Before reading, editing, or creating ANY file, you MUST:
 
 1. Load the `@local-models` skill
-2. Read `seed/skills/local-models/references/qwen-3.5-9b.md`
+2. Read `.opencode/skills/local-models/references/qwen-3.5-9b.md`
 3. Follow ALL 7 rules and the failure pattern table listed there
 
 You are qwen3.5-9b running locally. Failure to load this skill

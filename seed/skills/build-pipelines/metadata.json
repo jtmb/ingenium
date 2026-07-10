@@ -1,5 +1,0 @@
-{
-  "name": "build-pipelines",
-  "description": "Multi-phase build pipeline patterns for AI agents — fetch/plan/build/test/upload pipeline, plan.md checkbox format, API-first inter-service communication. Use when designing automated build pipelines driven by AI agents.",
-  "tags": ["agents", "pipelines", "build", "planning", "automation"]
-}

@@ -7,6 +7,7 @@ COPY package.json package-lock.json ./
 
 # Copy workspace package.json files for dependency install
 COPY packages/ingenium-core/package.json ./packages/ingenium-core/
+COPY packages/ingenium-email/package.json ./packages/ingenium-email/
 COPY services/ingenium-api/package.json ./services/ingenium-api/
 COPY services/ingenium-server/package.json ./services/ingenium-server/
 COPY services/ingenium-dashboard/package.json ./services/ingenium-dashboard/
@@ -45,6 +46,8 @@ COPY --from=builder --chown=appuser:appuser /app/node_modules ./node_modules
 # Copy built artifacts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-core/dist ./packages/ingenium-core/dist
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-core/package.json ./packages/ingenium-core/
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-email/dist ./packages/ingenium-email/dist
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-email/package.json ./packages/ingenium-email/
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-api/dist ./services/ingenium-api/dist
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-api/package.json ./services/ingenium-api/
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-server/dist ./services/ingenium-server/dist
@@ -55,7 +58,6 @@ COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/.ne
 # Copy process management config
 COPY --chown=appuser:appuser supervisord.conf ./supervisord.conf
 COPY --chown=appuser:appuser scripts/docker-entrypoint.sh ./entrypoint.sh
-COPY --chown=appuser:appuser scripts/seed-opencode-projects.js ./seed-opencode-projects.js
 # Copy agent definitions, commands, and skills (excluded from .dockerignore)
 COPY --chown=appuser:appuser .opencode/agents ./.opencode/agents
 COPY --chown=appuser:appuser .opencode/commands ./.opencode/commands

@@ -67,7 +67,7 @@ Skip if the skill already exists (error is fine).
 
 ## Step 4 — Register plugins
 
-1. Read each `.ts` file from `seed/plugins/`
+1. Read each `.ts` file from `.opencode/plugins/`
 2. For each:
    ```
    ingenium_plugin_create(
