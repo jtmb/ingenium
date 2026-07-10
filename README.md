@@ -80,9 +80,11 @@ Multi-project configuration with name→UUID resolution and per-project SQLite d
 AI agent conventions engine — 17 skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained split-skill format (SKILL.md + metadata.json + references/) stored at `seed/skills/` (canonical source) and `.opencode/skills/` (written to disk from DB). Skills are loaded from the SQLite database via the MCP server and auto-invoked based on file type, framework detection, and slash commands. The `file_tree` column stores a JSON map of relative paths → content for complete data round-trips. The dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and syntax highlighting (highlight.js) in both Preview and Source views.
 → [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md)
 
-### 🧠 Learnings
-Self-improving knowledge base with FTS5 full-text search, type/tag categorization, and before/after commit hashes. Every decision, pattern discovery, and bug fix is automatically logged. An automated pipeline (OpenCode plugin at `.opencode/plugins/learnings.ts`) reads pending learnings from the API, classifies them (add-pattern/update-rule/noop), and edits skill files. Learnings are DB-only with a file fallback at `.opencode/skills/learnings.md`.
-→ [docs/HOW-TO/learnings.md](docs/HOW-TO/learnings.md)
+### 🧠 Self-Learning Pipeline
+Self-improving knowledge base with observation collection, synthesis processing, and personality trait aggregation. Every decision, pattern discovery, and bug fix is automatically logged via `ingenium_observe`. An automated pipeline (Observer plugin at `.opencode/plugins/observer.ts`) processes observations into personality traits and skill updates. The system uses 10 observation types and creates 10 personality trait types for comprehensive agent learning.
+→ [docs/HOW-TO/self-learning.md](docs/HOW-TO/self-learning.md)
+
+> 🔴 **Note:** The old `ingenium_learning_log` is deprecated. Use `ingenium_observe` instead.
 
 ### 📋 Tasks
 Kanban-style task board with `todo` → `in_progress` → `review` → `done` workflow, dependency tracking, priority scoring, and full audit history. Tasks can be created, assigned, moved, linked, and archived via the ingenium-server MCP tools or the dashboard.
@@ -151,12 +153,13 @@ graph LR
 |-----|---------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Project structure, data flow, key components, skill file_tree format |
 | [docs/TECH-STACK.md](docs/TECH-STACK.md) | Dependencies, versions, why each was chosen |
-| [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | Naming, file organization, error handling, learning logging, plugin auto-config sync |
+| [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | Naming, file organization, error handling, observation logging, plugin auto-config sync |
 | [docs/VARIABLES.md](docs/VARIABLES.md) | All environment variables with defaults |
 | [docs/agents.md](docs/agents.md) | Agent profiles and pipeline lifecycle |
 | [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md) | Project management feature guide |
 | [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md) | Skill system usage and file_tree format |
-| [docs/HOW-TO/learnings.md](docs/HOW-TO/learnings.md) | Knowledge base and self-learning pipeline |
+| [docs/HOW-TO/self-learning.md](docs/HOW-TO/self-learning.md) | Self-learning pipeline with observations and personality traits |
+| [docs/HOW-TO/learnings.md](docs/HOW-TO/learnings.md) | Old learnings documentation (deprecated, kept for reference) |
 | [docs/HOW-TO/tasks.md](docs/HOW-TO/tasks.md) | Kanban task board feature guide |
 | [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md) | Plugin lifecycle management guide |
 | [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md) | MCP server configuration guide |

@@ -21,29 +21,38 @@ Every service with a frontend (Next.js dashboard) must have a `STYLING-GUIDE.md`
 
 The guide is generated from a live screenshot using the vision API and updated whenever visual changes are made.
 
-## Learning Logging — MCP Tool + File Fallback
+## Self-Learning Pipeline — Observations (Preferred)
 
-Every change that modifies skills, agents, hooks, plugins, config, or architecture MUST be logged via the `ingenium_learning_log` MCP tool. This writes to the Ingenium SQLite database with FTS5 indexing for cross-session searchability.
+The self-learning pipeline uses **observations** instead of the deprecated `ingenium_learning_log` tool. Every change that modifies skills, agents, hooks, plugins, config, or architecture should be logged via `ingenium_observe`.
 
-Learnings are **DB-primary** with a **file fallback**: if the API is down, agents append to `.opencode/skills/learnings.md`. On the next session start, `importLearningsFromFile()` in the learnings plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
+Observations are **DB-primary** with a **file fallback**: if the API is down, observations append to `.opencode/skills/learnings.md`. On the next session start, `importLearningsFromFile()` in the observer plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
 
-**entry_type enum** (Zod schema, `packages/ingenium-core/lib/schema.ts`):
+**Observation types** (Zod schema, `packages/ingenium-core/lib/schema.ts`):
 
 | Type | When used |
 |------|-----------|
+| `correction` | User corrects agent behavior |
+| `preference` | User preference or configuration choice (most common) |
 | `pattern` | Repeated convention, workflow, or discovered pattern |
-| `decision` | Architecture or design decision with rationale |
-| `bug` | Bug fix with root cause and prevention |
-| `preference` | User preference or configuration choice |
-| `research` | Investigation findings |
-| `skill` | Skill created, updated, or retired |
-| `agent` | Agent definition changed |
-| `config` | Configuration change |
-| `hook` | Hook lifecycle trigger changed |
-| `plugin` | Plugin lifecycle event |
-| `architecture` | Architecture decision |
+| `insight` | Novel discovery |
+| `feedback` | Implicit accept/reject |
+| `behavior` | User behavior signal |
+| `terminology` | Preferred language |
+| `workflow` | Workflow sequence |
+| `error` | User encountered error |
+| `goal` | Stated or implied goal |
 
-The `orchestrator-primer` skill requires the orchestrator to call `ingenium_learning_log` after every subagent task that modifies files (🔴 HARD RULE). The `generic-conventions` skill extends this to all agents for any code change. The `update-skills` skill adds auto-trigger instructions for logging when detection signals fire.
+The `orchestrator-primer` skill requires the orchestrator to call `ingenium_observe(observation_type="preference", ...)` after every subagent task that modifies files (🔴 HARD RULE). The `generic-conventions` skill extends this to all agents for any code change. The `update-skills` skill adds auto-trigger instructions for logging when detection signals fire.
+
+> 🔴 **Note:** The old `ingenium_learning_log` tool is deprecated but still functional for backward compatibility. New code should use `ingenium_observe`.
+
+### Related Self-Learning Skill
+
+See `.opencode/skills/self-learning/SKILL.md` for complete documentation of the self-learning pipeline, including:
+- Observation types and when to use them
+- Personality trait generation rules
+- Synthesis pipeline architecture
+- MCP tools reference
 
 ## Docker Configuration
 - Build-time UID matching host user for write access to workspace

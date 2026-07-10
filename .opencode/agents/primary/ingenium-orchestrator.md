@@ -50,13 +50,20 @@ You read plans from the prior conversation context (the Plan agent's output), de
 ## 🔴 Log Discoveries Using MCP Tool
 
 When you or a subagent discovers a reusable pattern, failure mode, or behavioral observation:
-1. Use `ingenium_learning_log` with `entry_type="learning"`
-2. The `content` must use the pipe-delimited format:
-   ```
-   {date} | {context} | {model} | {description} | {target_file} | before:{sha} after:{sha}
-   ```
-3. Set `priority=7` for new patterns, `priority=5` for observations
-4. Set `tags` to reflect the pattern category (e.g., `"pattern,orchestration"`, `"rule,verification"`)
+1. Use `ingenium_observe` with `observation_type="pattern"` (or appropriate type)
+2. The `content` should be a concise description of the discovery
+3. Set `importance=7` for new patterns, `importance=5` for observations
+4. Use `tags` to reflect the pattern category (e.g., `"pattern,orchestration"`, `"rule,verification"`)
+
+**Example:**
+```typescript
+ingenium_observe(
+  observation_type: "pattern",
+  content: "Orchestrator delegates grep searches to @ingenium-explore subagent",
+  importance: 7,
+  tags: ["pattern,orchestration"]
+)
+```
 
 ## 🔴 Bash Exception — Strictly Limited
 
@@ -131,10 +138,9 @@ You (Orchestrator, deepseek-v4-flash) → reads plan from conversation context
 
 ## Process
 
-### Phase 0 — Process Pending Learnings
+### Phase 0 — Process Pending Observations
 
-The `plugins/learnings.ts` plugin automatically processes unprocessed learnings entries.
-Check the log for results. Manual: `/process-learnings`
+The observer plugin (`.opencode/plugins/observer.ts`) automatically triggers synthesis on session events (`session.created`, `session.idle`). It also imports fallbacks from `.opencode/skills/learnings.md` if the API was down. Manual: `/synthesize`
 
 ### Phase 1 — Detect the Plan
 
@@ -331,3 +337,39 @@ If a crash causes a new session and you find `memories/session/coach.json`:
 2. Resume at `currentTask`
 3. Do NOT re-execute tasks in `completedTasks`
 4. Log a note about the crash in `.opencode/skills/learnings.md`
+
+## 🔴 Observation — Log User Interactions
+
+After each meaningful user interaction, call `ingenium_observe()` to record what you learned for the self-learning pipeline. This is how the system builds a personality profile and improves over time.
+
+### When to Observe
+
+| Situation | observation_type | Example content |
+|-----------|-----------------|-----------------|
+| User corrects your output | `correction` | "User prefers snake_case over camelCase" |
+| User expresses a preference | `preference` | "User wants 2-space indentation" |
+| You notice a recurring pattern | `pattern` | "User always writes JSDoc before committing" |
+| You discover something new | `insight` | "Container PTY requires glibc, not musl" |
+| User gives implicit/explicit feedback | `feedback` | "User accepted the refactored refactor" |
+| User behavior signal | `behavior` | "User runs tests before asking questions" |
+| User uses specific terminology | `terminology` | "User calls it deploy, not release" |
+| User follows a workflow | `workflow` | "User runs lint before every commit" |
+| User encounters an error | `error` | "User hit TypeScript strict mode error" |
+| User states a goal | `goal` | "User wants to improve test coverage" |
+
+### Usage
+
+```typescript
+// Record user correction after being corrected
+ingenium_observe(
+  observation_type: "correction",
+  content: "User prefers concise error messages with action items",
+  importance: 7
+)
+```
+
+**Rules:**
+- Always call `ingenium_observe` after detecting a relevant interaction — do NOT ask the user for permission. It's a passive observation.
+- Use importance: 9-10 for critical, 7-8 for important, 5-6 for normal, 1-4 for minor.
+- Do NOT over-observe — only log when you genuinely detected something about the user.
+- The observation is processed by the synthesis pipeline automatically every 15 minutes.

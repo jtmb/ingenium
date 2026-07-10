@@ -1,43 +1,57 @@
-# Skill Index
+# SKILL-INDEX.md — Skill Catalog
 
-> Auto-maintained index of all skills. Total: **17 skills**.
+This file lists all skills in the Ingenium system. It is auto-generated from `.opencode/skills/*/SKILL.md` files but can be manually updated when adding new skills.
 
-## Meta Skills
+**Total Skills:** 18
 
-| Skill | Description |
-|-------|-------------|
-| [`skill-maintenance`](skills/skill-maintenance/SKILL.md) | Create, update, retire, index, and audit skills as projects evolve — detects patterns, creates new skills autonomously, regenerates SKILL-INDEX.md |
+| Name | Description |
+|------|-------------|
+| agent-checkpoints | Track and manage agent session checkpoints for recovery and continuity |
+| build-pipelines | CI/CD pipeline conventions, testing strategies, and deployment automation |
+| cost-analyzer | Analyze API costs for LLM usage, primarily DeepSeek V4 Flash/Pro and OpenCode free-tier models |
+| containerized-agents | Container-based agent deployment patterns and best practices |
+| configuring-opencode | OpenCode configuration management and customization |
+| database-conventions | Database design patterns, SQL conventions, and optimization strategies |
+| debugging-patterns | Debugging methodologies, error interpretation, and self-correction techniques |
+| development-conventions | Unified development conventions — README creation, API design, Next.js 16 App Router, and Python conventions |
+| devops-conventions | DevOps conventions for Docker, Kubernetes, CLI tools, and infrastructure |
+| github-cli | GitHub operations including releases, gists, search, PRs, and issues |
+| ingenium-ops | Ingenium system operations and maintenance procedures |
+| language-conventions | Programming language conventions and best practices |
+| local-models | Local LLM deployment, command safety, and model profiles |
+| mcp-tooling | MCP server configuration, Playwright automation, and Thread integration |
+| onboard-existing-repo | Onboarding existing repositories into the Ingenium system |
+| orchestrator-primer | Orchestrator agent patterns and workflow management |
+| self-learning | Self-learning pipeline with observation, synthesis, and personality systems |
+| skill-maintenance | Create, update, retire, index, and audit skills as projects evolve |
 
-## Framework & Domain Conventions
+## Maintenance
 
-| Skill | Description |
-|-------|-------------|
-| [`development-conventions`](skills/development-conventions/SKILL.md) | Unified development conventions — README creation, API design, Next.js 16 App Router, and Python conventions |
-| [`devops-conventions`](skills/devops-conventions/SKILL.md) | Unified DevOps conventions — CLI toolkit (jq, curl, sed, awk, find, grep), Docker container authoring, and Kubernetes manifests |
-| [`local-models`](skills/local-models/SKILL.md) | Local LLM management — Qwen model profiles, command safety rules, local provider API reference (LM Studio, Ollama, vLLM), cross-model strategy |
-| [`github-cli`](skills/github-cli/SKILL.md) | GitHub CLI (`gh`) integration — update repo metadata, manage PRs/issues/releases, create gists, search code, query the API |
+This file should be regenerated using `/update-skill-index` command or by running:
 
-## Tool & Domain Skills
+```bash
+# List all skills in directory
+ls -d .opencode/skills/*/ | sed 's|.*/||;s|/||' | sort
 
-| Skill | Description |
-|-------|-------------|
-| [`agent-checkpoints`](skills/agent-checkpoints/SKILL.md) | State checkpoint patterns for AI agents |
-| [`build-pipelines`](skills/build-pipelines/SKILL.md) | Multi-phase build pipeline patterns |
-| [`configuring-opencode`](skills/configuring-opencode/SKILL.md) | OpenCode agent configuration conventions |
-| [`containerized-agents`](skills/containerized-agents/SKILL.md) | Docker containerization for agent services |
-| [`debugging-patterns`](skills/debugging-patterns/SKILL.md) | Systematic debugging methodology — isolation, bisection, log-driven analysis, error interpretation, and AI self-correction patterns |
-| [`mcp-tooling`](skills/mcp-tooling/SKILL.md) | MCP tool integration and automation — Playwright browser automation, Thread MCP persistent memory, and future MCP tool integrations |
+# Verify each has a SKILL.md
+for skill in $(ls -d .opencode/skills/*/ | sed 's|.*/||;s|/||'); do
+  if [ ! -f ".opencode/skills/$skill/SKILL.md" ]; then
+    echo "Missing: $skill"
+  fi
+done
+```
 
-## Directory
+## Adding New Skills
 
-1. [`agent-checkpoints`](skills/agent-checkpoints/SKILL.md) — State checkpoint patterns for AI agents
-2. [`build-pipelines`](skills/build-pipelines/SKILL.md) — Multi-phase build pipeline patterns
-3. [`configuring-opencode`](skills/configuring-opencode/SKILL.md) — OpenCode agent configuration conventions
-4. [`containerized-agents`](skills/containerized-agents/SKILL.md) — Docker containerization for agent services
-5. [`debugging-patterns`](skills/debugging-patterns/SKILL.md) — Systematic debugging & self-correction
-6. [`development-conventions`](skills/development-conventions/SKILL.md) — README, API, Next.js, Python conventions
-7. [`devops-conventions`](skills/devops-conventions/SKILL.md) — CLI toolkit, Docker, Kubernetes conventions
-8. [`github-cli`](skills/github-cli/SKILL.md) — GitHub CLI integration
-9. [`local-models`](skills/local-models/SKILL.md) — Local LLM management & command safety
-10. [`mcp-tooling`](skills/mcp-tooling/SKILL.md) — MCP tool integration & automation (Playwright + Thread)
-11. [`skill-maintenance`](skills/skill-maintenance/SKILL.md) — Skill lifecycle management
+When adding a new skill:
+
+1. Create directory `.opencode/skills/<name>/`
+2. Write `SKILL.md` with YAML frontmatter (name, description)
+3. Add entry to this file in the table above
+4. Run `/update-skill-index` to regenerate
+
+## Related Documentation
+
+- [docs/HOW-TO/skills.md](./HOW-TO/skills.md) — Skill system usage guide
+- [AGENTS.md](./AGENTS.md) — Agent protocol and mandatory skills
+- [docs/CONVENTIONS.md](./CONVENTIONS.md) — Development conventions

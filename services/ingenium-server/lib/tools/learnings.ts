@@ -8,8 +8,27 @@ import { api } from "../client.js";
 
 /** Log a new learning entry. Supports optional tags, priority, and session association. */
 export async function learningLog(project: string, entryType: string, content: string, tags?: string, priority?: number, sessionId?: string) {
+  // DEPRECATED: Use ingenium_observe instead. This still works but also forwards to observations.
   try {
     const res = await api.post("/learnings", { entry_type: entryType, content, tags, priority, session_id: sessionId }, { project });
+
+    // Forward to the new observations endpoint (non-blocking — failure is silent)
+    try {
+      const mappedType =
+        entryType === "bug" ? "error" :
+        entryType === "preference" ? "preference" :
+        entryType === "pattern" ? "pattern" :
+        entryType === "research" ? "insight" :
+        entryType === "decision" ? "behavior" : "feedback";
+      await api.post("/observations", {
+        observation_type: mappedType,
+        content,
+        importance: priority || 5,
+        source: "import",
+        context: JSON.stringify({ legacy_type: entryType, tags }),
+      }, { project });
+    } catch (_) { /* non-fatal, observation forwarding */ }
+
     return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
   } catch (err: any) {
     // API unavailable — fallback: save locally for next-session import

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { learnings, detectSkillGap } from "ingenium-core";
+import { learnings, detectSkillGap, observations } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 export const learningsRouter = Router();
@@ -37,7 +37,28 @@ learningsRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const { entry_type, content, tags, priority, session_id } = req.body;
+  // DEPRECATED: This endpoint will be replaced by observations.
+  // New code should use POST /api/v1/observations instead.
   const entry = learnings.logLearning(projectId, entry_type, content, tags, priority, session_id);
+
+  // Relay to observations for compatibility with the new pipeline
+  if (process.env.INGENIUM_LEGACY_LEARNINGS !== "1") {
+    try {
+      observations.storeObservation(
+        projectId,
+        (entry_type === "bug" ? "error" :
+        entry_type === "preference" ? "preference" :
+        entry_type === "pattern" ? "pattern" :
+        entry_type === "research" ? "insight" :
+        entry_type === "decision" ? "behavior" : "insight") as any,
+        content,
+        priority || 5,
+        "import",
+        JSON.stringify({ legacy_learning_id: entry.id, original_type: entry_type }),
+        session_id,
+      );
+    } catch (_) { /* non-fatal */ }
+  }
 
   // Auto-detect skill gaps (fire-and-forget, non-blocking)
   if (process.env.INGENIUM_SKILL_AUTO_DETECT !== "0") {

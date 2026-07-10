@@ -14,7 +14,5 @@ dist/ build/ .next/ target/ *.tsbuildinfo
 coverage/ .nyc_output/ test-results/
 # Archive
 .agents.old/
-# OpenCode local data
-.opencode/
 # Misc
 .turbo/ .cache/ .DS_Store

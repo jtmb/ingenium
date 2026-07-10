@@ -26,6 +26,15 @@ import { learningList, skillFromLearnings } from "../lib/tools/learnings.js";
 import { pluginGet } from "../lib/tools/plugins.js";
 import { planList } from "../lib/tools/context.js";
 import * as agentTools from "../lib/tools/agents.js";
+import {
+  observationStore, observationSearch, observationList, observationStats,
+} from "../lib/tools/observations.js";
+import {
+  personalityProfile, personalityTraits,
+} from "../lib/tools/personality.js";
+import {
+  synthesisRun, synthesisStatus,
+} from "../lib/tools/synthesis.js";
 
 /** Shared required project parameter. Projects must be created explicitly via ingenium_project_init or the dashboard. */
 const projectParam = z.string();
@@ -156,6 +165,92 @@ server.registerTool(
   "ingenium_skill_from_learnings",
   { description: "Scan recent learnings for skill gaps and auto-create tasks for AI engineers to write missing skills.", inputSchema: { project: projectParam } },
   async ({ project }) => skillFromLearnings(project),
+);
+
+// ── Observations ──────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_observe",
+  {
+    description: "Store an observation about the user's behavior, preferences, or interaction pattern. The agent uses this naturally during its workflow — no explicit self-reporting needed. Types: correction, preference, pattern, insight, feedback, behavior, terminology, workflow, error, goal.",
+    inputSchema: {
+      project: projectParam,
+      observation_type: z.string(),
+      content: z.string(),
+      importance: z.number().optional(),
+      source: z.string().optional(),
+      context: z.string().optional(),
+    },
+  },
+  async ({ project, observation_type, content, importance, source, context }) =>
+    observationStore(project, observation_type, content, importance, source, context),
+);
+
+server.registerTool(
+  "ingenium_observation_search",
+  {
+    description: "Full-text search across observations.",
+    inputSchema: { project: projectParam, query: z.string() },
+  },
+  async ({ project, query }) => observationSearch(project, query),
+);
+
+server.registerTool(
+  "ingenium_observation_list",
+  {
+    description: "List observations with optional status and type filters.",
+    inputSchema: { project: projectParam, status: z.string().optional(), type: z.string().optional() },
+  },
+  async ({ project, status, type }) => observationList(project, status, type),
+);
+
+server.registerTool(
+  "ingenium_observation_stats",
+  {
+    description: "Get observation pipeline statistics (total, pending, processed).",
+    inputSchema: { project: projectParam },
+  },
+  async ({ project }) => observationStats(project),
+);
+
+// ── Personality ───────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_personality",
+  {
+    description: "Get the full learned personality profile — aggregated traits about user preferences, communication style, and behavior patterns.",
+    inputSchema: { project: projectParam },
+  },
+  async ({ project }) => personalityProfile(project),
+);
+
+server.registerTool(
+  "ingenium_personality_traits",
+  {
+    description: "List personality traits, optionally filtered by type.",
+    inputSchema: { project: projectParam, trait_type: z.string().optional() },
+  },
+  async ({ project, trait_type }) => personalityTraits(project, trait_type),
+);
+
+// ── Synthesis ─────────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_synthesis_run",
+  {
+    description: "Trigger the background synthesis pipeline — processes pending observations into personality traits and skill updates.",
+    inputSchema: { project: projectParam },
+  },
+  async ({ project }) => synthesisRun(project),
+);
+
+server.registerTool(
+  "ingenium_synthesis_status",
+  {
+    description: "Check the synthesis pipeline status (pending count, last run, processed count).",
+    inputSchema: { project: projectParam },
+  },
+  async ({ project }) => synthesisStatus(project),
 );
 
 // ── Tasks ───────────────────────────────────────────────
