@@ -4,6 +4,8 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded fr
 
 > 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
 
+> 🔴 **Never state a fact without verifying against source files.** If you claim "X uses Y", you must have READ the file containing X. If you claim "Z imports W", you must have GREP'd for the import. If you cannot verify in one read or grep, say "I'm not sure — let me check" instead of guessing confidently. Confidently wrong claims waste implementation time.
+
 > **Dashboard**: Skills can be managed through the Ingenium Dashboard at [http://localhost:3000](http://localhost:3000).
 
 ---
