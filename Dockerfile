@@ -56,6 +56,8 @@ RUN chmod +x /app/entrypoint.sh
 
 # Create shared config and data directories with proper ownership
 RUN mkdir -p /app/config /app/.ingenium /app/.opencode/skills && chown appuser:appuser /app/config /app/.ingenium /app/.opencode /app/.opencode/skills
+# Pre-create appuser home for OpenCode config persistence
+RUN mkdir -p /home/appuser/.config/opencode /home/appuser/.local/share/opencode && chown -R appuser:appuser /home/appuser
 # Pre-create both the container default and the fallback opencode.json
 RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@latest","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/services/ingenium-server/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data"}}},"plugin":[]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
