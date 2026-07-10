@@ -36,6 +36,11 @@ export default function LearningsPage() {
   return (
     <div className="space-y-8">
       <h1 className="text-3xl font-bold">Learnings</h1>
+      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-800">
+        Learnings are deprecated. Use the new <a href="/observations" className="underline">Observations</a> page. 
+        The agent now records observations automatically during interactions — no self-reporting needed.
+        Old learnings are automatically forwarded to the new pipeline.
+      </div>
       <div className="bg-white p-4 rounded border space-y-3">
         <select value={type} onChange={(e) => setType(e.target.value)} className="border p-2 rounded">
           <option value="pattern">Pattern</option>

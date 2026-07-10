@@ -13,7 +13,9 @@ Analyzes API costs for LLM usage, primarily DeepSeek V4 Flash/Pro and OpenCode f
 
 - Set `INGENIUM_MONITORING_COST_TRACKING=true` to log estimated costs alongside API calls
 - Costs are estimates based on token counts — actual billing may vary
-- Monitor costs via `ingenium_learning_log(entry_type="cost", ...)` entries
+- Monitor costs via `ingenium_observe(observation_type="preference", content="...", importance=...)` entries
+
+> 🔴 **Note:** The old `ingenium_learning_log` is deprecated. Use `ingenium_observe` instead.
 
 ## Budgeting
 

@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql"]) {
+    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info(`Applied migration ${file}`);
@@ -90,6 +90,36 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "006_skill_file_tree.sql"), "utf-8");
       db.exec(sql);
       logger.info("Applied migration 006_skill_file_tree.sql");
+    }
+
+    // Check if observations table exists (migration 007)
+    const observationsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='observations'"
+    ).get() as { count: number };
+    if (observationsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "007_observations.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 007_observations.sql");
+    }
+
+    // Check if personality_traits table exists (migration 008)
+    const personalityCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='personality_traits'"
+    ).get() as { count: number };
+    if (personalityCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "008_personality_traits.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 008_personality_traits.sql");
+    }
+
+    // Check if pipeline_events table exists (migration 009)
+    const pipelineEventsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='pipeline_events'"
+    ).get() as { count: number };
+    if (pipelineEventsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "009_pipeline_events.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 009_pipeline_events.sql");
     }
   }
 }

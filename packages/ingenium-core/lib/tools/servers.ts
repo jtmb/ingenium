@@ -21,6 +21,16 @@ export function registerServer(projectId: string, name: string, command: string,
   });
 }
 
+export function updateServer(projectId: string, name: string, fields: { running?: number }): void {
+  execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    if (fields.running !== undefined) {
+      db.prepare("UPDATE servers SET running = ? WHERE project_id = ? AND name = ?").run(fields.running, projectId, name);
+    }
+    checkpointAfterWrite();
+  });
+}
+
 export function removeServer(projectId: string, name: string): void {
   execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");

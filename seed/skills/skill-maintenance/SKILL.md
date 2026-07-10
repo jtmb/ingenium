@@ -56,9 +56,11 @@ git commit -m "skill-maintenance: {summary of what changed}"
 AFTER=$(git rev-parse --short HEAD)
 ```
 
-### 🔴 Log Every Change to learnings.md
+### 🔴 Log Every Change to Observations
 
-Every change MUST be logged with Before and After hashes. Also log via MCP tools when available (`ingenium_learning_log`).
+Every change MUST be logged with Before and After hashes. Also log via MCP tools when available (`ingenium_observe(observation_type="preference", ...)`).
+
+> 🔴 **Note:** The old `ingenium_learning_log` is deprecated. Use `ingenium_observe` instead.
 
 ## Reference Files
 

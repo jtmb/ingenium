@@ -1,7 +1,11 @@
 # HOW-TO: Learnings
 
+> 🔴 **DEPRECATED** — This documentation is for the old learnings system. The new self-learning pipeline uses observations (see [docs/HOW-TO/self-learning.md](./self-learning.md)). The `ingenium_learning_log` tool still works but forwards to both old and new pipelines.
+
 ## What It Does
 Logs and searches learning entries across AI agent sessions. Learnings are FTS5-indexed for full-text search. Each entry has a type (pattern, decision, bug, preference, research) and optional tags. An automated pipeline processes learnings into skill file updates.
+
+**Migration:** Use `ingenium_observe` instead of `ingenium_learning_log`. See [docs/HOW-TO/self-learning.md](./self-learning.md) for the new system.
 
 ## entry_type Reference
 
@@ -49,28 +53,38 @@ Every `POST /learnings` with `entry_type ≠ "skill"` and `priority ≥ 5` trigg
 
 ### MCP Tools
 
-| Tool | Purpose |
-|------|---------|
-| `ingenium_learning_log` | Log a new learning entry with optional tags, priority, session |
-| `ingenium_learning_search` | Full-text search across learning entries |
-| `ingenium_learning_list` | List learning entries |
-| `ingenium_skill_from_learnings` | Scan recent learnings for skill gaps, create tasks for missing skills |
-| `process_learnings` | Process unprocessed learning entries into skill file updates |
+| Tool | Purpose | Status |
+|------|---------|--------|
+| `ingenium_learning_log` | Log a new learning entry (deprecated, forwards to both old and new pipelines) | Deprecated |
+| `ingenium_learning_search` | Full-text search across learning entries | Deprecated |
+| `ingenium_learning_list` | List learning entries | Deprecated |
+| `ingenium_skill_from_learnings` | Scan recent learnings for skill gaps, create tasks for missing skills | Deprecated |
+| `process_learnings` | Process unprocessed learning entries into skill file updates | Deprecated |
 
-## API Endpoints
-- `GET /api/v1/learnings?project=<name>` — recent learnings
-- `POST /api/v1/learnings?project=<name>` — log new entry
-- `GET /api/v1/learnings/search?project=<name>&q=<query>` — FTS5 search
+**Use these instead:**
+- `ingenium_observe` — Log observations (new system)
+- `ingenium_observation_search` — Search observations
+- `ingenium_synthesis_run` — Trigger synthesis pipeline
 
-## Code Location
-- Plugin: `.opencode/plugins/learnings.ts` and `learnings-core.ts`
-- Page: `services/ingenium-dashboard/src/app/learnings/page.tsx`
-- API client: `services/ingenium-dashboard/src/lib/api.ts` → `api.learnings`
-- Route: `services/ingenium-api/lib/routes/learnings.ts`
-- Core: `packages/ingenium-core/lib/tools/learnings.ts` and `detectSkillGap.ts`
-- Tests: `packages/ingenium-core/tests/learnings.test.ts` (11 tests)
+## API Endpoints (Deprecated)
+- `GET /api/v1/learnings?project=<name>` — recent learnings (deprecated)
+- `POST /api/v1/learnings?project=<name>` — log new entry (deprecated)
+- `GET /api/v1/learnings/search?project=<name>&q=<query>` — FTS5 search (deprecated)
+
+**Use these instead:**
+- `GET /api/v1/observations` — List observations
+- `POST /api/v1/observations` — Log new observation
+- `GET /api/v1/observations/search` — FTS5 search observations
+
+## Code Location (Deprecated)
+- Plugin: `.opencode/plugins/learnings.ts` and `learnings-core.ts` (deprecated, use observer.ts)
+- Page: `services/ingenium-dashboard/src/app/learnings/page.tsx` (deprecated, use observations/page.tsx)
+- API client: `services/ingenium-dashboard/src/lib/api.ts` → `api.learnings` (deprecated)
+- Route: `services/ingenium-api/lib/routes/learnings.ts` (deprecated)
+- Core: `packages/ingenium-core/lib/tools/learnings.ts` and `detectSkillGap.ts` (deprecated)
 
 ## Related Docs
-- STYLING-GUIDE.md — form and badge styling
-- docs/CONVENTIONS.md — learning→skill auto-detection rules
-- docs/ARCHITECTURE.md — learning system architecture
+- STYLING-GUIDE.md — form and badge styling (deprecated)
+- docs/CONVENTIONS.md — learning→skill auto-detection rules (deprecated, use observation rules)
+- docs/ARCHITECTURE.md — learning system architecture (deprecated, use self-learning pipeline)
+- [docs/HOW-TO/self-learning.md](./self-learning.md) — New self-learning documentation
