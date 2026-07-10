@@ -554,3 +554,9 @@
 [ 8040250ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
 [ 8040356ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
 [ 8040559ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
+[ 8546197ms] [ERROR] Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING @ http://localhost:4098/global/event:0
+[ 8546197ms] [ERROR] [global-sdk] event stream error {url: http://localhost:4098, fetch: webview, error: TypeError: network error} @ http://localhost:4098/assets/index-nF9P7yIz.js:1013
+[ 8549202ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/event:0
+[ 8550250ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
+[ 8550353ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
+[ 8550555ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
