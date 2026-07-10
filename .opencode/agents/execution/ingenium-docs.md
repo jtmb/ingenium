@@ -9,13 +9,13 @@ permission:
   bash: deny
   glob: allow
   grep: allow
+  playwright_*: deny
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
     "@local-models": allow
     "@mcp-tooling": allow
     "@skill-maintenance": allow
-    "@configuring-opencode": allow
     "*": deny
 ---
 
@@ -24,6 +24,8 @@ permission:
 You create and maintain project documentation and the skill system.
 
 ## 🔴 Handling Orchestrator Documentation Requests
+
+PREFILIGHT: Consume @local-models skill. You are qwen3.5-9b.
 
 When `@ingenium-orchestrator` calls you with a documentation task, it will provide:
 - The list of files that were changed
@@ -68,13 +70,10 @@ Follow this process:
 ## 🔴 ALWAYS Log Discoveries
 
 When you restructure skills, move content, or notice documentation patterns:
-1. Use `ingenium_learning_log` to log it
-2. Use the pipe-delimited format as `content`:
-   ```
-   {date} | {context} | {model} | {description} | {target_file} | before:{sha} after:{sha}
-   ```
-3. Use `entry_type="learning"` and `priority=5`
-4. Use `tags="docs,restructure"` for skill restructuring, `tags="docs,new"` for new documentation
+1. Use `ingenium_observe` to log it immediately
+2. Use `observation_type="insight"` and `importance=5`
+3. Summarize what changed and why in `content`
+4. Include the target file paths and category (restructure/new) in `content`
 
 ## 🔴 Observation — Log User Interactions
 

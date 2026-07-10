@@ -58,7 +58,7 @@ AFTER=$(git rev-parse --short HEAD)
 
 ### 🔴 Log Every Change to learnings.md
 
-Every change MUST be logged with Before and After hashes. Also log via MCP tools when available (`ingenium_learning_log`).
+Every change MUST be logged with Before and After hashes. Also log via MCP tools when available (`ingenium_observe`).
 
 ## Reference Files
 

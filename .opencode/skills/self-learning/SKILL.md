@@ -149,7 +149,7 @@ Run `/synthesize` to trigger the synthesis pipeline, or wait for the background 
 
 ## Deprecation Notice
 
-The old `ingenium_learning_log` MCP tool is **deprecated** but still functional. It forwards to both the old `learnings` table and the new `observations` table for backward compatibility.
+The old `ingenium_learning_log` MCP tool has been **removed**. Use `ingenium_observe` instead.
 
 **Migration path:**
 - New code should use `ingenium_observe` instead of `ingenium_learning_log`

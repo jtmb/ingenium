@@ -68,6 +68,41 @@ export const ServerSchema = z.object({
     running: z.coerce.boolean().default(false),
     created_at: z.string().datetime(),
 });
+export const ObservationSchema = z.object({
+    id: z.number(),
+    project_id: z.string(),
+    observation_type: z.enum([
+        "correction", "preference", "pattern", "insight", "feedback",
+        "behavior", "terminology", "workflow", "error", "goal"
+    ]),
+    content: z.string().min(1),
+    importance: z.number().min(1).max(10).default(5),
+    source: z.enum(["agent", "email", "chat", "document", "calendar", "synthesis", "import", "manual"]).default("agent"),
+    context: z.string().optional(),
+    status: z.enum(["pending", "processed", "skipped", "failed"]).default("pending"),
+    session_id: z.string().optional(),
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+});
+export const PersonalityTraitSchema = z.object({
+    id: z.number(),
+    project_id: z.string(),
+    trait_type: z.enum([
+        "communication_style", "code_preference", "workflow_pattern",
+        "terminology", "priority_signal", "feedback_style",
+        "interaction_pattern", "domain_knowledge", "learned_skill", "personality_trait"
+    ]),
+    trait_value: z.string().min(1),
+    display_label: z.string().optional(),
+    confidence: z.number().min(0).max(1).default(0.5),
+    exemplar_observation_id: z.number().optional(),
+    exemplar_text: z.string().optional(),
+    source: z.string().default("synthesis"),
+    is_active: z.coerce.boolean().default(true),
+    metadata: z.string().optional(),
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+});
 export const PluginSchema = z.object({
     id: z.string(),
     project_id: z.string(),
@@ -93,4 +128,21 @@ export const AgentSchema = z.object({
     enabled: z.coerce.boolean().default(true),
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
+});
+export const PipelineEventSchema = z.object({
+    id: z.number(),
+    project_id: z.string(),
+    event_type: z.enum([
+        "session_created", "session_idle", "observation_created", "observation_imported",
+        "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed",
+        "trait_created", "trait_updated", "plugin_initialized", "plugin_error",
+    ]),
+    event_source: z.enum(["agent", "plugin", "synthesis", "system"]),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    data: z.string().optional(),
+    parent_event_id: z.number().optional(),
+    session_id: z.string().optional(),
+    importance: z.number().min(1).max(10).default(5),
+    created_at: z.string().datetime(),
 });

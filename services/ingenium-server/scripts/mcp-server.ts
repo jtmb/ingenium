@@ -14,7 +14,6 @@ import { stopAll } from "../lib/proxy.js";
 
 // Import MCP tool handlers
 import * as skillTools from "../lib/tools/skills.js";
-import * as learningTools from "../lib/tools/learnings.js";
 import * as taskTools from "../lib/tools/tasks.js";
 import * as contextTools from "../lib/tools/context.js";
 import * as projectTools from "../lib/tools/projects.js";
@@ -22,7 +21,6 @@ import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
 import { settingGet, settingSet } from "../lib/tools/settings.js";
 import { projectRestore, projectListArchived, projectPurge } from "../lib/tools/projects.js";
-import { learningList, skillFromLearnings } from "../lib/tools/learnings.js";
 import { pluginGet } from "../lib/tools/plugins.js";
 import { planList } from "../lib/tools/context.js";
 import * as agentTools from "../lib/tools/agents.js";
@@ -35,6 +33,7 @@ import {
 import {
   synthesisRun, synthesisStatus,
 } from "../lib/tools/synthesis.js";
+import * as emailTools from "../lib/tools/emails.js";
 
 /** Shared required project parameter. Projects must be created explicitly via ingenium_project_init or the dashboard. */
 const projectParam = z.string();
@@ -128,43 +127,6 @@ server.registerTool(
   "ingenium_skill_sync",
   { description: "Sync a skill from its .md file on disk to the DB — edits made directly to the file are persisted.", inputSchema: { project: projectParam, name: z.string() } },
   async ({ project, name }) => skillTools.skillSync(project, name),
-);
-
-// ── Learnings ───────────────────────────────────────────
-
-server.registerTool(
-  "ingenium_learning_log",
-  {
-    description: "Log a new learning entry with optional tags, priority, and session association.",
-    inputSchema: {
-      project: projectParam,
-      entry_type: z.string(),
-      content: z.string(),
-      tags: z.string().optional(),
-      priority: z.number().optional(),
-      session_id: z.string().optional(),
-    },
-  },
-  async ({ project, entry_type, content, tags, priority, session_id }) =>
-    learningTools.learningLog(project, entry_type, content, tags, priority, session_id),
-);
-
-server.registerTool(
-  "ingenium_learning_search",
-  { description: "Full-text search across learning entries.", inputSchema: { project: projectParam, query: z.string() } },
-  async ({ project, query }) => learningTools.learningSearch(project, query),
-);
-
-server.registerTool(
-  "ingenium_learning_list",
-  { description: "List learning entries.", inputSchema: { project: projectParam } },
-  async ({ project }) => learningList(project),
-);
-
-server.registerTool(
-  "ingenium_skill_from_learnings",
-  { description: "Scan recent learnings for skill gaps and auto-create tasks for AI engineers to write missing skills.", inputSchema: { project: projectParam } },
-  async ({ project }) => skillFromLearnings(project),
 );
 
 // ── Observations ──────────────────────────────────────────
@@ -498,6 +460,133 @@ server.registerTool(
   "ingenium_agent_sync",
   { description: "Sync an agent from its .md file on disk to the DB — edits made directly to the file are persisted.", inputSchema: { project: projectParam, name: z.string() } },
   async ({ project, name }) => agentTools.agentSync(project, name),
+);
+
+// ── Email ──────────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_email_list",
+  {
+    description: "List emails in a folder. Use this to check inbox, sent items, or any folder.",
+    inputSchema: { project: projectParam, account: z.string(), folder: z.string().optional(), page: z.number().optional() },
+  },
+  async ({ project, account, folder, page }) => emailTools.emailList(project, account, folder, page),
+);
+
+server.registerTool(
+  "ingenium_email_search",
+  {
+    description: "Search emails by keyword, sender, subject, or date range.",
+    inputSchema: { project: projectParam, account: z.string(), query: z.string(), folder: z.string().optional() },
+  },
+  async ({ project, account, query, folder }) => emailTools.emailSearch(project, account, query, folder),
+);
+
+server.registerTool(
+  "ingenium_email_read",
+  {
+    description: "Read a full email by its UID (unique ID).",
+    inputSchema: { project: projectParam, account: z.string(), uid: z.number(), folder: z.string().optional() },
+  },
+  async ({ project, account, uid, folder }) => emailTools.emailRead(project, account, uid, folder),
+);
+
+server.registerTool(
+  "ingenium_email_send",
+  {
+    description: "Compose and send an email. Use HTML for formatting.",
+    inputSchema: {
+      project: projectParam, account: z.string(), to: z.string(), subject: z.string(),
+      html: z.string().optional(), text: z.string().optional(),
+      cc: z.string().optional(), bcc: z.string().optional(),
+    },
+  },
+  async ({ project, account, to, subject, html, text, cc, bcc }) =>
+    emailTools.emailSend(project, account, to, subject, html, text, cc, bcc),
+);
+
+server.registerTool(
+  "ingenium_email_draft",
+  {
+    description: "Save a draft email without sending.",
+    inputSchema: {
+      project: projectParam, account: z.string(), to: z.string(), subject: z.string(),
+      html: z.string().optional(),
+    },
+  },
+  async ({ project, account, to, subject, html }) => emailTools.emailDraft(project, account, to, subject, html),
+);
+
+server.registerTool(
+  "ingenium_email_folders",
+  {
+    description: "List all email folders for an account.",
+    inputSchema: { project: projectParam, account: z.string() },
+  },
+  async ({ project, account }) => emailTools.emailFolders(project, account),
+);
+
+server.registerTool(
+  "ingenium_email_accounts",
+  {
+    description: "List connected email accounts.",
+    inputSchema: { project: projectParam },
+  },
+  async ({ project }) => emailTools.emailAccounts(project),
+);
+
+server.registerTool(
+  "ingenium_email_triage",
+  {
+    description: "Triage emails — categorize by priority and suggest actions based on learned patterns. Use this to process your inbox.",
+    inputSchema: { project: projectParam, account: z.string(), limit: z.number().optional() },
+  },
+  async ({ project, account, limit }) => emailTools.emailTriage(project, account, limit),
+);
+
+server.registerTool(
+  "ingenium_email_suggest",
+  {
+    description: "Suggest an email response based on learned user patterns and past behavior.",
+    inputSchema: { project: projectParam, account: z.string(), uid: z.number(), folder: z.string().optional() },
+  },
+  async ({ project, account, uid, folder }) => emailTools.emailSuggestResponse(project, account, uid, folder),
+);
+
+server.registerTool(
+  "ingenium_email_draft_response",
+  {
+    description: "Auto-draft a response to an email based on learned patterns and save it to Drafts folder.",
+    inputSchema: { project: projectParam, account: z.string(), uid: z.number(), folder: z.string().optional() },
+  },
+  async ({ project, account, uid, folder }) => emailTools.emailDraftResponse(project, account, uid, folder),
+);
+
+server.registerTool(
+  "ingenium_email_patterns",
+  {
+    description: "List all learned email response patterns (skills with category 'email').",
+    inputSchema: { project: projectParam },
+  },
+  async ({ project }) => emailTools.emailPatterns(project),
+);
+
+server.registerTool(
+  "ingenium_email_watch_start",
+  {
+    description: "Start IMAP IDLE watcher for real-time email monitoring and auto-drafting.",
+    inputSchema: { project: projectParam, account: z.string() },
+  },
+  async ({ project, account }) => emailTools.emailWatchStart(project, account),
+);
+
+server.registerTool(
+  "ingenium_email_watch_status",
+  {
+    description: "Check if the IMAP IDLE watcher is running for an account.",
+    inputSchema: { project: projectParam, account: z.string() },
+  },
+  async ({ project, account }) => emailTools.emailWatchStatus(project, account),
 );
 
 // ── Start ───────────────────────────────────────────────

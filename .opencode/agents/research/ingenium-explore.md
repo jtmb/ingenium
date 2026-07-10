@@ -9,6 +9,7 @@ permission:
   grep: allow
   edit: deny
   bash: deny
+  playwright_*: deny
   skill:
     "@local-models": allow
     "*": deny

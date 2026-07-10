@@ -1,7 +1,6 @@
 # Ingenium Dashboard User Guide
 
-Ingenium's dashboard provides visual management for all your AI agent development tools.
-Access it at **http://localhost:3000** after starting the app.
+Ingenium's dashboard provides visual management for all your AI agent development tools, including email client integration with Gmail and Outlook OAuth2 + IMAP/SMTP support. Access it at **http://localhost:3000** after starting the app.
 
 ## Getting Started
 
@@ -13,9 +12,7 @@ Access it at **http://localhost:3000** after starting the app.
 docker compose up --build
 ```
 
-This starts 3 services: API (port 4097), Dashboard (port 3000), and MCP Server (stdio-ready, 48 tools).
-
-For Docker, a single container runs all 3 via supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096). Build-time UID matching ensures write access to workspace.
+This starts 4 services: API (port 4097), Dashboard (port 3000), MCP Server (stdio-ready, 61 tools), and email client OAuth2 endpoints. For Docker, a single container runs all via supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096). Build-time UID matching ensures write access to workspace.
 
 ## Projects
 
@@ -70,6 +67,31 @@ For Docker, a single container runs all 3 via supervisord: API (:4097), Dashboar
 **Code**: services/ingenium-dashboard/src/app/learnings/page.tsx → services/ingenium-api/routes/learnings.ts → packages/ingenium-core/lib/tools/learnings.ts
 
 **Docs**: docs/HOW-TO/learnings.md
+
+## Mail (Email Client)
+
+**What it does**: IMAP/SMTP email client with OAuth2 authentication for Gmail and Outlook. Supports inbox viewing, compose new messages, search across emails, and account management via the Ingenium Dashboard at `/mail`. The email client uses imapflow for async IMAP operations, nodemailer for SMTP sending, mailparser for MIME parsing, google-auth-library for Google OAuth2 flow, and @azure/msal-node for Microsoft OAuth2. Credentials are encrypted with AES-256-GCM before storage (INGENIUM_EMAIL_ENCRYPTION_KEY).
+
+**How to use**:
+1. Navigate to `/mail` in the dashboard or OpenCode web UI at `http://localhost:4098/mail`
+2. Click "Add Account" and select Gmail or Outlook provider
+3. Complete OAuth2 flow (redirects to Google/Outlook auth, then back to callback)
+4. Select email account from list after successful authentication
+5. View inbox with folder navigation on left sidebar
+6. Compose new messages using the compose button
+7. Search emails by subject, sender, or body content
+
+**OAuth2 Setup**: Before first use, configure OAuth2 credentials:
+- **Gmail**: Create OAuth2 app at https://console.cloud.google.com/apis/credentials with redirect URI `http://localhost:3000/mail/oauth/callback`
+- **Outlook**: Register Azure AD application with same callback URI
+
+**API Endpoints**: `/api/v1/email/accounts`, `/api/v1/email/inbox/:accountId`, `/api/v1/email/messages/:accountId/search?q=...` (see services/ingenium-api/routes/email.ts)
+
+**MCP Tools**: `email_account_list`, `email_compose_message`, `email_search_inbox`, `email_fetch_messages` — see packages/ingenium-email/lib/tools/*.ts for full reference. The email client tools are registered with the Ingenium MCP server and accessible via any OpenCode-compatible client connected to ingenium-server.
+
+**Self-Learning**: Email interactions (account setup, OAuth2 flows, message composition patterns) trigger observations logged by the Observer plugin during session events. Use `ingenium_observe(observation_type="preference", content="<email workflow observation>", importance=5)` after configuring email accounts or discovering useful workflows. See docs/HOW-TO/email.md for complete HOW-TO guide covering account setup, inbox management, compose flow, search patterns, MCP tools reference, and self-learning integration with the Ingenium pipeline.
+
+**Code**: packages/ingenium-email/src (IMAP client: imapflow, SMTP server: nodemailer, MIME parser: mailparser), services/ingenium-api/routes/email.ts → services/ingenium-dashboard/src/app/mail/page.tsx
 
 ## Tasks
 
@@ -131,6 +153,9 @@ curl "http://localhost:4097/api/v1/learnings/search?q=debugging"
 
 # Get all skills
 curl http://localhost:4097/api/v1/skills
+
+# List email accounts (if configured)
+curl http://localhost:4097/api/v1/email/accounts
 ```
 
 See each HOW-TO doc for the full API reference for each feature.

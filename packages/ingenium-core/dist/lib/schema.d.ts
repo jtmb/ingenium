@@ -200,6 +200,88 @@ export declare const ServerSchema: z.ZodObject<{
     running?: boolean | undefined;
 }>;
 export type Server = z.infer<typeof ServerSchema>;
+export declare const ObservationSchema: z.ZodObject<{
+    id: z.ZodNumber;
+    project_id: z.ZodString;
+    observation_type: z.ZodEnum<["correction", "preference", "pattern", "insight", "feedback", "behavior", "terminology", "workflow", "error", "goal"]>;
+    content: z.ZodString;
+    importance: z.ZodDefault<z.ZodNumber>;
+    source: z.ZodDefault<z.ZodEnum<["agent", "email", "chat", "document", "calendar", "synthesis", "import", "manual"]>>;
+    context: z.ZodOptional<z.ZodString>;
+    status: z.ZodDefault<z.ZodEnum<["pending", "processed", "skipped", "failed"]>>;
+    session_id: z.ZodOptional<z.ZodString>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: number;
+    created_at: string;
+    updated_at: string;
+    status: "pending" | "processed" | "failed" | "skipped";
+    project_id: string;
+    content: string;
+    observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
+    importance: number;
+    source: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual";
+    session_id?: string | undefined;
+    context?: string | undefined;
+}, {
+    id: number;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    content: string;
+    observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
+    status?: "pending" | "processed" | "failed" | "skipped" | undefined;
+    session_id?: string | undefined;
+    importance?: number | undefined;
+    source?: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | undefined;
+    context?: string | undefined;
+}>;
+export type Observation = z.infer<typeof ObservationSchema>;
+export declare const PersonalityTraitSchema: z.ZodObject<{
+    id: z.ZodNumber;
+    project_id: z.ZodString;
+    trait_type: z.ZodEnum<["communication_style", "code_preference", "workflow_pattern", "terminology", "priority_signal", "feedback_style", "interaction_pattern", "domain_knowledge", "learned_skill", "personality_trait"]>;
+    trait_value: z.ZodString;
+    display_label: z.ZodOptional<z.ZodString>;
+    confidence: z.ZodDefault<z.ZodNumber>;
+    exemplar_observation_id: z.ZodOptional<z.ZodNumber>;
+    exemplar_text: z.ZodOptional<z.ZodString>;
+    source: z.ZodDefault<z.ZodString>;
+    is_active: z.ZodDefault<z.ZodBoolean>;
+    metadata: z.ZodOptional<z.ZodString>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: number;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    source: string;
+    trait_type: "terminology" | "communication_style" | "code_preference" | "workflow_pattern" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
+    trait_value: string;
+    confidence: number;
+    is_active: boolean;
+    display_label?: string | undefined;
+    exemplar_observation_id?: number | undefined;
+    exemplar_text?: string | undefined;
+    metadata?: string | undefined;
+}, {
+    id: number;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    trait_type: "terminology" | "communication_style" | "code_preference" | "workflow_pattern" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
+    trait_value: string;
+    source?: string | undefined;
+    display_label?: string | undefined;
+    confidence?: number | undefined;
+    exemplar_observation_id?: number | undefined;
+    exemplar_text?: string | undefined;
+    is_active?: boolean | undefined;
+    metadata?: string | undefined;
+}>;
+export type PersonalityTrait = z.infer<typeof PersonalityTraitSchema>;
 export declare const PluginSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -276,4 +358,42 @@ export declare const AgentSchema: z.ZodObject<{
     skills?: string | undefined;
 }>;
 export type Agent = z.infer<typeof AgentSchema>;
+export declare const PipelineEventSchema: z.ZodObject<{
+    id: z.ZodNumber;
+    project_id: z.ZodString;
+    event_type: z.ZodEnum<["session_created", "session_idle", "observation_created", "observation_imported", "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed", "trait_created", "trait_updated", "plugin_initialized", "plugin_error"]>;
+    event_source: z.ZodEnum<["agent", "plugin", "synthesis", "system"]>;
+    title: z.ZodString;
+    description: z.ZodOptional<z.ZodString>;
+    data: z.ZodOptional<z.ZodString>;
+    parent_event_id: z.ZodOptional<z.ZodNumber>;
+    session_id: z.ZodOptional<z.ZodString>;
+    importance: z.ZodDefault<z.ZodNumber>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: number;
+    created_at: string;
+    project_id: string;
+    title: string;
+    importance: number;
+    event_type: "session_created" | "session_idle" | "observation_created" | "observation_imported" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "trait_created" | "trait_updated" | "plugin_initialized" | "plugin_error";
+    event_source: "agent" | "plugin" | "synthesis" | "system";
+    description?: string | undefined;
+    session_id?: string | undefined;
+    data?: string | undefined;
+    parent_event_id?: number | undefined;
+}, {
+    id: number;
+    created_at: string;
+    project_id: string;
+    title: string;
+    event_type: "session_created" | "session_idle" | "observation_created" | "observation_imported" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "trait_created" | "trait_updated" | "plugin_initialized" | "plugin_error";
+    event_source: "agent" | "plugin" | "synthesis" | "system";
+    description?: string | undefined;
+    session_id?: string | undefined;
+    importance?: number | undefined;
+    data?: string | undefined;
+    parent_event_id?: number | undefined;
+}>;
+export type PipelineEvent = z.infer<typeof PipelineEventSchema>;
 //# sourceMappingURL=schema.d.ts.map

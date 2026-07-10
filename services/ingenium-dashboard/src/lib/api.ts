@@ -79,6 +79,82 @@ export type PipelineEvent = {
   created_at: string;
 };
 
+/** ========== Email Types ========== */
+
+export type EmailProvider = "gmail" | "outlook" | "yahoo" | "custom";
+
+export type AuthType = "oauth2" | "app_password";
+
+export interface EmailAddress {
+  name?: string;
+  address: string;
+}
+
+export interface EmailAttachment {
+  partId: string;
+  filename: string;
+  size: number;
+  mimeType: string;
+}
+
+export interface EmailMessage {
+  uid: number;
+  messageId?: string;
+  subject: string;
+  from: EmailAddress[];
+  to: EmailAddress[];
+  cc: EmailAddress[];
+  date: string;
+  body: {
+    text?: string;
+    html?: string;
+  };
+  attachments: EmailAttachment[];
+  flags: string[];
+  folder: string;
+  threadId?: string;
+}
+
+export interface EmailFolder {
+  name: string;
+  path: string;
+  delimiter: string;
+  flags: string[];
+  totalMessages: number;
+  unreadMessages: number;
+}
+
+export interface EmailAccount {
+  id: string;
+  email: string;
+  name: string;
+  provider: EmailProvider;
+  authType: AuthType;
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
+  connected: boolean;
+  lastSync?: string;
+}
+
+export interface TriageResult {
+  emailUid: number;
+  category: string;
+  priority: "high" | "medium" | "low";
+  suggestedAction: "reply_now" | "draft" | "review_later" | "ignore";
+  matchedSkills: string[];
+  confidence: number;
+}
+
+export interface ResponseSuggestion {
+  emailUid: number;
+  subject: string;
+  body: string;
+  matchedSkill: string;
+  confidence: number;
+}
+
 /** A learned personality trait derived from observations via synthesis. */
 export type PersonalityTrait = {
   id: number;
@@ -216,6 +292,95 @@ export const api = {
       if (options?.source) params.set("source", options.source);
       if (options?.limit) params.set("limit", String(options.limit));
       return request<{ data: any[]; total: number }>(`/pipeline/timeline?${params}`);
+    },
+  },
+  emails: {
+    accounts: {
+      list: (project = DEFAULT_PROJECT) =>
+        request<{ data: EmailAccount[] }>(`/emails/accounts?project=${project}`),
+      create: (data: {
+        email: string; name: string; provider: EmailProvider; authType: AuthType;
+        imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number;
+        password?: string;
+      }, project = DEFAULT_PROJECT) =>
+        request<{ data: EmailAccount }>(`/emails/accounts?project=${project}`, {
+          method: "POST", body: JSON.stringify(data),
+        }),
+      delete: (id: string, project = DEFAULT_PROJECT) =>
+        request(`/emails/accounts/${id}?project=${project}`, { method: "DELETE" }),
+      test: (data: {
+        email: string; provider: EmailProvider; authType: AuthType;
+        imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number;
+        password?: string;
+      }, project = DEFAULT_PROJECT) =>
+        request<{ data: { success: boolean; message: string } }>(`/emails/accounts/test?project=${project}`, {
+          method: "POST", body: JSON.stringify(data),
+        }),
+      oauthUrl: (provider: string, project = DEFAULT_PROJECT) =>
+        request<{ data: { url: string } }>(`/emails/accounts/oauth/url?project=${project}&provider=${provider}`),
+      oauthCallback: (provider: string, code: string, redirectUri: string, project = DEFAULT_PROJECT) =>
+        request<{ data: EmailAccount }>(`/emails/accounts/oauth?project=${project}`, {
+          method: "POST", body: JSON.stringify({ provider, code, redirectUri }),
+        }),
+    },
+    list: (folder?: string, accountId?: string, page = 1, limit = 50, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project, page: String(page), limit: String(limit) });
+      if (folder) params.set("folder", folder);
+      if (accountId) params.set("account_id", accountId);
+      return request<{ data: EmailMessage[]; total: number }>(`/emails?${params}`);
+    },
+    search: (query: string, folder?: string, accountId?: string, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project, query });
+      if (folder) params.set("folder", folder);
+      if (accountId) params.set("account_id", accountId);
+      return request<{ data: EmailMessage[]; total: number }>(`/emails/search?${params}`);
+    },
+    get: (uid: number, accountId?: string, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project, uid: String(uid) });
+      if (accountId) params.set("account_id", accountId);
+      return request<{ data: EmailMessage }>(`/emails/${uid}?${params}`);
+    },
+    send: (data: {
+      to: string; cc?: string; bcc?: string; subject: string; body: string;
+      accountId?: string;
+    }, project = DEFAULT_PROJECT) =>
+      request<{ data: { success: boolean } }>(`/emails/send?project=${project}`, {
+        method: "POST", body: JSON.stringify(data),
+      }),
+    draft: (data: {
+      to?: string; cc?: string; bcc?: string; subject?: string; body?: string;
+      accountId?: string;
+    }, project = DEFAULT_PROJECT) =>
+      request<{ data: { uid: number } }>(`/emails/draft?project=${project}`, {
+        method: "POST", body: JSON.stringify(data),
+      }),
+    move: (uid: number, folder: string, accountId?: string, project = DEFAULT_PROJECT) =>
+      request<{ data: { success: boolean } }>(`/emails/${uid}/move?project=${project}`, {
+        method: "POST", body: JSON.stringify({ folder, account_id: accountId }),
+      }),
+    setFlags: (uid: number, flags: string[], accountId?: string, project = DEFAULT_PROJECT) =>
+      request<{ data: { success: boolean } }>(`/emails/${uid}/flags?project=${project}`, {
+        method: "PATCH", body: JSON.stringify({ flags, account_id: accountId }),
+      }),
+    delete: (uid: number, accountId?: string, project = DEFAULT_PROJECT) =>
+      request(`/emails/${uid}?project=${project}`, {
+        method: "DELETE", body: JSON.stringify({ account_id: accountId }),
+      }),
+    folders: (accountId?: string, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project });
+      if (accountId) params.set("account_id", accountId);
+      return request<{ data: EmailFolder[] }>(`/emails/folders?${params}`);
+    },
+    triage: (uid: number, accountId?: string, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project, uid: String(uid) });
+      if (accountId) params.set("account_id", accountId);
+      return request<{ data: TriageResult }>(`/emails/triage?${params}`);
+    },
+    suggest: (uid?: number, accountId?: string, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project });
+      if (uid) params.set("uid", String(uid));
+      if (accountId) params.set("account_id", accountId);
+      return request<{ data: ResponseSuggestion }>(`/emails/suggest?${params}`);
     },
   },
   settings: {

@@ -6,7 +6,6 @@ import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
-import { learningsRouter } from "../lib/routes/learnings.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
 import { contextRouter } from "../lib/routes/context.js";
 import { pluginsRouter } from "../lib/routes/plugins.js";
@@ -17,6 +16,7 @@ import { observationsRouter } from "../lib/routes/observations.js";
 import { personalityRouter } from "../lib/routes/personality.js";
 import { synthesisRouter } from "../lib/routes/synthesis.js";
 import { pipelineRouter } from "../lib/routes/pipeline.js";
+import { emailsRouter } from "../lib/routes/emails.js";
 
 const app = express();
 
@@ -33,7 +33,6 @@ app.get("/api/v1/health", (_req, res) => {
 // Routes
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/skills", skillsRouter);
-app.use("/api/v1/learnings", learningsRouter);
 app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/plugins", pluginsRouter);
@@ -44,6 +43,7 @@ app.use("/api/v1/observations", observationsRouter);
 app.use("/api/v1/personality", personalityRouter);
 app.use("/api/v1/synthesis", synthesisRouter);
 app.use("/api/v1/pipeline", pipelineRouter);
+app.use("/api/v1/emails", emailsRouter);
 
 // Error handler
 app.use(errorHandler);

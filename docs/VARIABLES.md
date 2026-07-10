@@ -37,6 +37,17 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 |----------|---------|---------|-------------|
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4097/api/v1` | `src/lib/api.ts` | API URL for the dashboard HTTP client |
 
+## Email (`packages/ingenium-email`)
+
+| Variable | Default | Used By | Description |
+|----------|---------|---------|-------------|
+| `GOOGLE_OAUTH_CLIENT_ID` | _(required for OAuth)_ | `oauth.ts` | Google OAuth2 app client ID |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | _(required for OAuth)_ | `oauth.ts` | Google OAuth2 app client secret |
+| `MS_OAUTH_CLIENT_ID` | _(required for OAuth)_ | `oauth.ts` | Microsoft OAuth2 app client ID |
+| `MS_OAUTH_CLIENT_SECRET` | _(required for OAuth)_ | `oauth.ts` | Microsoft OAuth2 app client secret |
+| `INGENIUM_EMAIL_ENCRYPTION_KEY` | _(required)_ | `oauth.ts`, `accounts.ts` | 32-byte hex key for AES-256-GCM credential encryption |
+| `OAUTH_REDIRECT_URI` | `http://localhost:3000/mail/oauth/callback` | `oauth.ts` | OAuth2 callback URL for Gmail/Outlook |
+
 ## Docker / opencode-server
 
 | Variable | Default | Used By | Description |

@@ -7,6 +7,7 @@ permission:
   read: allow
   write: deny
   bash: deny
+  playwright_*: deny
 skills:
 ---
 

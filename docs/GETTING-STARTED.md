@@ -27,6 +27,7 @@ npm install
 
 This installs dependencies for all packages in the monorepo:
 - `packages/ingenium-core` — shared library (SQLite WAL + FTS5, Zod schemas)
+- `packages/ingenium-email` — IMAP/SMTP email client with OAuth2 support for Gmail and Outlook
 - `services/ingenium-api` — Express REST API gateway
 - `services/ingenium-server` — MCP stdio server
 - `services/ingenium-dashboard` — Next.js 16 frontend
@@ -140,6 +141,7 @@ Navigate to [http://localhost:3000](http://localhost:3000). You should see these
 - **Projects** — manage project configurations
 - **Skills** — browse and search AI agent skills
 - **Learnings** — log and search learning entries
+- **Mail** — email client setup (Gmail/Outlook OAuth2 + IMAP)
 - **Tasks** — Kanban task board
 - **Plugins** — plugin lifecycle management
 - **Agents** — agent profile management
