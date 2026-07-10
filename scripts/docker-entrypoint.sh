@@ -36,4 +36,9 @@ OCEOF
   echo "Seeded OpenCode config with Ingenium MCP"
 fi
 
-exec supervisord -c /app/supervisord.conf
+# Auto-create global-default project on first start
+exec supervisord -c /app/supervisord.conf &
+sleep 5
+curl -s -X POST 'http://localhost:4097/api/v1/projects?project=global-default' \
+  -H 'Content-Type: application/json' -d '{"name":"global-default"}' > /dev/null 2>&1 || true
+wait
