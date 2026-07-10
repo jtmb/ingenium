@@ -183,7 +183,7 @@ bash tests/test-append-only-files.sh     # Verify append-only file constraints
 npm run test --workspace=packages/ingenium-core
 
 # Run E2E dashboard tests
-npx playwright test tests/ingenium-dashboard/
+npx playwright test --config=tests/playwright.config.ts tests/ingenium-dashboard/
 
 # Run all tests
 npm test

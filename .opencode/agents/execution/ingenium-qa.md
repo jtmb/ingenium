@@ -78,7 +78,7 @@ For changes that modify API behavior, MCP tools, or auto-detection pipelines, ve
 - **Node module tests**: `node -e "require('...').functionName(...)"` to test core library functions
 - **API endpoint tests**: `curl -s -X POST ...` to test new/changed API endpoints
 - **Build verification**: `npx tsc --noEmit` on affected packages
-- **Test suite**: `npx playwright test --workers=1` for full E2E suite
+- **Test suite**: `npx playwright test --config=tests/playwright.config.ts --workers=1` for full E2E suite
 
 Use `setImmediate` delays (sleep 2) after create operations before checking results. Always run health check first to ensure the API is up.
 
