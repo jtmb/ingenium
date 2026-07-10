@@ -41,4 +41,10 @@ exec supervisord -c /app/supervisord.conf &
 sleep 5
 curl -s -X POST 'http://localhost:4097/api/v1/projects?project=global-default' \
   -H 'Content-Type: application/json' -d '{"name":"global-default"}' > /dev/null 2>&1 || true
+
+# Set OpenCode workspace to /workspace
+OC_DB="/home/appuser/.local/share/opencode/opencode.db"
+if [ -f "$OC_DB" ]; then
+  node /app/seed-opencode-projects.js 2>/dev/null || true
+fi
 wait
