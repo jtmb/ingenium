@@ -1,0 +1,6 @@
+{
+  "name": "parallel-session-hygiene",
+  "description": "Git workflow for handling overlapping commits from parallel sessions — always verify git log before assuming files need deletion.",
+  "tags": ["llm-synthesized", "auto-generated"],
+  "alwaysApply": true
+}

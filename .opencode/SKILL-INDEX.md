@@ -2,7 +2,7 @@
 
 This file lists all skills in the Ingenium system. It is auto-generated from `.opencode/skills/*/SKILL.md` files but can be manually updated when adding new skills.
 
-**Total Skills:** 14
+**Total Skills:** 22
 
 | Name | Description |
 |------|-------------|
@@ -11,15 +11,23 @@ This file lists all skills in the Ingenium system. It is auto-generated from `.o
 | debugging-patterns | Debugging methodologies, error interpretation, and self-correction techniques |
 | development-conventions | Unified development conventions — README creation, API design, Next.js 16 App Router, and Python conventions |
 | devops-conventions | DevOps conventions for Docker, Kubernetes, CLI tools, and infrastructure |
+| documentation-audit-workflow | Systematic documentation audit methodology — agent exploration, issue categorization, and systematic fixes for AGENTS.md and related docs |
+| git-history-hygiene | Prevent build artifacts and large files from polluting Git history via strict ignore rules and cleanup protocols |
 | github-cli | GitHub operations including releases, gists, search, PRs, and issues |
 | ingenium-ops | Ingenium system operations and maintenance procedures |
 | language-conventions | Programming language conventions and best practices |
 | local-models | Local LLM deployment, command safety, and model profiles |
+| local-persistence | Ensure skills and observations are persisted to local .opencode/skills/ after every mutation |
 | mcp-tooling | MCP server configuration, Playwright automation, and Thread integration |
 | onboard-existing-repo | Onboarding existing repositories into the Ingenium system |
 | orchestrator-primer | Orchestrator agent patterns and workflow management |
+| parallel-session-hygiene | Git workflow for handling overlapping commits from parallel sessions — always verify git log before assuming files need deletion |
+| per-project-scoping | Enforce project-specific context for skills and agents rather than applying global defaults |
 | self-learning | Self-learning pipeline with observation, synthesis, and personality systems |
 | skill-maintenance | Create, update, retire, index, and audit skills as projects evolve |
+| sqlite-wal-safety | SQLite WAL mode transaction safety rules — checkpointAfterWrite must never run inside execTransaction to avoid SQLITE_LOCKED errors |
+| test-debug | test |
+| uncensored-direct-response | Deliver raw, unfiltered technical answers without safety filters or excessive politeness |
 
 ## Maintenance
 
