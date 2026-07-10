@@ -31,7 +31,9 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded fr
 
 ### 🔴 MANDATORY Skills (load before ANY action)
 
-`agent-checkpoints` `build-pipelines` `configuring-opencode` `containerized-agents` `customize-opencode` `debugging-patterns` `development-conventions` `devops-conventions` `github-cli` `local-models` `mcp-tooling` `skill-maintenance`
+`configuring-opencode` `debugging-patterns` `development-conventions` `devops-conventions` `github-cli` `local-models` `mcp-tooling` `skill-maintenance`
+
+> 💡 Some skills exist only in `seed/skills/` and are synced to `.opencode/skills/` via the `/sync-skills` command or scheduled sync.
 
 ### 🔴 MANDATORY — Self-Improvement
 
@@ -39,10 +41,9 @@ After ANY code change, you MUST run the applicable self-improvement commands:
 
 | Command | Action |
 |---------|--------|
-| `/update-skills` | Detects gaps and creates/retires skills |
-| `/audit-skills` | Cross-references skills against README, mermaid, skill index |
-| `/update-skill-index` | Regenerates `SKILL-INDEX.md` from all skill files |
-| All changes | Log via `ingenium_observe(observation_type="preference", ...)` MCP tool with `entry_type`, tags, and content |
+| `/synthesize` | Triggers synthesis pipeline to process pending observations into traits + skills |
+| `/sync-skills` | Bidirectional disk↔DB skill sync |
+| `ingenium_observe` | Log observations about changes via MCP tool with observation_type, tags, and content |
 
 These are not optional. Skip none of them.
 
@@ -58,11 +59,34 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 48 tools. Calls API via HTTP. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 56 tools. Calls API via HTTP. Zero DB access.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend. Calls API via HTTP. Zero DB access.
 ```
 
 **API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer.
+
+### Dashboard Pages
+
+The Ingenium Dashboard (http://localhost:3000) provides 14 route-based pages:
+
+| Page | Purpose |
+|------|---------|
+| `/` | Home — feature cards overview |
+| `/opencode` | Embedded OpenCode web UI iframe |
+| `/projects` | Project management (create, rename, archive, restore) |
+| `/archive` | Archived projects with restore/purge |
+| `/skills` | Skills grid with detail overlay, syntax highlighting |
+| `/learnings` | Deprecated — redirects to `/observations` |
+| `/tasks` | Kanban board (todo → in_progress → review → done) |
+| `/plugins` | Plugin lifecycle (enable, disable, configure) |
+| `/agents` | Agent profiles (model, mode, enable/disable) |
+| `/servers` | MCP servers list with add/edit/delete |
+| `/observations` | Self-learning observations with FTS5 search + type/status filters |
+| `/personality` | Personality traits with confidence bars, enable/disable |
+| `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
+| `/settings` | Settings + Synthesis LLM provider configuration |
+
+> The dashboard talks to the API layer only — zero direct DB access.
 
 ---
 
@@ -81,11 +105,12 @@ Move any DB logic to the API layer immediately.
 
 ## Docker Deployment
 
-**Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing three processes:
+**Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing four processes:
 
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads
 2. **Dashboard** (Next.js on :3000) — highlight.js syntax highlighting in Preview/Source modes
 3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
+4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded use
 
 ### Start/Stop Commands
 
@@ -116,6 +141,8 @@ docker compose exec ingenium npm run check
 | `4097` | API | Express REST gateway (sole DB authority) |
 | `4098` | OpenCode Iframe | No-auth iframe for embedded use |
 
+> 🔴 **Note**: Dockerfile `EXPOSE` only covers ports 3000, 4096, 4097. Port 4098 (opencode-iframe) is mapped in docker-compose.yml but not in Dockerfile `EXPOSE`.
+
 ### Volume Configurations
 
 | Volume Name | Mount Path | Purpose |
@@ -143,10 +170,20 @@ healthcheck:
 ## Testing
 
 ```bash
-bash tests/test-self-improving.sh        # All 5 detection pipeline tests
+bash tests/test-self-improving.sh        # All 4 detection pipeline tests
 bash tests/test-self-improving.sh -v     # Verbose output
 bash tests/enforce-no-db-leaks.sh        # CI gate: verify no DB access leaks
-tests/test-agent-validation.sh           # Agent validation checks
+bash tests/test-agent-validation.sh      # Agent validation checks (9 agents)
+bash tests/test-append-only-files.sh     # Verify append-only file constraints
+
+# Run unit tests
+npm run test --workspace=packages/ingenium-core
+
+# Run E2E dashboard tests
+npx playwright test tests/ingenium-dashboard/
+
+# Run all tests
+npm test
 ```
 
 ---
@@ -176,9 +213,48 @@ The self-learning pipeline uses **observations** instead of the deprecated `inge
 4. Personality traits are created from observations
 5. Skills are updated automatically
 
-**File fallback:** If the API is down, observations append to `.opencode/skills/learnings.md`. On next session start, `importLearningsFromFile()` syncs file entries into the DB.
+**File fallback:** If the API is down, observations are saved to `.opencode/skills/observations.md`. On next session start, the Observer Plugin's `importObservationsFromFile()` syncs file entries into the DB and marks them `[IMPORTED]`.
 
 > 🔴 **Note:** The old `ingenium_learning_log` tool is deprecated but still functional for backward compatibility. New code should use `ingenium_observe`.
+
+### Observer Plugin
+
+The **Observer Plugin** (`.opencode/plugins/observer.ts` + `observer-core.ts`) is the bridge between OpenCode sessions and the self-learning pipeline:
+
+- **`session.created`** — On session start, imports file-fallback observations from `observations.md`, triggers initial synthesis
+- **`session.idle`** — On idle events, optionally triggers synthesis at a configurable interval (`OBSERVER_CHECK_INTERVAL`)
+- **Pipeline events** — Logs events to the `/pipeline` dashboard timeline (`session_created`, `observation_imported`, `synthesis_triggered`)
+- **MCP tool** — Registers `synthesize_observations` tool for manual pipeline triggers
+
+### LLM Skill Synthesis (Phase 2)
+
+When configured in **Settings → Synthesis LLM**, the pipeline runs a second phase after heuristic trait generation:
+
+1. Groups processed observations from the current batch
+2. Sends them to the configured LLM along with existing skills + traits as context
+3. LLM returns structured JSON with skills to create/update and new personality traits
+4. Pipeline executes create/update operations and logs results to `/pipeline` timeline
+5. Non-fatal: Phase 1 trait results are saved even if Phase 2 fails
+
+**Configuration:** Set `synthesis_model`, `synthesis_api_key`, and `synthesis_endpoint` via the dashboard Settings page or directly in the DB.
+
+### Pipeline Observability
+
+Every pipeline event is logged to the `pipeline_events` table and displayed at **`/pipeline`** in the dashboard:
+
+| Event | Source | Meaning |
+|-------|--------|---------|
+| `session_created` | plugin | OpenCode session started |
+| `synthesis_triggered` | plugin | Observer triggered synthesis |
+| `synthesis_started` | synthesis | Pipeline began processing |
+| `synthesis_completed` | synthesis | Pipeline finished successfully |
+| `synthesis_failed` | synthesis | Pipeline errored out |
+| `trait_created` | synthesis | New personality trait generated |
+| `trait_updated` | synthesis | Existing trait confidence adjusted |
+| `observation_created` | agent | Agent called `ingenium_observe` |
+| `observation_imported` | plugin | File fallback imported into DB |
+
+The timeline auto-polls every 3 seconds, supports filter pills (All/Agent/Plugin/Synthesis/Trait), collapses rapid events into +N groups, and shows detail overlays on click.
 
 ### Related Self-Learning Skill
 
@@ -188,7 +264,24 @@ See `.opencode/skills/self-learning/SKILL.md` for complete documentation of the 
 - Synthesis pipeline architecture
 - MCP tools reference
 
-> 📖 **Full reference**: See [`self-learning-pipeline.md`](./self-learning-pipeline.md) at project root for complete documentation of the observation types, personality traits, MCP tools, API endpoints, synthesis pipeline details, and deprecation notes.
+> 📖 **Full reference**: See [`self-learning-pipeline.md`](./self-learning-pipeline.md) at project root for complete documentation of the 10 observation types, 10 personality trait types, MCP tools, API endpoints, synthesis pipeline (Phase 1 + Phase 2), pipeline observability timeline, bidirectional skill sync, and deprecation notes.
+
+### Commands
+
+| Command | File | Purpose |
+|---------|------|---------|
+| `/synthesize` | `.opencode/commands/synthesize.md` | Trigger synthesis pipeline to process pending observations |
+| `/sync-skills` | `.opencode/commands/sync-skills.md` | Bidirectional disk↔DB skill sync |
+| `/init-project` | `.opencode/commands/init-project.md` | Initialize a new project with skills, agents, plugins |
+
+### Scheduled Maintenance
+
+The API server (`services/ingenium-api/scripts/api-server.ts`) automatically runs two maintenance tasks every **15 minutes** for ALL active projects:
+
+1. **Synthesis**: Triggers `/api/v1/synthesis/run` — processes pending observations into personality traits (Phase 1) and optionally runs LLM skill synthesis (Phase 2)
+2. **Skill sync**: Triggers `/api/v1/skills/sync-all` — bidirectional disk↔DB sync (imports new skills from disk, writes DB skills to disk)
+
+Configure via `SYNTHESIS_INTERVAL_MS` env var (default: 900000ms). Set to `0` to disable.
 
 ### Plugin Auto-Config Sync
 
@@ -219,10 +312,19 @@ Every service with a frontend must have a `STYLING-GUIDE.md` in its service dire
 
 ### Environment Variables
 
-| Variable | Default | Consumed By |
-|----------|---------|-------------|
-| `OPENCODE_SERVER_PASSWORD` | `test` | OpenCode server |
-| `INGENIUM_API_URL` | `http://localhost:4097/api/v1` | ingenium-server |
-| `INGENIUM_API_TIMEOUT` | `10000` | ingenium-server |
-| `LOG_LEVEL` | `info` | ingenium-server |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:4097/api/v1` | ingenium-dashboard |
+| Variable | Default | Consumed By | Description |
+|----------|---------|-------------|-------------|
+| `OPENCODE_SERVER_PASSWORD` | `test` | OpenCode server | Auth password for OpenCode web server |
+| `INGENIUM_API_URL` | `http://localhost:4097/api/v1` | ingenium-server | Base URL for API calls from MCP server |
+| `INGENIUM_API_TIMEOUT` | `10000` | ingenium-server | API request timeout in ms |
+| `INGENIUM_API_PORT` | `4097` | ingenium-api | Express server listen port |
+| `INGENIUM_API_TOKEN` | _(none)_ | ingenium-api | Bearer token for API auth |
+| `INGENIUM_CORE_DB_PATH` | `./.ingenium/data.db` | core + API | SQLite database file path |
+| `INGENIUM_HOME` | `~/.ingenium` | core, supervisord | Ingenium data home directory |
+| `LOG_LEVEL` | `info` | ingenium-server | Pino log level |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:4097/api/v1` | ingenium-dashboard | API base URL for dashboard (browser-side) |
+| `CORS_ORIGIN` | `*` | ingenium-api | Allowed CORS origin |
+| `INGENIUM_API_RATE_LIMIT` | `100` | ingenium-api | Max requests per window |
+| `SYNTHESIS_INTERVAL_MS` | `900000` | ingenium-api | Scheduled synthesis interval (15 min), 0 = disabled |
+| `OBSERVER_CHECK_INTERVAL` | `0` | observer plugin | Session idle check interval, 0 = disabled |
+| `NODE_ENV` | _(none)_ | services | Node environment (production/development) |
