@@ -100,17 +100,20 @@ The Express API uses `express.json({ limit: "2mb" })` for request body parsing. 
 
 ## Dashboard Features
 
+### OpenCode Web UI Embedded in Dashboard
+The dashboard includes an embedded OpenCode service at `/opencode` — a second OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server. The session persists across tab navigation with a hidden iframe toggle. Workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+
 ### Project Management
 The Projects page at `/projects` features Active/Archived tab views. Users can:
 - View active projects or toggle to see archived projects
-- Rename projects inline
+- Rename projects inline (PATCH /projects/:name)
 - Archive projects (soft-delete with timestamp)
 - Restore archived projects
 - Purge expired projects (configurable retention via Settings)
 
 ### Skill File Tree Navigation
 When viewing a skill detail overlay, a split-pane layout is used:
-- **Left sidebar** (`FileTree` component) — renders the skill's `file_tree` JSON as a navigable tree with SKILL.md, metadata.json, and any reference files/folders
+- **Left sidebar** (`FileTree` component) — renders the skill's `file_tree` JSON as a navigable tree with SKILL.md, metadata.json, and any reference files/folders. Supports collapsible tree navigation.
 - **Right pane** (`MarkdownViewer` component) — displays file content with Preview/Source toggle and highlight.js syntax highlighting
 - **Inline editing** — click Edit to modify any file (SKILL.md or reference files) directly in the overlay, with Save persisting to the DB via PATCH
 
@@ -131,15 +134,17 @@ services:
     ports:
       - "4097:4097"   # API
       - "3000:3000"   # Dashboard
-      - "4096:4096"   # opencode-server
+      - "4096:4096"   # opencode-server (managed by supervisord)
     volumes:
       - ingenium_data:/app/.ingenium/data
 ```
 
 Inside the container, **supervisord** manages three processes:
-1. **API** (Express on :4097)
-2. **Dashboard** (Next.js on :3000)
-3. **opencode-server** (on :4096)
+1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads
+2. **Dashboard** (Next.js on :3000) — highlight.js syntax highlighting in Preview/Source modes
+3. **opencode-server** (on :4096) — appuser home dirs pre-created for config persistence
+
+Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
 Start with:
 ```bash

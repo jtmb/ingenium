@@ -187,7 +187,9 @@ The skill detail overlay uses a fixed position overlay with a split-pane layout.
 | Max Height | 90vh scrollable | `max-h-[90vh]` |
 | Split Layout | Flex row, left + right | `flex flex-1 overflow-hidden` |
 
-### File Tree (Left Sidebar)
+### File Tree (Left Sidebar) — FileTree Component
+
+The FileTree component renders a collapsible tree from the skill's `file_tree` JSON.
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
@@ -198,6 +200,7 @@ The skill detail overlay uses a fixed position overlay with a split-pane layout.
 | Selected Item | Blue highlight | `bg-blue-100 text-blue-800` |
 | Hover | Light gray | `hover:bg-gray-100` |
 | Indentation | 16px per depth level | `paddingLeft: depth * 16 + 8px` |
+| Metadata Node | Shows tags + alwaysApply from skill fields | — |
 
 ### Syntax Highlighting
 

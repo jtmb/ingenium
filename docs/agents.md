@@ -43,16 +43,16 @@ flowchart TB
 
 | Agent | Type | Model | Provider | Access | Purpose |
 |-------|------|-------|----------|--------|---------|
-| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-flash` | DeepSeek API | Full R/W | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
-| **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
-| **ingenium-plan-file** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (plan.md only) | Single-purpose — manages `plan.md` at project root. Created/updated/deleted by orchestrator instruction |
-| **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
-| **ingenium-scout** | Subagent | `lmstudio/qwopus3.5-9b-coder` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
-| **ingenium-software-engineer** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read/Write (`edit: allow, write: allow`) | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
-| **ingenium-software-engineer-fast** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
+| **ingenium-orchestrator** | Primary | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Full R/W | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
+| **ingenium-prompt-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
+| **ingenium-plan-file** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (plan.md only) | Single-purpose — manages `plan.md` at project root. Created/updated/deleted by orchestrator instruction |
+| **ingenium-explore** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
+| **ingenium-scout** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
+| **ingenium-software-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
+| **ingenium-software-engineer-fast** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes, performance-critical code |
-| **ingenium-qa** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Edit (`edit: allow`) | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code |
-| **ingenium-docs** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Zen | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates + `ingenium_learning_log` entries |
+| **ingenium-qa** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit (`edit: allow`) | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code |
+| **ingenium-docs** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates + `ingenium_learning_log` entries |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | Security audit + git-history leak scanning |
 
 ---
@@ -171,7 +171,7 @@ flowchart LR
 
 | Property | Value |
 |----------|-------|
-| **Model** | DeepSeek V4 Flash |
+| **Model** | qwen3.5-9b (LM Studio) |
 | **Access** | Read-only |
 | **Invoked by** | Orchestrator or user \`@\` mention |
 | **Triggers** | "Find files X", "Search for pattern Y", "Explore codebase Z" |
@@ -187,7 +187,7 @@ flowchart LR
 
 | Property | Value |
 |----------|-------|
-| **Model** | qwopus 3.5 9B Coder (LM Studio) |
+| **Model** | qwen3.5-9b (LM Studio) |
 | **Access** | Read-only |
 | **Invoked by** | Orchestrator or user \`@\` mention |
 | **Triggers** | "Check past decisions", "What did we do before?", "Search Thread for X" |
@@ -203,7 +203,7 @@ flowchart LR
 
 | Property | Value |
 |----------|-------|
-| **Model** | DeepSeek V4 Flash (OpenCode Zen free) |
+| **Model** | qwen3.5-9b (LM Studio) |
 | **Access** | Read/Write (`edit: allow`, `write: allow`) |
 | **Invoked by** | Orchestrator only |
 | **Triggers** | "Write code X", "Implement feature Y", "Fix bug Z", "Refactor W" |
@@ -230,8 +230,8 @@ The orchestrator can choose between three software engineer agents depending on 
 
 | Variant | Model | Reasoning | Use for |
 |---------|-------|-----------|---------|
-| `@ingenium-software-engineer-fast` | `deepseek/deepseek-v4-flash` | Medium | Standard bug fixes, simple refactors, doc code blocks, test authoring, straightforward tasks |
-| `@ingenium-software-engineer` (default) | `deepseek/deepseek-v4-flash` | High | General-purpose implementation — use when unsure which variant |
+| `@ingenium-software-engineer-fast` | `lmstudio/qwen/qwen3.5-9b` | Medium | Standard bug fixes, simple refactors, doc code blocks, test authoring, straightforward tasks |
+| `@ingenium-software-engineer` (default) | `lmstudio/qwen/qwen3.5-9b` | High | General-purpose implementation — use when unsure which variant |
 | `@ingenium-software-engineer-premium` | `deepseek/deepseek-v4-pro` | xhigh | Complex multi-file refactoring, architectural changes, performance-critical code, security-sensitive work |
 
 All three variants share the same permissions (`edit: allow`, `write: allow`) and skill set. The differentiation is purely in model capability and reasoning effort. The orchestrator's delegation table provides tier guidance: fast for standard work, premium for complex/risky, default when unsure.
@@ -242,7 +242,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 
 | Property | Value |
 |----------|-------|
-| **Model** | DeepSeek V4 Flash (OpenCode Zen free) |
+| **Model** | qwen3.5-9b (LM Studio) |
 | **Access** | Edit (`edit: allow`) |
 | **Invoked by** | Orchestrator only |
 | **Triggers** | "Review code X", "Verify tests for Y", "QA check on Z" |
@@ -265,7 +265,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 
 | Property | Value |
 |----------|-------|
-| **Model** | DeepSeek V4 Flash (OpenCode Zen free) |
+| **Model** | qwen3.5-9b (LM Studio) |
 | **Access** | Edit + Write (`edit: allow, write: allow, bash: deny`) |
 | **Invoked by** | Orchestrator only |
 | **Triggers** | 🔴 After EVERY code change (mandatory, never skipped) |
@@ -295,7 +295,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 
 | Property | Value |
 |----------|-------|
-| **Model** | DeepSeek V4 Flash |
+| **Model** | qwen3.5-9b (LM Studio) |
 | **Access** | Bash + read-only (`write: deny`) |
 | **Invoked by** | Orchestrator or user \`@\` mention |
 | **Triggers** | "Audit X", "Check for secrets", "Security review of Y" |
@@ -351,9 +351,7 @@ flowchart LR
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
 | DeepSeek V4 Pro (API) | \`ingenium-software-engineer-premium\` | 1 | Paid |
-| DeepSeek V4 Flash (API) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor`, `ingenium-prompt-engineer` | 4 | Paid |
-| DeepSeek V4 Flash (OpenCode Zen free) | `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-plan-file` | 5 | Free |
-| qwopus 3.5 9B Coder (LM Studio) | `ingenium-scout` | 1 | Local |
+| qwen3.5-9b (LM Studio) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor`, `ingenium-prompt-engineer`, `ingenium-scout`, `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-plan-file` | 10 | Local |
 
 **Model configuration**: Model assignments are defined per-agent in their `.md` agent profile files (stored in `.opencode/agents/` and the DB `agents` table). Each agent's frontmatter includes a `model:` field. Agent definitions can be managed via the Ingenium Dashboard at `/agents` or via the `ingenium_agent_*` MCP tools.
 

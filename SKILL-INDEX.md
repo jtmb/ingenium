@@ -18,7 +18,7 @@ All 17 skills are stored in the Ingenium SQLite database and written to disk in 
 | 2 | [build-pipelines](seed/skills/build-pipelines/SKILL.md) | Domain | Multi-stage build and CI/CD pipeline conventions |
 | 3 | [configuring-opencode](seed/skills/configuring-opencode/SKILL.md) | Domain | OpenCode configuration — MCP servers, plugins, env vars, skill loading |
 | 4 | [containerized-agents](seed/skills/containerized-agents/SKILL.md) | Domain | Containerized AI agent deployment patterns |
-| 5 | [cost-analyzer](seed/skills/cost-analyzer/SKILL.md) | Domain | DeepSeek/OpenAI API cost analysis from usage CSVs |
+| 5 | [local-models](seed/skills/local-models/SKILL.md) | Domain | Local LLM management — model profiles, command safety, LM Studio API (qwen3.5-9b) |
 | 6 | [database-conventions](seed/skills/database-conventions/SKILL.md) | Domain | SQLite WAL + FTS5, migration patterns, connection pooling |
 | 7 | [debugging-patterns](seed/skills/debugging-patterns/SKILL.md) | Domain | Systematic debugging — isolation, bisection, log-driven, stack-trace |
 | 8 | [development-conventions](seed/skills/development-conventions/SKILL.md) | Domain | Consolidated conventions: README, API design, Next.js 16, Python, testing, mermaid, gitignore |
