@@ -33,23 +33,22 @@ async function handler(req: NextRequest) {
     responseHeaders.delete("x-content-security-policy");
     responseHeaders.delete("x-webkit-csp");
 
-    // If HTML, rewrite absolute paths to go through the proxy
+    // For HTML, rewrite paths for same-origin proxy
     if (contentType.includes("text/html")) {
       let html = await resp.text();
       html = html.replace(
-        /(src|href|action)="\/(?!\/|api\/opencode-proxy)/g,
+        /(src|href)="\/(?!\/)/g,
         '$1="/api/opencode-proxy/'
       );
       return new NextResponse(html, {
         status: resp.status,
-        statusText: resp.statusText,
         headers: responseHeaders,
       });
     }
 
+    // Non-HTML: stream body directly
     return new NextResponse(resp.body, {
       status: resp.status,
-      statusText: resp.statusText,
       headers: responseHeaders,
     });
   } catch {
