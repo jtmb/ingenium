@@ -8,9 +8,11 @@ services:
       - "4098:4098"   # OpenCode iframe (no auth)
     environment:
       - OPENCODE_SERVER_PASSWORD=test
+      - WORKSPACE_DIR=/workspace
     volumes:
       - ingenium-data:/app/.ingenium
       - ./opencode.json:/app/opencode.json:ro
+      - ${HOME:-~}/repos:/workspace
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4097/api/v1/health"]
       interval: 30s

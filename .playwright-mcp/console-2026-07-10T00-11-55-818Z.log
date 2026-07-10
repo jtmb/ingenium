@@ -1,0 +1,6 @@
+[  619960ms] [ERROR] Failed to load resource: net::ERR_INCOMPLETE_CHUNKED_ENCODING @ http://localhost:4098/global/event:0
+[  619966ms] [ERROR] [global-sdk] event stream error {url: http://localhost:4098, fetch: webview, error: TypeError: network error} @ http://localhost:4098/assets/index-nF9P7yIz.js:1013
+[  620256ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
+[  620359ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
+[  620565ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/health:0
+[  622976ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://localhost:4098/global/event:0
