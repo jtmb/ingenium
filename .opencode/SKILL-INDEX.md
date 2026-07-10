@@ -2,14 +2,10 @@
 
 This file lists all skills in the Ingenium system. It is auto-generated from `.opencode/skills/*/SKILL.md` files but can be manually updated when adding new skills.
 
-**Total Skills:** 18
+**Total Skills:** 14
 
 | Name | Description |
 |------|-------------|
-| agent-checkpoints | Track and manage agent session checkpoints for recovery and continuity |
-| build-pipelines | CI/CD pipeline conventions, testing strategies, and deployment automation |
-| cost-analyzer | Analyze API costs for LLM usage, primarily DeepSeek V4 Flash/Pro and OpenCode free-tier models |
-| containerized-agents | Container-based agent deployment patterns and best practices |
 | configuring-opencode | OpenCode configuration management and customization |
 | database-conventions | Database design patterns, SQL conventions, and optimization strategies |
 | debugging-patterns | Debugging methodologies, error interpretation, and self-correction techniques |

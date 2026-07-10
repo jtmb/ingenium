@@ -15,7 +15,7 @@ Skills use a **split-skill format** on disk:
 
 ### Disk Locations
 
-- **Canonical source (editing location)**: `seed/skills/<name>/` — edit SKILL.md here
+- **Canonical source (editing location)**: `.opencode/skills/<name>/` — edit SKILL.md here
 - **Runtime copy**: `.opencode/skills/<name>/` — auto-written from DB; changes here are overwritten unless synced back via `ingenium_skill_sync`
 - **DB storage**: Skills table with `file_tree` column — a JSON map of relative paths → content for complete data round-trips
 

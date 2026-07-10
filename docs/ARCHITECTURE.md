@@ -14,7 +14,7 @@ Email Client → OAuth2 + IMAP/SMTP → Mail Providers (Gmail, Outlook)
 
 ## Skill System
 
-Skills are loaded from the Ingenium SQLite database via the MCP server. The canonical source files for editing live at `seed/skills/<name>/` with a split-skill format (SKILL.md + metadata.json + references/). When created or updated via API, skills are written to disk at `.opencode/skills/<name>/` for agent access.
+Skills are loaded from the Ingenium SQLite database via the MCP server. The canonical source files live at `.opencode/skills/<name>/` with a split-skill format (SKILL.md + metadata.json + references/). When created or updated via API, skills are written to disk for agent access.
 
 ### file_tree Column
 
@@ -27,7 +27,7 @@ This means a skill can contain any number of auxiliary files (reference docs, ex
 
 ### Skill Seeds
 
-17 skills live at `seed/skills/` and are loaded into the DB via `./run.sh seed` (uses `INSERT OR IGNORE` for idempotency). Each seed skill directory contains `SKILL.md` (with frontmatter), `metadata.json`, and any `references/` subdirectory.
+14 skills live at `.opencode/skills/` and are synced via `/sync-skills`.
 
 The MCP server provides tools for listing, loading, searching, creating, updating, deleting, enabling, disabling, and syncing skills. The `update-skill-index` workflow regenerates `SKILL-INDEX.md` from all skill files.
 

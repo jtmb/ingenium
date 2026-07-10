@@ -168,7 +168,7 @@ graph LR
 | [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md) | Plugin lifecycle management guide |
 | [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md) | MCP server configuration guide |
 | [docs/HOW-TO/settings.md](docs/HOW-TO/settings.md) | Settings management guide |
-| [USAGE.md](./USAGE.md) | Dashboard user guide and API access reference |
+| [docs/USAGE.md](./docs/USAGE.md) | Dashboard user guide and API access reference |
 | [AGENTS.md](./AGENTS.md) | Skill system protocol — agent entry point |
 | [services/ingenium-dashboard/STYLING-GUIDE.md](./services/ingenium-dashboard/STYLING-GUIDE.md) | Dashboard styling conventions and component design |
 

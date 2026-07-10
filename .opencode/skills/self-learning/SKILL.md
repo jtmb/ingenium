@@ -5,7 +5,7 @@ alwaysApply: true
 tags: ["self-learning", "observations", "synthesis", "personality", "ai-agent"]
 ---
 
-> 📖 **Full reference**: See [`self-learning-pipeline.md`](../../self-learning-pipeline.md) at project root for complete documentation.
+> 📖 **Full reference**: See [`self-learning-pipeline.md`](../../docs/self-learning-pipeline.md).
 
 # Self-Learning Pipeline
 
@@ -169,7 +169,7 @@ The old `ingenium_learning_log` MCP tool has been **removed**. Use `ingenium_obs
 
 - [docs/HOW-TO/learnings.md](../HOW-TO/learnings.md) — Old learnings documentation (deprecated, kept for reference)
 - `.opencode/commands/synthesize.md` — Synthesis command reference
-- `seed/skills/skill-maintenance/SKILL.md` — Skill lifecycle management
+- .opencode/skills/skill-maintenance/SKILL.md — Skill lifecycle management
 
 ## Code Location
 

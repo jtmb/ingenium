@@ -24,7 +24,7 @@ After creating the SKILL.md file, register it in ALL of these places:
 
 | Location | Action |
 |----------|--------|
-| `SKILL-INDEX.md` (repo root) | Add to numbered list AND category section |
+| `.opencode/SKILL-INDEX.md` | Add to numbered list AND category section |
 | `AGENTS.md` | If mandatory or in Pre-Flight Check table |
 | `docs/CONVENTIONS.md` | Add learning→skill detection references |
 

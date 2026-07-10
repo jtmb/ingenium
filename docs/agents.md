@@ -289,7 +289,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 
 | Changed files | Update these docs |
 |--------------|------------------|
-| `seed/skills/*/SKILL.md` or `.opencode/skills/*/SKILL.md` | `SKILL-INDEX.md`, `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md`, `README.md` |
+| `.opencode/skills/*/SKILL.md` | `docs/USAGE.md`, `AGENTS.md` skill table, `.opencode/SKILL-INDEX.md` |
 | `.opencode/plugins/*.ts` | `docs/ARCHITECTURE.md`, `docs/CONVENTIONS.md` |
 | `tests/` (test infra) | `docs/TECH-STACK.md` |
 | `README.md`, `USAGE.md`, `AGENTS.md` | `docs/README.md` |

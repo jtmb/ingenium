@@ -96,5 +96,5 @@ Every skill in the DB has a `file_tree` column (TEXT, JSON map of relative paths
 
 - **Reading from disk**: `syncSkillFromDisk()` reads SKILL.md + metadata.json, walks the directory tree for all auxiliary files (excluding SKILL.md and metadata.json), and stores them as `file_tree` JSON.
 - **Split-skill format on disk**: Each skill is a directory with `SKILL.md` (main content + YAML frontmatter), `metadata.json` (tags, alwaysApply), and optional `references/` directory for auxiliary docs.
-- **Seed skills at `seed/skills/`** are the canonical source — edit SKILL.md here, then use the dashboard or `ingenium_skill_sync` to persist changes to the DB.
+- **Skills live at `.opencode/skills/`** — edit SKILL.md here, then use the dashboard or `ingenium_skill_sync` to persist changes to the DB.
 - **Runtime copy at `.opencode/skills/`** is automatically written from the DB. Do not edit — changes will be overwritten unless synced back.

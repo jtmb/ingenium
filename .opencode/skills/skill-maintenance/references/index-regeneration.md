@@ -43,7 +43,7 @@ Categories for indexing:
 
 #### Step 3 — Regenerate SKILL-INDEX.md
 
-Write the full `SKILL-INDEX.md` to the repo root with:
+Write the full `SKILL-INDEX.md` to `.opencode/` with:
 1. Header with title, description, auto-maintained note, and total count
 2. Per-category tables with paths and descriptions
 3. Numbered directory listing with links to each SKILL.md
@@ -54,7 +54,7 @@ Count equals number of skill directories. Update the header.
 
 ### Verification
 
-- SKILL-INDEX.md exists at repo root
+- SKILL-INDEX.md exists at `.opencode/SKILL-INDEX.md`
 - Count matches `ls -d .opencode/skills/*/ | wc -l`
 - Every skill directory appears exactly once in the index
 - Links use relative paths from repo root
