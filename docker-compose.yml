@@ -10,6 +10,8 @@ services:
       - OPENCODE_SERVER_PASSWORD=test
     volumes:
       - ingenium-data:/app/.ingenium
+      - opencode-config:/home/appuser/.config
+      - opencode-data:/home/appuser/.local
       - ./opencode.json:/app/opencode.json:ro
       - ${HOME:-~}/repos:/workspace
     healthcheck:
@@ -21,3 +23,5 @@ services:
 
 volumes:
   ingenium-data:
+  opencode-config:
+  opencode-data:
