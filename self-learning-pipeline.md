@@ -341,6 +341,12 @@ GROUP BY project_id, trait_type;
 | `ingenium_observation_stats` | Pipeline stats | — | `{ total, pending, processed, by_type }` |
 | `ingenium_observation_delete` | Delete observation | `id` | `{ success: boolean }` |
 
+### Email Tools (13 tools)
+
+| Tool | Action | Input Parameters | Returns |
+|------|--------|------------------|---------|
+| \`ingenium_email_*\` | List, search, read, send, draft, triage, suggest response, auto-draft, IMAP watcher | See individual tool docs | Email-related results and actions |
+
 ### Personality Tools
 
 | Tool | Action | Input Parameters | Returns |

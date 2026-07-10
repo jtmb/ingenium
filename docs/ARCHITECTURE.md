@@ -77,7 +77,7 @@ Both paths ensure skill coverage stays in sync with learnings. See `.opencode/ag
 
 ## Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 14 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 
 | Page | Purpose |
 |------|---------|
@@ -91,6 +91,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 14 route-based pages:
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
 | `/servers` | MCP servers list with add/edit/delete |
+| `/mail` | Mail (inbox, compose, reader, auto-responses) — email client interface |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
@@ -100,7 +101,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 14 route-based pages:
 
 ### MCP Tool Count
 
-The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **48 tools**. Tool categories:
+The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **61 tools**. Tool categories:
 - Settings: 2 (get, set)
 - Skills: 9 (list, load, search, create, update, delete, enable, disable, sync)
 - Learnings: 4 (log, search, list, skill_from_learnings)

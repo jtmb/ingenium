@@ -124,16 +124,25 @@ Run `/synthesize` to trigger the synthesis pipeline, or wait for the background 
 
 ## MCP Tools
 
+### Core Observation Tools (8 tools)
+
+- \`ingenium_observe\` — Store an observation (10 types available)
+- \`ingenium_observation_search\` — FTS5 search across observations with ranking
+- \`ingenium_observation_list\` — List observations with filters (type, status, importance)
+- \`ingenium_observation_stats\` — Get pipeline statistics (pending/processed counts)
+
+### Email Tools (13 tools)
+
 | Tool | Purpose |
 |------|---------|
-| `ingenium_observe` | Store an observation (10 types available) |
-| `ingenium_observation_search` | FTS5 search across observations with ranking |
-| `ingenium_observation_list` | List observations with filters (type, status, importance) |
-| `ingenium_observation_stats` | Get pipeline statistics (pending/processed counts) |
-| `ingenium_personality` | Get full personality profile from all traits |
-| `ingenium_personality_traits` | List personality traits with filtering |
-| `ingenium_synthesis_run` | Trigger synthesis pipeline manually |
-| `ingenium_synthesis_status` | Check pipeline status and stats |
+| `ingenium_email_*` | List, search, read, send, draft, triage, suggest response, auto-draft, IMAP watcher |
+
+### Personality & Synthesis Tools (4 tools)
+
+- \`ingenium_personality\` — Get full personality profile from all traits
+- \`ingenium_personality_traits\` — List personality traits with filtering
+- \`ingenium_synthesis_run\` — Trigger synthesis pipeline manually
+- \`ingenium_synthesis_status\` — Check pipeline status and stats
 
 ## API Endpoints
 

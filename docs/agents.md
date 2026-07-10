@@ -57,6 +57,12 @@ flowchart TB
 
 ---
 
+## Email MCP Tools
+
+The 13 email MCP tools (`ingenium_email_list` through `ingenium_email_watch_status`) provide full email client capabilities including inbox triage, AI-powered response suggestions, and IMAP IDLE monitoring.
+
+---
+
 ## Lifecycle: What Triggers What
 
 | # | Phase | Trigger | Agent | Action |

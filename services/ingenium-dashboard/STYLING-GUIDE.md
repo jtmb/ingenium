@@ -164,12 +164,13 @@ Forms with multiple fields (Server Add, Learnings Log, Settings) use a stacked c
 
 ## Grid Exceptions
 
-The general grid rule (Rule #1) sets `md:grid-cols-3` for card grids. Two pages deviate:
+The general grid rule (Rule #1) sets `md:grid-cols-3` for card grids. Three pages deviate:
 
 | Page | Columns | Reason |
 |------|---------|--------|
 | Skills | `md:grid-cols-3` | Matches the general rule. Dense cards fit 3 across on desktop. |
-| Tasks (Kanban) | `grid-cols-4` | Kanban board needs 4 columns (Todo, In Progress, Review, Done). This is the only exception. |
+| Tasks (Kanban) | `grid-cols-4` | Kanban board needs 4 columns (Todo, In Progress, Review, Done). |
+| Mail (inbox) | `flex` 3-pane | Application layout — Folder sidebar + email list + reader panes. Documented as exception. |
 
 **If any page needs a different column count, document it here and update Rule #1.**
 
@@ -226,3 +227,13 @@ highlight.js is loaded globally in `layout.tsx`:
 | Rename Button | Default gray | — |
 | Archive Button | Red tint on hover | `hover:bg-red-50 text-red-600` |
 | Restore Button | Green tint on hover | `hover:bg-green-50 text-green-600` |
+
+### Mail Page Components
+
+| Component | Pattern Used | Key Tailwind Classes |
+|-----------|-------------|---------------------|
+| FolderSidebar | FileTree sidebar | `min-w-[200px] max-w-[250px] bg-gray-50 border-r border-gray-200`. Items: `px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded`. Selected: `bg-blue-100 text-blue-800`. |
+| EmailList | List items with borders | Rows: `px-4 py-3 border-b border-gray-200 hover:bg-gray-50`. Unread: `font-semibold text-gray-900`. Read: `text-gray-600`. Selected: `bg-blue-50`. |
+| EmailComposer | Stacked form card | `bg-white p-6 rounded-lg border space-y-4 max-w-2xl mx-auto`. Send: `bg-blue-600 text-white py-2 px-4 rounded`. Draft: `text-gray-600 hover:text-gray-900`. |
+| EmailReader | Headers panel + action bar | Headers: `bg-gray-50 border-b border-gray-200 px-4 py-3`. Actions: `px-3 py-1.5 text-sm border border-gray-200 rounded text-gray-600 hover:bg-gray-100`. Delete: `text-red-600 hover:bg-red-50`. |
+| AccountSetup | Provider grid + form | Provider cards: list item pattern `p-4 rounded border hover:shadow-md`. Form: stacked card `p-6 rounded-lg border space-y-4`. |

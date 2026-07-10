@@ -1,6 +1,6 @@
 ---
 name: mcp-tooling
-description: "MCP tool integration and automation — Playwright browser automation (navigate, screenshot, inspect, interact, console), Thread MCP persistent memory (context save/retrieve, session lifecycle, doc upload), and future MCP tool integrations. Use when the user asks for browser automation, persistent memory operations, or any MCP-based tool workflow."
+description: "MCP tool integration and automation — Playwright browser automation (navigate, screenshot, inspect, interact, console), Thread MCP persistent memory (context save/retrieve, session lifecycle, doc upload), email client tools (list, search, read, send, draft, triage, suggest response, auto-draft, IMAP watcher), and future MCP tool integrations. Use when the user asks for browser automation, persistent memory operations, or any MCP-based tool workflow."
 alwaysApply: true
 ---
 
@@ -82,8 +82,28 @@ When the session ends (user says "thanks", "done", "that's all"), you MUST:
 | [`references/thread/doc-upload.md`](references/thread/doc-upload.md) | Documentation website upload — site discovery, content fetch, bulk import |
 | [`references/thread/conventions.md`](references/thread/conventions.md) | Thread conventions — priority guidelines, tag naming, never rules |
 
+## Email Tools (13 tools)
+
+The Ingenium email client provides MCP tools for IMAP/SMTP email operations:
+
+- \`ingenium_email_list\` — List emails with filters
+- \`ingenium_email_search\` — Search emails across folders
+- \`ingenium_email_read\` — Read individual email content and headers
+- \`ingenium_email_send\` — Send new email via SMTP
+- \`ingenium_email_draft\` — Create draft email for later sending
+- \`ingenium_email_folders\` — Manage IMAP folder structure (create, delete, rename)
+- \`ingenium_email_accounts\` — List and configure email accounts
+- \`ingenium_email_triage\` — Auto-classify emails by priority/category
+- \`ingenium_email_suggest_response\` — Suggested responses for incoming messages
+- \`ingenium_email_draft_response\` — Create draft reply to selected email
+- \`ingenium_email_patterns\` — Email interaction patterns and templates
+- \`ingenium_email_watch_start\` — Start IMAP polling watcher (background)
+- \`ingenium_email_watch_status\` — Check/watcher status for active watchers
+
 ## Cross-References
 
 - **`development-conventions`** (`references/web-design/reviewer.md`) — Web design review workflow that uses Playwright for visual inspection
 - **`devops-conventions`** (`references/shell-scripts/scripting.md`) — Shell scripts for launching dev servers before testing
 - **`configuring-opencode`** — Agent permission lockdown patterns for MCP tools
+
+(End of file - total 89 lines)
