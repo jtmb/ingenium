@@ -1,6 +1,10 @@
 services:
   ingenium:
-    build: .
+    build:
+      context: .
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
     ports:
       - "3000:3000"   # Dashboard
       - "4096:4096"   # OpenCode server (auth)

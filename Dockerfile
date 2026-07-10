@@ -26,10 +26,12 @@ RUN npm prune --omit=dev
 FROM node:22-alpine AS runtime
 
 ARG OPENCODE_VERSION=1.17.18
-RUN apk add --no-cache supervisor curl tzdata python3 make g++
+ARG UID=1000
+ARG GID=1000
+RUN apk add --no-cache supervisor curl tzdata python3 make g++ shadow
 RUN curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64-musl.tar.gz" \
     | tar -xz -C /usr/local/bin/ opencode && chmod +x /usr/local/bin/opencode
-RUN addgroup -S appuser && adduser -S appuser -G appuser
+RUN addgroup -g ${GID} appuser && adduser -u ${UID} -G appuser -S appuser
 
 WORKDIR /app
 
