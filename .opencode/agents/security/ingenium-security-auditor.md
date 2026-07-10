@@ -8,6 +8,7 @@ permission:
   bash: allow
   glob: allow
   grep: allow
+  playwright_*: deny
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
@@ -70,13 +71,10 @@ For confirmed leaks in git history:
 ## 🔴 Log Security Discoveries
 
 When you discover a security pattern, leak, or vulnerability:
-1. Use `ingenium_learning_log` with `entry_type="learning"`
-2. Use the pipe-delimited format as `content`:
-   ```
-   {date} | security-audit | {model} | {description} | {target_file} | before:{sha} after:{sha}
-   ```
-3. Use `priority=7` for critical findings, `priority=5` for low-severity
-4. Use `tags="security,{severity}"`
+1. Use `ingenium_observe` to log it immediately
+2. Use `observation_type="insight"` and `importance=8` for critical findings, `importance=5` for low-severity
+3. Summarize the finding, affected files, and severity in `content`
+4. Include severity level in the `context` parameter (e.g. `"severity:critical"`)
 
 ## 🔴 Observation — Log User Interactions
 

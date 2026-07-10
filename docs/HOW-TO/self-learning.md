@@ -25,12 +25,12 @@ User OpenCode Session (:4098)
 
 ## Observation Types
 
-Use these 10 observation types when calling `ingenium_observe`:
+Use these 10 observation types when calling `ingenium_observe`. The email client (Gmail/Outlook OAuth2 + IMAP) is also an important source of observations:
 
 | Type | When to use | Example |
 |------|-------------|---------|
 | `correction` | User corrects agent behavior | "User prefers snake_case over camelCase" |
-| `preference` | User expresses a preference | "User wants 2-space indentation" |
+| `preference` | User expresses a preference | "User wants 2-space indentation" or "Prefers Gmail over Outlook for OAuth2 setup" |
 | `pattern` | Recurring behavior observed | "User always adds JSDoc comments" |
 | `insight` | Novel discovery | "Container PTY works with glibc" |
 | `feedback` | Implicit accept/reject | "User accepted the refactored code" |
@@ -44,7 +44,7 @@ Use these 10 observation types when calling `ingenium_observe`:
 
 ### For Agents (during workflow)
 
-Use `ingenium_observe` naturally during your workflow — just like you use `read`, `grep`, or `edit`:
+Use `ingenium_observe` naturally during your workflow — just like you use `read`, `grep`, or `edit`. The email client is also a rich source of observations:
 
 ```typescript
 // Store an observation during your work
@@ -53,6 +53,19 @@ ingenium_observe(
   content: "User prefers concise error messages with action items",
   importance: 7
 )
+
+// Email-specific examples (after OAuth2 setup or email workflow discovery)
+ingenium_observe({
+  observation_type: "insight",
+  content: "Email composition works seamlessly through nodemailer — no additional configuration needed after OAuth2 setup",
+  importance: 8
+})
+
+ingenium_observe({
+  observation_type: "pattern", 
+  content: "User searches emails by combining subject keywords with date ranges (e.g., 'invoice AND month:june')",
+  importance: 6
+})
 ```
 
 The observation is stored in the DB with status "pending". The synthesis pipeline will process it later.
@@ -80,6 +93,8 @@ The synthesis pipeline creates personality traits from observations. Each observ
 
 ## MCP Tools
 
+### Core Observation & Personality Tools
+
 | Tool | Purpose |
 |------|---------|
 | `ingenium_observe` | Store an observation (10 types available) |
@@ -90,6 +105,35 @@ The synthesis pipeline creates personality traits from observations. Each observ
 | `ingenium_personality_traits` | List personality traits with filtering |
 | `ingenium_synthesis_run` | Trigger synthesis pipeline manually |
 | `ingenium_synthesis_status` | Check pipeline status and stats |
+
+### Email Client Tools (OAuth2 + IMAP/SMTP)
+
+The email client registers these tools for direct MCP access:
+
+| Tool | Purpose | Parameters | Returns |
+|------|---------|------------|---------|
+| `email_account_list` | List all configured OAuth2 accounts | — | Array of `{ id, provider, emailAddress }` objects (Gmail/Outlook) |
+| `email_compose_message` | Compose and send new email via SMTP | `{ accountId: string, to: string[], subject: string, body: string, attachments?: File[] }` | Message ID or error message |
+| `email_search_inbox` | Search emails across all accounts with FTS5 ranking | `{ query: string, limit?: number, accountId?: string }` | Array of matching email summaries with highlighted text |
+
+**Example usage in OpenCode:**
+```typescript
+// List configured OAuth2 accounts  
+const accounts = await ingenium_email_account_list();
+console.log("Configured:", accounts); // [{ id: "1", provider: "gmail", emailAddress: "user@gmail.com" }]
+
+// Search inbox for invoice-related emails with FTS5 ranking
+const results = await ingenium_email_search_inbox({ query: "invoice 2026", limit: 5 });
+results.forEach(msg => { console.log(`${msg.subject} from ${msg.sender}`); })
+
+// Compose and send message via SMTP (nodemailer)
+await ingenium_email_compose_message({ 
+  accountId: accounts[0].id,
+  to: ["recipient@example.com"],
+  subject: "Project Update",
+  body: `Here's the latest status report...`
+});
+```
 
 ## API Endpoints
 

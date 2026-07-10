@@ -37,13 +37,10 @@ Prioritize by severity: 🔴 critical, 🟡 warning, 💡 suggestion.
 ## 🔴 ALWAYS Log Discoveries
 
 When you discover a recurring code quality issue, security pattern, or behavioral observation:
-1. Use `ingenium_learning_log` to log it immediately
-2. Use the pipe-delimited format as `content`:
-   ```
-   {date} | {context} | {model} | {description} | {target_file} | before:{sha} after:{sha}
-   ```
-3. Use `entry_type="learning"` and `priority=7` for new patterns, `priority=5` for observations
-4. Use `tags="pattern,code-quality"` for code issues, `tags="security,{model}"` for security findings
+1. Use `ingenium_observe` to log it immediately
+2. Use `observation_type="pattern"` and `importance=7` for new patterns, `importance=5` for observations
+3. Summarize the pattern and affected files in `content`
+4. Use `context` to specify category like "code-quality" or "security"
 
 ### 2. Test Verification
 Load `@development-conventions` (testing patterns) for the test lifecycle. Review tests written by @ingenium-software-engineer. Follow this checklist:

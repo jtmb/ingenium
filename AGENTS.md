@@ -51,15 +51,16 @@ These are not optional. Skip none of them.
 
 ## Repository Structure
 
-**Monorepo with 4 packages:**
+**Monorepo with 5 packages:**
 
 ```
 packages/
-└── ingenium-core/        # Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed)
+├── ingenium-core/        # Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed)
+└── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser). OAuth2 for Gmail/Outlook. No DB access.
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 56 tools. Calls API via HTTP. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 64 tools. Calls API via HTTP. Zero DB access.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend. Calls API via HTTP. Zero DB access.
 ```
 

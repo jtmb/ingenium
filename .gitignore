@@ -42,3 +42,19 @@ build/
 .agents/.lm-studio-env
 .vscode
 temp
+
+# ── SQLite runtime files ──────────────────────────────────
+data*
+*.db-shm
+*.db-wal
+
+# ── OpenCode session logs ─────────────────────────────────
+session-*.md
+session_*.md
+
+# ── Playwright MCP artifacts ──────────────────────────────
+.playwright-mcp/
+
+# ── Plans and scratch notes ───────────────────────────────
+email-plan.md
+*.plan.md

@@ -4,7 +4,8 @@
     "packages/ingenium-core",
     "services/ingenium-api",
     "services/ingenium-server",
-    "services/ingenium-dashboard"
+    "services/ingenium-dashboard",
+    "packages/ingenium-email"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

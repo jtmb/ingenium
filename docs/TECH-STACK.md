@@ -14,6 +14,11 @@
 - **Linting**: ESLint, TypeScript compiler
 - **CI**: GitHub Actions (push to `ingenium-core`, `ingenium-api`, `ingenium-server`, `ingenium-dashboard`)
 
+## Frontend
+
+- **Dashboard**: Next.js 16 App Router, React 19, Tailwind CSS 4
+- **Email Client**: imapflow (IMAP async client), nodemailer (SMTP), mailparser (MIME parsing), google-auth-library (Google OAuth2), @azure/msal-node (Microsoft OAuth2)
+
 ## Database Migrations
 
 | # | File | Purpose |

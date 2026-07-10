@@ -1,12 +1,10 @@
 export * from "./db.js";
 export * as skills from "./tools/skills.js";
-export * as learnings from "./tools/learnings.js";
 export * as tasks from "./tools/tasks.js";
 export * as context from "./tools/context.js";
 export * as projects from "./tools/projects.js";
 export * as plugins from "./tools/plugins.js";
 export * as servers from "./tools/servers.js";
-export * as detectSkillGap from "./tools/detectSkillGap.js";
 export * as settings from "./tools/settings.js";
 export * as observations from "./tools/observations.js";
 export * as personality from "./tools/personality.js";

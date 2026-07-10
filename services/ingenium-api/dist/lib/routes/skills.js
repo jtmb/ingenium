@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { skills } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import fs from "fs";
+import path from "path";
 export const skillsRouter = Router();
 skillsRouter.get("/", (req, res) => {
     const projectId = requireProject(req, res);
@@ -95,4 +97,48 @@ skillsRouter.post("/:name/sync", (req, res) => {
         return;
     }
     res.json({ data: skill });
+});
+// POST /sync-all — sync ALL skills disk→DB then DB→disk for a project
+skillsRouter.post("/sync-all", (req, res) => {
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
+    const skillsDir = path.resolve(process.env.INGENIUM_CORE_DB_PATH ?? "/app/.ingenium/data", "..", "..", ".opencode", "skills");
+    let fromDisk = 0;
+    let toDisk = 0;
+    let errors = [];
+    // Phase 1: Disk → DB — scan directories on disk, sync any not in DB
+    try {
+        if (fs.existsSync(skillsDir)) {
+            const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+            for (const e of entries) {
+                if (e.isDirectory()) {
+                    try {
+                        const existing = skills.getSkill(projectId, e.name);
+                        if (!existing) {
+                            const synced = skills.syncSkillFromDisk(projectId, e.name);
+                            if (synced)
+                                fromDisk++;
+                            else
+                                errors.push(`Disk sync failed: ${e.name}`);
+                        }
+                    }
+                    catch (err) {
+                        errors.push(`Disk sync error: ${e.name} — ${err.message}`);
+                    }
+                }
+            }
+        }
+    }
+    catch (err) {
+        errors.push(`Failed to scan skills dir: ${err.message}`);
+    }
+    // Phase 2: DB → Disk — write all DB skills to disk
+    try {
+        toDisk = skills.syncAllSkills(projectId);
+    }
+    catch (err) {
+        errors.push(`Failed to write skills to disk: ${err.message}`);
+    }
+    res.json({ data: { synced_to_db: fromDisk, written_to_disk: toDisk, errors } });
 });

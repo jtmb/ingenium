@@ -15,6 +15,15 @@ export function registerServer(projectId, name, command, args, env) {
         return db.prepare("SELECT * FROM servers WHERE id = ?").get(id);
     });
 }
+export function updateServer(projectId, name, fields) {
+    execTransaction(() => {
+        const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+        if (fields.running !== undefined) {
+            db.prepare("UPDATE servers SET running = ? WHERE project_id = ? AND name = ?").run(fields.running, projectId, name);
+        }
+        checkpointAfterWrite();
+    });
+}
 export function removeServer(projectId, name) {
     execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");

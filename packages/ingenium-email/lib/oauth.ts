@@ -1,0 +1,292 @@
+/** OAuth2 authentication for Gmail (google-auth-library) and Outlook (@azure/msal-node). */
+
+import crypto from "node:crypto";
+import type { OAuthToken } from "./types.js";
+import type { EmailProvider } from "./types.js";
+import { settings, getDb } from "ingenium-core";
+
+// ── Encryption helpers ────────────────────────────────────────────────────
+
+function getEncryptionKey(): Buffer {
+  const hex = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
+  if (!hex) {
+    throw new Error("INGENIUM_EMAIL_ENCRYPTION_KEY environment variable not set (32-byte hex)");
+  }
+  const key = Buffer.from(hex, "hex");
+  if (key.length !== 32) {
+    throw new Error(`INGENIUM_EMAIL_ENCRYPTION_KEY must be 32 bytes (64 hex chars), got ${key.length} bytes`);
+  }
+  return key;
+}
+
+/** Encrypt string data using AES-256-GCM. Returns base64(iv + authTag + ciphertext). */
+export function encryptCredentials(data: string): string {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+
+  const encrypted = Buffer.concat([
+    cipher.update(data, "utf-8"),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
+
+  const combined = Buffer.concat([iv, authTag, encrypted]);
+  return combined.toString("base64");
+}
+
+/** Decrypt AES-256-GCM encrypted data (base64-encoded). */
+export function decryptCredentials(encrypted: string): string {
+  const key = getEncryptionKey();
+  const combined = Buffer.from(encrypted, "base64");
+
+  const iv = combined.subarray(0, 16);
+  const authTag = combined.subarray(16, 32);
+  const ciphertext = combined.subarray(32);
+
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(authTag);
+
+  const decrypted = Buffer.concat([
+    decipher.update(ciphertext),
+    decipher.final(),
+  ]);
+  return decrypted.toString("utf-8");
+}
+
+// ── OAuth token storage ───────────────────────────────────────────────────
+
+const OAUTH_SETTINGS_PREFIX = "email_oauth_";
+
+function oauthKey(accountId: string): string {
+  return `${OAUTH_SETTINGS_PREFIX}${accountId}`;
+}
+
+/** Store encrypted OAuth tokens in settings. */
+export function storeTokens(
+  projectId: string,
+  accountId: string,
+  tokens: OAuthToken,
+): void {
+  const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
+  let payload: OAuthToken;
+  if (encKey) {
+    payload = {
+      accessToken: encryptCredentials(tokens.accessToken),
+      refreshToken: encryptCredentials(tokens.refreshToken),
+      expiryDate: tokens.expiryDate,
+      scope: tokens.scope,
+    };
+  } else {
+    payload = tokens;
+  }
+  settings.setSetting(projectId, oauthKey(accountId), JSON.stringify(payload));
+}
+
+/** Retrieve and optionally refresh stored OAuth tokens. */
+export async function getValidTokens(
+  projectId: string,
+  accountId: string,
+  provider: EmailProvider,
+): Promise<OAuthToken | null> {
+  const raw = settings.getSetting(projectId, oauthKey(accountId));
+  if (!raw) return null;
+
+  const stored = JSON.parse(raw) as OAuthToken;
+  const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
+
+  let tokens: OAuthToken;
+  if (encKey) {
+    tokens = {
+      accessToken: decryptCredentials(stored.accessToken),
+      refreshToken: decryptCredentials(stored.refreshToken),
+      expiryDate: stored.expiryDate,
+      scope: stored.scope,
+    };
+  } else {
+    tokens = stored;
+  }
+
+  // Check if expired (with 60-second buffer)
+  const now = Date.now();
+  if (tokens.expiryDate && tokens.expiryDate < now + 60_000) {
+    // Auto-refresh
+    const refreshed = await refreshAccessToken(provider, tokens.refreshToken);
+    storeTokens(projectId, accountId, refreshed);
+    return refreshed;
+  }
+
+  return tokens;
+}
+
+// ── Google OAuth2 ─────────────────────────────────────────────────────────
+
+function getRedirectUri(): string {
+  return process.env.OAUTH_REDIRECT_URI ?? "http://localhost:3000/mail/oauth/callback";
+}
+
+function importGoogleOAuthClient(): typeof import("google-auth-library").OAuth2Client {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { OAuth2Client } = require("google-auth-library") as typeof import("google-auth-library");
+  return OAuth2Client;
+}
+
+function getGoogleClient(): import("google-auth-library").OAuth2Client {
+  const OAuth2Client = importGoogleOAuthClient();
+  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID ?? "";
+  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "";
+  return new OAuth2Client(clientId, clientSecret, getRedirectUri());
+}
+
+// ── Microsoft OAuth2 ──────────────────────────────────────────────────────
+
+let _msalApp: import("@azure/msal-node").ConfidentialClientApplication | undefined;
+
+function getMsalApp(): import("@azure/msal-node").ConfidentialClientApplication {
+  if (!_msalApp) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const msal = require("@azure/msal-node") as typeof import("@azure/msal-node");
+    _msalApp = new msal.ConfidentialClientApplication({
+      auth: {
+        clientId: process.env.MS_OAUTH_CLIENT_ID ?? "",
+        clientSecret: process.env.MS_OAUTH_CLIENT_SECRET ?? "",
+        authority: "https://login.microsoftonline.com/common",
+      },
+    });
+  }
+  return _msalApp;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────
+
+/** Generate an OAuth authorization URL for the given provider. */
+export async function getOAuthUrl(
+  provider: EmailProvider,
+  projectId?: string,
+): Promise<{ url: string; state: string }> {
+  const state = crypto.randomBytes(16).toString("hex");
+  const pid = projectId || "gh-llm-bootstrap";
+
+  // Store state for CSRF validation on callback
+  settings.setSetting(pid, `oauth_state_${provider}`, state);
+
+  if (provider === "gmail") {
+    const gClient = getGoogleClient();
+    const url = gClient.generateAuthUrl({
+      access_type: "offline",
+      scope: "https://mail.google.com/",
+      state,
+      redirect_uri: getRedirectUri(),
+    });
+    return { url, state };
+  }
+
+  if (provider === "outlook") {
+    const msalApp = getMsalApp();
+    const url = await msalApp.getAuthCodeUrl({
+      scopes: [
+        "https://outlook.office.com/IMAP.AccessAsUser.All",
+        "https://outlook.office.com/SMTP.Send",
+        "offline_access",
+      ],
+      redirectUri: getRedirectUri(),
+      state,
+    });
+    return { url, state };
+  }
+
+  // yahoo / custom — placeholder URL
+  return { url: "", state };
+}
+
+/** Exchange an authorization code for OAuth tokens. */
+export async function exchangeCode(
+  provider: EmailProvider,
+  code: string,
+  state: string,
+  _redirectUri?: string,
+  projectId?: string,
+): Promise<OAuthToken> {
+  // Validate state parameter (CSRF protection)
+  const pid = projectId || "gh-llm-bootstrap";
+  const storedState = settings.getSetting(pid, `oauth_state_${provider}`);
+  if (!storedState || storedState !== state) {
+    throw new Error(`OAuth state mismatch for provider ${provider}. Possible CSRF attack.`);
+  }
+  // Delete stored state after validation
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
+    .run(pid, `oauth_state_${provider}`);
+
+  const redirectUri = _redirectUri ?? getRedirectUri();
+
+  if (provider === "gmail") {
+    const gClient = getGoogleClient();
+    const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
+    return {
+      accessToken: tokens.access_token ?? "",
+      refreshToken: tokens.refresh_token ?? "",
+      expiryDate: tokens.expiry_date ?? Date.now() + 3600_000,
+      scope: tokens.scope ?? "https://mail.google.com/",
+    };
+  }
+
+  if (provider === "outlook") {
+    const msalApp = getMsalApp();
+    const result = await msalApp.acquireTokenByCode({
+      code,
+      scopes: [
+        "https://outlook.office.com/IMAP.AccessAsUser.All",
+        "https://outlook.office.com/SMTP.Send",
+        "offline_access",
+      ],
+      redirectUri,
+    });
+    return {
+      accessToken: result?.accessToken ?? "",
+      refreshToken: "", // MSAL handles refresh internally
+      expiryDate: result?.expiresOn?.getTime() ?? Date.now() + 3600_000,
+      scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
+    };
+  }
+
+  throw new Error(`OAuth exchange not supported for provider: ${provider}`);
+}
+
+/** Refresh an expired access token using the refresh token. */
+export async function refreshAccessToken(
+  provider: EmailProvider,
+  refreshToken: string,
+): Promise<OAuthToken> {
+  if (provider === "gmail") {
+    const gClient = getGoogleClient();
+    gClient.setCredentials({ refresh_token: refreshToken });
+    const { credentials } = await gClient.refreshAccessToken();
+    return {
+      accessToken: credentials.access_token ?? "",
+      refreshToken: credentials.refresh_token ?? refreshToken,
+      expiryDate: credentials.expiry_date ?? Date.now() + 3600_000,
+      scope: credentials.scope ?? "https://mail.google.com/",
+    };
+  }
+
+  if (provider === "outlook") {
+    const msalApp = getMsalApp();
+    const result = await msalApp.acquireTokenByRefreshToken({
+      refreshToken,
+      scopes: [
+        "https://outlook.office.com/IMAP.AccessAsUser.All",
+        "https://outlook.office.com/SMTP.Send",
+        "offline_access",
+      ],
+    });
+    return {
+      accessToken: result?.accessToken ?? "",
+      refreshToken: refreshToken,
+      expiryDate: result?.expiresOn?.getTime() ?? Date.now() + 3600_000,
+      scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
+    };
+  }
+
+  throw new Error(`Token refresh not supported for provider: ${provider}`);
+}

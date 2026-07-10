@@ -5,11 +5,12 @@
 ```
 Dashboard → HTTP → API → Core → SQLite
 MCP Server → HTTP → API → Core → SQLite
+Email Client → OAuth2 + IMAP/SMTP → Mail Providers (Gmail, Outlook)
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **48 tools**. It talks to the API over HTTP. Zero DB access.
-- `ingenium-dashboard` is a Next.js 16 App Router frontend with **10 pages**. It talks to the API over HTTP.
+- `ingenium-server` runs as an MCP stdio transport with **61 tools**. It talks to the API over HTTP. Zero DB access.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **11 pages**. It talks to the API over HTTP.
 
 ## Skill System
 
@@ -63,6 +64,39 @@ The orchestrator agent (`.opencode/agents/primary/ingenium-orchestrator.md`) inc
 2. **Manual (LLM eye)**: Review recent learnings for `pattern`, `architecture`, or `decision` entries describing reusable conventions, then `ingenium_skill_search` to check coverage.
 
 Both paths ensure skill coverage stays in sync with learnings. See `.opencode/agents/primary/ingenium-orchestrator.md` lines 137-148 for the full protocol.
+
+## Dataset Reference
+
+| Package | Description | DB Access |
+|---------|-------------|-----------|
+| `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
+| `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
+| `services/ingenium-server/` | MCP stdio server with 64 tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 11 pages. Calls API via HTTP. Zero DB access. | No |
+| `packages/ingenium-email/` | IMAP/SMTP + OAuth2 email engine (imapflow, nodemailer, mailparser). DB Access: No. | No |
+
+## Dashboard Pages
+
+The Ingenium Dashboard (http://localhost:3000) provides 14 route-based pages:
+
+| Page | Purpose |
+|------|---------|
+| `/` | Home — feature cards overview |
+| `/opencode` | Embedded OpenCode web UI iframe |
+| `/projects` | Project management (create, rename, archive, restore) |
+| `/archive` | Archived projects with restore/purge |
+| `/skills` | Skills grid with detail overlay, syntax highlighting |
+| `/learnings` | Deprecated — redirects to `/observations` |
+| `/tasks` | Kanban board (todo → in_progress → review → done) |
+| `/plugins` | Plugin lifecycle (enable, disable, configure) |
+| `/agents` | Agent profiles (model, mode, enable/disable) |
+| `/servers` | MCP servers list with add/edit/delete |
+| `/observations` | Self-learning observations with FTS5 search + type/status filters |
+| `/personality` | Personality traits with confidence bars, enable/disable |
+| `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
+| `/settings` | Settings + Synthesis LLM provider configuration |
+
+> The dashboard talks to the API layer only — zero direct DB access.
 
 ### MCP Tool Count
 

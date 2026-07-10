@@ -50,13 +50,10 @@ You are a principal-level software engineer. Your job is to **implement high-qua
 ## 🔴 ALWAYS Log Discoveries
 
 When you discover a reusable behavioral pattern, common pitfall, or surprising behavior during implementation:
-1. Use `ingenium_learning_log` to log it immediately
-2. Use the pipe-delimited format as `content`:
-   ```
-   {date} | {context} | {model} | Qwen 3.5 9B pattern: {description} | {target_file} | before:{sha} after:{sha}
-   ```
-3. Use `entry_type="learning"` and `priority=7` for new patterns, `priority=5` for observations
-4. Use `tags="pattern,{model}"` for behavioral patterns, `tags="rule,{context}"` for HARD RULE discoveries
+1. Use `ingenium_observe` to log it immediately
+2. Use `observation_type="pattern"` and `importance=7` for new patterns, `importance=5` for observations
+3. Summarize the pattern, affected files, and target context in `content`
+4. Use `context` to specify "behavioral" for behavioral patterns or "rule" for HARD RULE discoveries
 
 ## Core Engineering Principles
 
