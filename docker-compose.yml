@@ -1,9 +1,6 @@
 services:
   ingenium:
-    build:
-      context: .
-      args:
-        UID: ${UID:-1000}
+    build: .
     ports:
       - "3000:3000"   # Dashboard
       - "4096:4096"   # OpenCode server (auth)
@@ -11,7 +8,6 @@ services:
       - "4098:4098"   # OpenCode iframe (no auth)
     environment:
       - OPENCODE_SERVER_PASSWORD=test
-      - WORKSPACE_DIR=/workspace
     volumes:
       - ingenium-data:/app/.ingenium
       - ./opencode.json:/app/opencode.json:ro
