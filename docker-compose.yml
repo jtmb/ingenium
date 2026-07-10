@@ -3,8 +3,9 @@ services:
     build: .
     ports:
       - "3000:3000"   # Dashboard
-      - "4096:4096"   # OpenCode server
+      - "4096:4096"   # OpenCode server (auth)
       - "4097:4097"   # API
+      - "4098:4098"   # OpenCode iframe (no auth)
     environment:
       - OPENCODE_SERVER_PASSWORD=test
     volumes:
