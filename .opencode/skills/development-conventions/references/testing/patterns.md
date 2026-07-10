@@ -50,7 +50,7 @@ for i in $(seq 1 30); do
     fi
     sleep 1
 done
-npx playwright test --reporter=list
+npx playwright test --config=tests/playwright.config.ts --reporter=list
 ```
 
 ### Playwright E2E — Selectors
