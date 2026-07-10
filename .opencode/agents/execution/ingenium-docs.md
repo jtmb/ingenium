@@ -12,7 +12,6 @@ permission:
   playwright_*: deny
   skill:
     "@development-conventions": allow
-    "@devops-conventions": allow
     "@debugging-patterns": allow
     "@local-models": allow
     "@mcp-tooling": allow
