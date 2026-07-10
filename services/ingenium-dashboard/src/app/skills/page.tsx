@@ -1,5 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 import { useState, useEffect, useRef } from "react";
+import { useProject } from "../../lib/ProjectContext";
 import { api, Skill } from "../../lib/api";
 import FileTree from "../components/FileTree";
 import MarkdownViewer from "../components/MarkdownViewer";
@@ -10,6 +12,7 @@ import MarkdownViewer from "../components/MarkdownViewer";
  * file tree on the left, content viewer/editor on the right.
  */
 export default function SkillsPage() {
+  const project = useProject();
   const [skills, setSkills] = useState<Skill[]>([]);
   const [search, setSearch] = useState("");
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
@@ -21,11 +24,11 @@ export default function SkillsPage() {
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { api.skills.list().then((r) => setSkills(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.skills.list(project).then((r) => setSkills(r.data)).catch(() => {}); }, [project]);
 
   const fetchSkill = async (name: string) => {
     try {
-      const r = await api.skills.get(name);
+      const r = await api.skills.get(name, project);
       setSelectedSkill(r.data);
       setSelectedFile("SKILL.md");
       setFileContent(r.data.content);
@@ -60,7 +63,7 @@ export default function SkillsPage() {
         tags: selectedSkill.tags,
         always_apply: selectedSkill.always_apply,
         files: fileTree,
-      });
+      }, project);
       
       setFileContent(editText);
       setEditMode(false);
@@ -86,10 +89,10 @@ export default function SkillsPage() {
         setTimeout(() => setUploadStatus("idle"), 3000);
         return;
       }
-      await api.skills.create(match[1]!.trim(), match[2]!.trim(), match[3]!.trim(), "ingenium");
+      await api.skills.create(match[1]!.trim(), match[2]!.trim(), match[3]!.trim(), project);
       setUploadStatus("success");
       setTimeout(() => setUploadStatus("idle"), 3000);
-      const res = await api.skills.list();
+      const res = await api.skills.list(project);
       setSkills(res.data);
     } catch {
       setUploadStatus("error");

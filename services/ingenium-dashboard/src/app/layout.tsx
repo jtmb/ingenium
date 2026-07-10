@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import "highlight.js/styles/github.css";
 import "./hljs-dark.css";
 import OpenCodeFrame from "./components/OpenCodeFrame";
+import ProjectSelector from "./components/ProjectSelector";
 
 /** Global metadata for the Ingenium Dashboard app. */
 export const metadata: Metadata = {
@@ -17,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-gray-50 text-gray-900">
         <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-6">
           <a href="/" className="font-bold text-lg">Ingenium</a>
+          <Suspense><ProjectSelector /></Suspense>
           <a href="/projects" className="text-sm text-gray-600 hover:text-gray-900">Projects</a>
           <a href="/archive" className="text-sm text-gray-600 hover:text-gray-900">Archive</a>
           <a href="/skills" className="text-sm text-gray-600 hover:text-gray-900">Skills</a>
@@ -28,7 +31,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/settings" className="text-sm text-gray-600 hover:text-gray-900">Settings</a>
           <a href="/opencode" className="text-sm text-gray-600 hover:text-gray-900">OpenCode</a>
         </nav>
-        <main className="p-6 max-w-6xl mx-auto">{children}</main>
+        <main className="p-6 max-w-6xl mx-auto">
+          <Suspense>{children}</Suspense>
+        </main>
         <OpenCodeFrame />
       </body>
     </html>

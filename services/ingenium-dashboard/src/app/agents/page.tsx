@@ -1,6 +1,8 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
+import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
 import { api, type Agent } from "@/lib/api";
@@ -10,6 +12,7 @@ import { api, type Agent } from "@/lib/api";
  * Full CRUD: create, edit, enable/disable, delete agent definitions synced to OpenCode.
  */
 export default function AgentsPage() {
+  const project = useProject();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +38,7 @@ export default function AgentsPage() {
     try {
       setLoading(true);
       setError(null);
-      const res = await api.agents.list();
+      const res = await api.agents.list(project);
       setAgents(res.data);
     } catch (err: any) {
       setError(err.message || "Failed to load agents");
@@ -44,14 +47,14 @@ export default function AgentsPage() {
     }
   };
 
-  useEffect(() => { fetchAgents(); }, []);
+  useEffect(() => { fetchAgents(); }, [project]);
 
   const handleCreate = async () => {
     if (!newName || !newContent) return;
     try {
       const data: any = { name: newName, content: newContent, description: newDesc, category: newCat, mode: newMode };
       if (newModel) data.model = newModel;
-      await api.agents.create(data);
+      await api.agents.create(data, project);
       setShowCreate(false);
       setNewName(""); setNewDesc(""); setNewContent(""); setNewModel("");
       fetchAgents();
@@ -67,7 +70,7 @@ export default function AgentsPage() {
       if (editModel !== undefined) data.model = editModel;
       if (editCat !== undefined) data.category = editCat;
       if (editContent !== undefined) data.content = editContent;
-      await api.agents.update(name, data);
+      await api.agents.update(name, data, project);
       setEditingId(null);
       fetchAgents();
     } catch (err: any) {
@@ -78,7 +81,7 @@ export default function AgentsPage() {
   const handleDelete = async (name: string) => {
     if (!window.confirm(`Delete agent "${name}"? This will remove its file from disk.`)) return;
     try {
-      await api.agents.delete(name);
+      await api.agents.delete(name, project);
       fetchAgents();
     } catch (err: any) {
       setError(err.message);
@@ -87,8 +90,8 @@ export default function AgentsPage() {
 
   const handleToggle = async (agent: Agent) => {
     try {
-      if (agent.enabled) await api.agents.disable(agent.name);
-      else await api.agents.enable(agent.name);
+      if (agent.enabled) await api.agents.disable(agent.name, project);
+      else await api.agents.enable(agent.name, project);
       fetchAgents();
     } catch (err: any) {
       setError(err.message);
