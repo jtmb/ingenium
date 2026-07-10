@@ -21,18 +21,13 @@ if [ ! -f "$OC_CONFIG" ]; then
   cat > "$OC_CONFIG" << 'OCEOF'
 {
   "$schema": "https://opencode.ai/config.json",
-  "projects": {
-    "repos": "/workspace"
-  },
   "mcp": {
     "ingenium": {
       "type": "local",
       "command": ["node", "/app/services/ingenium-server/dist/scripts/mcp-server.js"],
       "enabled": true,
       "environment": {
-        "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-        "INGENIUM_API_TIMEOUT": "10000",
-        "INGENIUM_CORE_DB_PATH": "/app/.ingenium/data"
+        "INGENIUM_API_URL": "http://localhost:4097/api/v1"
       }
     }
   }
