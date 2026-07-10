@@ -1,6 +1,6 @@
 # AGENTS.md — Ingenium MCP Server Agent Protocol
 
-This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded from the Ingenium SQLite database via the MCP server. Skill source files live at `seed/skills/<name>/` (canonical editing location) and are written to disk at `.opencode/skills/<name>/` with a split-skill format (SKILL.md + metadata.json + references/).
+This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.opencode/skills/<name>/` with a split-skill format (SKILL.md + metadata.json + references/).
 
 > 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
 
@@ -16,7 +16,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded fr
 
 ### Session Startup
 1. **Match skills** — Check the catalog against the request and files you might edit
-2. **Load matching skills** — Read `.opencode/skills/<name>/SKILL.md` (or `seed/skills/<name>/SKILL.md` if not yet written) for each match
+2. **Load matching skills** — Read `.opencode/skills/<name>/SKILL.md` for each match
 3. **Note 🔴 HARD RULEs** — These take priority over everything else
 4. **Run `/repo-context`** for project identity
 
@@ -35,7 +35,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills are loaded fr
 
 `configuring-opencode` `debugging-patterns` `development-conventions` `devops-conventions` `github-cli` `local-models` `mcp-tooling` `skill-maintenance`
 
-> 💡 Some skills exist only in `seed/skills/` and are synced to `.opencode/skills/` via the `/sync-skills` command or scheduled sync.
+> 💡 Skills are synced between the DB and `.opencode/skills/` via the `/sync-skills` command or scheduled sync.
 
 ### 🔴 MANDATORY — Self-Improvement
 
@@ -267,7 +267,7 @@ See `.opencode/skills/self-learning/SKILL.md` for complete documentation of the 
 - Synthesis pipeline architecture
 - MCP tools reference
 
-> 📖 **Full reference**: See [`self-learning-pipeline.md`](./self-learning-pipeline.md) at project root for complete documentation of the 10 observation types, 10 personality trait types, MCP tools, API endpoints, synthesis pipeline (Phase 1 + Phase 2), pipeline observability timeline, bidirectional skill sync, and deprecation notes.
+> 📖 **Full reference**: See [`self-learning-pipeline.md`](./docs/self-learning-pipeline.md) for complete documentation of the 10 observation types, 10 personality trait types, MCP tools, API endpoints, synthesis pipeline (Phase 1 + Phase 2), pipeline observability timeline, bidirectional skill sync, and deprecation notes.
 
 ### Commands
 
@@ -301,7 +301,7 @@ Every skill in the DB has a `file_tree` column (JSON map of relative paths → c
 - **Writing to disk:** `writeSkillToDisk()` writes SKILL.md + metadata.json, then every file in `file_tree`
 - **Reading from disk:** `syncSkillFromDisk()` reads SKILL.md + metadata.json, walks directory tree, stores as `file_tree` JSON
 - **Split-skill format on disk:** Each skill is a directory with `SKILL.md` (main content + YAML frontmatter), `metadata.json` (tags, alwaysApply), and optional `references/` directory
-- **Canonical source:** Edit at `seed/skills/<name>/`, then use dashboard or `ingenium_skill_sync` to persist to DB
+- **Canonical source:** Edit at `.opencode/skills/<name>/`, then use dashboard or `ingenium_skill_sync` to persist to DB
 - **Runtime copy:** `.opencode/skills/<name>/` is auto-written from DB. Do not edit — changes will be overwritten unless synced back
 
 ### Dashboard Styling Guide

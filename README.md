@@ -1,13 +1,13 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="Ingenium" width="120" />
+<img src="docs/assets/logo.svg" alt="Ingenium" width="120" />
 
 # Ingenium
 
 ### All your AI agent development tools in one place. One MCP server, hundreds of tools.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-17%20total-green?style=flat-square" alt="17 skills — seed/skills/" />
+  <img src="https://img.shields.io/badge/skills-14%20total-green?style=flat-square" alt="14 skills" />
   <img src="https://img.shields.io/badge/MCP%20tools-61-blue?style=flat-square" alt="61 MCP tools" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
@@ -77,7 +77,7 @@ Multi-project configuration with name→UUID resolution and per-project SQLite d
 → [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md)
 
 ### 📚 Skills
-AI agent conventions engine — 17 skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained split-skill format (SKILL.md + metadata.json + references/) stored at `seed/skills/` (canonical source) and `.opencode/skills/` (written to disk from DB). Skills are loaded from the SQLite database via the MCP server and auto-invoked based on file type, framework detection, and slash commands. The `file_tree` column stores a JSON map of relative paths → content for complete data round-trips. The dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and syntax highlighting (highlight.js) in both Preview and Source views.
+AI agent conventions engine — 17 skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained split-skill format (SKILL.md + metadata.json + references/) stored at `.opencode/skills/`. Skills are loaded from the SQLite database via the MCP server and auto-invoked based on file type, framework detection, and slash commands. The `file_tree` column stores a JSON map of relative paths → content for complete data round-trips. The dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and syntax highlighting (highlight.js) in both Preview and Source views.
 → [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md)
 
 ### 🧠 Self-Learning Pipeline
@@ -146,7 +146,7 @@ graph LR
     D[Browser<br/>Dashboard] -->|HTTP| C
     C -->|SQLite WAL| E[(SQLite<br/>FTS5)]
     
-    F[Agent Session] -->|skill-load| G[seed/skills/<br/>17 skills]
+    F[Agent Session] -->|skill-load| G[.opencode/skills/<br/>14 skills]
     G -->|update-skills| H[Self-learning<br/>engine]
     H -->|Logs to| E
 ```

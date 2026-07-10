@@ -1,5 +1,0 @@
-{
-  "name": "configuring-opencode",
-  "description": "OpenCode agent configuration conventions — frontmatter structure, tool/skill permission lockdown patterns, @skill-name reference rules. Use when creating or auditing agent definitions, or when ensuring agent configuration follows best practices.",
-  "tags": ["opencode", "agents", "configuration", "permissions", "conventions"]
-}
