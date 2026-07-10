@@ -19,21 +19,6 @@ tags: ["local-models", "llm", "inference", "qwen", "lm-studio", "terminal"]
 - Calling LM Studio API endpoints (`/v1/models`, `/v1/chat/completions`)
 - Configuring the LM Studio provider in `opencode.jsonc`
 
-## Reference Files
-
-| File | Content |
-|------|---------|
-| [`references/command-safety.md`](references/command-safety.md) | ✅ Safe patterns, anti-pattern catalog, timeout wrappers, MCP tool call verification rules |
-| [`references/model-profiles.md`](references/model-profiles.md) | Qwen model profiles: 2.5, 3.5, 3.6 — strengths, weaknesses, Model-Aware Hints |
-| [`references/lm-studio-api.md`](references/lm-studio-api.md) | LM Studio server info, API endpoints, provider configuration, common issues |
-| [`references/cross-model-strategy.md`](references/cross-model-strategy.md) | Comparison tables, which model for which task, prompt adaptation by model size, skill adaptation guide |
-
-## Cross-References
-
-- **`shell-scripts`** — Safety flags (`set -euo pipefail`) for scripts that wrap model calls
-- **`self-correction-patterns`** — Detect hung terminal sessions and recover without `&`
-- **`generic-conventions`** — Security rules for API keys, auth headers, and config
-
 ## 🔴 HARD RULEs
 
 ### Every Terminal Command MUST Produce a Termination Signal
@@ -128,3 +113,24 @@ If count > 100, narrow the search or use a different approach.
 
 ---
 
+## Reference Files
+
+| File | Content |
+|------|---------|
+| [`references/command-safety.md`](references/command-safety.md) | ✅ Safe patterns, anti-pattern catalog, timeout wrappers, MCP tool call verification rules |
+| [`references/model-profiles.md`](references/model-profiles.md) | Qwen model profiles: 2.5, 3.5, 3.6 — strengths, weaknesses, Model-Aware Hints |
+| [`references/lm-studio-api.md`](references/lm-studio-api.md) | LM Studio server info, API endpoints, provider configuration, common issues |
+| [`references/cross-model-strategy.md`](references/cross-model-strategy.md) | Comparison tables, which model for which task, prompt adaptation by model size, skill adaptation guide |
+| [`references/qwen-3.5-9b.md`](references/qwen-3.5-9b.md) | 🔴 qwen-3.5-9b subagent safety protocol — phase limits, anti-loop, anti-hallucination, file write verification |
+
+## Model-Specific Protocols
+
+For model-specific subagent safety rules (phase limits, anti-loop constraints), see:
+
+- **[qwen-3.5-9b.md](references/qwen-3.5-9b.md)** — Required reading for all qwen-3.5-9b subagents (ingenium-docs, ingenium-explore, ingenium-scout)
+
+## Cross-References
+
+- **`shell-scripts`** — Safety flags (`set -euo pipefail`) for scripts that wrap model calls
+- **`self-correction-patterns`** — Detect hung terminal sessions and recover without `&`
+- **`generic-conventions`** — Security rules for API keys, auth headers, and config

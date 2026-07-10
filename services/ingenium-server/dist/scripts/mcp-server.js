@@ -13,7 +13,6 @@ import { logger } from "../lib/logger.js";
 import { stopAll } from "../lib/proxy.js";
 // Import MCP tool handlers
 import * as skillTools from "../lib/tools/skills.js";
-import * as learningTools from "../lib/tools/learnings.js";
 import * as taskTools from "../lib/tools/tasks.js";
 import * as contextTools from "../lib/tools/context.js";
 import * as projectTools from "../lib/tools/projects.js";
@@ -21,7 +20,6 @@ import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
 import { settingGet, settingSet } from "../lib/tools/settings.js";
 import { projectRestore, projectListArchived, projectPurge } from "../lib/tools/projects.js";
-import { learningList, skillFromLearnings } from "../lib/tools/learnings.js";
 import { pluginGet } from "../lib/tools/plugins.js";
 import { planList } from "../lib/tools/context.js";
 import * as agentTools from "../lib/tools/agents.js";
@@ -60,21 +58,6 @@ server.registerTool("ingenium_skill_delete", { description: "Delete a skill by n
 server.registerTool("ingenium_skill_enable", { description: "Enable a skill and sync to disk.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillEnable(project, name));
 server.registerTool("ingenium_skill_disable", { description: "Disable a skill and remove from disk.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillDisable(project, name));
 server.registerTool("ingenium_skill_sync", { description: "Sync a skill from its .md file on disk to the DB — edits made directly to the file are persisted.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => skillTools.skillSync(project, name));
-// ── Learnings ───────────────────────────────────────────
-server.registerTool("ingenium_learning_log", {
-    description: "Log a new learning entry with optional tags, priority, and session association.",
-    inputSchema: {
-        project: projectParam,
-        entry_type: z.string(),
-        content: z.string(),
-        tags: z.string().optional(),
-        priority: z.number().optional(),
-        session_id: z.string().optional(),
-    },
-}, async ({ project, entry_type, content, tags, priority, session_id }) => learningTools.learningLog(project, entry_type, content, tags, priority, session_id));
-server.registerTool("ingenium_learning_search", { description: "Full-text search across learning entries.", inputSchema: { project: projectParam, query: z.string() } }, async ({ project, query }) => learningTools.learningSearch(project, query));
-server.registerTool("ingenium_learning_list", { description: "List learning entries.", inputSchema: { project: projectParam } }, async ({ project }) => learningList(project));
-server.registerTool("ingenium_skill_from_learnings", { description: "Scan recent learnings for skill gaps and auto-create tasks for AI engineers to write missing skills.", inputSchema: { project: projectParam } }, async ({ project }) => skillFromLearnings(project));
 // ── Observations ──────────────────────────────────────────
 server.registerTool("ingenium_observe", {
     description: "Store an observation about the user's behavior, preferences, or interaction pattern. The agent uses this naturally during its workflow — no explicit self-reporting needed. Types: correction, preference, pattern, insight, feedback, behavior, terminology, workflow, error, goal.",

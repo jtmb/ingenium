@@ -46,3 +46,7 @@ All 17 skills are stored in the Ingenium SQLite database and written to disk in 
 | **List all skills** | `ingenium_skill_list` MCP tool |
 | **View changelog** | `ingenium_learning_search` via MCP tool |
 | **Run seed** | `./run.sh seed` (idempotent, re-initializes all 17 skills) |
+
+## Notes
+
+- Email skills (category: \`email\`, tags: \`email,response\`) are auto-created by the synthesis pipeline when email interaction patterns are detected. They contain response templates between \`\`\`template markers.

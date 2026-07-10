@@ -62,7 +62,7 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 64 tools. Calls API via HTTP. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 61 tools. Calls API via HTTP. Zero DB access.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend. Calls API via HTTP. Zero DB access.
 ```
 
@@ -331,3 +331,9 @@ Every service with a frontend must have a `STYLING-GUIDE.md` in its service dire
 | `SYNTHESIS_INTERVAL_MS` | `900000` | ingenium-api | Scheduled synthesis interval (15 min), 0 = disabled |
 | `OBSERVER_CHECK_INTERVAL` | `0` | observer plugin | Session idle check interval, 0 = disabled |
 | `NODE_ENV` | _(none)_ | services | Node environment (production/development) |
+| `GOOGLE_OAUTH_CLIENT_ID` | _(required for OAuth)_ | ingenium-email | Google OAuth2 app client ID |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | _(required for OAuth)_ | ingenium-email | Google OAuth2 app client secret |
+| `MS_OAUTH_CLIENT_ID` | _(required for OAuth)_ | ingenium-email | Microsoft OAuth2 app client ID |
+| `MS_OAUTH_CLIENT_SECRET` | _(required for OAuth)_ | ingenium-email | Microsoft OAuth2 app client secret |
+| `INGENIUM_EMAIL_ENCRYPTION_KEY` | _(required)_ | ingenium-email | 32-byte hex key for AES-256-GCM credential encryption |
+| `OAUTH_REDIRECT_URI` | `http://localhost:3000/mail/oauth/callback` | ingenium-email | OAuth2 callback URL |

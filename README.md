@@ -8,7 +8,7 @@
 
 <p>
   <img src="https://img.shields.io/badge/skills-17%20total-green?style=flat-square" alt="17 skills — seed/skills/" />
-  <img src="https://img.shields.io/badge/MCP%20tools-48-blue?style=flat-square" alt="48 MCP tools" />
+  <img src="https://img.shields.io/badge/MCP%20tools-61-blue?style=flat-square" alt="61 MCP tools" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
 
@@ -25,7 +25,7 @@ Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium
 
 **The system learns from you.** Patterns you teach, conventions you establish, and decisions you make are stored in a searchable knowledge base. The `update-skills` agent autonomously detects new dependencies, repeated patterns, missing coverage, and stale content — creating, updating, or retiring skills as your codebase evolves. Every change is logged with before/after commit hashes for full auditability.
 
-Eleven dashboard pages provide visual management for every feature. Each page is a standalone feature with its own documentation.
+11 dashboard pages provide visual management for every feature. Each page is a standalone feature with its own documentation.
 
 ## Quick Start
 
@@ -94,6 +94,9 @@ Kanban-style task board with `todo` → `in_progress` → `review` → `done` wo
 OpenCode plugin lifecycle management — enable, disable, configure plugins that extend the MCP server's capabilities. Plugin state is persisted across restarts with auto-config sync between DB and `opencode.json`.
 → [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md)
 
+### 📧 Mail
+Full email client with inbox, compose, search, and AI auto-responses. Gmail/Outlook OAuth2 + IMAP/SMTP. 13 MCP tools for agents. Self-learning auto-draft from user patterns.
+
 ### 🖥️ Servers
 MCP server configuration and proxy engine — start, stop, configure MCP servers from the dashboard. The server proxy routes client requests to the appropriate backend, handling lifecycle and configuration.
 → [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md)
@@ -138,7 +141,7 @@ ingenium/
 
 ```mermaid
 graph LR
-    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>48 tools]
+    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>61 tools]
     B -->|HTTP| C[ingenium-api<br/>port 4097]
     D[Browser<br/>Dashboard] -->|HTTP| C
     C -->|SQLite WAL| E[(SQLite<br/>FTS5)]
