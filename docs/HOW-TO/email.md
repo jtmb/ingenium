@@ -219,7 +219,7 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 |-----|---------|
 | `docs/VARIABLES.md` | Email environment variables reference |
 | `AGENTS.md` section "Email Client Environment Variables" | OAuth2 setup instructions and security warnings |
-| `self-learning-pipeline.md` Section 6 | MCP tools for observations (including email-specific patterns) |
+| `docs/self-learning-pipeline.md` Section 6 | MCP tools for observations (including email-specific patterns) |
 
 ## Files Reference
 

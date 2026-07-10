@@ -196,4 +196,4 @@ ingenium_observation_search("keyword")
 
 - `.opencode/skills/self-learning/SKILL.md` — Complete skill documentation
 - [docs/HOW-TO/learnings.md](./learnings.md) — Old learnings documentation (deprecated, kept for reference)
-- `seed/skills/skill-maintenance/SKILL.md` — Skill lifecycle management
+- .opencode/skills/skill-maintenance/SKILL.md — Skill lifecycle management
