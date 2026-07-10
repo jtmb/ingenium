@@ -304,6 +304,18 @@ Every skill in the DB has a `file_tree` column (JSON map of relative paths → c
 - **Canonical source:** Edit at `.opencode/skills/<name>/`, then use dashboard or `ingenium_skill_sync` to persist to DB
 - **Runtime copy:** `.opencode/skills/<name>/` is auto-written from DB. Do not edit — changes will be overwritten unless synced back
 
+### 🔴 Skill Sync Pattern (Client-Side)
+
+After any skill mutation (`ingenium_skill_create`, `update`, or `enable`), use this pattern to persist locally:
+
+1. **Call `ingenium_skill_load(project, name)`** — Pull the full skill object from DB
+2. **Use `write` tool** — Write files at `.opencode/skills/<name>/`:
+   - `SKILL.md` with YAML frontmatter + content body
+   - `metadata.json` with `{name, description, tags, alwaysApply}`
+3. **Verify persistence** — Optionally read back to confirm
+
+This is the client-side equivalent of server-side `writeSkillToDisk()`. The local-persistence skill (always_apply: true) enforces this pattern automatically when loaded before mutations.
+
 ### Dashboard Styling Guide
 
 Every service with a frontend must have a `STYLING-GUIDE.md` in its service directory documenting:

@@ -24,7 +24,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/projects" className="text-sm text-gray-600 hover:text-gray-900">Projects</a>
           <a href="/archive" className="text-sm text-gray-600 hover:text-gray-900">Archive</a>
           <a href="/skills" className="text-sm text-gray-600 hover:text-gray-900">Skills</a>
-          <a href="/learnings" className="text-sm text-gray-400 hover:text-gray-600" title="Deprecated — use Observations">Learnings*</a>
           <a href="/tasks" className="text-sm text-gray-600 hover:text-gray-900">Tasks</a>
           <a href="/plugins" className="text-sm text-gray-600 hover:text-gray-900">Plugins</a>
           <a href="/mail" className="text-sm text-gray-600 hover:text-gray-900">Mail</a>

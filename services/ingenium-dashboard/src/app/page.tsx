@@ -18,9 +18,9 @@ export default function Home() {
           <h2 className="font-semibold text-lg">Skills</h2>
           <p className="text-sm text-gray-500">Browse, search, and edit skills</p>
         </Link>
-        <Link href="/learnings" className="p-6 bg-white rounded-lg border hover:shadow-md transition-shadow">
-          <h2 className="font-semibold text-lg">Learnings</h2>
-          <p className="text-sm text-gray-500">View and search learning entries</p>
+        <Link href="/observations" className="p-6 bg-white rounded-lg border hover:shadow-md transition-shadow">
+          <h2 className="font-semibold text-lg">Observations</h2>
+          <p className="text-sm text-gray-500">View observations recorded by agents during interactions</p>
         </Link>
         <Link href="/tasks" className="p-6 bg-white rounded-lg border hover:shadow-md transition-shadow">
           <h2 className="font-semibold text-lg">Tasks</h2>
