@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "highlight.js/styles/github.css";
 import "./hljs-dark.css";
+import OpenCodeFrame from "./components/OpenCodeFrame";
 
 /** Global metadata for the Ingenium Dashboard app. */
 export const metadata: Metadata = {
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/opencode" className="text-sm text-gray-600 hover:text-gray-900">OpenCode</a>
         </nav>
         <main className="p-6 max-w-6xl mx-auto">{children}</main>
+        <OpenCodeFrame />
       </body>
     </html>
   );
