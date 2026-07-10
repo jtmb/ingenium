@@ -1,0 +1,6 @@
+{
+  "name": "local-persistence",
+  "description": "Ensure skills and observations are persisted to local .opencode/skills/ — load from DB and write to disk after every mutation.",
+  "tags": ["local", "sync", "persistence", "hard-rule"],
+  "alwaysApply": true
+}

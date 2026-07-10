@@ -1,0 +1,6 @@
+{
+  "name": "per-project-scoping",
+  "description": "Enforce project-specific context for skills and agents rather than applying global defaults.",
+  "tags": ["llm-synthesized", "auto-generated"],
+  "alwaysApply": true
+}
