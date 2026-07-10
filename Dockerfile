@@ -52,6 +52,7 @@ COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/.ne
 # Copy process management config
 COPY --chown=appuser:appuser supervisord.conf ./supervisord.conf
 COPY --chown=appuser:appuser scripts/docker-entrypoint.sh ./entrypoint.sh
+COPY --chown=appuser:appuser scripts/seed-opencode-projects.js ./seed-opencode-projects.js
 RUN chmod +x /app/entrypoint.sh
 
 # Create shared config and data directories with proper ownership
