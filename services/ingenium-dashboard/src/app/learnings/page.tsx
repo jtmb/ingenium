@@ -1,5 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
+import { useProject } from "../../lib/ProjectContext";
 import { api, Learning } from "../../lib/api";
 import Overlay from "../components/Overlay";
 
@@ -9,20 +11,21 @@ import Overlay from "../components/Overlay";
  * creating new entries with a selectable entry type.
  */
 export default function LearningsPage() {
+  const project = useProject();
   const [learnings, setLearnings] = useState<Learning[]>([]);
   const [content, setContent] = useState("");
   const [type, setType] = useState("pattern");
   const [error, setError] = useState("");
   const [selectedLearning, setSelectedLearning] = useState<any>(null);
 
-  useEffect(() => { api.learnings.list().then((r) => setLearnings(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.learnings.list(project).then((r) => setLearnings(r.data)).catch(() => {}); }, [project]);
 
   /** Submits a new learning entry and prepends it to the list. */
   const log = async () => {
     if (!content) return;
     try {
       setError("");
-      const res = await api.learnings.create(type, content);
+      const res = await api.learnings.create(type, content, undefined, project);
       setLearnings([res.data, ...learnings]);
       setContent("");
     } catch (err) {

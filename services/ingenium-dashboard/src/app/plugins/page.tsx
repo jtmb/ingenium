@@ -1,5 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 import { useState, useEffect, useRef } from "react";
+import { useProject } from "../../lib/ProjectContext";
 import { api, Plugin } from "../../lib/api";
 import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
@@ -9,6 +11,7 @@ import MarkdownViewer from "../components/MarkdownViewer";
  * Full CRUD: upload .ts plugin files, edit, enable/disable, delete.
  */
 export default function PluginsPage() {
+  const project = useProject();
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +29,7 @@ export default function PluginsPage() {
     setLoading(true);
     setError(null);
     try {
-      const r = await api.plugins.list();
+      const r = await api.plugins.list(project);
       setPlugins(r.data);
     } catch (e: any) {
       setError(e.message ?? "Failed to load plugins");
@@ -35,7 +38,7 @@ export default function PluginsPage() {
     }
   };
 
-  useEffect(() => { loadPlugins(); }, []);
+  useEffect(() => { loadPlugins(); }, [project]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -49,7 +52,7 @@ export default function PluginsPage() {
   const handleCreate = async () => {
     if (!newName || !newPath) return;
     try {
-      await api.plugins.create(newName, newPath, newContent || undefined);
+      await api.plugins.create(newName, newPath, newContent || undefined, project);
       setNewName("");
       setNewPath("");
       setNewContent("");
@@ -64,7 +67,7 @@ export default function PluginsPage() {
   const handleDelete = async (p: Plugin) => {
     if (!window.confirm(`Delete plugin "${p.name}"? This cannot be undone.`)) return;
     try {
-      await api.plugins.delete(p.name);
+      await api.plugins.delete(p.name, project);
       await loadPlugins();
     } catch (e: any) {
       setError(e.message ?? "Failed to delete plugin");
@@ -73,7 +76,7 @@ export default function PluginsPage() {
 
   const handleUpdate = async (name: string) => {
     try {
-      await api.plugins.update(name, { file_path: editPath, source_content: editContent });
+      await api.plugins.update(name, { file_path: editPath, source_content: editContent }, project);
       setEditingId(null);
       await loadPlugins();
     } catch (e: any) {
@@ -84,9 +87,9 @@ export default function PluginsPage() {
   const toggle = async (p: Plugin) => {
     try {
       if (p.enabled) {
-        await api.plugins.disable(p.name);
+        await api.plugins.disable(p.name, project);
       } else {
-        await api.plugins.enable(p.name);
+        await api.plugins.enable(p.name, project);
       }
       setPlugins(plugins.map((x) => x.id === p.id ? { ...x, enabled: !x.enabled } : x));
     } catch (e: any) {

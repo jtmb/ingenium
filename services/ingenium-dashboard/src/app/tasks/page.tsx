@@ -1,5 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
+import { useProject } from "../../lib/ProjectContext";
 import { api, Task } from "../../lib/api";
 import Overlay from "../components/Overlay";
 
@@ -13,19 +15,20 @@ const columns = ["todo", "in_progress", "review", "done"] as const;
  * A form at the top allows creating new tasks that start in "todo".
  */
 export default function TasksPage() {
+  const project = useProject();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
-  useEffect(() => { api.tasks.list().then((r) => setTasks(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.tasks.list(project).then((r) => setTasks(r.data)).catch(() => {}); }, [project]);
 
   /** Creates a new task (auto-placed in "todo") and prepends it. */
   const create = async () => {
     if (!title) return;
     try {
       setError("");
-      const res = await api.tasks.create(title);
+      const res = await api.tasks.create(title, project);
       setTasks([res.data, ...tasks]);
       setTitle("");
     } catch (err) {
@@ -35,7 +38,7 @@ export default function TasksPage() {
 
   /** Moves a task to the target column, optimistically updating state. */
   const move = async (id: string, col: string) => {
-    await api.tasks.move(id, col);
+    await api.tasks.move(id, col, project);
     setTasks(tasks.map((t) => t.id === id ? { ...t, column_id: col } : t));
   };
 

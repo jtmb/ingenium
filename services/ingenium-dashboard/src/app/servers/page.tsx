@@ -1,5 +1,7 @@
 "use client";
+export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
+import { useProject } from "../../lib/ProjectContext";
 import { api, Server } from "../../lib/api";
 
 /**
@@ -8,16 +10,17 @@ import { api, Server } from "../../lib/api";
  * A form allows adding new server configurations.
  */
 export default function ServersPage() {
+  const project = useProject();
   const [servers, setServers] = useState<Server[]>([]);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
 
-  useEffect(() => { api.servers.list().then((r) => setServers(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.servers.list(project).then((r) => setServers(r.data)).catch(() => {}); }, [project]);
 
   /** Creates a new server entry and prepends it to the list. */
   const create = async () => {
     if (!name || !command) return;
-    const res = await api.servers.create(name, command);
+    const res = await api.servers.create(name, command, project);
     setServers([res.data, ...servers]);
     setName("");
     setCommand("");
