@@ -11,7 +11,7 @@ vi.mock("ingenium-core", () => {
       }),
     },
     getDb: vi.fn(() => ({
-      prepare: vi.fn(() => ({
+      prepare: vi.fn((sql: string) => ({
         all: vi.fn(() => {
           const entries: Array<{ key: string; value: string }> = [];
           for (const [k, v] of store.entries()) {
@@ -21,7 +21,13 @@ vi.mock("ingenium-core", () => {
           }
           return entries;
         }),
-        run: vi.fn(() => {}),
+        run: vi.fn((...bindParams: string[]) => {
+          // Sync DELETE statements back to the store Map so setSetting/getSetting see the change
+          if (sql.startsWith("DELETE FROM settings")) {
+            const key = bindParams[1];
+            if (key) store.delete(key);
+          }
+        }),
       })),
     })),
   };
@@ -29,7 +35,7 @@ vi.mock("ingenium-core", () => {
 
 describe("accounts", () => {
   beforeAll(() => {
-    process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = "abcdef0123456789abcdef0123456789";
+    process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
   });
 
   afterAll(() => {

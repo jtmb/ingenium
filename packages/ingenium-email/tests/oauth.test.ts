@@ -1,8 +1,39 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+
+// Mock ingenium-core so settings.setSetting/getSetting don't hit real SQLite
+vi.mock("ingenium-core", () => {
+  const store = new Map<string, string>();
+  return {
+    settings: {
+      getSetting: vi.fn((_projectId: string, key: string) => store.get(key) ?? null),
+      setSetting: vi.fn((_projectId: string, key: string, value: string) => {
+        store.set(key, value);
+      }),
+    },
+    getDb: vi.fn(() => ({
+      prepare: vi.fn((sql: string) => ({
+        all: vi.fn(() => {
+          const entries: Array<{ key: string; value: string }> = [];
+          for (const [k, v] of store.entries()) {
+            entries.push({ key: k, value: v });
+          }
+          return entries;
+        }),
+        run: vi.fn((...bindParams: string[]) => {
+          // Sync DELETE statements back to the store Map
+          if (sql.startsWith("DELETE FROM settings")) {
+            const key = bindParams[1];
+            if (key) store.delete(key);
+          }
+        }),
+      })),
+    })),
+  };
+});
 
 // ── Encryption round-trip tests ──────────────────────────────────────────
 
-const TEST_KEY = "abcdef0123456789abcdef0123456789"; // 32 bytes hex
+const TEST_KEY = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"; // 64 hex chars = 32 bytes
 
 describe("encryptCredentials / decryptCredentials", () => {
   beforeAll(() => {
@@ -100,8 +131,11 @@ describe("getOAuthUrl / exchangeCode", () => {
   });
 
   it("should throw for unsupported exchange provider", async () => {
+    // Seed an OAuth state so state validation passes and we reach the "not supported" check
+    const { settings } = await import("ingenium-core");
+    settings.setSetting("gh-llm-bootstrap", "oauth_state_yahoo", "test-state-123");
     const { exchangeCode } = await import("../lib/oauth.js");
-    await expect(exchangeCode("yahoo" as any, "code123")).rejects.toThrow("not supported");
+    await expect(exchangeCode("yahoo" as any, "code123", "test-state-123")).rejects.toThrow("not supported");
   });
 });
 

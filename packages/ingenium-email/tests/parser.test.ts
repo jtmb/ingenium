@@ -71,13 +71,11 @@ describe("sanitizeHtml", () => {
     expect(result).not.toContain("<script");
   });
 
-  it("should strip javascript: in href (limitation: not currently handled)", async () => {
+  it("should strip javascript: in href", async () => {
     const { sanitizeHtml } = await import("../lib/parser.js");
     const html = '<a href="javascript:alert(1)">click</a>';
     const result = sanitizeHtml(html);
-    // KNOWN LIMITATION: sanitizeHtml does NOT strip javascript: URIs
-    // This test documents the gap
-    expect(result).toContain("javascript:");
+    expect(result).not.toContain("javascript:");
   });
 
   it("should handle script with newlines and special chars", async () => {
