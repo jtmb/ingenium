@@ -14,7 +14,31 @@ for dir in /app/.ingenium /app/.opencode/skills; do
   fi
 done
 
-# Use the pre-created opencode.json if user hasn't mounted one
-# (a container-default opencode.json is baked into the image at /app/opencode.json)
+# Seed OpenCode config with Ingenium MCP on first start
+OC_CONFIG="/home/appuser/.config/opencode/opencode.jsonc"
+if [ ! -f "$OC_CONFIG" ]; then
+  mkdir -p "$(dirname "$OC_CONFIG")"
+  cat > "$OC_CONFIG" << 'OCEOF'
+{
+  "$schema": "https://opencode.ai/config.json",
+  "projects": {
+    "repos": "/workspace"
+  },
+  "mcp": {
+    "ingenium": {
+      "type": "local",
+      "command": ["node", "/app/services/ingenium-server/dist/scripts/mcp-server.js"],
+      "enabled": true,
+      "environment": {
+        "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+        "INGENIUM_API_TIMEOUT": "10000",
+        "INGENIUM_CORE_DB_PATH": "/app/.ingenium/data"
+      }
+    }
+  }
+}
+OCEOF
+  echo "Seeded OpenCode config with Ingenium MCP"
+fi
 
 exec supervisord -c /app/supervisord.conf
