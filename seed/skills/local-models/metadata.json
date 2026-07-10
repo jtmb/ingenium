@@ -1,6 +1,6 @@
 {
   "name": "local-models",
   "description": "Local LLM management — Qwen model profiles, command safety rules (no &, timeout wrappers), local provider API reference (LM Studio, Ollama, vLLM), and cross-model strategy guide.",
-  "tags": ["local-models", "llm", "inference", "qwen", "lm-studio", "terminal"],
+  "tags": ["local-models", "llm", "inference", "qwen", "qwen-3.5-9b", "lm-studio", "terminal"],
   "alwaysApply": true
 }
