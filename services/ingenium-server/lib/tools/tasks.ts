@@ -24,9 +24,9 @@ export async function taskMove(project: string, taskId: string, columnId: string
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Mark a task as completed. */
+/** Mark a task as completed (move to "done" column). */
 export async function taskComplete(project: string, taskId: string) {
-  const res = await api.patch(`/tasks/${taskId}`, {}, { project });
+  const res = await api.patch(`/tasks/${taskId}`, { column_id: "done" }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -50,7 +50,7 @@ export async function taskDelete(project: string, taskId: string) {
 
 /** Full-text search across tasks. */
 export async function taskSearch(project: string, query: string, limit?: number) {
-  const params: Record<string, string> = { project, query };
+  const params: Record<string, string> = { project, q: query };
   if (limit) params.limit = String(limit);
   const res = await api.get("/tasks/search", params);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
