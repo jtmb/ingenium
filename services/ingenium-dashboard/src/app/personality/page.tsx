@@ -56,6 +56,10 @@ export default function PersonalityPage() {
     return acc;
   }, {});
 
+  const allHidden = Object.keys(grouped).length > 0 && Object.values(grouped).every(
+    (typeTraits) => (typeTraits as PersonalityTrait[]).filter(t => (t.confidence || 0) >= 0.3).length === 0
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -69,7 +73,7 @@ export default function PersonalityPage() {
           <span className="text-sm text-gray-500">
             {traits.filter(t => (t.confidence || 0) >= 0.3).length} trait(s)
             {hiddenCount > 0 && (
-              <button onClick={() => setShowHidden(!showHidden)} className="ml-2 text-xs text-gray-400 hover:text-gray-600 underline">
+              <button onClick={() => setShowHidden(!showHidden)} className="ml-2 text-sm text-blue-600 font-medium hover:underline cursor-pointer">
                 {showHidden ? "Hide" : `${hiddenCount} hidden`}
               </button>
             )}
@@ -106,6 +110,20 @@ export default function PersonalityPage() {
       {sortMode === "grouped" && Object.entries(grouped).length === 0 && (
         <div className="bg-gray-50 p-8 rounded border text-center text-gray-400">
           No personality traits learned yet. Traits are generated automatically from observations via the synthesis pipeline.
+        </div>
+      )}
+
+      {sortMode === "grouped" && allHidden && !showHidden && (
+        <div className="bg-amber-50 border border-amber-200 rounded p-6 text-center">
+          <p className="text-amber-800 font-medium mb-2">
+            {Object.keys(grouped).length} trait type(s) found, but all below the display threshold.
+          </p>
+          <p className="text-amber-600 text-sm mb-3">
+            Traits need 2+ confirming observations to reach the 0.30 display threshold (confidence ≥ 30%).
+          </p>
+          <button onClick={() => setShowHidden(true)} className="px-4 py-2 bg-amber-100 text-amber-800 rounded text-sm font-medium hover:bg-amber-200">
+            Show all ({hiddenCount} hidden)
+          </button>
         </div>
       )}
 

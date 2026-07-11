@@ -31,12 +31,10 @@ export default function MCPServersPage() {
     api.servers.list(project).then((r) => { setServers(r.data); setIsGlobal(r.is_global); }).catch(() => {});
   }, [project]);
 
-  // Load tools when tab switches
+  // Load tools on mount (for badge count)
   useEffect(() => {
-    if (tab === "tools") {
-      api.mcpTools.list(project, true).then((r) => setCategories(r.data || [])).catch(() => {});
-    }
-  }, [tab, project]);
+    api.mcpTools.list(project, true).then((r) => setCategories(r.data || [])).catch(() => {});
+  }, [project]);
 
   const createServer = async () => {
     if (!name || !command) return;

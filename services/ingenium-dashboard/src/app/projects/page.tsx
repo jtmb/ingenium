@@ -19,6 +19,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [archived, setArchived] = useState<Project[]>([]);
   const [name, setName] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [view, setView] = useState<"active" | "archived">("active");
   const [details, setDetails] = useState<Record<string, any>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -68,7 +69,8 @@ export default function ProjectsPage() {
   };
 
   const activeProjects = projects.filter(p => !p.archived_at);
-  const displayed = view === "active" ? activeProjects : archived;
+  const displayed = (view === "active" ? activeProjects : archived)
+    .filter(p => !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
     <div className="space-y-6">
@@ -86,6 +88,16 @@ export default function ProjectsPage() {
             <button onClick={create} disabled={!name} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">Create</button>
           </div>
         )}
+      </div>
+
+      {/* Search */}
+      <div className="flex gap-2">
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search projects..."
+          className="border border-gray-200 p-2 rounded text-sm w-64"
+        />
       </div>
 
       {/* Cards */}
