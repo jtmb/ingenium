@@ -41,6 +41,18 @@ When saving screenshots, use paths that describe what they contain: `screenshot-
 
 Before calling any MCP tool, verify that the MCP server is configured in `opencode.json` and the server process is running. Check `.opencode/agents/*.md` for tool permissions.
 
+### 🔴 Ingenium MCP Tool Naming — Use Correct Prefix
+
+All Ingenium MCP tools use a **double `ingenium_ingenium_` prefix**:
+
+| ✅ Correct | ❌ Wrong |
+|-----------|---------|
+| `ingenium_ingenium_observation_stats` | `ingenuum_ingenium_observation_stats` (typo) |
+| `ingenium_ingenium_skill_load` | `ingenium_skill_load` (missing prefix) |
+| `ingenium_ingenium_observe` | `ingenium_observe` (missing prefix) |
+
+The pattern is: `ingenium_ingenium_<noun>_<verb>`. Double-check the prefix before calling — a typo wastes tool calls.
+
 ### 🔴 Save Context to Thread After Every Code Change
 
 After every code change (write/edit/delete/refactor), IMMEDIATELY save context to Thread before doing anything else:
