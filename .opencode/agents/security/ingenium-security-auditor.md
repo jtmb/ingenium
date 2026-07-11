@@ -68,10 +68,4 @@ For confirmed leaks in git history:
 2. Recommend: rotate the secret, then purge it with `git filter-branch` or BFG
 3. Reference the affected skill (e.g. `@development-conventions` for missing patterns, `@devops-conventions` for secret-in-args)
 
-## 🔴 Log Security Discoveries
 
-When you discover a security pattern, leak, or vulnerability:
-1. Use `ingenium_ingenium_observe` to log it immediately
-2. Use `observation_type="insight"` and `importance=8` for critical findings, `importance=5` for low-severity
-3. Summarize the finding, affected files, and severity in `content`
-4. Include severity level in the `context` parameter (e.g. `"severity:critical"`)

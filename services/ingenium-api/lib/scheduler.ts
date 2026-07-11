@@ -1,4 +1,4 @@
-import { settings, projects } from "ingenium-core";
+import { settings, projects, logger } from "ingenium-core";
 
 const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
 
@@ -23,7 +23,7 @@ async function triggerSynthesisForAllProjects(port: number) {
   try {
     const projectsRes = await fetch(`http://localhost:${port}/api/v1/projects`);
     if (!projectsRes.ok) {
-      console.warn(`[scheduler] Failed to fetch projects: ${projectsRes.status}`);
+      logger.warn("scheduler", `Failed to fetch projects: ${projectsRes.status}`);
       return;
     }
     const allProjects = (await projectsRes.json()).data || [];
@@ -40,17 +40,20 @@ async function triggerSynthesisForAllProjects(port: number) {
         );
         if (res.ok) {
           const result = await res.json();
-          console.log(
-            `[scheduler] Synthesis for "${p.name}": ${JSON.stringify(result.data)}`,
+          logger.info(
+            "scheduler",
+            `Synthesis for "${p.name}": ${JSON.stringify(result.data)}`,
           );
         } else {
-          console.warn(
-            `[scheduler] Synthesis for "${p.name}" failed: ${res.status}`,
+          logger.warn(
+            "scheduler",
+            `Synthesis for "${p.name}" failed: ${res.status}`,
           );
         }
       } catch (err: any) {
-        console.debug(
-          `[scheduler] Synthesis for "${p.name}" error: ${err.message}`,
+        logger.debug(
+          "scheduler",
+          `Synthesis for "${p.name}" error: ${err.message}`,
         );
       }
 
@@ -66,19 +69,21 @@ async function triggerSynthesisForAllProjects(port: number) {
         if (syncRes.ok) {
           const syncData = (await syncRes.json()).data;
           if (syncData.synced_to_db > 0 || syncData.written_to_disk > 0) {
-            console.log(
-              `[scheduler] Skill sync for "${p.name}": ${syncData.synced_to_db} from disk, ${syncData.written_to_disk} to disk`,
+            logger.info(
+              "scheduler",
+              `Skill sync for "${p.name}": ${syncData.synced_to_db} from disk, ${syncData.written_to_disk} to disk`,
             );
           }
         }
       } catch (err: any) {
-        console.debug(
-          `[scheduler] Skill sync for "${p.name}" error: ${err.message}`,
+        logger.debug(
+          "scheduler",
+          `Skill sync for "${p.name}" error: ${err.message}`,
         );
       }
     }
   } catch (err: any) {
-    console.debug(`[scheduler] Error fetching projects: ${err.message}`);
+    logger.debug("scheduler", `Error fetching projects: ${err.message}`);
   }
 
   // Cross-project synthesis
@@ -87,25 +92,26 @@ async function triggerSynthesisForAllProjects(port: number) {
       method: "POST",
     });
   } catch (e) {
-    console.debug("Cross-project synthesis failed:", e);
+    logger.debug("scheduler", "Cross-project synthesis failed", { error: e instanceof Error ? e.message : String(e) });
   }
 }
 
 function scheduleNext(port: number) {
   const interval = getSynthesisInterval();
   if (interval > 0) {
-    console.log(`[scheduler] Next synthesis in ${interval / 1000}s`);
+    logger.info("scheduler", `Next synthesis in ${interval / 1000}s`);
     setTimeout(() => {
       triggerSynthesisForAllProjects(port).finally(() => scheduleNext(port));
     }, interval);
   } else {
-    console.log(`[scheduler] Synthesis disabled (interval = 0)`);
+    logger.info("scheduler", `Synthesis disabled (interval = 0)`);
   }
 }
 
 export function startScheduler(port: number) {
-  console.log(
-    `[scheduler] Auto-synthesis initial default: ${SYNTHESIS_DEFAULT_MS / 1000}s (reads settings after first cycle)`,
+  logger.info(
+    "scheduler",
+    `Auto-synthesis initial default: ${SYNTHESIS_DEFAULT_MS / 1000}s (reads settings after first cycle)`,
   );
   setTimeout(() => triggerSynthesisForAllProjects(port), 30000);
   setTimeout(() => scheduleNext(port), 30000);

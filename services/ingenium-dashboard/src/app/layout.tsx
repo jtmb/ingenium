@@ -32,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/observations" className="text-sm text-gray-600 hover:text-gray-900">Observations</a>
           <a href="/personality" className="text-sm text-gray-600 hover:text-gray-900">Personality</a>
           <a href="/pipeline" className="text-sm text-gray-600 hover:text-gray-900">Pipeline</a>
+          <a href="/logs" className="text-sm text-gray-600 hover:text-gray-900">Logs</a>
           <a href="/settings" className="text-sm text-gray-600 hover:text-gray-900">Settings</a>
           <div className="ml-auto"><Suspense><ProjectSelector /></Suspense></div>
         </nav>

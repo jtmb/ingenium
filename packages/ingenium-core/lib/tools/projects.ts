@@ -1,4 +1,5 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { logger } from "../logger.js";
 import { Project } from "../schema.js";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, existsSync } from "node:fs";
@@ -31,7 +32,7 @@ export function createProject(name: string, isGlobal = false): Project {
     if (globalProject && globalProject.id !== id) {
       const count = skills.copySkills(globalProject.id, id);
       if (count > 0) {
-        console.log(`[projects] Auto-loaded ${count} global skill(s) into project "${name}"`);
+        logger.info("projects", `Auto-loaded ${count} global skill(s) into project "${name}"`);
       }
     }
 

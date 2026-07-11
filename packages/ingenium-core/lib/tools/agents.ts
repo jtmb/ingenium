@@ -13,14 +13,55 @@ function writeAgentToDisk(agent: Agent): void {
   const categoryDir = resolve(getAgentsDir(), agent.category);
   if (!existsSync(categoryDir)) mkdirSync(categoryDir, { recursive: true });
 
-  // Build YAML frontmatter + content
+  const filePath = resolve(categoryDir, `${agent.name}.md`);
+  const escapedDesc = agent.description.replace(/"/g, '\\"');
+
+  // If file exists, update only changed YAML fields — preserve everything else
+  if (existsSync(filePath)) {
+    const existingContent = readFileSync(filePath, "utf-8");
+    const fmMatch = existingContent.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+    if (fmMatch) {
+      const frontmatter = fmMatch[1]!;
+
+      // Update name (line starting with "name:")
+      let updated = frontmatter.replace(/^name:\s*.+$/m, `name: ${agent.name}`);
+
+      // Update description (line starting with "description:")
+      if (frontmatter.match(/^description:\s*".*"$/m)) {
+        updated = updated.replace(/^description:\s*".*"$/m, `description: "${escapedDesc}"`);
+      } else if (frontmatter.match(/^description:\s*.+$/m)) {
+        updated = updated.replace(/^description:\s*.+$/m, `description: "${escapedDesc}"`);
+      }
+
+      // Update mode (line starting with "mode:")
+      if (updated.match(/^mode:\s*.+$/m)) {
+        updated = updated.replace(/^mode:\s*.+$/m, `mode: ${agent.mode}`);
+      } else {
+        updated += `\nmode: ${agent.mode}`;
+      }
+
+      // Update model (only the uncommented model: line — not # model: commented lines)
+      if (agent.model) {
+        if (updated.match(/^model:\s*.+$/m)) {
+          updated = updated.replace(/^model:\s*.+$/m, `model: ${agent.model}`);
+        } else {
+          updated += `\nmodel: ${agent.model}`;
+        }
+      }
+
+      writeFileSync(filePath, `---\n${updated}\n---\n\n${agent.content}`);
+      return;
+    }
+  }
+
+  // File doesn't exist — create from scratch (original behavior)
   const permissions = (() => { try { return JSON.parse(agent.permissions); } catch { return {}; } })();
   const skills = (() => { try { return JSON.parse(agent.skills); } catch { return []; } })();
 
   const frontmatter = [
     "---",
     `name: ${agent.name}`,
-    `description: "${agent.description.replace(/"/g, '\\"')}"`,
+    `description: "${escapedDesc}"`,
     `mode: ${agent.mode}`,
   ];
   if (agent.model) frontmatter.push(`model: ${agent.model}`);
@@ -53,7 +94,7 @@ function writeAgentToDisk(agent: Agent): void {
   frontmatter.push("");
   frontmatter.push(agent.content);
 
-  writeFileSync(resolve(categoryDir, `${agent.name}.md`), frontmatter.join("\n"));
+  writeFileSync(filePath, frontmatter.join("\n"));
 }
 
 function removeAgentFromDisk(agent: Agent): void {
@@ -168,16 +209,6 @@ export function enableAgent(projectId: string, name: string): Agent | undefined 
   });
 }
 
-export function syncAllAgents(projectId: string, db?: any): number {
-  const database = db ?? getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-  const agents = database.prepare("SELECT * FROM agents WHERE project_id = ? AND enabled = 1")
-    .all(projectId) as Agent[];
-  for (const agent of agents) {
-    writeAgentToDisk(agent);
-  }
-  return agents.length;
-}
-
 export function disableAgent(projectId: string, name: string): Agent | undefined {
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -228,14 +259,14 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
   }
 
   if (!filePath || !existsSync(filePath)) {
-    logger.warn({ name }, "Agent file not found on disk");
+    logger.warn("agents", "Agent file not found on disk", { name });
     return undefined;
   }
 
   const content = readFileSync(filePath, "utf-8");
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!fmMatch) {
-    logger.warn({ name }, "Agent file has no frontmatter");
+    logger.warn("agents", "Agent file has no frontmatter", { name });
     return undefined;
   }
 

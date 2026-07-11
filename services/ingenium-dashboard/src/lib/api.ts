@@ -64,6 +64,15 @@ export type Observation = {
   updated_at: string;
 };
 
+/** A system log entry from the Ingenium server. */
+export type LogEntry = {
+  timestamp: string;
+  source: string;
+  level: string;
+  message: string;
+  data: any;
+};
+
 /** A pipeline event recorded during observation/synthesis/trait lifecycles. */
 export type PipelineEvent = {
   id: number;
@@ -417,6 +426,13 @@ export const api = {
       request<{ data: { id: string; content: string } }>(`/config?project=${encodeURIComponent(project)}&type=${encodeURIComponent(type)}`, { method: "PUT", body: JSON.stringify({ content }) }),
     sync: (type: string = "project", project = DEFAULT_PROJECT) =>
       request<{ data: { id: string; content: string } | null }>(`/config/sync?project=${encodeURIComponent(project)}&type=${encodeURIComponent(type)}`, { method: "POST" }),
+  },
+  logs: {
+    list: (project = DEFAULT_PROJECT, since?: string, limit = 200) => {
+      const params = new URLSearchParams({ project, limit: String(limit) });
+      if (since) params.set("since", since);
+      return request<{ data: { entries: LogEntry[]; sources: string[]; total: number } }>(`/logs?${params}`);
+    },
   },
   mcpTools: {
     list: (project = DEFAULT_PROJECT, includeCategories = false) =>

@@ -188,6 +188,7 @@ export const PipelineEventSchema = z.object({
   project_id: z.string(),
   event_type: z.enum([
     "session_created", "session_idle", "observation_created", "observation_imported",
+    "observation_detected",
     "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed",
     "trait_created", "trait_updated", "plugin_initialized", "plugin_error",
   ]),

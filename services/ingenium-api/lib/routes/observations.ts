@@ -116,7 +116,7 @@ observationsRouter.post("/enrich", async (req, res, next) => {
     const enriched = await synthesisLlm.enrichObservations(obs, config.endpoint, config.model, config.apiKey);
     res.json({ data: enriched });
   } catch (err: any) {
-    logger.error({ err: String(err?.message || err) }, "Observation enrichment failed");
+    logger.error("observations", "Observation enrichment failed", { err: String(err?.message || err) });
     next(err);
   }
 });
