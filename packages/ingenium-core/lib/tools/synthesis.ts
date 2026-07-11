@@ -206,14 +206,18 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
     }
   }
 
-  // Mark involved observations as processed
+  // Mark observations as processed if the LLM acted on them (CREATE or CONFIRM).
+  // Observations the LLM explicitly ignored are also marked processed — the LLM
+  // evaluated them and decided they're noise/unactionable. Leaving them pending
+  // would re-submit them every cycle, wasting LLM tokens.
   for (const obs of batch) {
     try {
       if (involvedObsIds.has(obs.id)) {
         observations.updateObservation(obs.id, { status: "processed" });
         result.observations_processed++;
       } else {
-        // Leave pending — not recognized by LLM yet
+        // Mark as processed — the LLM evaluated and chose to ignore them
+        observations.updateObservation(obs.id, { status: "processed" });
         result.observations_skipped++;
       }
     } catch (err) {

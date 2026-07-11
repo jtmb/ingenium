@@ -1,4 +1,4 @@
-import { settings, projects, logger } from "ingenium-core";
+import { settings, projects, logger, extraction, synthesis } from "ingenium-core";
 
 const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
 
@@ -20,91 +20,57 @@ function getSynthesisInterval(): number {
 }
 
 async function triggerSynthesisForAllProjects(port: number) {
-  try {
-    const projectsRes = await fetch(`http://localhost:${port}/api/v1/projects`);
-    if (!projectsRes.ok) {
-      logger.warn("scheduler", `Failed to fetch projects: ${projectsRes.status}`);
-      return;
+  const allProjects = projects.listProjects();
+  const activeProjects = allProjects.filter(p => !p.archived_at);
+
+  for (const p of activeProjects) {
+    // 1. Extraction — LLM-based observation extraction from OpenCode messages.
+    //    Await completion so synthesis sees the new observations same cycle.
+    try {
+      const extractResult = await extraction.runExtraction(p.id, p.name);
+      logger.info("scheduler", `Extraction for "${p.name}": scanned=${extractResult.scanned}, created=${extractResult.created}`);
+    } catch (err: any) {
+      logger.warn("scheduler", `Extraction for "${p.name}" failed: ${err.message}`);
     }
-    const allProjects = (await projectsRes.json()).data || [];
 
-    for (const p of allProjects) {
-      // 1. Extraction — LLM-based observation extraction from OpenCode messages
-      //    Runs BEFORE synthesis so new observations get processed the same cycle.
-      try {
-        const extractRes = await fetch(
-          `http://localhost:${port}/api/v1/extraction/run?project=${p.name}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: "{}",
-          },
-        );
-        if (extractRes.ok) {
-          logger.info("scheduler", `Extraction for "${p.name}" triggered`);
-        } else {
-          logger.debug("scheduler", `Extraction for "${p.name}" returned ${extractRes.status}`);
-        }
-      } catch (err: any) {
-        logger.debug("scheduler", `Extraction for "${p.name}" error: ${err.message}`);
-      }
+    // 2. Synthesis — processes pending observations into traits + skills
+    try {
+      const result = await synthesis.runSynthesis(p.id);
+      logger.info(
+        "scheduler",
+        `Synthesis for "${p.name}": ${result.summary}`,
+      );
+    } catch (err: any) {
+      logger.warn(
+        "scheduler",
+        `Synthesis for "${p.name}" failed: ${err.message}`,
+      );
+    }
 
-      // 2. Synthesis — processes pending observations into traits + skills
-      try {
-        const res = await fetch(
-          `http://localhost:${port}/api/v1/synthesis/run?project=${p.name}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: "{}",
-          },
-        );
-        if (res.ok) {
-          const result = await res.json();
+    try {
+      const syncRes = await fetch(
+        `http://localhost:${port}/api/v1/skills/sync-all?project=${p.name}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        },
+      );
+      if (syncRes.ok) {
+        const syncData = (await syncRes.json()).data;
+        if (syncData.synced_to_db > 0 || syncData.written_to_disk > 0) {
           logger.info(
             "scheduler",
-            `Synthesis for "${p.name}": ${JSON.stringify(result.data)}`,
-          );
-        } else {
-          logger.warn(
-            "scheduler",
-            `Synthesis for "${p.name}" failed: ${res.status}`,
+            `Skill sync for "${p.name}": ${syncData.synced_to_db} from disk, ${syncData.written_to_disk} to disk`,
           );
         }
-      } catch (err: any) {
-        logger.debug(
-          "scheduler",
-          `Synthesis for "${p.name}" error: ${err.message}`,
-        );
       }
-
-      try {
-        const syncRes = await fetch(
-          `http://localhost:${port}/api/v1/skills/sync-all?project=${p.name}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: "{}",
-          },
-        );
-        if (syncRes.ok) {
-          const syncData = (await syncRes.json()).data;
-          if (syncData.synced_to_db > 0 || syncData.written_to_disk > 0) {
-            logger.info(
-              "scheduler",
-              `Skill sync for "${p.name}": ${syncData.synced_to_db} from disk, ${syncData.written_to_disk} to disk`,
-            );
-          }
-        }
-      } catch (err: any) {
-        logger.debug(
-          "scheduler",
-          `Skill sync for "${p.name}" error: ${err.message}`,
-        );
-      }
+    } catch (err: any) {
+      logger.debug(
+        "scheduler",
+        `Skill sync for "${p.name}" error: ${err.message}`,
+      );
     }
-  } catch (err: any) {
-    logger.debug("scheduler", `Error fetching projects: ${err.message}`);
   }
 
   // Cross-project synthesis
