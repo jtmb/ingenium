@@ -82,8 +82,8 @@ function openDb(dbPath: string, worktree?: string): any {
 async function detectPatterns(
   dbPath: string,
   worktree?: string,
-): Promise<Array<{ type: string; content: string }>> {
-  const results: Array<{ type: string; content: string }> = [];
+): Promise<Array<{ type: string; content: string; context?: string }>> {
+  const results: Array<{ type: string; content: string; context?: string }> = [];
 
   try {
     if (!existsSync(dbPath)) return results;
@@ -91,17 +91,19 @@ async function detectPatterns(
     const db = openDb(dbPath, worktree);
     if (!db) return results;
 
-    let userTexts: string[] = [];
+    let userTexts: Array<{ text: string; time_created: number }> = [];
 
-    // Try session_input.prompt first (primary — contains actual user text)
+    // Try session_input.prompt first
     try {
       const inputs = db
         .prepare(
-          "SELECT prompt FROM session_input WHERE prompt IS NOT NULL AND prompt != '' ORDER BY time_created DESC LIMIT 30",
+          "SELECT prompt, time_created FROM session_input WHERE prompt IS NOT NULL AND prompt != '' ORDER BY time_created DESC LIMIT 30",
         )
-        .all() as Array<{ prompt: string }>;
+        .all() as Array<{ prompt: string; time_created: number }>;
       for (const r of inputs) {
-        if (r.prompt && r.prompt.length > 10) userTexts.push(r.prompt);
+        if (r.prompt && r.prompt.length > 10) {
+          userTexts.push({ text: r.prompt, time_created: r.time_created });
+        }
       }
     } catch {
       /* table may not exist */
@@ -116,16 +118,21 @@ async function detectPatterns(
             "SELECT data, time_created FROM part ORDER BY time_created DESC LIMIT 2000",
           )
           .all() as Array<{ data: string; time_created: number }>;
+        
+        // Keep all parts in order for context extraction
+        const allParts: Array<{ data: string; time_created: number }> = [];
+        
         for (const r of parts) {
           try {
             const d = JSON.parse(r.data);
+            allParts.push({ data: r.data, time_created: r.time_created });
             if (
               d.type === "text" &&
               d.text &&
               d.text.length > 10 &&
               r.time_created > lastRunAt
             ) {
-              userTexts.push(d.text);
+              userTexts.push({ text: d.text, time_created: r.time_created });
             }
           } catch {
             /* skip unparseable */
@@ -143,16 +150,20 @@ async function detectPatterns(
 
     // Run pattern detection on collected texts
     const seen = new Set<string>();
-    for (const text of userTexts) {
+    for (const entry of userTexts) {
       for (const [type, regexps] of Object.entries(PATTERNS)) {
         for (const regex of regexps) {
-          const match = text.match(regex);
+          const match = entry.text.match(regex);
           if (match) {
-            const snippet = text.length > 200 ? text.substring(0, 200) : text;
+            const snippet = entry.text.length > 200 ? entry.text.substring(0, 200) : entry.text;
             const key = `${type}:${snippet.substring(0, 60)}`;
             if (!seen.has(key)) {
               seen.add(key);
-              results.push({ type, content: snippet });
+              results.push({
+                type,
+                content: snippet,
+                context: undefined, // context set during enrichment call
+              });
             }
             break;
           }
@@ -167,27 +178,66 @@ async function detectPatterns(
 }
 
 /**
+ * Call the LLM enrichment endpoint to extract actionable rules from raw observations.
+ * Falls back to originals on any error.
+ */
+async function enrichObservations(
+  observations: Array<{ type: string; content: string; context?: string }>,
+): Promise<Array<{ type: string; content: string; context?: string; enriched_content?: string; skip: boolean }>> {
+  if (observations.length === 0) return [];
+
+  try {
+    const res = await fetch(`${API_BASE}/observations/enrich?project=${PROJECT}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ observations }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!res.ok) {
+      return observations.map(o => ({ ...o, skip: false }));
+    }
+
+    const json = await res.json();
+    return (json.data || []).map((item: any) => ({
+      type: item.type,
+      content: item.content,
+      context: item.context,
+      enriched_content: item.enriched_content,
+      skip: item.skip === true,
+    }));
+  } catch {
+    // Non-fatal — fall back to raw observations
+    return observations.map(o => ({ ...o, skip: false }));
+  }
+}
+
+/**
  * POST detected observations to the Ingenium API.
  * Returns the number successfully created.
+ * Uses enriched_content when available, falls back to raw content.
  */
 async function createObservations(
-  observations: Array<{ type: string; content: string }>,
+  observations: Array<{ type: string; content: string; context?: string; enriched_content?: string; skip: boolean }>,
   client: any,
   worktree: string,
 ): Promise<number> {
-  if (observations.length === 0) return 0;
+  const actionable = observations.filter(o => !o.skip);
+  if (actionable.length === 0) return 0;
 
   let created = 0;
-  for (const obs of observations) {
+  for (const obs of actionable) {
     try {
+      const finalContent = obs.enriched_content || obs.content;
       const res = await fetch(`${API_BASE}/observations?project=${PROJECT}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           observation_type: obs.type,
-          content: obs.content,
+          content: finalContent,
           importance: 5,
           source: "auto-observer",
+          context: obs.context || undefined,
         }),
       });
       if (res.ok) created++;
@@ -201,7 +251,7 @@ async function createObservations(
       body: {
         service: "auto-observer",
         level: "info",
-        message: `Auto-observed ${created} user behavior pattern(s) from ${observations.length} detected`,
+        message: `Auto-observed ${created} user behavior pattern(s) from ${actionable.length} enriched (${observations.length - actionable.length} skipped as noise)`,
       },
     });
   }
@@ -244,11 +294,12 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
           const dbPath = getDbPath();
           const observations = await detectPatterns(dbPath, worktree);
           if (observations.length > 0) {
-            const created = await createObservations(observations, ctx.client, worktree);
+            const enriched = await enrichObservations(observations);
+            const created = await createObservations(enriched, ctx.client, worktree);
             await logPipelineEvent(
               PROJECT,
               `Auto-observer: ${observations.length} detected, ${created} created`,
-              { detected: observations.length, created, dbfound: true },
+              { detected: observations.length, created, enriched: enriched.length, dbfound: true },
             );
           } else {
             // Even when nothing found, log so we know the plugin is alive
@@ -273,11 +324,12 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
           const dbPath = getDbPath();
           const observations = await detectPatterns(dbPath, worktree);
           if (observations.length > 0) {
-            const created = await createObservations(observations, ctx.client, worktree);
+            const enriched = await enrichObservations(observations);
+            const created = await createObservations(enriched, ctx.client, worktree);
             await logPipelineEvent(
               PROJECT,
               `Auto-observer: ${observations.length} detected, ${created} created`,
-              { detected: observations.length, created, dbfound: true },
+              { detected: observations.length, created, enriched: enriched.length, dbfound: true },
             );
           }
         } catch (err: any) {
@@ -297,9 +349,10 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
         async execute(_args: any, context: { worktree: string }) {
           const dbPath = getDbPath();
           const observations = await detectPatterns(dbPath, context.worktree);
-          const created = await createObservations(observations, ctx.client, context.worktree);
+          const enriched = await enrichObservations(observations);
+          const created = await createObservations(enriched, ctx.client, context.worktree);
           return JSON.stringify(
-            { detected: observations.length, created, observations },
+            { detected: observations.length, enriched: enriched.length, created, observations: enriched },
             null,
             2,
           );

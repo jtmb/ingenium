@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createProject } from "../lib/tools/projects.js";
-import { callSynthesisLLM, isLLMSynthesisConfigured, getLLMSynthesisConfig } from "../lib/tools/synthesis-llm.js";
+import { callSynthesisLLM, isLLMSynthesisConfigured, getLLMSynthesisConfig, enrichObservations, getFullLLMSynthesisConfig } from "../lib/tools/synthesis-llm.js";
 import { setSetting } from "../lib/tools/settings.js";
 
 let tempDir: string;
@@ -407,6 +407,237 @@ describe("LLM synthesis configuration", () => {
   it("reports configured with only model set on global project (apiKey optional)", () => {
     setSetting(globalProjectId, "synthesis_model", "test-model");
     expect(isLLMSynthesisConfigured("unused-project-id")).toBe(true);
+  });
+});
+
+// ── Live LLM integration test (conditional) ─────────────────
+
+// ── Enrichment tests ────────────────────────────────────────
+
+describe("enrichObservations", () => {
+  it("returns empty array for empty input", async () => {
+    const result = await enrichObservations([], endpoint(), "model", "key");
+    expect(result).toEqual([]);
+    expect(mockRequests).toBe(0); // Must not make HTTP request
+  });
+
+  it("returns originals when no endpoint or model configured", async () => {
+    const obs = [{ type: "correction", content: "no, use 2-space indentation" }];
+    const result = await enrichObservations(obs, "", "", "");
+    expect(result).toHaveLength(1);
+    expect(result[0].skip).toBe(false);
+    expect(result[0].enriched_content).toBeUndefined();
+    expect(result[0].content).toBe("no, use 2-space indentation");
+    expect(mockRequests).toBe(0);
+  });
+
+  it("returns originals when endpoint is null/undefined", async () => {
+    const obs = [{ type: "preference", content: "I prefer snake_case" }];
+    const result = await enrichObservations(obs, "", "test-model", "test-key");
+    expect(result).toHaveLength(1);
+    expect(result[0].skip).toBe(false);
+    expect(result[0].enriched_content).toBeUndefined();
+  });
+
+  it("uses enriched_content when LLM returns valid enrichment", async () => {
+    const enrichmentResponse = [
+      { index: 0, content: "no, use 2-space indentation", enriched_content: "User prefers 2-space indentation over 4-space", skip: false },
+    ];
+    setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
+
+    const obs = [{ type: "correction", content: "no, use 2-space indentation" }];
+    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    expect(result).toHaveLength(1);
+    expect(result[0].skip).toBe(false);
+    expect(result[0].enriched_content).toBe("User prefers 2-space indentation over 4-space");
+    expect(result[0].content).toBe("no, use 2-space indentation");
+    expect(result[0].type).toBe("correction");
+  });
+
+  it("skips observations marked as noise by LLM", async () => {
+    const enrichmentResponse = [
+      { index: 0, content: "this is fucked", enriched_content: null, skip: true },
+      { index: 1, content: "no, use 2-space", enriched_content: "User prefers 2-space indentation", skip: false },
+    ];
+    setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
+
+    const obs = [
+      { type: "correction", content: "this is fucked" },
+      { type: "correction", content: "no, use 2-space" },
+    ];
+    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    expect(result).toHaveLength(2);
+    expect(result[0].skip).toBe(true);
+    expect(result[0].enriched_content).toBeUndefined();
+    expect(result[1].skip).toBe(false);
+    expect(result[1].enriched_content).toBe("User prefers 2-space indentation");
+  });
+
+  it("handles json_object wrapping format (model wraps in object)", async () => {
+    // Some models return {"observations": [...]} instead of bare [...]
+    const enrichmentResponse = { observations: [
+      { index: 0, content: "run tests first", enriched_content: "User always runs tests before committing", skip: false },
+    ]};
+    setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
+
+    const obs = [{ type: "workflow", content: "run tests first" }];
+    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    expect(result).toHaveLength(1);
+    expect(result[0].enriched_content).toBe("User always runs tests before committing");
+    expect(result[0].skip).toBe(false);
+  });
+
+  it("returns originals when LLM returns non-array response", async () => {
+    setMockResponse(mockContent(JSON.stringify({ not_enriched: true })));
+
+    const obs = [{ type: "correction", content: "should use tabs" }];
+    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    expect(result).toHaveLength(1);
+    expect(result[0].skip).toBe(false);
+    expect(result[0].enriched_content).toBeUndefined();
+    expect(result[0].content).toBe("should use tabs");
+  });
+
+  it("returns originals on API error status", async () => {
+    setMockResponse({ error: "server error" }, 500);
+
+    const obs = [{ type: "correction", content: "fix the naming" }];
+    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    expect(result).toHaveLength(1);
+    expect(result[0].skip).toBe(false);
+    expect(result[0].enriched_content).toBeUndefined();
+  });
+
+  it("returns originals on network error with fallback retry", async () => {
+    // Point at unreachable port — will trigger fetch error, retry, then fallback
+    const obs = [{ type: "preference", content: "I like concise errors" }];
+    const result = await enrichObservations(obs, "http://127.0.0.1:19999", "model", "key");
+    expect(result).toHaveLength(1);
+    expect(result[0].skip).toBe(false);
+    expect(result[0].enriched_content).toBeUndefined();
+  });
+
+  it("handles AbortSignal cancellation and returns originals", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const obs = [{ type: "correction", content: "no, use different approach" }];
+    const result = await enrichObservations(obs, endpoint(), "model", "key", controller.signal);
+    expect(result).toHaveLength(1);
+    expect(result[0].skip).toBe(false);
+    expect(result[0].enriched_content).toBeUndefined();
+  });
+
+  it("includes context in enriched output when provided", async () => {
+    const enrichmentResponse = [
+      { index: 0, content: "no, use 2-space", enriched_content: "User prefers 2-space indentation", skip: false },
+    ];
+    setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
+
+    const obs = [{ type: "correction", content: "no, use 2-space", context: "Agent used 4-space indentation\nUser: no, use 2-space\nAgent: OK switching" }];
+    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    expect(result).toHaveLength(1);
+    expect(result[0].context).toBe("Agent used 4-space indentation\nUser: no, use 2-space\nAgent: OK switching");
+    expect(result[0].enriched_content).toBe("User prefers 2-space indentation");
+  });
+
+  it("handles retry with plain format when json_object fails", async () => {
+    // First attempt returns 400 (json_object not supported), second attempt succeeds
+    let callCount = 0;
+    const customServer = createServer((_req, res) => {
+      callCount++;
+      if (callCount === 1) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "json_object not supported" }));
+      } else {
+        const payload = JSON.stringify([
+          { index: 0, content: "no, use 2-space", enriched_content: "User prefers 2-space", skip: false },
+        ]);
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ choices: [{ message: { content: payload } }] }));
+      }
+    });
+
+    await new Promise<void>((resolve) => customServer.listen(0, resolve));
+    const port = (customServer.address() as AddressInfo).port;
+    const endpoint = `http://localhost:${port}`;
+
+    const obs = [{ type: "correction", content: "no, use 2-space" }];
+    const result = await enrichObservations(obs, endpoint, "model", "key");
+
+    expect(callCount).toBe(2);
+    expect(result).toHaveLength(1);
+    expect(result[0].enriched_content).toBe("User prefers 2-space");
+
+    await new Promise<void>((resolve) => customServer.close(() => resolve()));
+  });
+
+  it("handles short/insufficient enriched_content gracefully", async () => {
+    // enriched_content must be > 10 chars, otherwise it's treated as undefined
+    const enrichmentResponse = [
+      { index: 0, content: "do X", enriched_content: "short", skip: false },
+    ];
+    setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
+
+    const obs = [{ type: "correction", content: "do X" }];
+    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    expect(result).toHaveLength(1);
+    expect(result[0].enriched_content).toBeUndefined(); // too short
+    expect(result[0].skip).toBe(false);
+  });
+
+  it("handles missing index entries in LLM response", async () => {
+    // Response has only index 2, but we passed 3 observations
+    const enrichmentResponse = [
+      { index: 2, content: "obs3", enriched_content: "Enriched for obs3", skip: false },
+    ];
+    setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
+
+    const obs = [
+      { type: "correction", content: "obs1" },
+      { type: "preference", content: "obs2" },
+      { type: "workflow", content: "obs3" },
+    ];
+    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    expect(result).toHaveLength(3);
+    expect(result[0].enriched_content).toBeUndefined(); // no match
+    expect(result[1].enriched_content).toBeUndefined(); // no match
+    expect(result[2].enriched_content).toBe("Enriched for obs3");
+  });
+});
+
+describe("getFullLLMSynthesisConfig", () => {
+  it("returns null when no global project exists (no settings set)", () => {
+    // Note: global project exists from beforeAll, but no settings are set for these
+    const config = getFullLLMSynthesisConfig();
+    expect(config).toBeNull();
+  });
+
+  it("returns config when all settings are configured on global project", () => {
+    setSetting(globalProjectId, "synthesis_model", "gpt-4o");
+    setSetting(globalProjectId, "synthesis_api_key", "sk-test");
+    setSetting(globalProjectId, "synthesis_endpoint", "https://api.openai.com/v1");
+    const config = getFullLLMSynthesisConfig();
+    expect(config).not.toBeNull();
+    expect(config!.model).toBe("gpt-4o");
+    expect(config!.apiKey).toBe("sk-test");
+    expect(config!.endpoint).toBe("https://api.openai.com/v1");
+  });
+
+  it("returns null when endpoint is not configured", () => {
+    setSetting(globalProjectId, "synthesis_model", "gpt-4o");
+    setSetting(globalProjectId, "synthesis_api_key", "sk-test");
+    // Don't set endpoint
+    setSetting(globalProjectId, "synthesis_endpoint", "");
+    const config = getFullLLMSynthesisConfig();
+    expect(config).toBeNull();
+  });
+
+  it("returns null when model is not configured", () => {
+    setSetting(globalProjectId, "synthesis_model", "");
+    setSetting(globalProjectId, "synthesis_api_key", "sk-test");
+    setSetting(globalProjectId, "synthesis_endpoint", "https://api.openai.com/v1");
+    const config = getFullLLMSynthesisConfig();
+    expect(config).toBeNull();
   });
 });
 
