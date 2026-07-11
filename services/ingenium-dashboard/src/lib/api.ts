@@ -228,6 +228,8 @@ export const api = {
       request<{ data: Plugin }>(`/plugins/${name}/enable?project=${project}`, { method: "POST" }),
     disable: (name: string, project = DEFAULT_PROJECT) =>
       request<{ data: Plugin }>(`/plugins/${name}/disable?project=${project}`, { method: "POST" }),
+    getSource: (name: string, project = DEFAULT_PROJECT) =>
+      request<{ data: { source: string } }>(`/plugins/${encodeURIComponent(name)}/source?project=${project}`),
   },
   agents: {
     list: (project = DEFAULT_PROJECT, category?: string) => {

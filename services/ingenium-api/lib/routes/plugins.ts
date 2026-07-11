@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { plugins } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 
 export const pluginsRouter = Router();
 
@@ -26,6 +28,24 @@ pluginsRouter.post("/", (req, res) => {
     res.status(201).json({ data: plugin });
   } catch (err: any) {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
+  }
+});
+
+// GET /:name/source — get plugin source from disk
+pluginsRouter.get("/:name/source", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const plugin = plugins.getPlugin(projectId, req.params.name!);
+  if (!plugin) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Plugin not found" } });
+    return;
+  }
+  try {
+    const filePath = resolve(process.cwd(), plugin.file_path);
+    const content = readFileSync(filePath, "utf-8");
+    res.json({ data: { source: content } });
+  } catch {
+    res.json({ data: { source: plugin.source_content || "" } });
   }
 });
 

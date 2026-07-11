@@ -221,11 +221,18 @@ export default function PluginsPage() {
                   </div>
                   <div className="flex gap-2">
                     <button
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
+                        let content = p.source_content || "";
+                        if (!content) {
+                          try {
+                            const res = await api.plugins.getSource(p.name, project);
+                            content = res.data.source;
+                          } catch { /* keep empty */ }
+                        }
                         setEditingId(p.id);
                         setEditPath(p.file_path);
-                        setEditContent(p.source_content || "");
+                        setEditContent(content);
                       }}
                       className="bg-gray-100 text-gray-600 py-1 px-3 rounded text-sm hover:bg-gray-200 transition-colors"
                     >
