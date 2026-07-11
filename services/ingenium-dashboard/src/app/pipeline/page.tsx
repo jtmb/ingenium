@@ -152,7 +152,7 @@ export default function PipelinePage() {
         : undefined;
 
     api.pipeline
-      .events(project, sourceParam ? { source: sourceParam } : undefined)
+      .events(project, { limit: 500, ...(sourceParam ? { source: sourceParam } : {}) })
       .then((r: any) => {
         let data: PipelineEvent[] = (r.data || []);
         if (filterMode === "trait") {
