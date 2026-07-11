@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProject } from "../lib/tools/projects.js";
-import { storeObservation } from "../lib/tools/observations.js";
+import { storeObservation, deleteObservation, getObservation } from "../lib/tools/observations.js";
 import {
   upsertTrait,
   getTraits,
@@ -191,5 +191,25 @@ describe("personality traits", () => {
 
     const remaining = listTraits(projectId, true);
     expect(remaining.length).toBe(0);
+  });
+
+  it("sets exemplar_observation_id to NULL when referenced observation is deleted (ON DELETE SET NULL)", () => {
+    const obs = storeObservation(projectId, "preference", "User prefers async/await pattern");
+    const trait = upsertTrait(projectId, "code_preference", "async-await-delete-test", "Uses async/await", 0.6, obs.id);
+    expect(trait.exemplar_observation_id).toBe(obs.id);
+
+    // Delete the observation — should succeed (FK uses ON DELETE SET NULL)
+    const deleted = deleteObservation(projectId, obs.id);
+    expect(deleted).toBe(true);
+
+    // Verify observation is gone
+    const refetchedObs = getObservation(obs.id);
+    expect(refetchedObs).toBeUndefined();
+
+    // Verify trait still exists but exemplar_observation_id is now NULL
+    const allTraits = listTraits(projectId, true);
+    const refetchedTrait = allTraits.find(t => t.id === trait.id);
+    expect(refetchedTrait).toBeDefined();
+    expect(refetchedTrait!.exemplar_observation_id).toBeNull();
   });
 });

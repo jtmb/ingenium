@@ -382,6 +382,7 @@ For each new observation, decide ONE of:
 - **IGNORE** — It's noise, a one-off, or unactionable. Skip it.
 
 ### Rules
+- **STRONGLY prefer CONFIRM over CREATE.** Before creating a new trait, scan every existing trait — if any existing trait expresses the SAME underlying preference or behavior (even if worded differently, or more/less precise), CONFIRM it instead of creating a near-duplicate. Only CREATE when no existing trait covers the observation's meaning. Reworded restatements of an existing trait are CONFIRMs, not new traits.
 - Merge semantically-equivalent observations into ONE trait — do not create near-duplicates.
 - Normalize wording: traits should be crisp, reusable, third-person statements about the user.
 - Assign trait_type from this list: communication_style, code_preference, workflow_pattern, terminology, priority_signal, feedback_style, interaction_pattern, domain_knowledge, learned_skill, personality_trait.
