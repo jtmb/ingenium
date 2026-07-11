@@ -149,3 +149,15 @@ One-shot every bug and feature listed in next-steps-plan/next-steps.md. Fix all 
 | README | [`README.md`](README.md) |
 | Email | [`docs/HOW-TO/email.md`](docs/HOW-TO/email.md) |
 | Self-Learning Pipeline | [`docs/self-learning-pipeline.md`](docs/self-learning-pipeline.md) |
+
+---  
+
+
+<!-- 
+**Follow up prompt for orchestrator**
+
+Ok Orchestrator. Please write the plan to @next-steps-plan/BIG-PLAN.md 
+
+```md
+Then follow the orchestration as directed. Do your best. Use premium agents for everything except documentation. Track the todos with the todo tool from opencode, i want to see the progress on my side bar. Please Ensure you are following your agents directive and you are using the appropriate skills. You may proceed.
+``` -->

@@ -1,145 +1,142 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useState, useEffect } from "react";
+
+import { useState, useEffect, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Task } from "../../lib/api";
-import Overlay from "../components/Overlay";
 
-/** Kanban-style column ordering: left to right workflow. */
-const columns = ["todo", "in_progress", "review", "done"] as const;
+import BoardView from "./components/BoardView";
+import ListView from "./components/ListView";
+import TimelineView from "./components/TimelineView";
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                             */
+/* ------------------------------------------------------------------ */
+
+type ViewMode = "board" | "list" | "timeline";
+
+const VIEW_OPTIONS: { mode: ViewMode; label: string }[] = [
+  { mode: "board", label: "Board" },
+  { mode: "list", label: "List" },
+  { mode: "timeline", label: "Timeline" },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Page                                                              */
+/* ------------------------------------------------------------------ */
 
 /**
- * Kanban task board page.
- * Tasks are grouped by column. Clicking a task opens a detail overlay.
- * Each card has an "Advance →" button to move it to the next column.
- * A form at the top allows creating new tasks that start in "todo".
+ * Task board page with view switcher (Board / List / Timeline).
+ * View mode is persisted via the `?view=` query parameter.
  */
 export default function TasksPage() {
   const project = useProject();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const viewFromQuery = (searchParams.get("view") as ViewMode) || "board";
+  const [view, setView] = useState<ViewMode>(
+    ["board", "list", "timeline"].includes(viewFromQuery) ? viewFromQuery : "board"
+  );
+
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
-  useEffect(() => { api.tasks.list(project).then((r) => setTasks(r.data)).catch(() => {}); }, [project]);
+  // Fetch tasks
+  useEffect(() => {
+    api.tasks.list(project).then((r) => setTasks(r.data ?? [])).catch(() => {});
+  }, [project]);
 
-  /** Creates a new task (auto-placed in "todo") and prepends it. */
+  // Sync view state to URL
+  const switchView = useCallback(
+    (mode: ViewMode) => {
+      setView(mode);
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("view", mode);
+      router.replace(`?${params.toString()}`, { scroll: false });
+    },
+    [searchParams, router]
+  );
+
+  // Create new task
   const create = async () => {
-    if (!title) return;
+    if (!title.trim()) return;
     try {
       setError("");
-      const res = await api.tasks.create(title, project);
-      setTasks([res.data, ...tasks]);
+      const res = await api.tasks.create(title.trim(), project);
+      setTasks((prev) => [res.data, ...prev]);
       setTitle("");
-    } catch (err) {
+    } catch {
       setError("Failed to create task. Please check that a project exists.");
     }
   };
 
-  /** Moves a task to the target column, optimistically updating state. */
-  const move = async (id: string, col: string) => {
-    await api.tasks.move(id, col, project);
-    setTasks(tasks.map((t) => t.id === id ? { ...t, column_id: col } : t));
-  };
-
-  /** Maps column IDs to Tailwind color classes for the status badge. */
-  const columnColors: Record<string, string> = {
-    todo: "bg-gray-100 text-gray-600",
-    in_progress: "bg-blue-100 text-blue-700",
-    review: "bg-amber-100 text-amber-700",
-    done: "bg-green-100 text-green-700",
-  };
-
-  /** Advances a task to the next column in the workflow. */
-  const handleAdvance = (task: Task) => {
-    const advanceMap: Record<string, string> = {
-      todo: "in_progress",
-      in_progress: "review",
-      review: "done",
-      done: "todo",
-    };
-    const nextCol = advanceMap[task.column_id] ?? "todo";
-    move(task.id, nextCol);
-  };
-
-  /** Groups tasks by their current column. */
-  const grouped = Object.fromEntries(columns.map((c) => [c, tasks.filter((t) => t.column_id === c)]));
-
   return (
-    <div className="space-y-8">
-      <h1 className="text-3xl font-bold">Tasks</h1>
-      <div className="flex gap-2">
-        <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Task title" className="border p-2 rounded flex-1" />
-        <button onClick={create} className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700">Add</button>
+    <div className="space-y-6">
+      {/* Header + create form */}
+      <div className="space-y-4">
+        <h1 className="text-3xl font-bold">Tasks</h1>
+
+        {/* Create task inline row */}
+        <div className="flex gap-2">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && create()}
+            placeholder="Task title"
+            className="border border-gray-200 rounded px-3 py-2 flex-1 text-sm"
+          />
+          <button
+            onClick={create}
+            className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700"
+          >
+            Add
+          </button>
+        </div>
+        {error && <div className="text-red-600 text-sm">{error}</div>}
       </div>
-      {error && <div className="text-red-600 text-sm">{error}</div>}
-      <div className="grid grid-cols-4 gap-4">
-        {columns.map((col) => (
-          <div key={col} className="bg-gray-100 p-3 rounded min-h-[200px]">
-            <h3 className="font-medium text-sm uppercase mb-2">{col.replace("_", " ")}</h3>
-            <div className="space-y-2">
-              {(grouped[col] ?? []).map((t) => (
-                <div
-                  key={t.id}
-                  className="bg-white p-2 rounded text-sm border hover:shadow-md transition-shadow cursor-pointer"
-                  onClick={() => setSelectedTask(t)}
-                >
-                  <div className="font-medium truncate">{t.title}</div>
-                  {t.assigned_to && <div className="text-xs text-gray-500 mt-1">{t.assigned_to}</div>}
-                  <div className="flex items-center justify-between mt-2">
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${columnColors[t.column_id] || "bg-gray-100 text-gray-600"}`}>
-                      {t.column_id || "todo"}
-                    </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleAdvance(t); }}
-                      className="text-xs text-blue-600 hover:text-blue-800"
-                      title="Advance to next column"
-                    >
-                      Advance →
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+
+      {/* View switcher */}
+      <div className="flex gap-1 border-b border-gray-200">
+        {VIEW_OPTIONS.map(({ mode, label }) => (
+          <button
+            key={mode}
+            onClick={() => switchView(mode)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+              view === mode
+                ? "border-blue-600 text-blue-600"
+                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+            }`}
+          >
+            {label}
+          </button>
         ))}
       </div>
 
-      <Overlay
-        isOpen={selectedTask !== null}
-        onClose={() => setSelectedTask(null)}
-        title={selectedTask?.title ?? ""}
-        subtitle={`Status: ${selectedTask?.column_id ?? "todo"}`}
-      >
-        {selectedTask && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="font-semibold">Assigned to:</span>{" "}
-                <span className="text-gray-600">{selectedTask.assigned_to || "Unassigned"}</span>
-              </div>
-              <div>
-                <span className="font-semibold">Created:</span>{" "}
-                <span className="text-gray-600">{new Date(selectedTask.created_at).toLocaleString()}</span>
-              </div>
-              {selectedTask.completed_at && (
-                <div>
-                  <span className="font-semibold">Completed:</span>{" "}
-                  <span className="text-gray-600">{new Date(selectedTask.completed_at).toLocaleString()}</span>
-                </div>
-              )}
-            </div>
-            {selectedTask.description && (
-              <div>
-                <h3 className="font-semibold mb-1">Description</h3>
-                <pre className="bg-gray-50 p-3 rounded border text-sm whitespace-pre-wrap font-sans">
-                  {selectedTask.description}
-                </pre>
-              </div>
-            )}
-          </div>
-        )}
-      </Overlay>
+      {/* Active view */}
+      {view === "board" && (
+        <BoardView
+          project={project}
+          tasks={tasks}
+          onTasksChange={setTasks}
+        />
+      )}
+      {view === "list" && (
+        <ListView
+          project={project}
+          tasks={tasks}
+          onTasksChange={setTasks}
+        />
+      )}
+      {view === "timeline" && (
+        <TimelineView
+          project={project}
+          tasks={tasks}
+          onTasksChange={setTasks}
+        />
+      )}
     </div>
   );
 }
