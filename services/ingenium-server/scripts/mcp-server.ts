@@ -167,6 +167,15 @@ server.registerTool(
   wrapHandler("ingenium_skill_sync", async ({ project, name }) => skillTools.skillSync(project, name)),
 );
 
+server.registerTool(
+  "ingenium_skill_consolidate",
+  {
+    description: "Trigger LLM-driven skill audit — merges redundant skills to maintain ≤20 total. Analyzes all enabled skills and proposes merges/deletes for overlapping topics.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler("ingenium_skill_consolidate", async ({ project }) => skillTools.skillConsolidate(project)),
+);
+
 // ── Observations ──────────────────────────────────────────
 
 server.registerTool(

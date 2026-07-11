@@ -8,6 +8,10 @@ import { getSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
 import { logger } from "../logger.js";
 
+function safeParseJson(str: string): Record<string, any> {
+  try { return JSON.parse(str); } catch { return {}; }
+}
+
 export interface SynthesisResult {
   observations_processed: number;
   traits_created: number;
@@ -641,4 +645,101 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
   } catch (_) { /* non-fatal */ }
 
   return result;
+}
+
+/**
+ * Consolidation result from the skill audit job.
+ */
+export interface ConsolidationResult {
+  merged: number;
+  deleted: number;
+  summary: string;
+}
+
+/**
+ * Audit all enabled skills for a project and use the LLM to propose merges/deletes,
+ * condensing to ≤20 skills. This is a standalone pass that runs after synthesis,
+ * not driven by new observations — it evaluates the entire skill catalog.
+ */
+export async function consolidateSkills(projectId: string): Promise<ConsolidationResult> {
+  // Skip if LLM not configured
+  const gid = projects.getGlobalProject()?.id;
+  if (!gid || !synthesisLlm.isLLMSynthesisConfigured(gid)) {
+    return { merged: 0, deleted: 0, summary: "LLM not configured — skipping consolidation" };
+  }
+
+  const allSkills = skills.listSkills(projectId);
+  if (allSkills.length <= 20) {
+    return { merged: 0, deleted: 0, summary: `${allSkills.length} skills — already ≤20, no consolidation needed` };
+  }
+
+  // Build skill summary for LLM
+  const skillSummaries = allSkills.map(s => ({
+    name: s.name,
+    description: s.description || "",
+    tags: s.tags || "",
+    // First 300 chars of content for context
+    content_preview: (s.content || "").substring(0, 300),
+  }));
+
+  const prompt = synthesisLlm.buildConsolidationPrompt(skillSummaries, allSkills.length);
+  const result = await synthesisLlm.callConsolidationLLM(projectId, prompt);
+
+  let merged = 0;
+  let deleted = 0;
+
+  // Process merges: combine source skill into target, delete source
+  for (const merge of result.merges || []) {
+    try {
+      const target = skills.getSkill(projectId, merge.target);
+      const source = skills.getSkill(projectId, merge.source);
+      if (!target || !source) continue;
+
+      // Merge content: append source's SKILL.md after target's
+      const mergedContent = `${target.content}\n\n## Merged from ${merge.source}\n\n${source.content}`;
+
+      // Merge file_trees: combine reference files (source files prefixed)
+      const targetTree = safeParseJson((target as any).file_tree || "{}");
+      const sourceTree = safeParseJson((source as any).file_tree || "{}");
+      for (const [key, val] of Object.entries(sourceTree)) {
+        targetTree[`merged-${merge.source}/${key}`] = val;
+      }
+
+      // Merge tags
+      const mergedTags = [
+        ...new Set([
+          ...(target.tags || "").split(",").map(t => t.trim()).filter(Boolean),
+          ...(source.tags || "").split(",").map(t => t.trim()).filter(Boolean),
+        ]),
+      ].join(",");
+
+      skills.updateSkill(
+        projectId,
+        merge.target,
+        mergedContent,
+        target.description || "",
+        mergedTags,
+        (target as any).always_apply,
+        JSON.stringify(targetTree),
+      );
+      skills.writeSkillToDisk(skills.getSkill(projectId, merge.target)!);
+      skills.deleteSkill(projectId, merge.source);
+      merged++;
+    } catch (e: any) {
+      logger.warn("synthesis", `Merge failed: ${merge.source} → ${merge.target}: ${e.message}`);
+    }
+  }
+
+  // Process deletes
+  for (const name of result.delete || []) {
+    try {
+      skills.deleteSkill(projectId, name);
+      deleted++;
+    } catch (e: any) {
+      logger.warn("synthesis", `Delete failed for ${name}: ${e.message}`);
+    }
+  }
+
+  const summary = `Consolidated ${allSkills.length} → ${allSkills.length - merged - deleted} skills (${merged} merged, ${deleted} deleted)`;
+  return { merged, deleted, summary };
 }
