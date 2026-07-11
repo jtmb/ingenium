@@ -200,6 +200,22 @@ npm test
 
 The self-learning pipeline uses **observations** instead of the deprecated `ingenium_learning_log` tool. Every change that modifies skills, agents, hooks, plugins, config, or architecture should be logged via `ingenium_observe`.
 
+## 🔴 HARD RULE — Observe user behavior, NOT implementation
+
+Never log implementation notes as observations. Observations track the USER's behavior, preferences, and feedback — not what code was written or what features were implemented. Implementation activity belongs in pipeline events and git commits.
+
+✅ LOG THESE (user behavior):
+- "User prefers 2-space indentation over 4-space"
+- "User corrected the agent's error handling approach"
+- "User always runs lint before committing"
+- "User asks for alternatives before accepting suggestions"
+
+❌ DO NOT LOG THESE (implementation):
+- "Added sort filters to the dashboard"
+- "Implemented global config path resolution"
+- "Fixed plugins table UNIQUE constraint"
+- Any description of code changes or architecture decisions
+
 **Observation types:**
 - `correction` — User corrects agent behavior
 - `preference` — User preference or configuration choice (most common for logging)
@@ -268,6 +284,12 @@ Every pipeline event is logged to the `pipeline_events` table and displayed at *
 | `observation_imported` | plugin | File fallback imported into DB |
 
 The timeline auto-polls every 3 seconds, supports filter pills (All/Agent/Plugin/Synthesis/Trait), collapses rapid events into +N groups, and shows detail overlays on click.
+
+### Personality Trait Confidence Model
+
+Traits start at low confidence (0.05–0.15) and require 2+ confirming observations to reach display threshold (0.30). Confidence is capped at 0.95. Traits unused for 7+ days lose 0.05 confidence (decay). Traits can be dismissed from the dashboard via the × button.
+
+Only display-worthy traits (confidence ≥ 0.30) appear on the personality profile page by default. Hidden traits can be toggled via the "N hidden" link.
 
 ### Related Self-Learning Skill
 

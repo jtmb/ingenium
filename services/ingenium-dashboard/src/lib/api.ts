@@ -274,6 +274,8 @@ export const api = {
     },
     profile: (project = DEFAULT_PROJECT) =>
       request<{ data: any }>(`/personality/profile?project=${project}`),
+    dismiss: (id: number, project = DEFAULT_PROJECT) =>
+      request<{ data: { id: number } }>(`/personality/${id}/dismiss?project=${project}`, { method: "POST" }),
   },
   synthesis: {
     run: (project = DEFAULT_PROJECT) =>

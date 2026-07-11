@@ -287,6 +287,60 @@ GROUP BY project_id, trait_type;
 
 ---
 
+## 4.5 Personality Trait System
+
+### Six Trait Dimensions
+
+The personality system tracks 6 developer-specific dimensions:
+
+| Dimension | Source Observations | What It Captures |
+|-----------|-------------------|------------------|
+| `communication_style` | correction, preference | Whether the user prefers direct, detailed, or concise communication |
+| `code_preference` | preference, correction | Code style, formatting, language, and tooling preferences |
+| `workflow_pattern` | pattern, workflow | Recurring multi-step processes and sequencing habits |
+| `feedback_style` | correction, feedback | Whether corrections are detailed or terse, confirmatory or directive |
+| `interaction_pattern` | behavior | How the user interacts with agents (frequent pings, batch commands, etc.) |
+| `priority_signal` | error, goal | What the user prioritizes: correctness, performance, speed, completeness |
+
+### Confidence Model
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| **Starting confidence** | 0.05–0.15 | First observation starts very low |
+| **Requirement** | 2+ confirming observations | Must see multiple signals to build confidence |
+| **Display threshold** | 0.30 | Traits ≥ 0.30 appear on the dashboard by default |
+| **Confidence cap** | 0.95 | Maximum achievable confidence |
+| **Decay rate** | -0.05 after 7+ days | Traits unused for a week lose confidence |
+| **Dismiss** | Button (×) | User can dismiss any trait from the dashboard |
+
+Traits start at very low confidence and need multiple confirming observations to become display-worthy. Once a trait reaches ≥ 0.30 confidence, it appears on the `/personality` page. Confidence is capped at 0.95 to prevent overcommitment to any single pattern.
+
+### Display & Dismiss Flow
+
+- Traits with confidence ≥ 0.30 appear by default on the personality profile
+- Traits below 0.30 are hidden behind a **"N hidden"** toggle link
+- Click the **×** button on any trait card to dismiss it (marks `is_active = 0`)
+- Dismissed traits can be re-enabled via the API (`/api/v1/personality/:id/enable`)
+- Dismissal does not delete the trait — it hides it from the default view
+
+### Observation Quality Rules
+
+Observations must describe **user behavior**, not implementation activity:
+
+**✅ Behavior observations (correct):**
+- "User prefers 2-space indentation over 4-space"
+- "User corrected the agent's error handling approach"
+- "User always runs lint before committing"
+
+**❌ Implementation observations (wrong):**
+- "Added sort filters to the dashboard"
+- "Implemented global config path resolution"
+- "Fixed plugins table UNIQUE constraint"
+
+Implementation activity belongs in pipeline events, git commits, and the `/pipeline` timeline — not in observations. The synthesis pipeline only processes behavior-focused observations into personality traits.
+
+---
+
 ## 5. Personality Trait Types (Full Reference)
 
 | Trait Type | Generated From | Confidence Behavior | Display Label Example |

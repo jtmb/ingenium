@@ -34,6 +34,19 @@ personalityRouter.post("/", (req, res) => {
   res.status(201).json({ data: trait });
 });
 
+// POST /:id/dismiss
+personalityRouter.post("/:id/dismiss", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid trait ID" } });
+    return;
+  }
+  personality.setActive(projectId, id, false);
+  res.json({ data: { id } });
+});
+
 // POST /:id/disable
 personalityRouter.post("/:id/disable", (req, res) => {
   const projectId = requireProject(req, res);
