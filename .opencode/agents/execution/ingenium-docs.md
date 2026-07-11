@@ -3,7 +3,7 @@ name: ingenium-docs
 description: "Documentation and skill management agent. Creates and updates README, API docs, ADRs, and skill system files."
 mode: subagent
 model: lmstudio/qwen/qwen3.5-9b
-# model: opencode/deepseek-v4-flash-free  # only if Zen free tier available
+# model: opencode/deepseek-v4-flash-free  # only if Zen free tier ;also available: lmstudio/qwen/qwen3.5-9b
 permission:
   read: allow
   edit: allow

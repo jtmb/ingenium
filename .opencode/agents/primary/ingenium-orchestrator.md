@@ -1,7 +1,7 @@
 ---
 description: "Coordination agent with subagent-only execution. Reads plans from OpenCode's Plan agent (conversation context), decomposes into parallel subagent tasks, verifies output, and detects + encodes patterns into skills. Never works directly."
 mode: primary
-model: deepseek/deepseek-v4-flash
+model: deepseek/deepseek-v4-pro
 steps: 100
 permission:
   read: allow

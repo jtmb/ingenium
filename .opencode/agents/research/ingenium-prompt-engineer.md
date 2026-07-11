@@ -2,7 +2,7 @@
 name: ingenium-prompt-engineer
 description: "A specialized chat mode for analyzing and improving prompts. Every user input is treated as a prompt to be improved. It provides a detailed analysis of the original prompt, evaluating it against a systematic framework based on prompt engineering best practices, then generates a new, improved prompt."
 mode: subagent
-model: deepseek/deepseek-v4-flash
+model: deepseek/deepseek-v4-pro
 permission:
   read: allow
   write: deny
