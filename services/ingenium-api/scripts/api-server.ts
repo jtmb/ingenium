@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { logger } from "ingenium-core";
+import { logger, getDb } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
@@ -68,6 +68,17 @@ app.use(errorHandler);
 app.listen(config.port, () => {
   logger.info("api", `ingenium-api listening on port ${config.port}`);
   startScheduler(config.port);
+
+  // 🔴 Durability: run WAL checkpoint + integrity check at startup
+  const dbPath = process.env.INGENIUM_CORE_DB_PATH || "/app/.ingenium/data.db";
+  try {
+    const db = getDb(dbPath);
+    const checkpoint = db.pragma("wal_checkpoint(TRUNCATE)");
+    const integrity = db.pragma("integrity_check");
+    logger.info("api", "DB startup check", { checkpoint, integrity });
+  } catch (e: any) {
+    logger.error("api", `DB startup check failed: ${e.message}`, { stack: e.stack });
+  }
 });
 
 // Crash handlers — log unhandled errors before process exits
