@@ -1,7 +1,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
+import { execSync } from "node:child_process";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 const PROJECT = "gh-llm-bootstrap";
@@ -66,70 +66,27 @@ async function detectPatterns(dbPath: string, worktree?: string): Promise<Array<
   try {
     if (!existsSync(dbPath)) return results;
 
-    let Database: any;
-
-    // Try resolving better-sqlite3 from the worktree first, then fall back to import
-    if (worktree) {
-      try {
-        const req = createRequire(resolve(worktree, "noop.js"));
-        Database = req("better-sqlite3");
-      } catch {
-        try { Database = (await import("better-sqlite3")).default; } catch { return results; }
-      }
-    } else {
-      try { Database = (await import("better-sqlite3")).default; } catch { return results; }
-    }
-
-    const db = new Database(dbPath, { readonly: true });
-
-    // Get recent user messages — try multiple tables
     let userTexts: string[] = [];
 
-    // 1. Check session_input.prompt (primary — contains actual user text)
     try {
-      const inputs = db.prepare(
-        "SELECT prompt FROM session_input WHERE prompt IS NOT NULL AND prompt != '' ORDER BY time_created DESC LIMIT 30"
-      ).all() as Array<{ prompt: string }>;
-      for (const r of inputs) {
-        if (r.prompt && r.prompt.length > 10) userTexts.push(r.prompt);
-      }
-    } catch { /* table may not exist */ }
-
-    // 2. Check part.data for user text
-    if (userTexts.length === 0) {
-      try {
-        const parts = db.prepare(
-          "SELECT data FROM part ORDER BY time_created DESC LIMIT 100"
-        ).all() as Array<{ data: string }>;
-        for (const r of parts) {
-          try {
-            const d = JSON.parse(r.data);
-            if (d.type === "text" && d.text && d.text.length > 10) {
-              userTexts.push(d.text);
-            }
-          } catch {}
+      const script = `
+        const D = require('better-sqlite3');
+        const db = new D('${dbPath.replace(/'/g, "'\\''")}', { readonly: true });
+        const texts = [];
+        try { const inputs = db.prepare("SELECT prompt FROM session_input WHERE prompt IS NOT NULL AND prompt != '' ORDER BY time_created DESC LIMIT 30").all(); for (const r of inputs) { if (r.prompt && r.prompt.length > 10) texts.push(r.prompt); } } catch(e) {}
+        if (texts.length === 0) {
+          try { const parts = db.prepare("SELECT data FROM part ORDER BY time_created DESC LIMIT 100").all(); for (const r of parts) { try { const d = JSON.parse(r.data); if (d.type === 'text' && d.text && d.text.length > 10) texts.push(d.text); } catch(e) {} } } catch(e) {}
         }
-      } catch { /* table may not exist */ }
+        db.close();
+        process.stdout.write(JSON.stringify(texts));
+      `;
+      const output = execSync(`node -e "${script.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
+        encoding: 'utf-8', timeout: 10000, windowsHide: true,
+      });
+      userTexts = JSON.parse(output.trim() || '[]');
+    } catch {
+      return results;
     }
-
-    // 3. Fallback: check message.data for user content
-    if (userTexts.length === 0) {
-      try {
-        const messages = db.prepare(
-          "SELECT data FROM message ORDER BY time_created DESC LIMIT 100"
-        ).all() as Array<{ data: string }>;
-        for (const row of messages) {
-          try {
-            const parsed = JSON.parse(row.data);
-            if (parsed.role === "user" && parsed.content && parsed.content.length > 10) {
-              userTexts.push(parsed.content);
-            }
-          } catch {}
-        }
-      } catch { /* table or column may not exist */ }
-    }
-
-    db.close();
 
     // Run pattern detection on collected texts
     const seen = new Set<string>();
