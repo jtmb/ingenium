@@ -34,6 +34,7 @@ if [ ! -f "$OC_CONFIG" ]; then
   },
   "plugin": [
     "/app/packages/ingenium-extension/observer.ts",
+    "/app/packages/ingenium-extension/auto-observer.ts",
     "/app/packages/ingenium-extension/skill-sync.ts"
   ]
 }
