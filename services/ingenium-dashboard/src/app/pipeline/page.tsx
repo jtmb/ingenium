@@ -115,6 +115,34 @@ export default function PipelinePage() {
   const [paused, setPaused] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [nextRun, setNextRun] = useState("");
+  const [intervalMs, setIntervalMs] = useState(900000);
+
+  // Fetch synthesis interval for countdown
+  useEffect(() => {
+    api.settings.get("synthesis_interval_ms", "global-default").then((r) => {
+      const ms = parseInt(r.data?.value, 10);
+      if (!isNaN(ms) && ms > 0) setIntervalMs(ms);
+    }).catch(() => {});
+  }, []);
+
+  // Countdown to next synthesis run
+  useEffect(() => {
+    if (intervalMs <= 0) { setNextRun("disabled"); return; }
+    const tick = () => {
+      // Estimate next run from last synthesis_completed event
+      const lastCompleted = events.find(e => e.event_type === "synthesis_completed");
+      const lastTs = lastCompleted ? new Date(lastCompleted.created_at).getTime() : Date.now();
+      const elapsed = Date.now() - lastTs;
+      const remaining = Math.max(0, intervalMs - (elapsed % intervalMs));
+      const min = Math.floor(remaining / 60000);
+      const sec = Math.floor((remaining % 60000) / 1000);
+      setNextRun(`Next run in ${min}:${String(sec).padStart(2, "0")}`);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [events, intervalMs]);
 
   // ── Fetch ────────────────────────────────────────────────────────────
   const fetchEvents = useCallback(() => {
@@ -163,6 +191,7 @@ export default function PipelinePage() {
       observations: events.filter((e) => e.event_type === "observation_created").length,
       syntheses: events.filter((e) => e.event_type.startsWith("synthesis_")).length,
       traits: events.filter((e) => e.event_type.startsWith("trait_")).length,
+      skills: events.filter((e) => e.event_type === "skill_created" || e.event_type === "skill_updated").length,
     }),
     [events],
   );
@@ -246,7 +275,10 @@ export default function PipelinePage() {
     <div className="space-y-6">
       {/* ── Header + stats ──────────────────────────────────────────── */}
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Pipeline Activity</h1>
+        <div>
+          <h1 className="text-3xl font-bold">Pipeline Activity</h1>
+          <p className="text-sm text-gray-400 mt-1">{nextRun}</p>
+        </div>
         <div className="text-sm text-gray-500 space-x-4">
           <span>
             Total: <strong>{stats.total}</strong>
@@ -262,6 +294,10 @@ export default function PipelinePage() {
           <span>
             Traits:{" "}
             <strong className="text-blue-600">{stats.traits}</strong>
+          </span>
+          <span>
+            Skills:{" "}
+            <strong className="text-purple-600">{stats.skills}</strong>
           </span>
         </div>
       </div>
