@@ -65,7 +65,7 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 74 tools. Calls API via HTTP. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access. Tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend (15 pages). Calls API via HTTP. Zero DB access.
 ```
 
@@ -86,7 +86,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
-| `/servers` | MCP servers list with add/edit/delete |
+| `/mcp-servers` | MCP servers + Tool Manager (Servers/Tools tabs, 73 tools in 15 categories, per-tool enable/disable toggle, search, category filter) |
 | `/config` | OpenCode config editor (Project/Global tabs, sync from disk, save) |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
@@ -389,7 +389,7 @@ Commands are captured in the DB alongside skills, agents, and plugins. The follo
 
 ### Scheduled Maintenance
 
-The API server (`services/ingenium-api/scripts/api-server.ts`) automatically runs two maintenance tasks every **15 minutes** for ALL active projects:
+The API server (`services/ingenium-api/lib/scheduler.ts`) automatically runs two maintenance tasks every **15 minutes** for ALL active projects:
 
 1. **Synthesis**: Triggers `/api/v1/synthesis/run` — processes pending observations into personality traits (Phase 1) and optionally runs LLM skill synthesis (Phase 2)
 2. **Skill sync**: Triggers `/api/v1/skills/sync-all` — bidirectional disk↔DB sync (imports new skills from disk, writes DB skills to disk)
@@ -406,9 +406,9 @@ The synthesis pipeline can evaluate observations and skills across multiple proj
 
 Cross-project synthesis runs as part of the scheduled maintenance cycle (every 15 minutes) or can be triggered manually via the `ingenium_synthesis_cross_project` tool.
 
-### Servers Page — `source` Column
+### MCP Page — `source` Column
 
-The Servers dashboard page (`/servers`) displays a `source` badge for each server with three states:
+The MCP dashboard page (`/mcp-servers`) has two tabs — **Servers** and **Tools**. The Servers tab displays a `source` badge for each server with three states:
 - **External** (blue badge) — Standard user-added server
 - **Enabled** (green badge) — Server on a global project, inherited across all projects
 - **Running** (green badge) — Server sourced from `ingenium` (proxied via the MCP proxy engine)

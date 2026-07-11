@@ -8,7 +8,7 @@ The monorepo has 5 packages:
 - `packages/ingenium-core` — shared library (SQLite WAL + FTS5, 7 tool modules, Zod schemas). Consumed by API only.
 - `packages/ingenium-email` — IMAP/SMTP email client with OAuth2 for Gmail and Outlook (imapflow, nodemailer, mailparser, google-auth-library, @azure/msal-node)
 - `services/ingenium-api` — Express REST API gateway on port 4097. Sole database authority.
-- `services/ingenium-server` — MCP stdio server with 74 tools. Calls API via HTTP. Zero DB access.
+- `services/ingenium-server` — MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access.
 - `services/ingenium-dashboard` — Next.js 16 App Router frontend with 15 feature pages. Calls API via HTTP. Zero DB access.
 
 ## Documentation Index

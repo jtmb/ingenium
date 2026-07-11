@@ -34,9 +34,9 @@ export default function Home() {
           <h2 className="font-semibold text-lg">Agents</h2>
           <p className="text-sm text-gray-500">Manage AI agents — create, edit, enable, or delete agent definitions synced to OpenCode</p>
         </Link>
-        <Link href="/servers" className="p-6 bg-white rounded-lg border hover:shadow-md transition-shadow">
-          <h2 className="font-semibold text-lg">Servers</h2>
-          <p className="text-sm text-gray-500">Manage MCP server configurations</p>
+        <Link href="/mcp-servers" className="p-6 bg-white rounded-lg border hover:shadow-md transition-shadow">
+          <h2 className="font-semibold text-lg">MCP</h2>
+          <p className="text-sm text-gray-500">Manage MCP servers and tools</p>
         </Link>
       </div>
     </div>

@@ -419,10 +419,14 @@ export const api = {
       request<{ data: { id: string; content: string } | null }>(`/config/sync?project=${encodeURIComponent(project)}&type=${encodeURIComponent(type)}`, { method: "POST" }),
   },
   mcpTools: {
-    list: (project = DEFAULT_PROJECT) =>
-      request<{ data: Array<{ tool_name: string; enabled: boolean }>; total: number }>(`/mcp-tools?project=${encodeURIComponent(project)}`),
+    list: (project = DEFAULT_PROJECT, includeCategories = false) =>
+      request<{ data: any[]; total: number }>(`/mcp-tools?project=${encodeURIComponent(project)}&include_categories=${includeCategories}`),
     toggle: (name: string, enabled: boolean, project = DEFAULT_PROJECT) =>
       request<{ data: any }>(`/mcp-tools/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, {
+        method: "PUT", body: JSON.stringify({ enabled }),
+      }),
+    toggleCategory: (category: string, enabled: boolean, project = DEFAULT_PROJECT) =>
+      request<{ data: any }>(`/mcp-tools/category/${encodeURIComponent(category)}?project=${encodeURIComponent(project)}`, {
         method: "PUT", body: JSON.stringify({ enabled }),
       }),
   },

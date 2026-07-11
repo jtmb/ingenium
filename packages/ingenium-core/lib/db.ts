@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql"]) {
+    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info(`Applied migration ${file}`);
@@ -190,6 +190,19 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "016_mcp_tool_states.sql"), "utf-8");
       db.exec(sql);
       logger.info("Applied migration 016_mcp_tool_states.sql");
+    }
+
+    // Check if personality_traits FK needs rebuilding (migration 017)
+    // After migration 015 renamed/recreated observations, the FK in personality_traits
+    // may reference a stale internal table reference. Detect by checking if the
+    // personality_traits CREATE TABLE SQL includes the 017_rebuilt marker comment.
+    const traitsSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='personality_traits'"
+    ).get() as { sql: string } | undefined;
+    if (traitsSql && observationsCreateSql && observationsCreateSql.sql.includes("auto-observer") && !traitsSql.sql.includes("017_rebuilt")) {
+      const sql = readFileSync(resolve(migrationsDir, "017_fix_trait_fk.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 017_fix_trait_fk.sql");
     }
   }
 }

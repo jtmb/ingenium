@@ -8,7 +8,7 @@
 
 <p>
   <img src="https://img.shields.io/badge/skills-22%20total-green?style=flat-square" alt="22 skills" />
-  <img src="https://img.shields.io/badge/MCP%20tools-74-blue?style=flat-square" alt="74 MCP tools" />
+  <img src="https://img.shields.io/badge/MCP%20tools-73-blue?style=flat-square" alt="73 MCP tools" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
 
@@ -21,7 +21,7 @@
 ### OpenCode Web UI Embedded in Dashboard
 The dashboard includes an embedded OpenCode service at `/opencode` — a second OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
 
-Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to **74 tools** spanning project management, skill management, observations, personality, synthesis pipeline, task boards, full-text knowledge search, plugin lifecycle, commands, config management, agent management, server configuration, email client integration with Gmail/Outlook OAuth2 + IMAP/SMTP support, and settings. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
+Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to **73 tools** spanning project management, skill management, observations, personality, synthesis pipeline, task boards, full-text knowledge search, plugin lifecycle, commands, config management, agent management, server configuration, email client integration with Gmail/Outlook OAuth2 + IMAP/SMTP support, and settings. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
 **The system learns from you.** Patterns you teach, conventions you establish, and decisions you make are processed through a self-learning pipeline. The Observer plugin captures observations during your workflow, the synthesis pipeline (Phase 1 heuristic + optional Phase 2 LLM) transforms them into personality traits and skills, and the `/pipeline` timeline provides full observability into every step. The system supports cross-project synthesis, sharing learned patterns across all your projects.
 
@@ -75,7 +75,7 @@ Plugins ship inside the `@ingenium/extension` package. Reference them from your 
 }
 ```
 
-**Other MCP clients** — Point your client's `command` to `npx -y @ingenium/extension`. The server speaks stdio MCP with **74 tools**. No HTTP port, no network config.
+**Other MCP clients** — Point your client's `command` to `npx -y @ingenium/extension`. The server speaks stdio MCP with **73 tools**. No HTTP port, no network config.
 
 **Docker Deployment** — Single-container deployment via `docker compose up --build` manages three processes: API (`:4097`), Dashboard (`:3000`), and opencode-server (`:4096`) via supervisord. Build-time UID matching ensures write access to workspace. Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
@@ -112,8 +112,8 @@ OpenCode plugin lifecycle management — enable, disable, configure plugins that
 ### 📧 Mail
 Full email client with inbox, compose, search, and AI auto-responses. Gmail/Outlook OAuth2 + IMAP/SMTP. 13 MCP tools for agents. Self-learning auto-draft from user patterns.
 
-### 🖥️ Servers
-MCP server configuration and proxy engine — start, stop, configure MCP servers from the dashboard. The server proxy routes client requests to the appropriate backend, handling lifecycle and configuration.
+### 🖥️ MCP (Servers + Tools)
+MCP server configuration and tool management — dual-tab page with **Servers** (add, start, stop MCP servers with source badges) and **Tools** (73 tools in 15 categories, per-tool and per-category enable/disable toggles, search, category filter). Disabled tools return a `TOOL_DISABLED` error at the MCP server level before execution.
 → [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md)
 
 ### 👤 Agents
@@ -153,7 +153,7 @@ ingenium/
 │   └── ingenium-extension/   # Client-side OpenCode package (MCP server, observer + skill-sync + auto-observer plugins, ARCHITECTURE.md). Installable via `npx -y @ingenium/extension`
 ├── services/
 │   ├── ingenium-api/          # Express REST gateway on port 4097. Sole database authority.
-│   ├── ingenium-server/       # MCP stdio server with 74 tools. Calls API via HTTP. Zero DB access.
+│   ├── ingenium-server/       # MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access.
 │   └── ingenium-dashboard/    # Next.js 16 App Router frontend with 15 feature pages. Calls API via HTTP. Zero DB access.
 ├── seed/
 │   ├── skills/                # Canonical skill sources in split-skill format (SKILL.md + metadata.json + references/)
@@ -173,7 +173,7 @@ ingenium/
 
 ```mermaid
 graph LR
-    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>74 tools]
+    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>73 tools]
     B -->|HTTP| C[ingenium-api<br/>port 4097]
     D[Browser<br/>Dashboard] -->|HTTP| C
     C -->|SQLite WAL| E[(SQLite<br/>FTS5)]

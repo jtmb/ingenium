@@ -12,13 +12,12 @@ export function setToolState(projectId: string, toolName: string, enabled: boole
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
-    const existing = db.prepare("SELECT * FROM mcp_tool_states WHERE project_id = ? AND tool_name = ?").get(projectId, toolName) as MCPToolState | undefined;
-    if (existing) {
-      db.prepare("UPDATE mcp_tool_states SET enabled = ?, updated_at = ? WHERE project_id = ? AND tool_name = ?").run(enabled ? 1 : 0, now, projectId, toolName);
-    } else {
-      const id = db.prepare("SELECT COALESCE(MAX(id), 0) + 1 FROM mcp_tool_states").get() as { id: number };
-      db.prepare("INSERT INTO mcp_tool_states (id, project_id, tool_name, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)").run(id.id, projectId, toolName, enabled ? 1 : 0, now, now);
-    }
+    // Use UPSERT — table has UNIQUE(project_id, tool_name), no id column needed
+    db.prepare(`
+      INSERT INTO mcp_tool_states (project_id, tool_name, enabled, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, tool_name) DO UPDATE SET enabled = ?, updated_at = ?
+    `).run(projectId, toolName, enabled ? 1 : 0, now, now, enabled ? 1 : 0, now);
     checkpointAfterWrite();
     return db.prepare("SELECT * FROM mcp_tool_states WHERE project_id = ? AND tool_name = ?").get(projectId, toolName) as MCPToolState;
   });
@@ -59,4 +58,79 @@ export function listToolStatesWithDefaults(projectId: string): Array<{ tool_name
     tool_name: name,
     enabled: stateMap.has(name) ? stateMap.get(name)! : true,
   }));
+}
+
+const CATEGORY_PREFIX: Record<string, string> = {
+  setting: "Settings",
+  skill: "Skills",
+  task: "Tasks",
+  project: "Projects",
+  plugin: "Plugins",
+  server: "Servers",
+  agent: "Agents",
+  observation: "Observations",
+  personality: "Personality",
+  synthesis: "Synthesis",
+  command: "Commands",
+  config: "Config",
+  plan: "Plans",
+  email: "Email",
+  observe: "Observe",
+};
+
+export function getCategory(toolName: string): string {
+  // toolName = "ingenium_skill_list" → prefix = "skill" → "Skills"
+  const parts = toolName.split("_");
+  const prefix = parts[1];
+  if (prefix && CATEGORY_PREFIX[prefix]) {
+    return CATEGORY_PREFIX[prefix];
+  }
+  return "Other";
+}
+
+export interface CategorizedTool {
+  tool_name: string;
+  enabled: boolean;
+  category: string;
+}
+
+export function listCategorizedTools(projectId: string): Array<{
+  category: string;
+  enabled_count: number;
+  total_count: number;
+  tools: Array<{ tool_name: string; enabled: boolean }>;
+}> {
+  const tools = listToolStatesWithDefaults(projectId);
+  const categorized = tools.map(t => ({ ...t, category: getCategory(t.tool_name) }));
+
+  // Group by category
+  const groups = new Map<string, Array<{ tool_name: string; enabled: boolean }>>();
+  for (const t of categorized) {
+    if (!groups.has(t.category)) groups.set(t.category, []);
+    groups.get(t.category)!.push({ tool_name: t.tool_name, enabled: t.enabled });
+  }
+
+  // Return sorted categories
+  const categoryOrder = Object.values(CATEGORY_PREFIX);
+  return Array.from(groups.entries())
+    .sort((a, b) => categoryOrder.indexOf(a[0]) - categoryOrder.indexOf(b[0]))
+    .map(([category, tools]) => ({
+      category,
+      enabled_count: tools.filter(t => t.enabled).length,
+      total_count: tools.length,
+      tools,
+    }));
+}
+
+export function setCategoryState(projectId: string, category: string, enabled: boolean): number {
+  const prefix = Object.entries(CATEGORY_PREFIX).find(([, v]) => v === category)?.[0];
+  if (!prefix) return 0;
+
+  const matchingTools = getAllToolNames().filter(n => n.startsWith(`ingenium_${prefix}`));
+  let changed = 0;
+  for (const toolName of matchingTools) {
+    setToolState(projectId, toolName, enabled);
+    changed++;
+  }
+  return changed;
 }
