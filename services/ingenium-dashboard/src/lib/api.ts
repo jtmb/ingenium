@@ -220,6 +220,44 @@ export interface ResponseSuggestion {
   confidence: number;
 }
 
+/** A scheduled/triggered job that runs agents. */
+export type Job = {
+  id: string;
+  project_id: string;
+  name: string;
+  description?: string;
+  agent: string;
+  prompt_template: string;
+  schedule_cron?: string;
+  trigger_event?: string;
+  enabled: boolean;
+  timeout_minutes: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** A single execution run of a job. */
+export type JobRun = {
+  id: string;
+  job_id: string;
+  status: "queued" | "running" | "success" | "failed" | "timeout" | "cancelled";
+  trigger: "manual" | "cron" | "event";
+  started_at?: string;
+  finished_at?: string;
+  exit_code?: number;
+  created_at: string;
+};
+
+/** A single log line from a job run. */
+export type JobRunLog = {
+  id: number;
+  run_id: string;
+  seq: number;
+  stream: "stdout" | "stderr";
+  line: string;
+  created_at: string;
+};
+
 /** A learned personality trait derived from observations via synthesis. */
 export type PersonalityTrait = {
   id: number;
@@ -536,6 +574,56 @@ export const api = {
     toggleCategory: (category: string, enabled: boolean, project = DEFAULT_PROJECT) =>
       request<{ data: any }>(`/mcp-tools/category/${encodeURIComponent(category)}?project=${encodeURIComponent(project)}`, {
         method: "PUT", body: JSON.stringify({ enabled }),
+      }),
+  },
+  jobs: {
+    list: (project = DEFAULT_PROJECT) =>
+      request<{ data: Job[]; total: number }>(`/jobs?project=${encodeURIComponent(project)}`),
+    get: (jobId: string, project = DEFAULT_PROJECT) =>
+      request<{ data: Job }>(`/jobs/${encodeURIComponent(jobId)}?project=${encodeURIComponent(project)}`),
+    create: (data: {
+      name: string;
+      description?: string;
+      agent: string;
+      prompt_template: string;
+      schedule_cron?: string;
+      trigger_event?: string;
+      timeout_minutes?: number;
+    }, project = DEFAULT_PROJECT) =>
+      request<{ data: Job }>(`/jobs?project=${encodeURIComponent(project)}`, {
+        method: "POST", body: JSON.stringify(data),
+      }),
+    update: (jobId: string, data: Partial<{
+      name: string;
+      description: string;
+      agent: string;
+      prompt_template: string;
+      schedule_cron: string;
+      trigger_event: string;
+      enabled: boolean;
+      timeout_minutes: number;
+    }>, project = DEFAULT_PROJECT) =>
+      request<{ data: Job }>(`/jobs/${encodeURIComponent(jobId)}?project=${encodeURIComponent(project)}`, {
+        method: "PATCH", body: JSON.stringify(data),
+      }),
+    delete: (jobId: string, project = DEFAULT_PROJECT) =>
+      request(`/jobs/${encodeURIComponent(jobId)}?project=${encodeURIComponent(project)}`, {
+        method: "DELETE",
+      }),
+    run: (jobId: string, project = DEFAULT_PROJECT) =>
+      request<{ data: JobRun }>(`/jobs/${encodeURIComponent(jobId)}/run?project=${encodeURIComponent(project)}`, {
+        method: "POST",
+      }),
+    runs: (jobId: string, project = DEFAULT_PROJECT, limit = 50) =>
+      request<{ data: JobRun[]; total: number }>(`/jobs/${encodeURIComponent(jobId)}/runs?project=${encodeURIComponent(project)}&limit=${limit}`),
+    runLogs: (runId: string, afterSeq?: number, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project: encodeURIComponent(project) });
+      if (afterSeq !== undefined) params.set("after", String(afterSeq));
+      return request<{ data: JobRunLog[]; total: number }>(`/jobs/runs/${encodeURIComponent(runId)}/logs?${params}`);
+    },
+    cancelRun: (runId: string, project = DEFAULT_PROJECT) =>
+      request<{ data: JobRun }>(`/jobs/runs/${encodeURIComponent(runId)}/cancel?project=${encodeURIComponent(project)}`, {
+        method: "POST",
       }),
   },
 };
