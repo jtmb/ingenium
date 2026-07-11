@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql"]) {
+    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info(`Applied migration ${file}`);
@@ -170,6 +170,26 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "014_configs.sql"), "utf-8");
       db.exec(sql);
       logger.info("Applied migration 014_configs.sql");
+    }
+
+    // Check if observations source CHECK includes 'auto-observer' (migration 015)
+    const observationsCreateSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='observations'"
+    ).get() as { sql: string } | undefined;
+    if (observationsCreateSql && !observationsCreateSql.sql.includes("auto-observer")) {
+      const sql = readFileSync(resolve(migrationsDir, "015_auto_observer_source.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 015_auto_observer_source.sql");
+    }
+
+    // Check if mcp_tool_states table exists (migration 016)
+    const mcpToolStatesCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='mcp_tool_states'"
+    ).get() as { count: number };
+    if (mcpToolStatesCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "016_mcp_tool_states.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 016_mcp_tool_states.sql");
     }
   }
 }

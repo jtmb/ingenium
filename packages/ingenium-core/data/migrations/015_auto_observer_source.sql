@@ -1,5 +1,18 @@
--- Migration 007: Observations table for background self-learning pipeline.
--- Replaces the old self-reporting learnings system with passive observations.
+-- Migration 015: Add 'auto-observer' to observations source CHECK constraint.
+-- The auto-observer plugin creates observations with source="auto-observer",
+-- but the existing CHECK constraint only allows: agent, email, chat, document,
+-- calendar, synthesis, import, manual.
+--
+-- Since SQLite does not support ALTER CONSTRAINT, we rebuild the table.
+-- This also handles the FTS5 content-sync table correctly.
+
+-- Step 1: Save old data
+ALTER TABLE observations RENAME TO observations_old;
+
+-- Step 2: Drop FTS virtual table (it references the old observations table by name)
+DROP TABLE IF EXISTS observations_fts;
+
+-- Step 3: Recreate observations with updated source CHECK constraint
 CREATE TABLE IF NOT EXISTS observations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL REFERENCES projects(id),
@@ -36,11 +49,13 @@ CREATE TABLE IF NOT EXISTS observations (
     updated_at TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_observations_project_status ON observations(project_id, status);
-CREATE INDEX IF NOT EXISTS idx_observations_type ON observations(observation_type);
-CREATE INDEX IF NOT EXISTS idx_observations_importance ON observations(importance DESC);
+-- Step 4: Restore existing data
+INSERT INTO observations SELECT * FROM observations_old;
 
--- FTS5 for full-text search
+-- Step 5: Cleanup old table
+DROP TABLE IF EXISTS observations_old;
+
+-- Step 6: Rebuild FTS5 virtual table and triggers
 CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(content, context, content=observations, content_rowid=id);
 
 CREATE TRIGGER IF NOT EXISTS observations_fts_insert AFTER INSERT ON observations BEGIN
@@ -53,3 +68,6 @@ CREATE TRIGGER IF NOT EXISTS observations_fts_update AFTER UPDATE ON observation
     INSERT INTO observations_fts(observations_fts, rowid, content, context) VALUES('delete', old.id, old.content, old.context);
     INSERT INTO observations_fts(rowid, content, context) VALUES (new.id, new.content, new.context);
 END;
+
+-- Step 7: Rebuild FTS index from existing data
+INSERT INTO observations_fts(observations_fts) VALUES('rebuild');

@@ -21,7 +21,7 @@ The user prefers models that provide direct, straight answers without safety fil
 > "Sure, here's a direct answer to your question! It seems like you want the variable name in snake_case. So, we should change `myVar` to `my_var`."
 
 **Correct (Raw/Direct):**
-> Change `myVar` to `my_var`. The user prefers snake_case.
+> Change `myVar` to `my_var`. The user prefers snake_case. I did becuause 'reasoning goes here'. Here are the implications: 'implications go here'.
 
 ### Trigger Conditions
 - User asks a technical question directly.
