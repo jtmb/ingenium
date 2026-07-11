@@ -13,6 +13,7 @@ export default function SettingsPage() {
   // Synthesis LLM state
   const [providers, setProviders] = useState<any[]>([]);
   const [providerId, setProviderId] = useState("");
+  const [selectedModel, setSelectedModel] = useState("");
   const [apiKeyState, setApiKey] = useState("");
   const [endpoint, setEndpoint] = useState("");
   const [savingLlm, setSavingLlm] = useState(false);
@@ -22,6 +23,7 @@ export default function SettingsPage() {
   const [customName, setCustomName] = useState("");
   const [customModel, setCustomModel] = useState("");
   const selectedProvider = providers.find(p => p.id === providerId);
+  const providerModels = selectedProvider ? Object.entries(selectedProvider.models || {}) as [string, any][] : [];
 
   useEffect(() => {
     api.settings.get("archive_retention_days", "global-default").then((r) => {
@@ -59,6 +61,16 @@ export default function SettingsPage() {
       if (k.data?.value) setApiKey(k.data.value);
       if (e.data?.value) setEndpoint(e.data.value);
       if (pid === "__custom__" && m.data?.value) setCustomModel(m.data.value);
+      // Restore selected model for non-custom providers
+      if (pid && pid !== "__custom__" && m.data?.value) {
+        setSelectedModel("");
+        // Find which model key has this ID
+        const prov = providers.find(x => x.id === pid);
+        if (prov) {
+          const match = Object.entries(prov.models || {}).find(([, v]: [string, any]) => v.id === m.data.value);
+          if (match) setSelectedModel(match[0]);
+        }
+      }
     }).catch(() => {});
   }, []);
 
@@ -73,9 +85,10 @@ export default function SettingsPage() {
         ep = endpoint;
       } else {
         const p = providers.find(x => x.id === providerId);
-        const firstModel = p ? Object.values(p.models || {})[0] : null;
-        modelId = firstModel ? (firstModel as any).id : "";
-        ep = firstModel ? (firstModel as any).api?.url || "" : "";
+        const models = p ? Object.entries(p.models || {}) as [string, any][] : [];
+        const model = models.find(([k]) => k === selectedModel) || models[0];
+        modelId = model ? model[1]?.id || "" : "";
+        ep = model ? model[1]?.api?.url || "" : "";
       }
 
       await api.settings.set("synthesis_model", modelId, "global-default");
@@ -96,7 +109,11 @@ export default function SettingsPage() {
     try {
       const modelId = isCustom
         ? customModel
-        : (Object.values(selectedProvider?.models || {})[0] as any)?.id || providerId;
+        : (() => {
+            const models = providerModels;
+            const match = models.find(([k]) => k === selectedModel) || models[0];
+            return match?.[1]?.id || selectedModel || providerId;
+          })();
       const ep = isCustom
         ? endpoint
         : endpoint;
@@ -152,10 +169,13 @@ export default function SettingsPage() {
             setIsCustom(val === "__custom__");
             if (val === "__custom__") {
               setEndpoint("");
+              setSelectedModel("");
             } else if (val) {
               const p = providers.find(x => x.id === val);
-              const m = p ? Object.values(p.models || {})[0] : null;
-              setEndpoint((m as any)?.api?.url || "");
+              const models = p ? Object.entries(p.models || {}) : [];
+              const firstModel = models[0];
+              setEndpoint((firstModel?.[1] as any)?.api?.url || "");
+              setSelectedModel(firstModel?.[0] || "");
             }
           }} className="border p-2 rounded w-full text-sm">
             <option value="">— No LLM (heuristics only) —</option>
@@ -188,6 +208,17 @@ export default function SettingsPage() {
             })()}
           </select>
         </div>
+
+        {!isCustom && providerId && providerModels.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium">Model</label>
+            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm">
+              {providerModels.map(([key, val]) => (
+                <option key={key} value={key}>{key} {(val as any)?.id ? `(${(val as any).id})` : ""}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {isCustom && (
           <div className="grid grid-cols-2 gap-4 p-3 bg-gray-50 rounded border">
