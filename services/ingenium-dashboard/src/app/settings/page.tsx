@@ -26,6 +26,12 @@ export default function SettingsPage() {
   const [isCustom, setIsCustom] = useState(false);
   const [customName, setCustomName] = useState("");
   const [customModel, setCustomModel] = useState("");
+
+  // Backup synthesis LLM state
+  const [showBackup, setShowBackup] = useState(false);
+  const [backupEndpoint, setBackupEndpoint] = useState("");
+  const [backupModel, setBackupModel] = useState("");
+  const [backupApiKey, setBackupApiKey] = useState("");
   const selectedProvider = providers.find(p => p.id === providerId);
   const providerModels = selectedProvider ? Object.entries(selectedProvider.models || {}) as [string, any][] : [];
 
@@ -78,6 +84,19 @@ export default function SettingsPage() {
     }).catch(() => {});
   }, []);
 
+  // Load backup synthesis config
+  useEffect(() => {
+    Promise.all([
+      api.settings.get("synthesis_backup_endpoint", "global-default"),
+      api.settings.get("synthesis_backup_model", "global-default"),
+      api.settings.get("synthesis_backup_api_key", "global-default"),
+    ]).then(([e, m, k]) => {
+      if (e.data?.value) { setBackupEndpoint(e.data.value); setShowBackup(true); }
+      if (m.data?.value) setBackupModel(m.data.value);
+      if (k.data?.value) setBackupApiKey(k.data.value);
+    }).catch(() => {});
+  }, []);
+
   // Fetch saved synthesis interval
   useEffect(() => {
     api.settings.get("synthesis_interval_ms", "global-default").then((r) => {
@@ -113,6 +132,10 @@ export default function SettingsPage() {
       await api.settings.set("synthesis_provider", providerId, "global-default");
       if (apiKeyState) await api.settings.set("synthesis_api_key", apiKeyState, "global-default");
       await api.settings.set("synthesis_endpoint", ep, "global-default");
+      // Save backup config
+      if (backupEndpoint) await api.settings.set("synthesis_backup_endpoint", backupEndpoint, "global-default");
+      if (backupModel) await api.settings.set("synthesis_backup_model", backupModel, "global-default");
+      if (backupApiKey) await api.settings.set("synthesis_backup_api_key", backupApiKey, "global-default");
       setEndpoint(ep);
       setLlmStatus("✅ Configuration saved");
     } catch (err: any) {
@@ -275,6 +298,31 @@ export default function SettingsPage() {
             <option value="0">Disabled</option>
           </select>
           {intervalSaved && <span className="text-sm text-green-600 ml-2">Saved!</span>}
+        </div>
+
+        {/* Backup Provider */}
+        <div className="border-t pt-3 mt-3">
+          <button type="button" onClick={() => setShowBackup(!showBackup)} className="text-sm font-medium text-gray-600 hover:text-gray-900">
+            {showBackup ? "▾" : "▸"} Backup Provider (fallback)
+          </button>
+          {showBackup && (
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="block text-sm font-medium">Backup Endpoint</label>
+                <input type="text" value={backupEndpoint} onChange={(e) => setBackupEndpoint(e.target.value)} placeholder="https://api.backup-provider.com/v1" className="border p-2 rounded w-full text-sm font-mono" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium">Backup Model</label>
+                  <input type="text" value={backupModel} onChange={(e) => setBackupModel(e.target.value)} placeholder="model-id" className="border p-2 rounded w-full text-sm font-mono" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium">Backup API Key</label>
+                  <input type="password" value={backupApiKey} onChange={(e) => setBackupApiKey(e.target.value)} placeholder="sk-..." className="border p-2 rounded w-full text-sm" />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2 items-center">
