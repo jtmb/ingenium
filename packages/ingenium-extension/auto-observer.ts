@@ -100,6 +100,7 @@ async function detectPatterns(): Promise<Array<{ type: string; content: string; 
     /^Find this text:/i,  // edit instruction
     /^Replace the ENTIRE/i,  // edit instruction
     /^want you to (?:plan|search|build|make|create|write|edit|update|delete|rename|copy|move|add|remove|run|execute|trigger|start|stop|fix|debug|test|deploy|check|review|audit|investigate|research|find|list|read|implement)\s/i,  // "want you to plan a skill" = task instruction
+    /^@ingenium-/i,  // subagent mention = task delegation, not user behavior
     /\/home\/brajam\//i,  // contains a filesystem path = task context
   ];
 
