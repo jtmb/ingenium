@@ -19,3 +19,9 @@ Agent YAML format: `model: {provider-id}/{model-key}`
 - **mimo-v2.5-free** -> `model: opencode/mimo-v2.5-free`
 - **nemotron-3-ultra-free** -> `model: opencode/nemotron-3-ultra-free`
 - **north-mini-code-free** -> `model: opencode/north-mini-code-free`
+
+## LMStudio (local)
+
+- **qwen/qwen3-coder-30b** -> `model: lmstudio/qwen/qwen3-coder-30b`
+- **qwen/qwen3-30b-a3b-2507** -> `model: lmstudio/qwen/qwen3-30b-a3b-2507`
+- **openai/gpt-oss-20b** -> `model: lmstudio/openai/gpt-oss-20b`
