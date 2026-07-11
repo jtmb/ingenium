@@ -1,10 +1,10 @@
 # RULES:
- - Please use @ingenium-software-engineer-premium for any explore tasks.
- - You are in Plan mode. You do not edit, you spawn @ingenium-software-engineer-premium for any actions write/edit/explore actions.
+ - Please use @ingenium-software-engineer-premium for any explore tasks. Perform any screenshot viewewing tasks yourself, you have vision.
+ - You are in Plan mode. You do not edit, you spawn @ingenium-software-engineer-premium or @ingenium-software-engineer-fast  any actions write/edit. You use @ingenium-explore for explore actions or @ingenium-software-engineer-premium if you require a better model. You use @ingenium-docs for documentations and finally @ @ingenium-qa for testing.
  - Your job is to be the brain of the operation.
- - Map Out documentation and testing at every phase.
+ - Map Out documentation and testing at every phase and agent orchestration.
 # REQUEST/DIRECTIVE:
-One-shot every bug and feature listed in next-steps-plan/next-steps.md. Fix all 14 bugs across /projects, /skills, /logs, /mail, /mcp-servers, /observations, /personality, and the OpenCode client plugin error. Implement the full kanban board overhaul on /tasks with all 13 specified features and build the new /jobs page. No prioritization, no scoping down — everything in one pass a true one shot. You will Architect the entire plan and split it into phases for me to hand off to my orchestrator. The orchestrator is deepseek v4 pro, you are fable 5. The orchestrator is going to be significantly worse than you at problem solving so make sure you think throug those isses and map out a solid guided plan for the bellow:
+One-shot every bug and feature listed below. Fix the 2 remaining /projects bugs (archived tab search, duplicate search bars), the 3 /mail bugs (OAuth credential UI, demo/testing mode, proper credential-error flow), the 2 /logs issues (investigate and fix API errors, make verbose errors a project standard), the /Skills background consolidation job, Playwright E2E test all new features from the previous build until they actually work, and execute the UI polish pass — bring flat pages (observations, agents, settings, mail, plugins, config) up to the visual standard of pipeline/logs. One pass, no excuses, test until it works. Architect the plan into phases for the orchestrator. The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below.
 
 
 ## Bugs:
@@ -12,130 +12,42 @@ One-shot every bug and feature listed in next-steps-plan/next-steps.md. Fix all 
 ### /projects
 
 1. No Search bar on archived tab
-
-### /Skills
-
-1. Skills made by the Synthysis sytem are showing up as:
- llm-synthesized-name-goes-here, for example : 
-`llm-synthesized-global-config-management`. 
-
-    Skills should not follow this system for nameing conventions they should just be name-goes-here, for example: `global-config-management`
-
-2. Created Skills should have dates when they are created, both in the document and in the UI.
-
-3. The editor/viewer for markdown is small and cropped see screenshot: `next-steps-plan/screenshots/Screenshot 2026-07-11 113842.png` it should use a standard window size for the full screen overlay for the editor/viewer.
-
-4. metadata.json on the skills that have been synthysized don't contain relevant tags. They need tags. metadata.json is a way for the models to quickly pickup what skills are listed under `references/` for each skill. (SKILL.md acts as a pointer to said skills and metadata.json acts as a quick index for the models to know what that skill contains)
-
-5. Please see screenshot. `next-steps-plan/screenshots/Screenshot 2026-07-11 114730.png` as you can see the contents of the code blocks are not visible due to grey on grey text. This needs to be fixed in the editor/viewer.
-
-6. There are a lot of Skills. As part of the synthesis process, the LLM should analyze the current skills in `/skills` on the server side and see if it can fit the current skill into any other existing skill using the criteria and format from `step 4.` 
-
-    Currently there are 45 skills i would like the LLM synthesis to try to maintain 20 skills per project, new addictions should be tried to fit in the users current skills. Using the format in `step 4.` we should be able to aquire a cleaner and more manageble project structure.
-
-### /logs
-
-1. I am seing :
-
-    ```
-    11:36:31	Skills	
-    WARN	Skill file not found on disk
-    11:36:31	Skills	
-    WARN	Skill file not found on disk
-    11:36:31	Skills	
-    WARN	Skill file not found on disk
-    11:36:31	Skills	
-    WARN	Skill file not found on disk
-    11:41:38	Skills	
-    WARN	Skill file not found on disk
-    11:41:38	Skills	
-    WARN	Skill file not found on disk
-    11:41:38	Skills	
-    WARN	Skill file not found on disk
-    ``` 
-    What does this mean? My skills from my external project (current), or is it the skills for the global project that lives on the server aka, docker container?
-
+2. Duplicate search bars on /projects — remove the top-right one and the create button, move the remaining search bar to the top-right position
 
 ### /mail
 
-1. clicking "add Account" brings up the "Add Email Account" Screen. It presents 3 buttons:
-    - Gmail
-    - Outlook
-    - Custom
+1. OAuth credentials have no UI — generated auth URL has empty `client_id=`, user cannot enter Google/Microsoft client ID/secret anywhere. No credentials screen or setup flow
+2. No way to test email UI without real OAuth — need a "load demo account" or placeholder mode so the email dashboard renders and MCP tools can be exercised
+3. "Add Account" should detect missing credentials and prompt user for setup instead of producing an auth URL with empty fields or erroring
 
+### /logs
 
-    an error occurs when clicking any of the buttons instead of going to the expected setup screen:
+1. API errors showing in /logs — investigate current "Unhandled error" entries and fix root cause before rebuilding
+2. "Unhandled error" messages are useless — every error must include enough context to diagnose without digging through code. Make verbose errors a project standard: all catch blocks, Express error handlers, and child_process error handlers must log the originating route, request details, stack trace, and a human-readable summary
 
-    *ERROR:* `{"error":{"code":"OAUTH_ERROR","message":"require is not defined"}}`
+### /Skills
 
-
-2. The Purpose of mail is supposed to be a place wher eyou connect your email client via oath. IT has mcp tools that allow the model to interact with the email client so it can do things like clean up emails, draft responses to emails based on how you respond to your emails etc. Full email management over mcp. Im not sure how much of it is working, you will need to ivestiate. The mcp tools seem to have been added. Please Ensure all the above features are functioning and email client is built and working.
-    
-
-### /mcp-servers
-
-1. The Tools tab do not intially load the tool count when loading in the /mcp-servers page. The tool count indicator on the tab stays at 0 until you click on the tab, and then it resets back to 0 again after refreshing the page cycle repoeats etc.
-2. Please confirm that turning tools on and off in in the tools tab actually dissables those tools for the agents.
-
-### /observations
-
-1. `Total` and `Pending` count are both showing `0` yet there observations present. See screenshot: `next-steps-plan/screenshots/observations.png`
-
-### /personality
-1. /personality is completely blank. No content. I don;t think the pipeline is working. Please investigate. See screenshot: `next-steps-plan/screenshots/personality.png` 
-
-
-## opencode CLIENT BUGS
-
-1. When i open my opecode client i get an plugin error: Failed to install plugin packages/ingenium-extension/observer.ts@: Could not read package.json: Error: ENOTDIR: not a directory, open '/home/brajam/repos/gh-llm-bootstrap/packages/ingenium-extension/observer.ts/package.json'
-
-    is the above still used? if so could this be why the synthysis pipeline is not firing?
+1. Background skill consolidation not running — 45 skills, no autonomous job condensing them below 20. Phase 3 prompt changes exist but no scheduler/cron job triggers the merge-first logic
 
 ## Features:
 
-### /tasks
+### E2E TESTING
 
-1. Right now /tasks is a very simple task manager that kind of replicates the look of a kanban board. See screenshot: `next-steps-plan/screenshots/Screenshot 2026-07-11 121053.png` Agents have full control of this task board with mcp tools. **(!as is the pattern with almost everything in Ingenium!)**
+1. Playwright test all features from the last one-shot plan: /jobs page (create job, run, live log console, cron scheduling), /mail (OAuth flow, account setup, email list/read/send MCP tools), kanban board on /tasks (drag-drop, swimlanes, WIP limits, view switcher, card detail with comments/activity/time tracking/search/bulk edit/notifications). Test until they work — not a single smoke pass.
 
-    I would like a full kanban board. with these features:
+### VISUAL UPGRADE
 
-    - Multiple Board Views: Toggle between List/Backlog (spreadsheet-style prioritization), Board (Kanban columns), and Timeline/Roadmap (Gantt-style date visualization) without losing context.
+1. UI polish pass across all 16 dashboard pages — bring flat/unpolished pages (observations, agents, settings, mail, plugins, config) up to the visual quality of the best pages (pipeline, logs). Consistent card design, proper spacing, hover states, empty states, and typography. Keep stylesheets manageable — no per-page CSS files, use shared Tailwind patterns from STYLING-GUIDE.md. Make a plan to implement a simillar yet pollished ui. Think of it as a polish pass. Some of the pages look great like :
+ http://localhost:3000/pipeline
+http://localhost:3000/logs
 
-    - Horizontal Swimlanes: Group rows by Assignee, Epic, or Priority to visually split the board, allowing you to see bottlenecks per team member or major feature.
+and others look terrible and flat:
 
-    - Column Constraints: Enforce Work-In-Progress (WIP) Limits per column (e.g., "In Progress: Max 5"), with visual warnings (turning red/counting down) when limits are breached.
+http://localhost:3000/observations
+http://localhost:3000/agents
+http://localhost:3000/settings
 
-    - Compact vs. Rich Card Density: A UI toggle allowing users to switch between dense lists (text only) and rich cards (showing avatars, badges, and due dates) to save screen real estate.
-
-    - Hierarchical Issue Types: Native support for Epics (parent) > Stories/Tasks (children) > Sub-tasks (checklist items with their own statuses). The board must visually link sub-tasks to their parent.
-
-    - Advanced Custom Fields: Support for over 15 field types out-of-the-box: Text, Paragraph, Number, Date, DateTime, Single/Multi-Select, User Picker, Group Picker, Checkboxes, Radio, URL, and Scripted/Calculated Fields (e.g., Due Date = Start Date + 5 days).
-
-    - Rich Text Descriptions: A WYSIWYG editor that supports @mentions, inline images, code blocks (with syntax highlighting), and nested checklists inside the description.
-
-    - Time Tracking: Native input for Original Estimate, Time Spent, and Remaining Estimate, with a visual "time remaining" pie/badge on the front of the card.
-
-    - Project Full-Text Search: A spotlight-style search bar (Ctrl+K) that searches card titles, descriptions, comments, and custom field values, with syntax highlighting for the matched terms.
-
-    - Bulk Edit Mode: A checkbox mode on the board that allows users to select 10 cards, drag them all to a new column simultaneously, or mass-edit a custom field.
-
-    - Threaded Comments: A comment section that supports inline replies, edit history, and reactions (👍/👀).
-
-    - Activity Stream: A reverse-chronological timeline inside the sidebar showing every change (status change, field edit, attachment upload, comment) with the user's avatar and a timestamp.
-
-    - Linked Dependencies: A visual "Blocked By / Blocks" relationship map inside the card, showing which other cards are holding this one back, with click-through navigation.
-
-    - In-App Toast Notifications: A bell icon that visually notifies users when they are @mentioned, assigned to a card, or when a card they are watching changes status.
-
-    - @Mention Autocomplete: Typing @ must bring up a agent picker with profile pictures and role labels. Allow scheduling agents to do certain tasks. /jobs will handle running the agents. Essentially i want to be able to put tasks on the kanban board and have agents pick them up and complete them. (all configurable ofc)
-
-
-### ADD NEW PAGE: /jobs
-
-1. (back-end): Jobs will be jenkins like job scheduler/runner, for agents. It will run on top of opencode already on the server, jobs are scheduled with opencode cli.
-2. (front-end): jenkins like job scheduler/runner but using our ui and design principles observed in the screenshots and also refer to `docs/CONVENTIONS.md:15`	for styling mandate — colour palette, typography, layout, card rules. 
-3. All mcp tools available for use. Agents can be configured as jobs that run on cron or based on triggered event. 
-4. Please include a log output screen of the job like jenkins does. We need to see what the agents are doing during the jobs.
+Please keep visual design consistent. Keep Stylesheets manegable.
 
 ### Documentation References
 
@@ -150,14 +62,4 @@ One-shot every bug and feature listed in next-steps-plan/next-steps.md. Fix all 
 | Email | [`docs/HOW-TO/email.md`](docs/HOW-TO/email.md) |
 | Self-Learning Pipeline | [`docs/self-learning-pipeline.md`](docs/self-learning-pipeline.md) |
 
----  
-
-
-<!-- 
-**Follow up prompt for orchestrator**
-
-Ok Orchestrator. Please write the plan to @next-steps-plan/BIG-PLAN.md 
-
-```md
-Then follow the orchestration as directed. Do your best. Use premium agents for everything except documentation. Track the todos with the todo tool from opencode, i want to see the progress on my side bar. Please Ensure you are following your agents directive and you are using the appropriate skills. You may proceed.
-``` -->
+---

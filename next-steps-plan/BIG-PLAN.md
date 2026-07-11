@@ -1,179 +1,184 @@
-# ONE-SHOT MASTER PLAN — Bugs + Kanban + Jobs
+# MASTER PLAN — 7 Phases (Remaining Bugs + Features)
 
-**Orchestrator: DeepSeek V4 Pro · Architect: Fable 5**
-**All root causes verified — do not re-diagnose, execute as written.**
-**Use `@ingenium-software-engineer-premium` for all implementation.**
-**Use `@ingenium-docs` for all documentation updates.**
-
----
-
-## 🔴 HARD RULES (violate at your own risk)
-
-1. **WAL safety**: `checkpointAfterWrite()` ALWAYS outside `execTransaction()`, never inside.
-2. **DB isolation**: Only `core` + `api` touch SQLite. Dashboard/server via HTTP.
-3. **Route ordering**: Literal routes (`/stats`, `/next`) BEFORE param routes (`/:id`).
-4. **Migration pattern**: Next = `020`. Add to `db.ts:39` + guarded block. CHECK constraints need RENAME→CREATE→COPY→DROP.
-5. **After every phase**: `npx tsc --noEmit` + `npm run test --workspace=packages/ingenium-core` + commit.
-6. **Rebuild Docker** at 🐳 gates only. Spawn `@ingenium-qa` after implementation phases.
-7. **Documentation**: Spawn `@ingenium-docs` at checkpoints marked 📖.
+**Orchestrator: DeepSeek V4 Pro. Every phase has exact file:line targets — do NOT re-diagnose.**
+**Use `@ingenium-software-engineer-premium` for implementation, `@ingenium-docs` for docs, `@ingenium-qa` for testing.**
+**After every phase: `npx tsc --noEmit` on touched packages + `npm run test --workspace=packages/ingenium-core` + commit.**
 
 ---
 
-## PHASE 1 — Dashboard Quick Fixes (5 bugs)
+## PHASE 0 — DB Recovery + Durability (🔴 BLOCKER)
 
-**Files**: `projects/page.tsx`, `mcp-servers/page.tsx`, `hljs-dark.css`, `skills/page.tsx`, `personality/page.tsx`
+**Root cause**: WAL grew to 4.1MB (bigger than 3.3MB DB) because `checkpointAfterWrite()` uses PASSIVE checkpoints that silently fail under reader locks. `INGENIUM_CORE_DB_PATH` not set in docker-compose → inconsistent default path. All data IS accessible — recovery is non-destructive.
 
-| Bug | File:Line | Change |
-|-----|-----------|--------|
-| Projects archived search | `projects/page.tsx:71,83-88` | Add `searchQuery` state; render search input for BOTH tabs; filter `displayed` by `searchQuery` |
-| MCP Tools count = 0 | `mcp-servers/page.tsx:35-39` | Remove `if (tab === "tools")` guard; useEffect depends on `[project]` |
-| Code blocks grey-on-grey | `hljs-dark.css:1-5` | Remove `color:inherit` from light-mode `.hljs`; add light-mode token colors |
-| Skill overlay cropped | `skills/page.tsx:145-147` | Replace `mt-8 mb-8 w-11/12 max-w-7xl max-h-[90vh]` → near-fullscreen `w-[calc(100%-32px)] h-[calc(100%-32px)] m-4` |
-| Personality "blank" | `personality/page.tsx:106-109` | Add amber empty-state card with "show all" button when all traits hidden below 0.30 gate; make "N hidden" prominent |
+### 0.1 — Force checkpoint (non-destructive)
+```bash
+docker compose exec ingenium node -e "
+const Database = require('better-sqlite3');
+const db = new Database('/app/.ingenium/data');
+db.pragma('wal_checkpoint(TRUNCATE)');
+console.log('WAL pages after checkpoint:', JSON.stringify(db.pragma('wal_checkpoint(PASSIVE)')));
+const result = db.pragma('integrity_check');
+console.log('Integrity:', JSON.stringify(result));
+db.close();
+"
+```
+If TRUNCATE fails busy → try RESTART → then PASSIVE.
 
-**Gate**: dashboard tsc → 🐳 → Playwright → commit.
+### 0.2 — Fix path + durability
+- `docker-compose.yml`: add `INGENIUM_CORE_DB_PATH=/app/.ingenium/data.db` to environment
+- `services/ingenium-api/scripts/api-server.ts`: after startScheduler() call — run `wal_checkpoint(TRUNCATE)` + `integrity_check` on startup, log result
+- `services/ingenium-api/lib/scheduler.ts`: after each synthesis cycle completion, call `checkpointAfterWrite()` (readers idle = checkpoint succeeds). At ~line 51 (after synthesis, before skill-sync).
 
----
-
-## PHASE 2 — API/Core Fixes (3 bugs)
-
-| Bug | File:Line | Change |
-|-----|-----------|--------|
-| Observation stats INVALID_ID | `routes/observations.ts:50,88` | Move `GET /stats` route ABOVE `GET /:id` |
-| "Skill file not found" spam | `skills.ts:199-207` + `routes/skills.ts:106-123` | Skip dirs without SKILL.md in sync-all Phase 1; downgrade missing-skill to debug; include name in payload |
-| Skill creation dates | `skills.ts:70-74` + `skills/page.tsx:150-152` | Add `created: ${skill.created_at}` to frontmatter; display date in overlay header |
-
-**Gate**: core tests → curl `/observations/stats` returns real counts → 🐳 → commit.
-
----
-
-## PHASE 3 — Synthesis Overhaul (3 bugs)
-
-| Bug | Change |
-|-----|--------|
-| Remove `llm-synthesized-` prefix | `synthesis-llm.ts:106` delete prompt mandate; `:152-154` delete force-prepend; rename 20 existing prefixed skills via API |
-| Real metadata.json tags | Add `tags?: string` to response schema + prompt example; `synthesis.ts:310` use LLM tags or fallback |
-| 20-skill cap + merge-first | Update Phase 2 prompt: target ≤20, prefer merging into existing skills; add `merge_into` support |
-
-**Gate**: core tests (update prefix-assertion tests) → live synthesis → 🐳 → commit. 📖 docs checkpoint.
+### Verification
+- Rebuild Docker → `/logs?level=error` must have ZERO "Unhandled error" entries
+- WAL file must be < 1MB after startup
+- All 22 obs / 14 traits / 45 skills still accessible via API
 
 ---
 
-## PHASE 4 — Mail OAuth + Email Audit (2 bugs)
+## PHASE 1 — Verbose Error Standard
 
-| Bug | Change |
-|-----|--------|
-| "require is not defined" | `oauth.ts:130,148` replace `require()` → `await import()`; make callers async |
-| Email audit | All 13 MCP tools wired (verified); add OAuth env vars to docker-compose with placeholders; document setup |
+**Root cause**: `services/ingenium-api/lib/middleware/errors.ts:54` logs `"Unhandled error"` with only `{ error: err?.message }`. ~40 other catch blocks across the codebase drop the stack trace and context.
 
-**Gate**: 🐳 → Playwright /mail → commit. **🔴 OAuth credentials**: user must supply real client IDs/secrets in `.env`.
+### 1.1 — Primary error handler
+`errors.ts:54` — change log message to: `` `${req.method} ${req.originalUrl} → ${err.name}: ${err.message}` ``. Add to meta: `name`, `stack` (full), `method`, `path`, `requestId`.
 
----
+### 1.2 — Sweep all catch blocks
+Fix every location where errors are logged without stack/context. Key files:
+- `routes/emails.ts` (~20 catch blocks at lines 116, 142, 265, 284, 307, 344, 368, 390, 435, 470, 505, 544, 581, 618, 650)
+- `routes/tasks.ts:296`, `routes/commands.ts:27,55`, `routes/plugins.ts:29,75`, `routes/settings.ts:61`, `routes/jobs.ts:161-163`
+- `routes/observations.ts:136`, `routes/extraction.ts:26`, `routes/synthesis.ts:18,35`
+- `scheduler.ts:33,44,69,82,180,184`
+- `packages/ingenium-core/lib/tools/synthesis-llm.ts:299,685`
+- `packages/ingenium-core/lib/tools/synthesis.ts:170,205,225,229,332,371,405,416`
 
-## PHASE 5 — Client Plugin + Tool Toggle (2 bugs)
+Pattern: every `logger.error(src, "...", { error: err.message })` → add `name`, `stack` (first 5 lines), and route context where available.
 
-| Bug | Change |
-|-----|--------|
-| Plugin `ENOTDIR` error | `opencode.json:53-55` prefix all paths with `./`; sync to DB configs |
-| Tool toggle proof | PATCH `ingenium_skill_list` state `enabled:false` → call tool → expect `TOOL_DISABLED` → re-enable |
-
-**Gate**: user restarts OpenCode once → commit.
-
----
-
-## PHASE 6 — Kanban Board Overhaul (13 features)
-
-### 6A — Data Layer
-**Migration 020**: Extend `tasks` with `parent_id`, `issue_type`, `priority`, `due_date`, `start_date`, time tracking columns, `custom_fields` JSON, `task_fts` FTS5. New tables: `task_comments`, `task_activity`, `task_links`, `task_notifications`, `board_config`.
-
-**Core `tasks.ts`**: Add `updateTask`, `deleteTask`, `searchTasks` (FTS), `addComment/editComment/reactComment`, `logActivity`, `linkTasks`, `getTaskTree`, `notifications`, `getBoardConfig/setBoardConfig`.
-
-**API `routes/tasks.ts`**: Full CRUD, search, comments, activity, links, bulk operations, board config, notifications.
-
-### 6B — MCP Tools
-Add: `ingenium_task_update`, `_delete`, `_search`, `_comment`, `_activity`, `_link`, `_board_config_get/set`, `_subtask_create`, `_notifications`.
-
-### 6C — Board UI
-- `npm install @dnd-kit/core @dnd-kit/sortable`
-- DB-driven columns from board_config, drag-drop between columns
-- WIP limits (visual warning at breach), swimlanes (Assignee/Epic/Priority)
-- Density toggle (compact/rich), view switcher: List | Board | Timeline
-- Timeline: CSS-grid Gantt
-
-### 6D — Card Detail + Collaboration
-- Rich-text editor (contentEditable + markdown shortcuts + highlight.js)
-- Threaded comments with reactions, activity stream sidebar
-- Time tracking inputs + pie badge, dependencies panel
-- Custom fields from board_config (15 types, calculated fields)
-- Ctrl+K spotlight search (FTS), bulk-edit mode
-- Toast notifications (bell icon, polling)
-
-**Gate**: 🐳 → Playwright full pass → @ingenium-qa → commit. 📖 docs checkpoint.
+### Verification
+Trigger a deliberate error → confirm log message includes method + path + error name + stack in meta.
 
 ---
 
-## PHASE 7 — /jobs Page (Jenkins-like agent job runner)
+## PHASE 2 — Projects Duplicate Search Bar
 
-### 7A — Backend
-- **Feasibility gate**: `docker compose exec ingenium opencode run --help` to verify non-interactive mode
-- **Migration 021**: `jobs`, `job_runs`, `job_run_logs`
-- **Core `jobs.ts`**: CRUD, run lifecycle, log append/tail
-- **Runner `job-runner.ts`**: `child_process.spawn("opencode", ["run", prompt, "--agent", agent])`, stream stdout/stderr, timeout kill, concurrency cap
-- **Cron**: 60s tick evaluating `schedule_cron` in scheduler.ts
-- **API `routes/jobs.ts`**: CRUD, run/cancel, runs list, log tail
+**Root cause**: Phase 1 added a search input (`projects/page.tsx:93-101`) while the original creation input (lines 86-90, inside `view==="active"` guard) still exists. User wants the creation input gone, search moved to top-right, create functionality as a `+ New Project` button in the PageHeader.
 
-### 7B — MCP Tools
-`ingenium_job_create/_list/_update/_delete/_run/_runs/_logs/_cancel`
+### Fix
+- Remove creation input + Create button (lines 86-90)
+- Remove standalone search section (lines 93-101)
+- Add `+ New Project` button to the page header bar (top-left of the toggle-bar flex at line 80)
+- Move search input into the top-right of the same flex container at line 80
+- The `+ New Project` button opens a small modal/create form
 
-### 7C — Frontend /jobs
-- Job cards (name, agent badge, cron, enabled toggle, last-run status, Run Now button)
-- Create/edit overlay (agent dropdown, prompt template, cron, timeout)
-- Job detail with Jenkins-style run history + **live log console** (black bg, monospace, polling)
-- Kanban↔Jobs hook: @mention agent → "Dispatch as job"
-
-**Gate**: 🐳 → Playwright → commit. 📖 docs checkpoint.
+### Verification
+Playwright: search filters both Active + Archived tabs; create New Project button works; no duplicate inputs visible.
 
 ---
 
-## PHASE 8 — Final Integration Gate
+## PHASE 3 — Skills Background Consolidation Job
 
-1. Full suite: `npm test`, all tsc, `enforce-no-db-leaks.sh`
-2. 🐳 final rebuild; Playwright sweep of all 17 pages
-3. Verify pipeline autonomy (scheduler log: extraction→synthesis→skill-sync)
-4. `@ingenium-qa` full review; `@ingenium-docs` consistency sweep
-5. Badge/stat updates (tools ~95, pages 17, agents 9)
-6. `/sync-skills` + final commit
+**Root cause**: No `consolidateSkills()` function exists. Phase 3 prompt changes tell the LLM to prefer merges, but synthesis only runs when new observations arrive and only sees the new batch (1-7 obs), not all 45 skills. A standalone consolidation pass is needed.
+
+### 3.1 — New `consolidateSkills(projectId)` in synthesis.ts
+If ≤20 skills, return early. If >20: send ALL skill names + descriptions + key content sections to LLM with prompt to propose merges/deletes. Execute via `updateSkill` (merge file_trees) + `deleteSkill`.
+
+### 3.2 — New consolidation LLM call
+Reuse `callSynthesisLLM` pattern. Prompt receives full skill catalog, returns `{ merges: [{source, target, reason}], delete: [name] }`.
+
+### 3.3 — Scheduler hook
+In `scheduler.ts`, insert after synthesis step (line ~39) and before skill-sync (line ~51). Guard: skip if LLM not configured.
+
+### 3.4 — MCP tool + API route
+`ingenium_skill_consolidate` → `POST /api/v1/skills/consolidate?project=...`
+
+### Verification
+Trigger consolidation → 45 skills consolidated to ≤20; spot-check merged skills retain references/ file content.
 
 ---
 
-## Documentation Checkpoints (📖)
+## PHASE 4 — Mail OAuth Credential UI + Demo Mode
 
-| Phase | Spawn @ingenium-docs to update |
-|-------|-------------------------------|
-| 3 | `self-learning-pipeline.md`, `synthesis.md`, `skills.md`, `AGENTS.md` |
-| 6 | `tasks.md`, `STYLING-GUIDE.md`, `mcp-tools.md`, README |
-| 7 | NEW `jobs.md`, `ARCHITECTURE.md`, `VARIABLES.md`, `mcp-tools.md`, README, `AGENTS.md` |
-| 8 | Final sweep: all page counts, tool counts, nav links |
+**Decision**: Credentials live in a new **"Email OAuth" card on `/settings`** page (alongside Synthesis LLM config).
+
+### 4.1 — Settings-based credential store
+`packages/ingenium-email/lib/oauth.ts`: read `oauth_gmail_client_id` / `oauth_gmail_client_secret` / `oauth_outlook_client_id` / `oauth_outlook_client_secret` from settings API first, fall back to env vars.
+
+### 4.2 — Settings page OAuth card
+Add "Email OAuth" card on `/settings` with 4 input fields (Google client ID/secret, Microsoft client ID/secret) + Save button. Reads/writes via settings API.
+
+### 4.3 — AccountSetup gate
+`AccountSetup.tsx`: check if credentials exist before firing OAuth redirect. If not set, show "OAuth not configured" message with link to `/settings`.
+
+### 4.4 — Demo mode
+Add "Load Demo Account" button on `/mail` that creates a fake account row → 3-pane UI renders (empty inbox, IMAP gracefully fails).
+
+### Verification
+Playwright: no-creds → setup prompt (not error); with creds → valid OAuth URL; demo → 3-pane UI renders.
 
 ---
 
-## Appendix: Quick Reference
+## PHASE 5 — Visual Upgrade
 
-### Documentation References
+**Current state**: Zero shared UI primitives. The same card string appears 40+ times. Flat pages (observations, agents, settings, mail, plugins, config) lack the header cards, stat badges, filter pills, and empty states that logs/pipeline have. Tailwind v4, no per-page CSS.
 
-| Resource | Path |
-|----------|------|
-| MCP Tools | [`docs/HOW-TO/mcp-tools.md`](../docs/HOW-TO/mcp-tools.md) |
-| Architecture | [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) |
-| Synthesis | [`docs/HOW-TO/synthesis.md`](../docs/HOW-TO/synthesis.md) |
-| Personality | [`docs/HOW-TO/personality.md`](../docs/HOW-TO/personality.md) |
-| Conventions | [`docs/CONVENTIONS.md`](../docs/CONVENTIONS.md) |
-| README | [`README.md`](../README.md) |
-| Email | [`docs/HOW-TO/email.md`](../docs/HOW-TO/email.md) |
-| Self-Learning Pipeline | [`docs/self-learning-pipeline.md`](../docs/self-learning-pipeline.md) |
+### 5A — Extract 8 shared primitives (from logs/pipeline markup)
+Create in `src/app/components/`:
+- **PageHeader** — hero card (title + subtitle + stat counters + status pill + action children). Extract from `logs/page.tsx:229-267`.
+- **StatBadge** — label + colored value. Extract from Logs line 238, Pipeline line 289.
+- **Badge** — colored outline/solid chip. Extract from everywhere.
+- **FilterPill** / **FilterPills** — active/inactive toggle pills. Extract from Pipeline lines 313-322, Logs lines 277-303.
+- **Toolbar** — bordered filter card wrapper. Extract from Logs lines 270-344.
+- **SearchInput** — styled search with focus ring. Extract from Logs lines 334-342.
+- **EmptyState** — centered message + icon + optional action button. Extract from Logs lines 348-364, generalize mail/EmptyState.
+- **ConfidenceBar** — progress bar. Extract from personality lines 101-103.
 
-### Commit Format
-`phase(N): brief description (#bug-refs)`
+### 5B — Retrofit 6 flat pages
+- **observations**: PageHeader + StatBadges, selects→FilterPills+SearchInput in Toolbar, type-colored left border on rows
+- **agents**: PageHeader (Total/Enabled) + EmptyState + fix selects to style-guide + edit-card hover
+- **settings**: PageHeader + fix 5 selects + add Email OAuth card (from Phase 4 WIP) + section icons
+- **mail**: PageHeader (Unread/Accounts) + shared EmptyState
+- **plugins**: PageHeader (Total/Enabled) + EmptyState + toggle-button colors + edit-card hover
+- **config**: PageHeader + editor-card hover fix
 
-### Verification Per Phase
-`npx tsc --noEmit -p packages/ingenium-core && cd services/ingenium-api && npx tsc --noEmit && npm run test --workspace=packages/ingenium-core`
+### Verification
+Playwright visual pass all 6 pages; confirm consistent headers/badges/empty states. No new CSS files — all Tailwind classes from shared components.
+
+---
+
+## PHASE 6 — E2E Playwright Testing
+
+**"Test until it works" loop**. `@ingenium-qa` drives, `@ingenium-software-engineer-premium` fixes failures in a loop:
+
+- **/jobs**: create job → run → live log console streams → cron preview
+- **/mail**: demo account → 3-pane renders → email MCP tools respond
+- **kanban /tasks**: drag-drop, swimlanes, WIP breach, view switch, card detail (comments/activity/time/deps/search/bulk/notifications)
+- Loop: fail → fix → re-test until green. Not a single smoke pass.
+
+---
+
+## PHASE 7 — Final Gate
+
+1. Full test suite: `npm run test --workspace=packages/ingenium-core` (must be 181+ green)
+2. All tsc: core + api + server + dashboard (3 pre-existing .next errors allowed)
+3. `bash tests/enforce-no-db-leaks.sh` — all clean
+4. 🐳 final Docker rebuild
+5. Playwright sweep: all 17 pages render without crash
+6. Pipeline autonomy: scheduler log shows extraction→synthesis→skill-sync
+7. DB healthy: WAL < 1MB, zero "Unhandled error" in logs
+8. `@ingenium-docs` final consistency sweep
+9. Commit
+
+---
+
+## Quick Reference
+
+| Phase | Lead Agent | Rebuild |
+|-------|-----------|---------|
+| 0 | premium | 🐳 required |
+| 1 | premium + fast | 🐳 after |
+| 2 | fast | not required (dashboard only) |
+| 3 | premium | 🐳 after (core change) |
+| 4 | premium + fast | 🐳 after |
+| 5 | premium (5A) + fast (5B) | 🐳 after (new components) |
+| 6 | qa + premium (fix loop) | 🐳 after each fix loop |
+| 7 | qa + docs | 🐳 final |
