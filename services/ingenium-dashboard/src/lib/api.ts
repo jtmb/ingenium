@@ -20,7 +20,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export type Project = { id: string; name: string; path?: string; archived_at?: string; created_at: string; updated_at: string };
 
 /** An AI agent skill with its full content. */
-export type Skill = { id: string; name: string; description: string; content: string; category?: string; enabled: boolean; tags?: string; always_apply?: number; file_tree?: string };
+export type Skill = { id: string; name: string; description: string; content: string; category?: string; enabled: boolean; tags?: string; always_apply?: number; file_tree?: string; created_at: string; updated_at: string };
 
 /** A learning entry — decisions, patterns, bugs, or preferences. */
 export type Learning = { id: number; entry_type: string; content: string; tags?: string; priority: number; created_at: string };
