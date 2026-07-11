@@ -751,31 +751,36 @@ ${skillsText}`;
 export async function callConsolidationLLM(
   projectId: string,
   prompt: string,
+  overrideEndpoint?: string,
+  overrideModel?: string,
+  overrideApiKey?: string,
 ): Promise<ConsolidationSkillResult> {
   const config = getLLMSynthesisConfig(projectId);
-  if (!config) return { merges: [], delete: [] };
+  // Allow overrides to supply model/apiKey even if primary config is absent
+  const model = overrideModel ?? config?.model;
+  const apiKey = overrideApiKey ?? config?.apiKey;
+  if (!model) return { merges: [], delete: [] };
 
   const gid = getGlobalProject()?.id;
-  const endpointRaw = gid ? getSetting(gid, "synthesis_endpoint") : undefined;
+  const endpointRaw = overrideEndpoint ?? (gid ? getSetting(gid, "synthesis_endpoint") : undefined);
   if (!endpointRaw) return { merges: [], delete: [] };
 
   const endpoint = endpointRaw.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
   try {
     const response = await fetch(`${endpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
-        model: config.model,
+        model,
         messages: [
           { role: "system", content: "You are a skill catalog auditor that outputs only valid JSON." },
           { role: "user", content: prompt },
         ],
         max_tokens: 8192,
-        response_format: { type: "json_object" },
         temperature: 0.3,
       }),
     });

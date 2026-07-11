@@ -3,8 +3,8 @@ export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
-import { api, Job, JobRun, JobRunLog, Agent } from "../../lib/api";
 import Overlay from "../components/Overlay";
+import { api, Job, JobRun, JobRunLog, Agent } from "../../lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -205,6 +205,8 @@ function JobFormOverlay({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Escape + body scroll lock handled by Overlay component
+
   useEffect(() => {
     if (initial) {
       setForm({
@@ -265,60 +267,66 @@ function JobFormOverlay({
       subtitle="Configure a scheduled or triggered agent job"
       fullScreen
     >
-      <div className="max-w-3xl space-y-4">
-        {error && <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded p-3">{error}</div>}
+      <div className="max-w-2xl mx-auto space-y-4">
+        {error && (
+          <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded p-3">{error}</div>
+        )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Name *</label>
-            <input
-              value={form.name}
-              onChange={(e) => update("name", e.target.value)}
-              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm"
-              placeholder="e.g., Nightly Security Scan"
-            />
-          </div>
+        {/* Name */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Name *</label>
+          <input
+            value={form.name}
+            onChange={(e) => update("name", e.target.value)}
+            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm"
+            placeholder="e.g., Nightly Security Scan"
+          />
+        </div>
 
-          <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
-            <textarea
-              value={form.description}
-              onChange={(e) => update("description", e.target.value)}
-              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm min-h-[60px]"
-              placeholder="Optional description of what this job does"
-            />
-          </div>
+        {/* Description */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Description</label>
+          <textarea
+            value={form.description}
+            onChange={(e) => update("description", e.target.value)}
+            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm min-h-[60px]"
+            placeholder="Optional description of what this job does"
+          />
+        </div>
 
+        {/* Agent dropdown */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Agent *</label>
+          <select
+            value={form.agent}
+            onChange={(e) => update("agent", e.target.value)}
+            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm bg-white hover:bg-gray-50 cursor-pointer"
+          >
+            <option value="">— Select agent —</option>
+            {agents.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Prompt Template */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Prompt Template *</label>
+          <textarea
+            value={form.prompt_template}
+            onChange={(e) => update("prompt_template", e.target.value)}
+            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono min-h-[200px]"
+            placeholder={`Write the prompt template. Use {{variable}} for dynamic values.`}
+            rows={6}
+          />
+        </div>
+
+        {/* 2-col row: Cron + Timeout */}
+        <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Agent *</label>
-            <select
-              value={form.agent}
-              onChange={(e) => update("agent", e.target.value)}
-              className="w-full border border-gray-200 rounded text-sm bg-white px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
-            >
-              <option value="">— Select agent —</option>
-              {agents.map((a) => (
-                <option key={a.name} value={a.name}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Timeout (minutes)</label>
-            <input
-              type="number"
-              value={form.timeout_minutes}
-              onChange={(e) => update("timeout_minutes", parseInt(e.target.value) || 30)}
-              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm"
-              min={1}
-              max={1440}
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Schedule (cron)</label>
+            <label className="block text-sm font-medium mb-1">Schedule (cron)</label>
             <input
               value={form.schedule_cron}
               onChange={(e) => update("schedule_cron", e.target.value)}
@@ -329,41 +337,44 @@ function JobFormOverlay({
               <div className="mt-1"><CronPreview cron={form.schedule_cron} /></div>
             )}
           </div>
-
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Trigger Event (optional)</label>
+            <label className="block text-sm font-medium mb-1">Timeout (minutes)</label>
             <input
-              value={form.trigger_event}
-              onChange={(e) => update("trigger_event", e.target.value)}
+              type="number"
+              value={form.timeout_minutes}
+              onChange={(e) => update("timeout_minutes", parseInt(e.target.value) || 30)}
               className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm"
-              placeholder="e.g., push, pr_opened"
-            />
-          </div>
-
-          <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-gray-500 mb-1">Prompt Template *</label>
-            <textarea
-              value={form.prompt_template}
-              onChange={(e) => update("prompt_template", e.target.value)}
-              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm min-h-[200px] font-mono"
-              placeholder={`Write the prompt template. Use {{variable}} for dynamic values.`}
+              min={1}
+              max={1440}
             />
           </div>
         </div>
 
-        <div className="flex gap-2 pt-2">
+        {/* Trigger Event */}
+        <div>
+          <label className="block text-sm font-medium mb-1">Trigger Event (optional)</label>
+          <input
+            value={form.trigger_event}
+            onChange={(e) => update("trigger_event", e.target.value)}
+            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm"
+            placeholder="e.g., push, pr_opened"
+          />
+        </div>
+
+        {/* Buttons */}
+        <div className="flex justify-end gap-2 pt-2">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 border border-gray-200 rounded text-sm"
+          >
+            Cancel
+          </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm disabled:opacity-50"
           >
             {saving ? "Saving..." : initial ? "Update Job" : "Create Job"}
-          </button>
-          <button
-            onClick={onClose}
-            className="py-2 px-4 rounded text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-          >
-            Cancel
           </button>
         </div>
       </div>
@@ -378,22 +389,26 @@ function JobFormOverlay({
 function LiveLogConsole({ run, project }: { run: JobRun; project: string }) {
   const [logs, setLogs] = useState<JobRunLog[]>([]);
   const [pinned, setPinned] = useState(true);
-  const [polling, setPolling] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const maxSeqRef = useRef<number | undefined>(undefined);
 
   const isRunning = run.status === "running";
 
-  // Initial load + polling
+  // Reset logs when run.id changes (different run selected)
   useEffect(() => {
     setLogs([]);
-    setPolling(true);
+    maxSeqRef.current = undefined;
+  }, [run.id]);
 
+  // Poll logs every 2s while running; stop when finished
+  useEffect(() => {
     const fetchLogs = async () => {
       try {
-        const maxSeq = logs.length > 0 ? Math.max(...logs.map((l) => l.seq)) : undefined;
-        const res = await api.jobs.runLogs(run.id, maxSeq, project);
+        const res = await api.jobs.runLogs(run.id, maxSeqRef.current, project);
         if (res.data && res.data.length > 0) {
+          const newMaxSeq = Math.max(...res.data.map((l) => l.seq));
+          maxSeqRef.current = newMaxSeq;
           setLogs((prev) => [...prev, ...res.data]);
         }
       } catch {
@@ -401,19 +416,20 @@ function LiveLogConsole({ run, project }: { run: JobRun; project: string }) {
       }
     };
 
+    // Initial fetch on mount or when run.id/status changes
     fetchLogs();
 
     if (isRunning) {
       pollRef.current = setInterval(fetchLogs, 2000);
-    } else {
-      setPolling(false);
     }
 
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [run.id, run.status, project]);
+  }, [run.id, isRunning, project]);
 
   // Auto-scroll when pinned
   useEffect(() => {
@@ -426,7 +442,7 @@ function LiveLogConsole({ run, project }: { run: JobRun; project: string }) {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-gray-700">
-          Logs {polling && <span className="text-xs text-gray-400 ml-1">(live)</span>}
+          Logs {isRunning && <span className="text-xs text-gray-400 ml-1">(live)</span>}
         </h3>
         <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
           <input
@@ -445,7 +461,7 @@ function LiveLogConsole({ run, project }: { run: JobRun; project: string }) {
       >
         {logs.length === 0 && (
           <div className="text-gray-500 italic flex items-center gap-2">
-            {polling && (
+            {isRunning && (
               <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -504,19 +520,19 @@ function JobDetailView({
     }
   }, [job.id, project]);
 
-  useEffect(() => {
-    fetchRuns();
-    // Poll runs while a run is running
-    const hasRunning = runs.some((r) => r.status === "running");
-    if (hasRunning) {
-      const timer = setInterval(fetchRuns, 3000);
-      return () => clearInterval(timer);
-    }
-    // No cleanup needed when no runs are running
-    return;
-  }, [fetchRuns, runs]);
-
   const activeRun = selectedRun ?? runs.find((r) => r.status === "running") ?? null;
+
+  // Poll run list every 2s only while a run is actively running.
+  // Dependencies track id + status (not the full object) to avoid re-renders.
+  useEffect(() => {
+    // Initial fetch on mount
+    fetchRuns();
+
+    if (!activeRun || activeRun.status !== "running") return;
+
+    const timer = setInterval(fetchRuns, 2000);
+    return () => clearInterval(timer);
+  }, [fetchRuns, activeRun?.id, activeRun?.status]);
 
   return (
     <div className="space-y-6">

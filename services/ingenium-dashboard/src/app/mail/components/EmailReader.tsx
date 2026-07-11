@@ -25,8 +25,9 @@ export default function EmailReader({
   // No email selected
   if (!email && !loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Select an email to read</p>
+      <div className="flex-1 flex flex-col items-center justify-center gap-3">
+        <span className="text-3xl">✉️</span>
+        <p className="text-gray-400 text-sm">Select an email to read</p>
       </div>
     );
   }

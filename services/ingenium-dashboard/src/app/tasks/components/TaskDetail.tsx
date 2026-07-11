@@ -346,7 +346,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   const handleAddComment = useCallback(async () => {
     if (!newComment.trim()) return;
     try {
-      const res = await api.tasks.addComment(task.id, newComment.trim(), undefined, project);
+      const res = await api.tasks.addComment(task.id, newComment.trim(), "user", undefined, project);
       setComments((prev) => [...prev, res.data]);
       setNewComment("");
     } catch {
@@ -357,7 +357,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   const handleReply = useCallback(async () => {
     if (!replyBody.trim() || !replyTo) return;
     try {
-      const res = await api.tasks.addComment(task.id, replyBody.trim(), replyTo, project);
+      const res = await api.tasks.addComment(task.id, replyBody.trim(), "user", replyTo, project);
       setComments((prev) => [...prev, res.data]);
       setReplyBody("");
       setReplyTo(null);
@@ -390,12 +390,16 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   }, [task.id, project]);
 
   // --- Dependencies ---
-  const blocksLinks = useMemo(() => links.filter((l) => l.link_type === "blocks"), [links]);
-  const blockedByLinks = useMemo(() => links.filter((l) => l.link_type === "blocked_by"), [links]);
+  const blocksLinks = useMemo(() => links.filter((l) => l.link_type === "blocks" && l.task_id === task.id), [links, task.id]);
+  const blockedByLinks = useMemo(() => links.filter((l) => l.link_type === "blocked_by" || (l.link_type === "blocks" && l.linked_task_id === task.id)), [links, task.id]);
 
   const getTaskById = useCallback((id: string) => {
     return allTasks.find((t) => t.id === id);
   }, [allTasks]);
+
+  const otherEndId = useCallback((link: TaskLink) => {
+    return link.task_id === task.id ? link.linked_task_id : link.task_id;
+  }, [task.id]);
 
   const handleDepSearch = useCallback(async (q: string) => {
     setDepSearch(q);
@@ -413,7 +417,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
 
   const handleAddDep = useCallback(async (targetId: string) => {
     try {
-      const res = await api.tasks.addLink(task.id, { target_task_id: targetId, link_type: depType }, project);
+      const res = await api.tasks.addLink(task.id, { linked_task_id: targetId, link_type: depType }, project);
       setLinks((prev) => [...prev, res.data]);
       setDepSearch("");
       setDepSearchOpen(false);
@@ -703,12 +707,13 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
               <div>
                 <h4 className="text-xs font-medium text-gray-500 mb-1">Blocks</h4>
                 {blocksLinks.map((l) => {
-                  const target = getTaskById(l.target_task_id);
+                  const targetId = otherEndId(l);
+                  const target = getTaskById(targetId);
                   return (
                     <div key={l.id} className="flex items-center justify-between text-sm py-0.5 group">
                       <button className="text-blue-600 hover:underline truncate text-left"
                         onClick={() => target && onTaskClick?.(target)}>
-                        {target?.title ?? l.target_task_id}
+                        {target?.title ?? targetId}
                       </button>
                       <button onClick={() => handleRemoveLink(l.id)}
                         className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 ml-1 shrink-0">×</button>
@@ -721,12 +726,13 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
               <div>
                 <h4 className="text-xs font-medium text-gray-500 mb-1">Blocked by</h4>
                 {blockedByLinks.map((l) => {
-                  const target = getTaskById(l.target_task_id);
+                  const targetId = otherEndId(l);
+                  const target = getTaskById(targetId);
                   return (
                     <div key={l.id} className="flex items-center justify-between text-sm py-0.5 group">
                       <button className="text-blue-600 hover:underline truncate text-left"
                         onClick={() => target && onTaskClick?.(target)}>
-                        {target?.title ?? l.target_task_id}
+                        {target?.title ?? targetId}
                       </button>
                       <button onClick={() => handleRemoveLink(l.id)}
                         className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 ml-1 shrink-0">×</button>

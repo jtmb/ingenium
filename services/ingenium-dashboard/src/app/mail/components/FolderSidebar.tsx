@@ -80,7 +80,7 @@ export default function FolderSidebar({
             <button
               key={folder.path || folder.name}
               onClick={() => onSelectFolder(folder.path || folder.name)}
-              className={`flex items-center justify-between px-3 py-1.5 text-sm rounded text-left ${
+              className={`flex items-center justify-between px-3 py-1.5 text-sm rounded text-left transition-colors ${
                 isSelected
                   ? "bg-blue-100 text-blue-800 font-medium"
                   : "text-gray-600 hover:bg-gray-100"

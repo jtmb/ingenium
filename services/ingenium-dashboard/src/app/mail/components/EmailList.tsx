@@ -46,7 +46,7 @@ export default function EmailList({
         <input
           type="text"
           placeholder="Search emails..."
-          className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-500"
+          className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200"
           onChange={(e) => onSearch(e.target.value)}
         />
       </div>

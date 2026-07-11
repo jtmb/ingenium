@@ -6,8 +6,11 @@ import {
   DragEndEvent,
   DragOverlay,
   DragStartEvent,
+  PointerSensor,
   closestCorners,
   useDroppable,
+  useSensor,
+  useSensors,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -365,6 +368,12 @@ type BoardViewProps = {
 };
 
 export default function BoardView({ project, tasks, onTasksChange }: BoardViewProps) {
+  // dnd-kit sensors with an 8px activation distance so clicks fire onClick
+  // instead of being swallowed by the drag listeners.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
   const [columns, setColumns] = useState<BoardColumn[]>(DEFAULT_COLUMNS);
   const [swimlane, setSwimlane] = useState<SwimlaneMode>("none");
   const [compact, setCompact] = useState(() => {
@@ -599,6 +608,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
 
       {/* Board */}
       <DndContext
+        sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
