@@ -149,6 +149,9 @@ graph LR
     F[Agent Session] -->|skill-load| G[.opencode/skills/<br/>14 skills]
     G -->|update-skills| H[Self-learning<br/>engine]
     H -->|Logs to| E
+    
+    I[Orchestrator] -->|QA verify| J[@ingenium-qa<br/>review + test]
+    I -->|docs update| K[@ingenium-docs<br/>documentation]
 ```
 
 ## Documentation

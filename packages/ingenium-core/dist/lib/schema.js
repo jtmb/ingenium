@@ -113,6 +113,15 @@ export const PluginSchema = z.object({
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
 });
+export const CommandSchema = z.object({
+    id: z.string(),
+    project_id: z.string(),
+    name: z.string().min(1).max(64),
+    file_path: z.string(),
+    content: z.string().optional(),
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+});
 export const AgentSchema = z.object({
     id: z.string(),
     project_id: z.string(),

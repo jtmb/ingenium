@@ -9,7 +9,7 @@ Email Client → OAuth2 + IMAP/SMTP → Mail Providers (Gmail, Outlook)
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **61 tools**. It talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **66 tools**. It talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **11 pages**. It talks to the API over HTTP.
 
 ## Skill System
@@ -71,7 +71,7 @@ Both paths ensure skill coverage stays in sync with learnings. See `.opencode/ag
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 64 tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 66 tools. Calls API via HTTP. Zero DB access. | No |
 | `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 11 pages. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | IMAP/SMTP + OAuth2 email engine (imapflow, nodemailer, mailparser). DB Access: No. | No |
 
@@ -101,7 +101,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 
 ### MCP Tool Count
 
-The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **61 tools**. Tool categories:
+The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **66 tools**. Tool categories:
 - Settings: 2 (get, set)
 - Skills: 9 (list, load, search, create, update, delete, enable, disable, sync)
 - Learnings: 4 (log, search, list, skill_from_learnings)
@@ -109,6 +109,7 @@ The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **61 t
 - Plans (Context): 3 (save, search, list)
 - Projects: 6 (list, init, delete, restore, list_archived, purge)
 - Plugins: 7 (list, get, enable, disable, create, delete, update)
+- Commands: 5 (list, get, create, update, delete) — manages `.opencode/commands/` lifecycle with DB migration `010_commands.sql` and core tools in `packages/ingenium-core/lib/tools/commands.ts`
 - Servers: 3 (list, add, remove)
 - Agents: 8 (list, get, create, update, delete, enable, disable, sync)
 - Plus: `process_learnings` (from learnings plugin)

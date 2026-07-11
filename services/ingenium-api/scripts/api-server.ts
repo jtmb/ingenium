@@ -17,6 +17,7 @@ import { personalityRouter } from "../lib/routes/personality.js";
 import { synthesisRouter } from "../lib/routes/synthesis.js";
 import { pipelineRouter } from "../lib/routes/pipeline.js";
 import { emailsRouter } from "../lib/routes/emails.js";
+import { commandsRouter } from "../lib/routes/commands.js";
 
 const app = express();
 
@@ -44,6 +45,7 @@ app.use("/api/v1/personality", personalityRouter);
 app.use("/api/v1/synthesis", synthesisRouter);
 app.use("/api/v1/pipeline", pipelineRouter);
 app.use("/api/v1/emails", emailsRouter);
+app.use("/api/v1/commands", commandsRouter);
 
 // Error handler
 app.use(errorHandler);

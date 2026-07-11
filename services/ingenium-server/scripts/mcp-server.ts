@@ -22,6 +22,8 @@ import * as serverTools from "../lib/tools/servers.js";
 import { settingGet, settingSet } from "../lib/tools/settings.js";
 import { projectRestore, projectListArchived, projectPurge } from "../lib/tools/projects.js";
 import { pluginGet } from "../lib/tools/plugins.js";
+import * as commandTools from "../lib/tools/commands.js";
+import { commandGet } from "../lib/tools/commands.js";
 import { planList } from "../lib/tools/context.js";
 import * as agentTools from "../lib/tools/agents.js";
 import {
@@ -371,6 +373,44 @@ server.registerTool(
     inputSchema: { project: projectParam, name: z.string(), file_path: z.string().optional(), source_content: z.string().optional() }
   },
   async ({ project, name, file_path, source_content }) => pluginTools.pluginUpdate(project, name, { file_path, source_content }),
+);
+
+// ── Commands ─────────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_command_list",
+  { description: "List all commands for a project.", inputSchema: { project: projectParam } },
+  async ({ project }) => commandTools.commandList(project),
+);
+
+server.registerTool(
+  "ingenium_command_get",
+  { description: "Get a command by name.", inputSchema: { project: projectParam, name: z.string() } },
+  async ({ project, name }) => commandGet(project, name),
+);
+
+server.registerTool(
+  "ingenium_command_create",
+  {
+    description: "Create a new command.",
+    inputSchema: { project: projectParam, name: z.string(), filePath: z.string(), content: z.string().optional() }
+  },
+  async ({ project, name, filePath, content }) => commandTools.commandCreate(project, name, filePath, content),
+);
+
+server.registerTool(
+  "ingenium_command_update",
+  {
+    description: "Update an existing command.",
+    inputSchema: { project: projectParam, name: z.string(), file_path: z.string().optional(), content: z.string().optional() }
+  },
+  async ({ project, name, file_path, content }) => commandTools.commandUpdate(project, name, { file_path, content }),
+);
+
+server.registerTool(
+  "ingenium_command_delete",
+  { description: "Delete a command.", inputSchema: { project: projectParam, name: z.string() } },
+  async ({ project, name }) => commandTools.commandDelete(project, name),
 );
 
 // ── Servers ─────────────────────────────────────────────

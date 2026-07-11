@@ -132,6 +132,17 @@ export const PluginSchema = z.object({
 });
 export type Plugin = z.infer<typeof PluginSchema>;
 
+export const CommandSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  name: z.string().min(1).max(64),
+  file_path: z.string(),
+  content: z.string().optional(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+export type Command = z.infer<typeof CommandSchema>;
+
 export const AgentSchema = z.object({
   id: z.string(),
   project_id: z.string(),

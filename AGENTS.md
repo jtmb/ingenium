@@ -6,7 +6,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 
 > 🔴 **Never state a fact without verifying against source files.** If you claim "X uses Y", you must have READ the file containing X. If you claim "Z imports W", you must have GREP'd for the import. If you cannot verify in one read or grep, say "I'm not sure — let me check" instead of guessing confidently. Confidently wrong claims waste implementation time.
 
-> **Dashboard**: Skills can be managed through the Ingenium Dashboard at [http://localhost:3000](http://localhost:3000).
+> **Dashboard**: Skills, plugins, agents, projects, and commands can be managed through the Ingenium Dashboard at [http://localhost:3000](http://localhost:3000). Commands are captured in the DB layer (no dedicated dashboard page — use MCP tools directly).
 
 ---
 
@@ -62,15 +62,15 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 61 tools. Calls API via HTTP. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 69 tools. Calls API via HTTP. Zero DB access.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend. Calls API via HTTP. Zero DB access.
 ```
 
-**API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer.
+**API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer. Commands are captured in the DB alongside skills, agents, and plugins.
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 14 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 
 | Page | Purpose |
 |------|---------|
@@ -89,7 +89,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 14 route-based pages:
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
 | `/settings` | Settings + Synthesis LLM provider configuration |
 
-> The dashboard talks to the API layer only — zero direct DB access.
+> The dashboard talks to the API layer only — zero direct DB access. Commands are managed via MCP tools without a dedicated page.
 
 ---
 
@@ -110,10 +110,12 @@ Move any DB logic to the API layer immediately.
 
 **Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing four processes:
 
-1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads
+1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads, commands CRUD operations
 2. **Dashboard** (Next.js on :3000) — highlight.js syntax highlighting in Preview/Source modes
 3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
 4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded use
+
+> The API layer is the sole authority for all 4 `.opencode/` resources: skills, agents, plugins, and commands.
 
 ### Start/Stop Commands
 
@@ -150,7 +152,7 @@ docker compose exec ingenium npm run check
 
 | Volume Name | Mount Path | Purpose |
 |-------------|------------|---------|
-| `ingenium-data` | `/app/.ingenium` | SQLite databases, learnings, tasks, projects |
+| `ingenium-data` | `/app/.ingenium` | SQLite databases, learnings, tasks, projects, commands |
 | `opencode-config` | `/home/appuser/.config` | OpenCode configuration (persists across rebuilds) |
 | `opencode-data` | `/home/appuser/.local` | OpenCode user data, session state |
 
@@ -271,11 +273,15 @@ See `.opencode/skills/self-learning/SKILL.md` for complete documentation of the 
 
 ### Commands
 
+Commands are captured in the DB alongside skills, agents, and plugins. The following MCP tools manage commands:
+
 | Command | File | Purpose |
 |---------|------|---------|
 | `/synthesize` | `.opencode/commands/synthesize.md` | Trigger synthesis pipeline to process pending observations |
 | `/sync-skills` | `.opencode/commands/sync-skills.md` | Bidirectional disk↔DB skill sync |
 | `/init-project` | `.opencode/commands/init-project.md` | Initialize a new project with skills, agents, plugins |
+
+**Commands MCP Tools:** `ingenium_command_list`, `ingenium_command_get`, `ingenium_command_create`, `ingenium_command_update`, `ingenium_command_delete`
 
 ### Scheduled Maintenance
 
@@ -324,6 +330,15 @@ Every service with a frontend must have a `STYLING-GUIDE.md` in its service dire
 - Layout grid and spacing
 - Component-level styles (nav, cards, forms)
 - Immutable rules that must not be broken
+
+### 🔴 QA-First Workflow
+
+After every subagent task that modifies files:
+1. **Spawn `@ingenium-qa`** — Review changes, run tests, verify quality
+2. **Spawn `@ingenium-docs`** — Update affected documentation (AGENTS.md, SKILL-INDEX.md)
+3. **Task not done until QA passes and docs are updated**
+
+See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrator.md) for the full Definition of Done process.
 
 ### Environment Variables
 

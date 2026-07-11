@@ -14,4 +14,5 @@ export * from "./schema.js";
 export * from "./logger.js";
 export * as agents from "./tools/agents.js";
 export * as pipelineEvents from "./tools/pipeline-events.js";
+export * as commands from "./tools/commands.js";
 //# sourceMappingURL=index.d.ts.map

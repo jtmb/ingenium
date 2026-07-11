@@ -9,7 +9,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes 61 tools accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes 76 tools accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
 
 ## Projects
 
@@ -85,6 +85,25 @@ Docker starts a single container running 4 processes under supervisord: API (:40
 **API Endpoints**: `/api/v1/email/accounts`, `/api/v1/email/inbox/:accountId`, `/api/v1/email/messages/:accountId/search?q=...` (see services/ingenium-api/routes/email.ts)
 
 **MCP Tools**: `email_account_list`, `email_compose_message`, `email_search_inbox`, `email_fetch_messages` — see packages/ingenium-email/lib/tools/*.ts for full reference. The email client tools are registered with the Ingenium MCP server and accessible via any OpenCode-compatible client connected to ingenium-server.
+
+**Command Tools**: `ingenium_command_list`, `ingenium_command_get`, `ingenium_command_create`, `ingenium_command_update`, `ingenium_command_delete` — manage `.opencode/commands/` lifecycle through the DB layer. No dedicated dashboard page — use MCP tools directly (see Commands section above).
+
+## Commands
+
+**What it does**: Manage `.opencode/commands/` lifecycle through 5 MCP tools. Commands are captured in the DB layer (mirroring plugins) with migration `010_commands.sql` and core tools in `packages/ingenium-core/lib/tools/commands.ts`. No dedicated dashboard page — use MCP tools directly.
+
+**How to use**:
+- List all commands via `ingenium_command_list(project, limit)`
+- Get a specific command by name via `ingenium_command_get(project, name)`
+- Create a new command via `ingenium_command_create(project, name, filePath, sourceContent)`
+- Update an existing command via `ingenium_command_update(project, name, file_path, source_content)`
+- Delete a command via `ingenium_command_delete(project, name)`
+
+**API**: GET /api/v1/commands, GET /api/v1/commands/:name, POST /api/v1/commands, PUT /api/v1/commands/:name, DELETE /api/v1/commands/:name
+
+**Code**: services/ingenium-api/routes/commands.ts → packages/ingenium-core/lib/tools/commands.ts
+
+**Migration**: `010_commands.sql` creates the commands table with project_id and name (unique) columns.
 
 **Self-Learning**: Email interactions (account setup, OAuth2 flows, message composition patterns) trigger observations logged by the Observer plugin during session events. Use `ingenium_observe(observation_type="preference", content="<email workflow observation>", importance=5)` after configuring email accounts or discovering useful workflows. See docs/HOW-TO/email.md for complete HOW-TO guide covering account setup, inbox management, compose flow, search patterns, MCP tools reference, and self-learning integration with the Ingenium pipeline.
 
