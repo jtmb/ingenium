@@ -311,6 +311,32 @@ export declare const PluginSchema: z.ZodObject<{
     source_content?: string | undefined;
 }>;
 export type Plugin = z.infer<typeof PluginSchema>;
+export declare const CommandSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    name: z.ZodString;
+    file_path: z.ZodString;
+    content: z.ZodOptional<z.ZodString>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    name: string;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    file_path: string;
+    content?: string | undefined;
+}, {
+    id: string;
+    name: string;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    file_path: string;
+    content?: string | undefined;
+}>;
+export type Command = z.infer<typeof CommandSchema>;
 export declare const AgentSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;

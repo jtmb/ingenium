@@ -26,7 +26,7 @@ function runMigrations(db) {
     const tableCount = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table'").get();
     if (tableCount.count === 0) {
         // Fresh DB — run all migrations in order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql"]) {
             const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
             db.exec(sql);
             logger.info(`Applied migration ${file}`);
@@ -88,6 +88,13 @@ function runMigrations(db) {
             const sql = readFileSync(resolve(migrationsDir, "009_pipeline_events.sql"), "utf-8");
             db.exec(sql);
             logger.info("Applied migration 009_pipeline_events.sql");
+        }
+        // Check if commands table exists (migration 010)
+        const commandsCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='commands'").get();
+        if (commandsCheck.count === 0) {
+            const sql = readFileSync(resolve(migrationsDir, "010_commands.sql"), "utf-8");
+            db.exec(sql);
+            logger.info("Applied migration 010_commands.sql");
         }
     }
 }

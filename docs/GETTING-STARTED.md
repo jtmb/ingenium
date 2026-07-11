@@ -90,7 +90,7 @@ To make Ingenium available in **all** your OpenCode projects, add the same entry
 
 Add the `ingenium` entry under the `mcp.servers` section, using the same JSON structure from Step 3. The global config uses JSONC format (supports comments), so you can add explanatory notes.
 
-Once added, every OpenCode project on your machine will have access to Ingenium's 48 MCP tools.
+Once added, every OpenCode project on your machine will have access to Ingenium's 66 MCP tools.
 
 ---
 
@@ -103,9 +103,9 @@ docker compose up --build
 ```
 
 This starts all services in a single container:
-- **API** on http://localhost:4097 — REST API gateway, sole database authority  
-- **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend  
-- **opencode-server** on stdio (port :4096) — MCP server with 61 tools
+  - **API** on http://localhost:4097 — REST API gateway, sole database authority  
+  - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend  
+  - **opencode-server** on stdio (port :4096) — MCP server with 66 tools
 
 The container runs supervisord managing all processes. Press `Ctrl+C` to stop gracefully.
 
