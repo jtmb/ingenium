@@ -112,23 +112,41 @@ export declare const TaskSchema: z.ZodObject<{
     files: z.ZodOptional<z.ZodString>;
     labels: z.ZodOptional<z.ZodString>;
     session_id: z.ZodOptional<z.ZodString>;
+    parent_id: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    issue_type: z.ZodDefault<z.ZodEnum<["epic", "story", "task", "subtask"]>>;
+    priority: z.ZodDefault<z.ZodNumber>;
+    due_date: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    start_date: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    estimate_minutes: z.ZodNullable<z.ZodOptional<z.ZodNumber>>;
+    spent_minutes: z.ZodDefault<z.ZodNumber>;
+    remaining_minutes: z.ZodNullable<z.ZodOptional<z.ZodNumber>>;
+    custom_fields: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     created_at: z.ZodString;
     updated_at: z.ZodString;
-    completed_at: z.ZodOptional<z.ZodString>;
+    completed_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
 }, "strip", z.ZodTypeAny, {
     id: string;
     created_at: string;
     updated_at: string;
     project_id: string;
+    priority: number;
     title: string;
     column_id: string;
+    issue_type: "epic" | "story" | "task" | "subtask";
+    spent_minutes: number;
     description?: string | undefined;
     session_id?: string | undefined;
     assigned_to?: string | undefined;
     depends_on?: string | undefined;
     files?: string | undefined;
     labels?: string | undefined;
-    completed_at?: string | undefined;
+    parent_id?: string | null | undefined;
+    due_date?: string | null | undefined;
+    start_date?: string | null | undefined;
+    estimate_minutes?: number | null | undefined;
+    remaining_minutes?: number | null | undefined;
+    custom_fields?: string | null | undefined;
+    completed_at?: string | null | undefined;
 }, {
     id: string;
     created_at: string;
@@ -136,15 +154,142 @@ export declare const TaskSchema: z.ZodObject<{
     project_id: string;
     title: string;
     description?: string | undefined;
+    priority?: number | undefined;
     session_id?: string | undefined;
     column_id?: string | undefined;
     assigned_to?: string | undefined;
     depends_on?: string | undefined;
     files?: string | undefined;
     labels?: string | undefined;
-    completed_at?: string | undefined;
+    parent_id?: string | null | undefined;
+    issue_type?: "epic" | "story" | "task" | "subtask" | undefined;
+    due_date?: string | null | undefined;
+    start_date?: string | null | undefined;
+    estimate_minutes?: number | null | undefined;
+    spent_minutes?: number | undefined;
+    remaining_minutes?: number | null | undefined;
+    custom_fields?: string | null | undefined;
+    completed_at?: string | null | undefined;
 }>;
 export type Task = z.infer<typeof TaskSchema>;
+export declare const TaskCommentSchema: z.ZodObject<{
+    id: z.ZodString;
+    task_id: z.ZodString;
+    parent_comment_id: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    author: z.ZodString;
+    body: z.ZodString;
+    reactions: z.ZodDefault<z.ZodString>;
+    edited_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    task_id: string;
+    author: string;
+    body: string;
+    reactions: string;
+    parent_comment_id?: string | null | undefined;
+    edited_at?: string | null | undefined;
+}, {
+    id: string;
+    created_at: string;
+    task_id: string;
+    author: string;
+    body: string;
+    parent_comment_id?: string | null | undefined;
+    reactions?: string | undefined;
+    edited_at?: string | null | undefined;
+}>;
+export type TaskComment = z.infer<typeof TaskCommentSchema>;
+export declare const TaskActivitySchema: z.ZodObject<{
+    id: z.ZodString;
+    task_id: z.ZodString;
+    actor: z.ZodString;
+    event_type: z.ZodString;
+    payload: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    task_id: string;
+    actor: string;
+    event_type: string;
+    payload?: string | null | undefined;
+}, {
+    id: string;
+    created_at: string;
+    task_id: string;
+    actor: string;
+    event_type: string;
+    payload?: string | null | undefined;
+}>;
+export type TaskActivity = z.infer<typeof TaskActivitySchema>;
+export declare const TaskLinkSchema: z.ZodObject<{
+    id: z.ZodString;
+    task_id: z.ZodString;
+    linked_task_id: z.ZodString;
+    link_type: z.ZodEnum<["blocks", "blocked_by", "relates_to"]>;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    task_id: string;
+    linked_task_id: string;
+    link_type: "blocks" | "blocked_by" | "relates_to";
+}, {
+    id: string;
+    task_id: string;
+    linked_task_id: string;
+    link_type: "blocks" | "blocked_by" | "relates_to";
+}>;
+export type TaskLink = z.infer<typeof TaskLinkSchema>;
+export declare const TaskNotificationSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    recipient: z.ZodString;
+    task_id: z.ZodString;
+    kind: z.ZodEnum<["mentioned", "assigned", "watched_status"]>;
+    read_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    project_id: string;
+    task_id: string;
+    recipient: string;
+    kind: "mentioned" | "assigned" | "watched_status";
+    read_at?: string | null | undefined;
+}, {
+    id: string;
+    created_at: string;
+    project_id: string;
+    task_id: string;
+    recipient: string;
+    kind: "mentioned" | "assigned" | "watched_status";
+    read_at?: string | null | undefined;
+}>;
+export type TaskNotification = z.infer<typeof TaskNotificationSchema>;
+export declare const BoardConfigSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    columns: z.ZodString;
+    custom_field_defs: z.ZodDefault<z.ZodString>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    columns: string;
+    custom_field_defs: string;
+}, {
+    id: string;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    columns: string;
+    custom_field_defs?: string | undefined;
+}>;
+export type BoardConfig = z.infer<typeof BoardConfigSchema>;
 export declare const ContextSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
@@ -439,7 +584,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 export declare const PipelineEventSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
-    event_type: z.ZodEnum<["session_created", "session_idle", "observation_created", "observation_imported", "observation_detected", "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed", "extraction_completed", "extraction_failed", "trait_created", "trait_updated", "plugin_initialized", "plugin_error"]>;
+    event_type: z.ZodEnum<["session_created", "session_idle", "observation_created", "observation_imported", "observation_detected", "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed", "extraction_completed", "extraction_failed", "trait_created", "trait_updated", "skill_created", "skill_updated", "plugin_initialized", "plugin_error"]>;
     event_source: z.ZodEnum<["agent", "plugin", "synthesis", "system"]>;
     title: z.ZodString;
     description: z.ZodOptional<z.ZodString>;
@@ -453,8 +598,8 @@ export declare const PipelineEventSchema: z.ZodObject<{
     created_at: string;
     project_id: string;
     title: string;
+    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "plugin_initialized" | "plugin_error";
     importance: number;
-    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "plugin_initialized" | "plugin_error";
     event_source: "agent" | "plugin" | "synthesis" | "system";
     description?: string | undefined;
     session_id?: string | undefined;
@@ -465,7 +610,7 @@ export declare const PipelineEventSchema: z.ZodObject<{
     created_at: string;
     project_id: string;
     title: string;
-    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "plugin_initialized" | "plugin_error";
+    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "plugin_initialized" | "plugin_error";
     event_source: "agent" | "plugin" | "synthesis" | "system";
     description?: string | undefined;
     session_id?: string | undefined;
