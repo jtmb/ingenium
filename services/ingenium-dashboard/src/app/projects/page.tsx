@@ -108,7 +108,7 @@ export default function ProjectsPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-lg font-semibold">{p.name}</span>
-                    {p.is_global && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">GLOBAL</span>}
+                    {!!p.is_global && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">GLOBAL</span>}
                     {p.archived_at && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-medium">ARCHIVED</span>}
                   </div>
                   <div className="text-xs text-gray-400 mt-0.5">Created {formatRelative(p.created_at)}</div>

@@ -16,8 +16,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gray-50 text-gray-900">
-        <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-6">
+      <body className="min-h-screen bg-gray-50 text-gray-900 overflow-x-hidden">
+        <nav className="bg-white border-b border-gray-200 px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
           <a href="/" className="font-bold text-lg">Ingenium</a>
           <a href="/opencode" className="text-sm text-gray-600 hover:text-gray-900">OpenCode</a>
           <span className="text-gray-300">|</span>
