@@ -2,8 +2,8 @@
 name: ingenium-docs
 description: "Documentation and skill management agent. Creates and updates README, API docs, ADRs, and skill system files."
 mode: subagent
-model: opencode/deepseek-v4-flash-free
-# model: lmstudio/qwen/qwen3.5-9b  # looping issues — switched to Zen free tier
+model: lmstudio/qwen/qwen3.5-9b
+# model: opencode/deepseek-v4-flash-free  # only if Zen free tier available
 permission:
   read: allow
   edit: allow
@@ -78,10 +78,4 @@ Follow this process:
 6. After skill system changes (new skill created), regenerate `SKILL-INDEX.md` and update `AGENTS.md` skill/agent tables
 
 
-## 🔴 ALWAYS Log Discoveries
 
-When you restructure skills, move content, or notice documentation patterns:
-1. Use `ingenium_ingenium_observe` to log it immediately
-2. Use `observation_type="insight"` and `importance=5`
-3. Summarize what changed and why in `content`
-4. Include the target file paths and category (restructure/new) in `content`

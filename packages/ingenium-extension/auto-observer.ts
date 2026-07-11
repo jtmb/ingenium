@@ -3,7 +3,9 @@ import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
-const PROJECT = "gh-llm-bootstrap";
+// TODO: PROJECT should be dynamic (derived from worktree or env) rather than hardcoded.
+// Currently kept for backward compatibility — overridable via INGENIUM_PROJECT env var.
+const PROJECT = process.env.INGENIUM_PROJECT || "gh-llm-bootstrap";
 
 // Track last run timestamp for dedup — only process messages newer than this
 let lastRunAt = Date.now();
@@ -12,7 +14,7 @@ let lastRunAt = Date.now();
  * Patterns to detect in user messages.
  * Key: observation_type, Value: regex patterns
  */
-const PATTERNS: Record<string, RegExp[]> = {
+const PATTERNS: Map<string, RegExp[]> = new Map(Object.entries({
   correction: [
     /no[.,!]? (?:use|don|do|should|make it)/i,
     /(?:change|replace|swap|switch) .* (?:to|with|instead)/i,
@@ -38,143 +40,128 @@ const PATTERNS: Record<string, RegExp[]> = {
     /(?:ci|cd|deploy|release|publish) .*(?:pipeline|step|flow|process)/i,
     /(?:troubleshoot|debug|fix|repair) .*(?:not working|broken|fail|error|issue)/i,
   ],
-};
+}));
 
 /**
- * Find the OpenCode DB path.
- * Searches common locations. Returns the first existing path or the default.
+ * Resolve the OpenCode DB path from the user's home directory.
  */
 function getDbPath(): string {
-  const candidates = [
-    resolve(process.env.HOME || "/home/appuser", ".local/share/opencode/opencode.db"),
-    "/home/appuser/.local/share/opencode/opencode.db",
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-  return candidates[0];
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  return resolve(home, ".local", "share", "opencode", "opencode.db");
 }
 
 /**
- * Open the OpenCode DB using better-sqlite3.
- * Tries direct require first, falls back to createRequire from worktree.
+ * Open the OpenCode DB using Bun's built-in SQLite.
+ * Bun's `bun:sqlite` is the native runtime for OpenCode plugins — no native addons needed.
  */
-function openDb(dbPath: string, worktree?: string): any {
+function openDb(): any {
+  const dbPath = getDbPath();
   try {
-    // Direct require — works in OpenCode's CommonJS plugin runtime
-    return (require as any)("better-sqlite3")(dbPath, { readonly: true });
-  } catch {
-    try {
-      // Fallback: resolve from worktree using createRequire
-      const { createRequire } = require("node:module");
-      const req = createRequire(resolve(worktree || process.cwd(), "noop.js"));
-      return req("better-sqlite3")(dbPath, { readonly: true });
-    } catch {
-      return null;
-    }
+    const { Database } = require("bun:sqlite") as any;
+    const db = new Database(dbPath, { readonly: true });
+    console.log(`[auto-observer] Opened DB at ${dbPath}`);
+    return db;
+  } catch (err: any) {
+    console.error(`[auto-observer] ERROR: Cannot open OpenCode DB at ${dbPath}:`, err.message);
+    return null;
   }
 }
 
 /**
  * Read recent user messages from the OpenCode DB and detect behavior patterns.
- * Returns observations to create.
+ *
+ * OpenCode v2 DB schema:
+ *   - `part` table: id, message_id, session_id, time_created, time_updated, data (JSON)
+ *   - `message` table: id, session_id, role, ...
+ *   - `session_input` table exists but has 0 rows (dead table — do NOT query it)
+ *
+ * Uses json_extract() to access fields inside the `data` JSON column.
+ * Joins with `message` table to filter for role='user' messages only.
+ * Only scans messages newer than `lastRunAt` to avoid rescanning.
  */
-async function detectPatterns(
-  dbPath: string,
-  worktree?: string,
-): Promise<Array<{ type: string; content: string; context?: string }>> {
-  const results: Array<{ type: string; content: string; context?: string }> = [];
+async function detectPatterns(): Promise<Array<{ type: string; content: string; context?: string }>> {
+  const dbPath = getDbPath();
 
-  try {
-    if (!existsSync(dbPath)) return results;
-
-    const db = openDb(dbPath, worktree);
-    if (!db) return results;
-
-    let userTexts: Array<{ text: string; time_created: number }> = [];
-
-    // Try session_input.prompt first
-    try {
-      const inputs = db
-        .prepare(
-          "SELECT prompt, time_created FROM session_input WHERE prompt IS NOT NULL AND prompt != '' ORDER BY time_created DESC LIMIT 30",
-        )
-        .all() as Array<{ prompt: string; time_created: number }>;
-      for (const r of inputs) {
-        if (r.prompt && r.prompt.length > 10) {
-          userTexts.push({ text: r.prompt, time_created: r.time_created });
-        }
-      }
-    } catch {
-      /* table may not exist */
-    }
-
-    // Fall back to part.data — uses LIMIT 2000 because agent reasoning/tool-call
-    // entries vastly outnumber user text entries (ratio typically 30:1 or higher).
-    if (userTexts.length === 0) {
-      try {
-        const parts = db
-          .prepare(
-            "SELECT data, time_created FROM part ORDER BY time_created DESC LIMIT 2000",
-          )
-          .all() as Array<{ data: string; time_created: number }>;
-        
-        // Keep all parts in order for context extraction
-        const allParts: Array<{ data: string; time_created: number }> = [];
-        
-        for (const r of parts) {
-          try {
-            const d = JSON.parse(r.data);
-            allParts.push({ data: r.data, time_created: r.time_created });
-            if (
-              d.type === "text" &&
-              d.text &&
-              d.text.length > 10 &&
-              r.time_created > lastRunAt
-            ) {
-              userTexts.push({ text: d.text, time_created: r.time_created });
-            }
-          } catch {
-            /* skip unparseable */
-          }
-        }
-      } catch {
-        /* table may not exist */
-      }
-    }
-
-    db.close();
-
-    // Update dedup timestamp
-    lastRunAt = Date.now();
-
-    // Run pattern detection on collected texts
-    const seen = new Set<string>();
-    for (const entry of userTexts) {
-      for (const [type, regexps] of Object.entries(PATTERNS)) {
-        for (const regex of regexps) {
-          const match = entry.text.match(regex);
-          if (match) {
-            const snippet = entry.text.length > 200 ? entry.text.substring(0, 200) : entry.text;
-            const key = `${type}:${snippet.substring(0, 60)}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              results.push({
-                type,
-                content: snippet,
-                context: undefined, // context set during enrichment call
-              });
-            }
-            break;
-          }
-        }
-      }
-    }
-  } catch {
-    // Non-fatal — better-sqlite3 may not be available in the runtime
+  if (!existsSync(dbPath)) {
+    console.warn(`[auto-observer] DB not found at ${dbPath} — skipping pattern detection`);
+    return [];
   }
 
-  return results;
+  const db = openDb();
+  if (!db) {
+    console.warn("[auto-observer] DB not available — skipping pattern detection");
+    return [];
+  }
+
+  try {
+    // Query part table using json_extract — joins with message table for role filtering.
+    // Only scan messages after lastRunAt to avoid rescanning.
+    // LIMIT 2000 because agent reasoning/tool-call entries vastly outnumber user text entries
+    // (ratio typically 30:1 or higher).
+    const rows = db.query(`
+      SELECT
+        json_extract(p.data, '$.text') as text,
+        p.time_created,
+        m.role
+      FROM part p
+      JOIN message m ON p.message_id = m.id
+      WHERE m.role = 'user'
+        AND json_extract(p.data, '$.type') = 'text'
+        AND length(json_extract(p.data, '$.text')) > 10
+        AND p.time_created > ?
+      ORDER BY p.time_created DESC
+      LIMIT 2000
+    `).all(lastRunAt);
+
+    console.log(`[auto-observer] Scanned ${rows.length} recent user messages from OpenCode DB (since ${new Date(lastRunAt).toISOString()})`);
+
+    if (rows.length === 0) {
+      console.log("[auto-observer] No new messages to scan since last run");
+      return [];
+    }
+
+    const seen = new Set<string>();
+    const observations: Array<{ type: string; content: string; context?: string }> = [];
+
+    for (const row of rows) {
+      const text = String(row.text || "").trim();
+      if (!text || text.length < 10) continue;
+
+      // Update lastRunAt to the latest message time
+      if (row.time_created && typeof row.time_created === 'number' && row.time_created > lastRunAt) {
+        lastRunAt = row.time_created;
+      }
+
+      for (const [obsType, patterns] of PATTERNS) {
+        for (const pattern of patterns) {
+          const match = text.match(pattern);
+          if (match) {
+            const snippet = match[1] || match[0] || text.substring(0, 200);
+            const key = `${obsType}:${snippet.substring(0, 60)}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              observations.push({
+                type: obsType,
+                content: snippet,
+                context: text.substring(0, 500),
+              });
+            }
+            break; // One match per pattern category
+          }
+        }
+      }
+    }
+
+    console.log(`[auto-observer] Pattern detection complete: ${observations.length} patterns found across ${PATTERNS.size} categories`);
+    return observations;
+  } catch (err: any) {
+    console.error(`[auto-observer] ERROR during pattern detection:`, err.message, err.stack);
+    return [];
+  } finally {
+    if (db && typeof db.close === 'function') {
+      try { db.close(); } catch { /* best effort */ }
+    }
+  }
 }
 
 /**
@@ -186,6 +173,8 @@ async function enrichObservations(
 ): Promise<Array<{ type: string; content: string; context?: string; enriched_content?: string; skip: boolean }>> {
   if (observations.length === 0) return [];
 
+  console.log(`[auto-observer] Enriching ${observations.length} observations via API...`);
+
   try {
     const res = await fetch(`${API_BASE}/observations/enrich?project=${PROJECT}`, {
       method: "POST",
@@ -195,19 +184,24 @@ async function enrichObservations(
     });
 
     if (!res.ok) {
+      console.warn(`[auto-observer] Enrichment API returned ${res.status} — using raw observations`);
       return observations.map(o => ({ ...o, skip: false }));
     }
 
     const json = await res.json();
-    return (json.data || []).map((item: any) => ({
+    const enriched = (json.data || []).map((item: any) => ({
       type: item.type,
       content: item.content,
       context: item.context,
       enriched_content: item.enriched_content,
       skip: item.skip === true,
     }));
-  } catch {
-    // Non-fatal — fall back to raw observations
+
+    const skipped = enriched.filter(o => o.skip).length;
+    console.log(`[auto-observer] Enrichment complete: ${enriched.length - skipped} enriched, ${skipped} skipped as noise`);
+    return enriched;
+  } catch (err: any) {
+    console.error(`[auto-observer] Enrichment failed:`, err.message, "— falling back to raw observations");
     return observations.map(o => ({ ...o, skip: false }));
   }
 }
@@ -220,10 +214,11 @@ async function enrichObservations(
 async function createObservations(
   observations: Array<{ type: string; content: string; context?: string; enriched_content?: string; skip: boolean }>,
   client: any,
-  worktree: string,
 ): Promise<number> {
   const actionable = observations.filter(o => !o.skip);
   if (actionable.length === 0) return 0;
+
+  console.log(`[auto-observer] Creating ${actionable.length} observations...`);
 
   let created = 0;
   for (const obs of actionable) {
@@ -240,20 +235,31 @@ async function createObservations(
           context: obs.context || undefined,
         }),
       });
-      if (res.ok) created++;
-    } catch {
-      // Skip individual errors — don't block the batch
+      if (res.ok) {
+        created++;
+      } else {
+        console.error(`[auto-observer] API error creating observation: ${res.status} ${res.statusText}`);
+      }
+    } catch (err: any) {
+      console.error(`[auto-observer] ERROR creating observation:`, err.message);
     }
   }
 
   if (created > 0) {
-    await client.app.log({
-      body: {
-        service: "auto-observer",
-        level: "info",
-        message: `Auto-observed ${created} user behavior pattern(s) from ${actionable.length} enriched (${observations.length - actionable.length} skipped as noise)`,
-      },
-    });
+    console.log(`[auto-observer] Created ${created} observations successfully (${actionable.length - created} failed, ${observations.length - actionable.length} skipped)`);
+    try {
+      await client.app.log({
+        body: {
+          service: "auto-observer",
+          level: "info",
+          message: `Auto-observed ${created} user behavior pattern(s) from ${actionable.length} enriched (${observations.length - actionable.length} skipped as noise)`,
+        },
+      });
+    } catch (err: any) {
+      console.error(`[auto-observer] ERROR logging to client app log:`, err.message);
+    }
+  } else {
+    console.log(`[auto-observer] No observations created (0/${actionable.length} succeeded)`);
   }
 
   return created;
@@ -263,8 +269,9 @@ async function createObservations(
  * POST a pipeline event to the Ingenium API for observability.
  */
 async function logPipelineEvent(project: string, title: string, data: any) {
+  console.log(`[auto-observer] Logging pipeline event: "${title}"`);
   try {
-    await fetch(`${API_BASE}/pipeline/events?project=${project}`, {
+    const res = await fetch(`${API_BASE}/pipeline/events?project=${project}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -275,8 +282,13 @@ async function logPipelineEvent(project: string, title: string, data: any) {
         importance: 4,
       }),
     });
-  } catch {
-    // Non-fatal — pipeline event logging is best-effort
+    if (!res.ok) {
+      console.warn(`[auto-observer] Pipeline event API returned ${res.status}: ${res.statusText}`);
+    } else {
+      console.log(`[auto-observer] Pipeline event logged successfully`);
+    }
+  } catch (err: any) {
+    console.error(`[auto-observer] ERROR logging pipeline event:`, err.message);
   }
 }
 
@@ -288,14 +300,14 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
   return {
     event: async ({ event }: { event: any }) => {
       if (event.type === "session.created") {
+        console.log("[auto-observer] session.created — running detection");
         turnCount = 0;
         try {
           // Run detection immediately on session start
-          const dbPath = getDbPath();
-          const observations = await detectPatterns(dbPath, worktree);
+          const observations = await detectPatterns();
           if (observations.length > 0) {
             const enriched = await enrichObservations(observations);
-            const created = await createObservations(enriched, ctx.client, worktree);
+            const created = await createObservations(enriched, ctx.client);
             await logPipelineEvent(
               PROJECT,
               `Auto-observer: ${observations.length} detected, ${created} created`,
@@ -303,12 +315,14 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
             );
           } else {
             // Even when nothing found, log so we know the plugin is alive
+            console.log("[auto-observer] session.created — no patterns detected");
             await logPipelineEvent(PROJECT, "Auto-observer: scanned — no patterns found", {
               dbfound: true,
               scanned: true,
             });
           }
         } catch (err: any) {
+          console.error("[auto-observer] session.created — failed:", err.message);
           await logPipelineEvent(PROJECT, "Auto-observer: failed", {
             error: err?.message ?? String(err),
             dbfound: false,
@@ -320,19 +334,22 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
         turnCount++;
         if (turnCount % CHECK_INTERVAL !== 0) return;
 
+        console.log(`[auto-observer] session.idle — turn ${turnCount}, running detection`);
         try {
-          const dbPath = getDbPath();
-          const observations = await detectPatterns(dbPath, worktree);
+          const observations = await detectPatterns();
           if (observations.length > 0) {
             const enriched = await enrichObservations(observations);
-            const created = await createObservations(enriched, ctx.client, worktree);
+            const created = await createObservations(enriched, ctx.client);
             await logPipelineEvent(
               PROJECT,
               `Auto-observer: ${observations.length} detected, ${created} created`,
               { detected: observations.length, created, enriched: enriched.length, dbfound: true },
             );
+          } else {
+            console.log(`[auto-observer] session.idle turn ${turnCount} — no patterns detected`);
           }
         } catch (err: any) {
+          console.error(`[auto-observer] session.idle turn ${turnCount} — failed:`, err.message);
           await logPipelineEvent(PROJECT, "Auto-observer: failed", {
             error: err?.message ?? String(err),
             dbfound: false,
@@ -347,10 +364,11 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
           "Run auto-observer pattern detection immediately against recent user messages. Scans the OpenCode message history for correction, preference, terminology, and workflow patterns, then posts observations to the Ingenium API.",
         args: {},
         async execute(_args: any, context: { worktree: string }) {
-          const dbPath = getDbPath();
-          const observations = await detectPatterns(dbPath, context.worktree);
+          console.log("[auto-observer] auto_observe_now tool invoked — running detection");
+          const observations = await detectPatterns();
           const enriched = await enrichObservations(observations);
-          const created = await createObservations(enriched, ctx.client, context.worktree);
+          const created = await createObservations(enriched, ctx.client);
+          console.log(`[auto-observer] auto_observe_now complete: ${observations.length} detected, ${enriched.length} enriched, ${created} created`);
           return JSON.stringify(
             { detected: observations.length, enriched: enriched.length, created, observations: enriched },
             null,

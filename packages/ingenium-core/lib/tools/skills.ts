@@ -58,7 +58,7 @@ description: "${(skill.description || "").replace(/"/g, '\\"')}"
         writeFileSync(filePath, content as string, "utf-8");
       }
     } catch (e) {
-      logger.warn({ name: skill.name }, "Failed to parse file_tree JSON");
+      logger.warn("skills", "Failed to parse file_tree JSON", { name: skill.name });
     }
   }
 }
@@ -168,7 +168,7 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
     const skillsBase = getSkillsBase(projectId);
     const filePath = resolve(skillsBase, name, "SKILL.md");
     if (!existsSync(filePath)) {
-      logger.warn({ name, filePath }, "Skill file not found on disk");
+      logger.warn("skills", "Skill file not found on disk", { name, filePath });
       return undefined;
     }
 
@@ -228,7 +228,7 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
       const inserted = db.prepare("SELECT rowid FROM skills WHERE id = ?").get(id) as any;
       db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
         .run(inserted.rowid, content, description);
-      logger.info({ name: diskName }, "Skill created from disk sync");
+      logger.info("skills", "Skill created from disk sync", { name: diskName });
     } else {
       // Update existing skill from disk file
       const now = new Date().toISOString();
@@ -241,7 +241,7 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
       // Re-insert FTS
       db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
         .run(row.rowid, content, description);
-      logger.info({ name: diskName }, "Skill synced from disk");
+      logger.info("skills", "Skill synced from disk", { name: diskName });
     }
 
     checkpointAfterWrite();

@@ -1,4 +1,5 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { logger } from "../logger.js";
 import { Config } from "../schema.js";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -30,7 +31,7 @@ export function saveConfig(projectId: string, type: "project" | "global", conten
       writeFileSync(configPath, content, "utf-8");
     } catch (e) {
       // Disk write failure is non-fatal for the DB operation
-      console.warn("Failed to write config to disk:", e);
+      logger.warn("configs", "Failed to write config to disk", { error: e instanceof Error ? e.message : String(e) });
     }
     checkpointAfterWrite();
     return db.prepare("SELECT * FROM configs WHERE project_id = ? AND type = ?").get(projectId, type) as Config;

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { randomUUID } from "node:crypto";
 import { ZodError } from "zod";
+import { logger } from "ingenium-core";
 
 export class AppError extends Error {
   constructor(
@@ -50,7 +51,7 @@ export function errorHandler(
   }
 
   // Unexpected error
-  console.error("Unhandled error:", err);
+  logger.error("api", "Unhandled error", { error: err?.message });
   res.status(500).json({
     error: {
       code: "INTERNAL_ERROR",

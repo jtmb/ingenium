@@ -2,7 +2,8 @@
 name: ingenium-qa
 description: "Code review and quality assurance. Reviews code for quality, correctness, and security. Verifies tests written by @ingenium-software-engineer."
 mode: subagent
-model: deepseek/deepseek-v4-flash
+model: lmstudio/qwen/qwen3.5-9b
+# model: deepseek/deepseek-v4-flash  # only if Zen free tier available
 permission:
   read: allow
   bash: allow
@@ -35,14 +36,6 @@ Load `@development-conventions` (code review patterns) and examine all changed f
 - **Testing** — coverage gaps, meaningless assertions, missing edge cases
 
 Prioritize by severity: 🔴 critical, 🟡 warning, 💡 suggestion.
-
-## 🔴 ALWAYS Log Discoveries
-
-When you discover a recurring code quality issue, security pattern, or behavioral observation:
-1. Use `ingenium_ingenium_observe` to log it immediately
-2. Use `observation_type="pattern"` and `importance=7` for new patterns, `importance=5` for observations
-3. Summarize the pattern and affected files in `content`
-4. Use `context` to specify category like "code-quality" or "security"
 
 ### 2. Test Verification
 Load `@development-conventions` (testing patterns) for the test lifecycle. Review tests written by @ingenium-software-engineer. Follow this checklist:

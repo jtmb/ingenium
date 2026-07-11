@@ -51,7 +51,7 @@ description: "${(skill.description || "").replace(/"/g, '\\"')}"
             }
         }
         catch (e) {
-            logger.warn({ name: skill.name }, "Failed to parse file_tree JSON");
+            logger.warn("skills", "Failed to parse file_tree JSON", { name: skill.name });
         }
     }
 }
@@ -156,7 +156,7 @@ export function syncSkillFromDisk(projectId, name) {
         const skillsBase = getSkillsBase(projectId);
         const filePath = resolve(skillsBase, name, "SKILL.md");
         if (!existsSync(filePath)) {
-            logger.warn({ name, filePath }, "Skill file not found on disk");
+            logger.warn("skills", "Skill file not found on disk", { name, filePath });
             return undefined;
         }
         // Read and parse frontmatter
@@ -216,7 +216,7 @@ export function syncSkillFromDisk(projectId, name) {
             const inserted = db.prepare("SELECT rowid FROM skills WHERE id = ?").get(id);
             db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
                 .run(inserted.rowid, content, description);
-            logger.info({ name: diskName }, "Skill created from disk sync");
+            logger.info("skills", "Skill created from disk sync", { name: diskName });
         }
         else {
             // Update existing skill from disk file
@@ -230,7 +230,7 @@ export function syncSkillFromDisk(projectId, name) {
             // Re-insert FTS
             db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
                 .run(row.rowid, content, description);
-            logger.info({ name: diskName }, "Skill synced from disk");
+            logger.info("skills", "Skill synced from disk", { name: diskName });
         }
         checkpointAfterWrite();
         return db.prepare("SELECT * FROM skills WHERE project_id = ? AND name = ?")

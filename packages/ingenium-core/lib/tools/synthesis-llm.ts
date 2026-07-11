@@ -242,7 +242,7 @@ export async function callSynthesisLLM(
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown error");
-      logger.warn({ status: response.status, error: errText }, "LLM synthesis API returned error");
+      logger.warn("synthesis-llm", "LLM synthesis API returned error", { status: response.status, error: errText });
       // Try parsing as non-JSON response format
       const fallbackResponse = await fetch(`${baseEndpoint}/v1/chat/completions`, {
         method: "POST",
@@ -275,7 +275,7 @@ export async function callSynthesisLLM(
     if (err.name === "AbortError") {
       return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis was cancelled." };
     }
-    logger.error({ err: String(err?.message || err) }, "LLM synthesis call failed");
+    logger.error("synthesis-llm", "LLM synthesis call failed", { err: String(err?.message || err) });
     return { skills_to_create: [], skills_to_update: [], insights: [`LLM error: ${String(err?.message || err)}`], summary: "LLM synthesis failed" };
   }
 }
@@ -475,7 +475,7 @@ export async function enrichObservations(
 
       if (!response.ok) {
         if (attempt < maxRetries) continue;
-        logger.warn({ status: response.status }, "LLM enrichment returned error, falling back to raw observations");
+        logger.warn("synthesis-llm", "LLM enrichment returned error, falling back to raw observations", { status: response.status });
         return observations.map(o => ({ ...o, skip: false }));
       }
 
@@ -508,7 +508,7 @@ export async function enrichObservations(
         return observations.map(o => ({ ...o, skip: false }));
       }
       if (attempt < maxRetries) continue;
-      logger.error({ err: String(err?.message || err) }, "LLM enrichment call failed, falling back to raw observations");
+      logger.error("synthesis-llm", "LLM enrichment call failed, falling back to raw observations", { err: String(err?.message || err) });
       return observations.map(o => ({ ...o, skip: false }));
     }
   }

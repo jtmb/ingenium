@@ -183,13 +183,13 @@ export declare const ServerSchema: z.ZodObject<{
     running: z.ZodDefault<z.ZodBoolean>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    source: "opencode" | "ingenium";
     id: string;
     name: string;
     created_at: string;
     project_id: string;
     enabled: boolean;
     command: string;
-    source: "opencode" | "ingenium";
     running: boolean;
     args?: string | undefined;
     env?: string | undefined;
@@ -199,10 +199,10 @@ export declare const ServerSchema: z.ZodObject<{
     created_at: string;
     project_id: string;
     command: string;
+    source?: "opencode" | "ingenium" | undefined;
     enabled?: boolean | undefined;
     args?: string | undefined;
     env?: string | undefined;
-    source?: "opencode" | "ingenium" | undefined;
     running?: boolean | undefined;
 }>;
 export type Server = z.infer<typeof ServerSchema>;
@@ -219,13 +219,13 @@ export declare const ObservationSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    source: "auto-observer" | "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual";
     id: number;
     created_at: string;
     updated_at: string;
     status: "pending" | "processed" | "failed" | "skipped";
     project_id: string;
     content: string;
-    source: "auto-observer" | "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual";
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
     importance: number;
     session_id?: string | undefined;
@@ -237,9 +237,9 @@ export declare const ObservationSchema: z.ZodObject<{
     project_id: string;
     content: string;
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
+    source?: "auto-observer" | "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | undefined;
     status?: "pending" | "processed" | "failed" | "skipped" | undefined;
     session_id?: string | undefined;
-    source?: "auto-observer" | "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | undefined;
     importance?: number | undefined;
     context?: string | undefined;
 }>;
@@ -259,11 +259,11 @@ export declare const PersonalityTraitSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    source: string;
     id: number;
     created_at: string;
     updated_at: string;
     project_id: string;
-    source: string;
     trait_type: "terminology" | "communication_style" | "code_preference" | "workflow_pattern" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
     trait_value: string;
     confidence: number;

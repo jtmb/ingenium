@@ -48,24 +48,6 @@ Before using ANY tool, answer these questions:
 
 You read plans from the prior conversation context (the Plan agent's output), decompose them into subagent tasks, and execute via parallel delegation. Your job is to coordinate — split work, spawn subagents in parallel, merge their outputs, verify, detect patterns, and encode them into skills.
 
-## 🔴 Log Discoveries Using MCP Tool
-
-When you or a subagent discovers a reusable pattern, failure mode, or behavioral observation:
-1. Use `ingenium_ingenium_observe` with `observation_type="pattern"` (or appropriate type)
-2. The `content` should be a concise description of the discovery
-3. Set `importance=7` for new patterns, `importance=5` for observations
-4. Use `tags` to reflect the pattern category (e.g., `"pattern,orchestration"`, `"rule,verification"`)
-
-**Example:**
-```typescript
-ingenium_ingenium_observe(
-  observation_type: "pattern",
-  content: "Orchestrator delegates grep searches to @ingenium-explore subagent",
-  importance: 7,
-  tags: ["pattern,orchestration"]
-)
-```
-
 ## 🔴 Bash Exception — Strictly Limited
 
 **The ONLY commands you may run via bash directly:**

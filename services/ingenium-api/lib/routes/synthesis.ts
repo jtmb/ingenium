@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { synthesis } from "ingenium-core";
+import { synthesis, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 export const synthesisRouter = Router();
@@ -13,9 +13,9 @@ synthesisRouter.post("/run", (req, res) => {
   setImmediate(async () => {
     try {
       const result = await synthesis.runSynthesis(projectId, sessionId);
-      console.log(`[synthesis] Completed: ${JSON.stringify(result)}`);
+      logger.info("synthesis", `Completed: ${JSON.stringify(result)}`);
     } catch (err: any) {
-      console.error("[synthesis] Pipeline failed:", err.message);
+      logger.error("synthesis", "Pipeline failed", { error: err.message });
     }
   });
   res.json({ data: { status: "started", message: "Synthesis pipeline triggered. Check back via GET /status." } });
@@ -32,7 +32,7 @@ synthesisRouter.get("/status", (req, res) => {
 // POST /cross-project — trigger cross-project synthesis
 synthesisRouter.post("/cross-project", (_req, res) => {
   setImmediate(() => {
-    synthesis.runCrossProjectSynthesis().catch((e) => console.error("Cross-project synthesis failed:", e));
+    synthesis.runCrossProjectSynthesis().catch((e) => logger.error("synthesis", "Cross-project synthesis failed", { error: e instanceof Error ? e.message : String(e) }));
   });
   res.json({ status: "started" });
 });
