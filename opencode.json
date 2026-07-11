@@ -56,6 +56,7 @@
   },
   "plugin": [
     "packages/ingenium-extension/observer.ts",
+    "packages/ingenium-extension/auto-observer.ts",
     "packages/ingenium-extension/skill-sync.ts"
   ]
 }
