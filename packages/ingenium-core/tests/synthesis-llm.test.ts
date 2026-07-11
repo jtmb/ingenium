@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createProject } from "../lib/tools/projects.js";
-import { callSynthesisLLM, isLLMSynthesisConfigured, getLLMSynthesisConfig, enrichObservations, getFullLLMSynthesisConfig } from "../lib/tools/synthesis-llm.js";
+import { callSynthesisLLM, isLLMSynthesisConfigured, getLLMSynthesisConfig, enrichObservations, getFullLLMSynthesisConfig, consolidateTraits } from "../lib/tools/synthesis-llm.js";
 import { setSetting } from "../lib/tools/settings.js";
 
 let tempDir: string;
@@ -638,6 +638,235 @@ describe("getFullLLMSynthesisConfig", () => {
     setSetting(globalProjectId, "synthesis_endpoint", "https://api.openai.com/v1");
     const config = getFullLLMSynthesisConfig();
     expect(config).toBeNull();
+  });
+});
+
+// ── Consolidation tests ──────────────────────────────────────
+
+describe("consolidateTraits", () => {
+  beforeEach(() => {
+    setSetting(globalProjectId, "synthesis_model", "test-model");
+    setSetting(globalProjectId, "synthesis_api_key", "test-key");
+    setSetting(globalProjectId, "synthesis_endpoint", `http://localhost:${mockPort}`);
+  });
+
+  it("returns null when not configured", async () => {
+    setSetting(globalProjectId, "synthesis_model", "");
+    setSetting(globalProjectId, "synthesis_endpoint", "");
+    const result = await consolidateTraits(projectId, [], []);
+    expect(result).toBeNull();
+  });
+
+  it("parses valid create entries from LLM response", async () => {
+    const consolidation = {
+      create: [
+        {
+          trait_type: "workflow_pattern",
+          trait_value: "User rebuilds and tests after every change",
+          confidence_hint: 0.12,
+          observation_ids: [692, 693],
+        },
+        {
+          trait_type: "code_preference",
+          trait_value: "User prefers 2-space indentation",
+          confidence_hint: 0.25,
+          observation_ids: [694],
+        },
+      ],
+      confirm: [
+        { trait_id: 42, observation_id: 695 },
+      ],
+      ignore_count: 3,
+    };
+    setMockResponse(mockContent(JSON.stringify(consolidation)));
+
+    const result = await consolidateTraits(projectId, [
+      { id: 692, observation_type: "workflow", content: "User rebuilds and tests after every change." },
+      { id: 693, observation_type: "correction", content: "User corrects that thread should not be used as a fallback; root cause must be fixed." },
+      { id: 694, observation_type: "preference", content: "User prefers 2-space indentation" },
+      { id: 695, observation_type: "preference", content: "Existing trait observed again" },
+    ], [
+      { id: 42, trait_type: "code_preference", trait_value: "User prefers concise code", confidence: 0.4 },
+    ]);
+
+    expect(result).not.toBeNull();
+    expect(result!.create).toHaveLength(2);
+    expect(result!.create[0]).toMatchObject({
+      trait_type: "workflow_pattern",
+      trait_value: "User rebuilds and tests after every change",
+      confidence_hint: 0.12,
+    });
+    expect(result!.create[0].observation_ids).toEqual([692, 693]);
+    expect(result!.create[1]).toMatchObject({
+      trait_type: "code_preference",
+      trait_value: "User prefers 2-space indentation",
+      confidence_hint: 0.25,
+    });
+    expect(result!.confirm).toHaveLength(1);
+    expect(result!.confirm[0]).toMatchObject({ trait_id: 42, observation_id: 695 });
+    expect(result!.ignore).toBe(3);
+  });
+
+  it("clamps confidence_hint to [0.05, 0.30] range", async () => {
+    const consolidation = {
+      create: [
+        {
+          trait_type: "workflow_pattern",
+          trait_value: "Too high",
+          confidence_hint: 0.99,
+          observation_ids: [1],
+        },
+        {
+          trait_type: "code_preference",
+          trait_value: "Negative",
+          confidence_hint: -0.1,
+          observation_ids: [2],
+        },
+        {
+          trait_type: "terminology",
+          trait_value: "NaN",
+          confidence_hint: "not a number",
+          observation_ids: [3],
+        },
+      ],
+      confirm: [],
+    };
+    setMockResponse(mockContent(JSON.stringify(consolidation)));
+
+    const result = await consolidateTraits(projectId, [
+      { id: 1, observation_type: "workflow", content: "Test" },
+      { id: 2, observation_type: "preference", content: "Test" },
+      { id: 3, observation_type: "preference", content: "Test" },
+    ], []);
+
+    expect(result).not.toBeNull();
+    expect(result!.create).toHaveLength(3);
+    expect(result!.create[0].confidence_hint).toBe(0.30); // clamped to max
+    expect(result!.create[1].confidence_hint).toBe(0.05); // clamped to min
+    expect(result!.create[2].confidence_hint).toBe(0.10); // NaN → default
+  });
+
+  it("defaults invalid trait_type to code_preference", async () => {
+    const consolidation = {
+      create: [
+        {
+          trait_type: "invalid_type",
+          trait_value: "Some trait",
+          confidence_hint: 0.12,
+          observation_ids: [1],
+        },
+        {
+          trait_type: "workflow_pattern",
+          trait_value: "Valid trait",
+          confidence_hint: 0.12,
+          observation_ids: [2],
+        },
+      ],
+      confirm: [],
+    };
+    setMockResponse(mockContent(JSON.stringify(consolidation)));
+
+    const result = await consolidateTraits(projectId, [
+      { id: 1, observation_type: "preference", content: "Test" },
+      { id: 2, observation_type: "workflow", content: "Test" },
+    ], []);
+
+    expect(result).not.toBeNull();
+    expect(result!.create[0].trait_type).toBe("code_preference"); // invalid → default
+    expect(result!.create[1].trait_type).toBe("workflow_pattern"); // valid → kept
+  });
+
+  it("filters create entries with empty trait_value", async () => {
+    const consolidation = {
+      create: [
+        { trait_type: "code_preference", trait_value: "", confidence_hint: 0.12, observation_ids: [1] },
+        { trait_type: "workflow_pattern", trait_value: "  ", confidence_hint: 0.12, observation_ids: [2] },
+        { trait_type: "terminology", trait_value: "Kept", confidence_hint: 0.12, observation_ids: [3] },
+      ],
+      confirm: [],
+    };
+    setMockResponse(mockContent(JSON.stringify(consolidation)));
+
+    const result = await consolidateTraits(projectId, [
+      { id: 1, observation_type: "preference", content: "a" },
+      { id: 2, observation_type: "preference", content: "b" },
+      { id: 3, observation_type: "preference", content: "c" },
+    ], []);
+
+    expect(result).not.toBeNull();
+    expect(result!.create).toHaveLength(1);
+    expect(result!.create[0].trait_value).toBe("Kept");
+  });
+
+  it("returns null when LLM response is truncated by token limit (finish_reason=length, empty content)", async () => {
+    // Simulate the exact bug scenario: model hits token limit, produces empty content
+    const truncatedResponse = {
+      id: "test",
+      object: "chat.completion",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "length",
+          message: { role: "assistant", content: "" },
+        },
+      ],
+    };
+    setMockResponse(truncatedResponse);
+
+    const result = await consolidateTraits(projectId, [
+      { id: 1, observation_type: "preference", content: "User prefers thorough exploration" },
+      { id: 2, observation_type: "workflow", content: "User rebuilds and tests after every change" },
+    ], []);
+
+    // Should return null so observations stay PENDING instead of being silently marked processed
+    expect(result).toBeNull();
+  });
+
+  it("still attempts to parse truncated response that has partial content", async () => {
+    // If finish_reason is "length" but content is non-empty, still try to parse
+    const truncatedWithContent = {
+      id: "test",
+      object: "chat.completion",
+      choices: [
+        {
+          index: 0,
+          finish_reason: "length",
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              create: [{ trait_type: "code_preference", trait_value: "Partial", confidence_hint: 0.12, observation_ids: [1] }],
+              confirm: [],
+              ignore_count: 1,
+            }),
+          },
+        },
+      ],
+    };
+    setMockResponse(truncatedWithContent);
+
+    const result = await consolidateTraits(projectId, [
+      { id: 1, observation_type: "preference", content: "Test" },
+      { id: 2, observation_type: "preference", content: "Test" },
+    ], []);
+
+    // With partial content available, still parse it successfully
+    expect(result).not.toBeNull();
+    expect(result!.create).toHaveLength(1);
+    expect(result!.ignore).toBe(1);
+  });
+
+  it("returns empty consolidate result for empty LLM response ({})", async () => {
+    // The LLM genuinely decides nothing is actionable — this is valid, not a bug
+    setMockResponse(mockContent("{}"));
+
+    const result = await consolidateTraits(projectId, [
+      { id: 1, observation_type: "insight", content: "Discovered something interesting" },
+    ], []);
+
+    expect(result).not.toBeNull();
+    expect(result!.create).toEqual([]);
+    expect(result!.confirm).toEqual([]);
+    expect(result!.ignore).toBe(0);
   });
 });
 
