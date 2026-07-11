@@ -1,16 +1,10 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Observation } from "../../lib/api";
 import Overlay from "../components/Overlay";
-import PageHeader from "../components/PageHeader";
-import Toolbar from "../components/Toolbar";
-import FilterPills from "../components/FilterPills";
-import SearchInput from "../components/SearchInput";
-import Badge from "../components/Badge";
-import EmptyState from "../components/EmptyState";
 
 const TYPE_COLORS: Record<string, string> = {
   correction: "bg-red-100 text-red-700",
@@ -25,46 +19,12 @@ const TYPE_COLORS: Record<string, string> = {
   goal: "bg-pink-100 text-pink-700",
 };
 
-const TYPE_BORDER: Record<string, string> = {
-  correction: "border-l-red-400",
-  preference: "border-l-purple-400",
-  pattern: "border-l-green-400",
-  insight: "border-l-blue-400",
-  feedback: "border-l-yellow-400",
-  behavior: "border-l-orange-400",
-  terminology: "border-l-indigo-400",
-  workflow: "border-l-teal-400",
-  error: "border-l-red-600",
-  goal: "border-l-pink-400",
-};
-
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-700",
   processed: "bg-green-100 text-green-700",
   skipped: "bg-gray-100 text-gray-500",
   failed: "bg-red-100 text-red-700",
 };
-
-const TYPE_COLOR_MAP: Record<string, BadgeColor> = {
-  correction: "red",
-  preference: "purple",
-  pattern: "green",
-  insight: "blue",
-  feedback: "yellow",
-  behavior: "orange",
-  terminology: "indigo",
-  workflow: "teal",
-  error: "red",
-  goal: "pink",
-};
-
-type BadgeColor = "blue" | "green" | "red" | "yellow" | "purple" | "gray" | "indigo" | "teal" | "orange" | "pink";
-
-const STATUS_OPTIONS = ["pending", "processed", "skipped", "failed"];
-const TYPE_OPTIONS = [
-  "correction", "preference", "pattern", "insight", "feedback",
-  "behavior", "terminology", "workflow", "error", "goal",
-];
 
 function safeParseJson(raw: string | undefined | null): object | null {
   if (!raw) return null;
@@ -79,116 +39,85 @@ export default function ObservationsPage() {
   const router = useRouter();
   const project = useProject();
   const [observations, setObservations] = useState<Observation[]>([]);
-  const [statusFilter, setStatusFilter] = useState(new Set<string>(new Set<string>()));
-  const [typeFilter, setTypeFilter] = useState(new Set<string>(new Set<string>()));
-  const [searchText, setSearchText] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
   const [selected, setSelected] = useState<any>(null);
   const [stats, setStats] = useState({ total: 0, pending: 0 });
 
   useEffect(() => {
-    api.observations.list(project, "", "").then((r) => setObservations(r.data || [])).catch(() => {});
+    api.observations.list(project, statusFilter, typeFilter).then((r) => setObservations(r.data || [])).catch(() => {});
     api.observations.stats(project).then((r) => setStats(r.data || { total: 0, pending: 0 })).catch(() => {});
-  }, [project]);
-
-  const filtered = useMemo(() => {
-    return observations.filter((o) => {
-      if (statusFilter.size > 0 && !statusFilter.has(o.status)) return false;
-      if (typeFilter.size > 0 && !typeFilter.has(o.observation_type)) return false;
-      if (searchText && !o.content.toLowerCase().includes(searchText.toLowerCase())) return false;
-      return true;
-    });
-  }, [observations, statusFilter, typeFilter, searchText]);
-
-  const toggleFilter = (
-    setter: React.Dispatch<React.SetStateAction<Set<string>>>,
-    key: string,
-  ) => {
-    setter((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
+  }, [project, statusFilter, typeFilter]);
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Observations"
-        subtitle="Agent observations and behavior patterns"
-        stats={[
-          { label: "Total", value: stats.total },
-          { label: "Pending", value: stats.pending, color: "yellow" },
-        ]}
-      />
-
-      <Toolbar>
-        <FilterPills
-          label="Status:"
-          options={STATUS_OPTIONS.map((s) => ({ key: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))}
-          selected={statusFilter}
-          onToggle={(key) => toggleFilter(setStatusFilter, key)}
-        />
-        <FilterPills
-          label="Type:"
-          options={TYPE_OPTIONS.map((t) => ({ key: t, label: t.charAt(0).toUpperCase() + t.slice(1), color: TYPE_COLOR_MAP[t] ?? "gray" }))}
-          selected={typeFilter}
-          onToggle={(key) => toggleFilter(setTypeFilter, key)}
-        />
-        <div className="flex-1 min-w-[200px]">
-          <SearchInput
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Search content..."
-          />
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold">Observations</h1>
+        <div className="text-sm text-gray-500 space-x-4">
+          <span>Total: <strong>{stats.total}</strong></span>
+          <span>Pending: <strong className="text-yellow-600">{stats.pending}</strong></span>
         </div>
-      </Toolbar>
+      </div>
+
+      <div className="flex gap-2">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-gray-50 cursor-pointer">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="processed">Processed</option>
+          <option value="skipped">Skipped</option>
+          <option value="failed">Failed</option>
+        </select>
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-gray-50 cursor-pointer">
+          <option value="">All types</option>
+          <option value="correction">Correction</option>
+          <option value="preference">Preference</option>
+          <option value="pattern">Pattern</option>
+          <option value="insight">Insight</option>
+          <option value="feedback">Feedback</option>
+          <option value="behavior">Behavior</option>
+          <option value="terminology">Terminology</option>
+          <option value="workflow">Workflow</option>
+          <option value="error">Error</option>
+          <option value="goal">Goal</option>
+        </select>
+      </div>
 
       <div className="space-y-2">
-        {observations.length === 0 ? (
-          <EmptyState
-            message="No observations yet."
-            subtitle="The agent will record observations automatically during interactions."
-          />
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            message="No matching observations."
-            subtitle="Try adjusting the filters or search term."
-          />
-        ) : (
-          filtered.map((o: Observation) => (
-            <div
-              key={o.id}
-              className={`bg-white p-4 rounded border-l-4 ${TYPE_BORDER[o.observation_type] || "border-l-gray-300"} border border-l-4 hover:shadow-md transition-shadow group cursor-pointer`}
-              onClick={() => setSelected(o)}
-            >
-              <div className="flex gap-2 items-center mb-1 flex-wrap">
-                <Badge color={TYPE_COLOR_MAP[o.observation_type] || "gray"} variant="solid">
-                  {o.observation_type}
-                </Badge>
-                <Badge color={o.status === "pending" ? "yellow" : o.status === "processed" ? "green" : o.status === "failed" ? "red" : "gray"} variant="solid">
-                  {o.status}
-                </Badge>
-                <span className="text-xs text-gray-400">{new Date(o.created_at).toLocaleString()}</span>
-                {o.importance && <span className="text-xs text-gray-400">Importance: {o.importance}/10</span>}
-                <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      router.push(`/observations/${o.id}`);
-                    }}
-                    className="text-xs text-blue-600 hover:text-blue-800 underline"
-                    title="View full details"
-                  >
-                    Open
-                  </button>
-                </span>
-              </div>
-              <p className="text-sm">{o.content}</p>
-              {o.context && <pre className="text-xs text-gray-400 mt-1 truncate">{o.context}</pre>}
-            </div>
-          ))
+        {observations.length === 0 && (
+          <div className="bg-gray-50 p-8 rounded border text-center text-gray-400">
+            No observations yet. The agent will record observations automatically during interactions.
+          </div>
         )}
+        {observations.map((o: Observation) => (
+          <div
+            key={o.id}
+            className="bg-white p-4 rounded border cursor-pointer hover:shadow-md transition-shadow group"
+            onClick={() => setSelected(o)}
+          >
+            <div className="flex gap-2 items-center mb-1 flex-wrap">
+              <span className={`text-xs px-2 py-0.5 rounded ${TYPE_COLORS[o.observation_type] || "bg-gray-100 text-gray-700"}`}>
+                {o.observation_type}
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[o.status] || ""}`}>{o.status}</span>
+              <span className="text-xs text-gray-400">{new Date(o.created_at).toLocaleString()}</span>
+              {o.importance && <span className="text-xs text-gray-400">Importance: {o.importance}/10</span>}
+              <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/observations/${o.id}`);
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                  title="View full details"
+                >
+                  Open
+                </button>
+              </span>
+            </div>
+            <p className="text-sm">{o.content}</p>
+            {o.context && <pre className="text-xs text-gray-400 mt-1 truncate">{o.context}</pre>}
+          </div>
+        ))}
       </div>
 
       <Overlay isOpen={selected !== null} onClose={() => setSelected(null)} title={`Observation #${selected?.id ?? ""}`}
