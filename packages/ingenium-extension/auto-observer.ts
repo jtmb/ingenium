@@ -1,5 +1,8 @@
 import { tool } from "@opencode-ai/plugin";
 
+// 🔴 LOAD CHECK — if you see this, the plugin file IS being loaded by OpenCode
+console.log("[auto-observer] PLUGIN FILE LOADED — module initialization");
+
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 // TODO: PROJECT should be dynamic (derived from worktree or env) rather than hardcoded.
 // Currently kept for backward compatibility — overridable via INGENIUM_PROJECT env var.
