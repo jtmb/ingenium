@@ -125,11 +125,13 @@ function runMigrations(db) {
             logger.info("Applied migration 014_configs.sql");
         }
         // Check if observations source CHECK includes 'auto-observer' (migration 015)
-        const observationsCreateSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='observations'").get();
+        let observationsCreateSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='observations'").get();
         if (observationsCreateSql && !observationsCreateSql.sql.includes("auto-observer")) {
             const sql = readFileSync(resolve(migrationsDir, "015_auto_observer_source.sql"), "utf-8");
             db.exec(sql);
             logger.info("Applied migration 015_auto_observer_source.sql");
+            // Re-read observations CREATE SQL — migration 015 just rebuilt the table
+            observationsCreateSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='observations'").get();
         }
         // Check if mcp_tool_states table exists (migration 016)
         const mcpToolStatesCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='mcp_tool_states'").get();
@@ -145,7 +147,10 @@ function runMigrations(db) {
         const traitsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='personality_traits'").get();
         if (traitsSql && observationsCreateSql && observationsCreateSql.sql.includes("auto-observer") && !traitsSql.sql.includes("017_rebuilt")) {
             const sql = readFileSync(resolve(migrationsDir, "017_fix_trait_fk.sql"), "utf-8");
+            // Disable FK enforcement during migration to avoid cascading FTS trigger errors
+            db.pragma("foreign_keys = OFF");
             db.exec(sql);
+            db.pragma("foreign_keys = ON");
             logger.info("Applied migration 017_fix_trait_fk.sql");
         }
     }
