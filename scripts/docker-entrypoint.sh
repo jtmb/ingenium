@@ -25,7 +25,7 @@ if [ ! -f "$OC_CONFIG" ]; then
   "mcp": {
     "ingenium": {
       "type": "local",
-      "command": ["node", "/app/services/ingenium-server/dist/scripts/mcp-server.js"],
+      "command": ["npx", "-y", "@ingenium/extension"],
       "enabled": true,
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1"
