@@ -97,11 +97,22 @@ export default function SettingsPage() {
       api.settings.get("synthesis_backup_endpoint", "global-default"),
       api.settings.get("synthesis_backup_api_key", "global-default"),
     ]).then(([pr, m, e, k]) => {
-      if (pr.data?.value) { setBackupProviderId(pr.data.value); setShowBackup(true); }
-      if (m.data?.value) setBackupSelectedModel(m.data.value);
+      const bPid = pr.data?.value || "";
+      if (bPid) { setBackupProviderId(bPid); setShowBackup(true); }
+      setBackupIsCustom(bPid === "__custom__");
+      if (bPid === "__custom__") {
+        if (m.data?.value) setBackupCustomModel(m.data.value);
+        if (e.data?.value) setBackupCustomEndpoint(e.data.value);
+      } else if (bPid && m.data?.value) {
+        const bp = providers.find(x => x.id === bPid);
+        if (bp) {
+          const match = Object.entries(bp.models || {}).find(([, v]: [string, any]) => v.id === m.data.value);
+          if (match) setBackupSelectedModel(match[0]);
+        }
+      }
       if (k.data?.value) setBackupApiKey(k.data.value);
     }).catch(() => {});
-  }, []);
+  }, [providers]);
 
   // Fetch saved synthesis interval
   useEffect(() => {
