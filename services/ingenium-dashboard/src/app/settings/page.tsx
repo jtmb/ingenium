@@ -87,7 +87,7 @@ export default function SettingsPage() {
         }
       }
     }).catch(() => {});
-  }, []);
+  }, [providers]);
 
   // Load backup synthesis config
   useEffect(() => {
