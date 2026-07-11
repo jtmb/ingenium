@@ -18,12 +18,12 @@ Controls how many days projects stay in the archive before being permanently del
 
 ### Synthesis LLM Provider
 
-Configure an LLM for Phase 2 skill synthesis in the self-learning pipeline.
+Configure an LLM for the self-learning pipeline (extraction + trait consolidation + skill synthesis).
 
 **Provider Selection:**
 - Choose from available OpenCode providers (detected from OpenCode config)
 - Select "**— Custom Provider —**" for providers not in the list
-- Select "**— No LLM (heuristics only) —**" to run Phase 1 only
+- Select "**— No LLM (heuristics only) —**" to disable LLM features — observations will stay PENDING, no traits or skills will be created
 
 **Model Selection:**
 - For standard providers: select from the model dropdown
