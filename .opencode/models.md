@@ -22,6 +22,4 @@ Agent YAML format: `model: {provider-id}/{model-key}`
 
 ## LMStudio (local)
 
-- **qwen/qwen3-coder-30b** -> `model: lmstudio/qwen/qwen3-coder-30b`
-- **qwen/qwen3-30b-a3b-2507** -> `model: lmstudio/qwen/qwen3-30b-a3b-2507`
-- **openai/gpt-oss-20b** -> `model: lmstudio/openai/gpt-oss-20b`
+- **qwen/qwen3.5-9b** -> `model: lmstudio/qwen/qwen3.5-9b`
