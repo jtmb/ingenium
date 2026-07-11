@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import FolderSidebar from "./components/FolderSidebar";
 import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
 import EmptyState from "./components/EmptyState";
 import AccountSetup from "./components/AccountSetup";
-import PageHeader from "../components/PageHeader";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 const PROJECT = "gh-llm-bootstrap";
@@ -147,14 +146,6 @@ export default function MailPage() {
     setSearchQuery("");
   }, []);
 
-  const headerStats = useMemo(() => {
-    if (accounts.length === 0) return undefined;
-    return [
-      { label: "Accounts", value: accounts.length, color: "blue" },
-      { label: "Inbox", value: total, color: "green" },
-    ] as { label: string; value: number | string; color?: string }[];
-  }, [accounts.length, total]);
-
   // No accounts — show empty / setup state
   if (accounts.length === 0 && !showAccountSetup) {
     const loadDemoAccount = async () => {
@@ -191,7 +182,7 @@ export default function MailPage() {
 
     return (
       <div className="space-y-4">
-        <PageHeader title="Mail" />
+        <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
         <EmptyState
           message="No email accounts configured"
           action={{ label: "Add Account", onClick: () => setShowAccountSetup(true) }}
@@ -211,7 +202,7 @@ export default function MailPage() {
   if (showAccountSetup) {
     return (
       <div className="space-y-4">
-        <PageHeader title="Mail" />
+        <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
         <AccountSetup
           onComplete={async () => {
             setShowAccountSetup(false);
@@ -234,11 +225,7 @@ export default function MailPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Mail"
-        stats={headerStats}
-        variant="plain"
-      />
+      <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
 
       <div className="flex h-[calc(100vh-180px)] border border-gray-200 rounded bg-white overflow-hidden">
         {/* Folder sidebar */}

@@ -1,12 +1,10 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
-import PageHeader from "../components/PageHeader";
-import EmptyState from "../components/EmptyState";
 import { api, type Agent } from "@/lib/api";
 
 /**
@@ -113,25 +111,17 @@ export default function AgentsPage() {
     .map(cat => ({ category: cat, items: agents.filter(a => a.category === cat) }))
     .filter(g => g.items.length > 0);
 
-  const enabledCount = useMemo(() => agents.filter(a => a.enabled).length, [agents]);
-
   return (
     <div className="space-y-8">
-      <PageHeader
-        title="Agents"
-        subtitle="Manage AI agent definitions"
-        stats={[
-          { label: "Total", value: agents.length },
-          { label: "Enabled", value: enabledCount, color: "green" },
-        ]}
-      >
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Agents</h1>
         <button
           onClick={() => setShowCreate(!showCreate)}
           className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
         >
           {showCreate ? "Cancel" : "Add Agent"}
         </button>
-      </PageHeader>
+      </div>
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
@@ -156,13 +146,13 @@ export default function AgentsPage() {
             onChange={e => setNewDesc(e.target.value)}
           />
           <div className="flex gap-4">
-            <select className="border border-gray-200 bg-white px-3 py-1.5 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={newCat} onChange={e => setNewCat(e.target.value)}>
+            <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={newCat} onChange={e => setNewCat(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="execution">Execution</option>
               <option value="research">Research</option>
               <option value="security">Security</option>
             </select>
-            <select className="border border-gray-200 bg-white px-3 py-1.5 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={newMode} onChange={e => setNewMode(e.target.value)}>
+            <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={newMode} onChange={e => setNewMode(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="subagent">Subagent</option>
             </select>
@@ -192,11 +182,10 @@ export default function AgentsPage() {
       {loading && <p className="text-gray-500">Loading agents...</p>}
 
       {!loading && agents.length === 0 && (
-        <EmptyState
-          message="No agents registered"
-          subtitle="Click Add Agent to create one."
-          action={{ label: "Add Agent", onClick: () => setShowCreate(true) }}
-        />
+        <div className="text-center py-12 text-gray-500">
+          <p className="text-lg">No agents registered</p>
+          <p className="text-sm">Use "Add Agent" to create your first agent. Agents are written to .opencode/agents/ and synced to global config.</p>
+        </div>
       )}
 
       {grouped.map(group => (
@@ -214,7 +203,7 @@ export default function AgentsPage() {
                       onChange={e => setEditDesc(e.target.value)}
                     />
                     <div className="flex gap-4">
-                      <select className="border border-gray-200 bg-white px-3 py-1.5 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={editCat} onChange={e => setEditCat(e.target.value)}>
+                      <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={editCat} onChange={e => setEditCat(e.target.value)}>
                         <option value="primary">Primary</option>
                         <option value="execution">Execution</option>
                         <option value="research">Research</option>
