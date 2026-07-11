@@ -241,6 +241,13 @@ When configured in **Settings → Synthesis LLM**, the pipeline runs a second ph
 4. Pipeline executes create/update operations and logs results to `/pipeline` timeline
 5. Non-fatal: Phase 1 trait results are saved even if Phase 2 fails
 
+**Split-skill output:** Skills created by the LLM use the standard split-skill format:
+- `SKILL.md` — main content with YAML frontmatter
+- `metadata.json` — tags, alwaysApply, description
+- `references/` — auxiliary reference files for related concepts grouped into a single skill
+
+**Naming convention:** All LLM-synthesized skill names must include the `llm-synthesized` prefix (e.g., `llm-synthesized-email-workflows`). The LLM groups related concepts discovered across observations into one skill with multiple reference files rather than creating many small single-concept skills.
+
 **Configuration:** Set `synthesis_model`, `synthesis_api_key`, and `synthesis_endpoint` via the dashboard Settings page or directly in the DB.
 
 ### Pipeline Observability
@@ -268,6 +275,8 @@ See `.opencode/skills/self-learning/SKILL.md` for complete documentation of the 
 - Personality trait generation rules
 - Synthesis pipeline architecture
 - MCP tools reference
+
+The self-learning skill now includes a `metadata.json` file for proper split-skill format compliance, enabling consistent skill sync and dashboard editing.
 
 > 📖 **Full reference**: See [`self-learning-pipeline.md`](./docs/self-learning-pipeline.md) for complete documentation of the 10 observation types, 10 personality trait types, MCP tools, API endpoints, synthesis pipeline (Phase 1 + Phase 2), pipeline observability timeline, bidirectional skill sync, and deprecation notes.
 
@@ -309,6 +318,14 @@ Every plugin lifecycle operation (create, enable, disable, delete, update) MUST 
 2. `opencode.json`'s `plugin` array
 
 This prevents "disconnected config" bugs where the DB shows a plugin as enabled but OpenCode can't load it.
+
+### Plugin Source Auto-Populate
+
+When creating a plugin via `ingenium_plugin_create`, if `sourceContent` is empty the API auto-populates the source by reading the file at the given `filePath` from disk. This allows plugins to be created by path reference alone:
+
+- **MCP tool:** `ingenium_plugin_create(project, name, filePath)` — omit `sourceContent` to trigger auto-read
+- **API endpoint:** `GET /api/v1/plugins/:name/source` — returns the raw source content from disk for a given plugin
+- **Dashboard:** The Plugins page Edit button fetches source from the `GET /plugins/:name/source` endpoint when the DB content is empty, enabling inline editing of file-backed plugins
 
 ### Skill file_tree Format
 

@@ -209,6 +209,9 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
         // Execute skill create operations
         for (const skillToCreate of llmResult.skills_to_create) {
           try {
+            const fileTree = skillToCreate.reference_files && skillToCreate.reference_files.length > 0
+              ? JSON.stringify(Object.fromEntries(skillToCreate.reference_files.map(rf => [rf.path, rf.content])))
+              : undefined;
             skills.createSkill(
               projectId,
               skillToCreate.name,
@@ -217,6 +220,7 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
               "learning", // category
               "llm-synthesized,auto-generated",
               1, // always_apply
+              fileTree,
             );
             result.skills_created++;
 
@@ -400,6 +404,8 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
     try {
       const existing = skills.getSkill(globalProject.id, skillName);
       if (!existing) {
+        const sourceSkill = skills.getSkill(sampleSkill.project_id || projectIds[0]!, skillName);
+        const fileTree = (sourceSkill as any)?.file_tree || undefined;
         skills.createSkill(
           globalProject.id,
           sampleSkill.name,
@@ -408,6 +414,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
           "global",
           "cross-project,auto-generated",
           1,
+          fileTree,
         );
         result.skills_created++;
 

@@ -97,7 +97,16 @@ export function createPlugin(projectId, name, filePath, sourceContent) {
         validatePluginPath(filePath);
         const now = new Date().toISOString();
         const id = `plugin_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const content = sourceContent ?? "";
+        const content = sourceContent || (() => {
+            try {
+                const resolvedPath = resolve(getProjectRoot(), ".opencode/plugins", filePath);
+                if (existsSync(resolvedPath)) {
+                    return readFileSync(resolvedPath, "utf-8");
+                }
+            }
+            catch { /* file doesn't exist yet */ }
+            return "";
+        })();
         db.prepare(`INSERT INTO plugins (id, project_id, name, file_path, enabled, source_content, created_at, updated_at)
        VALUES (?, ?, ?, ?, 1, ?, ?, ?)`).run(id, projectId, name, filePath, content, now, now);
         ensurePluginDir();

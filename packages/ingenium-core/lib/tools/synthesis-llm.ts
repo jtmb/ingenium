@@ -11,6 +11,7 @@ export interface SynthesisLLMResult {
     name: string;
     description: string;
     content: string;
+    reference_files?: Array<{ path: string; content: string }>;
   }>;
   skills_to_update: Array<{
     name: string;
@@ -77,7 +78,10 @@ Analyze these observations and respond with ONLY valid JSON (no markdown, no cod
     {
       "name": "kebab-case-name",
       "description": "One-line description",
-      "content": "Full SKILL.md markdown content with ## 🔴 HARD RULEs and code examples"
+      "content": "Concise SKILL.md content with ## 🔴 HARD RULEs and ## Reference Files table",
+      "reference_files": [
+        { "path": "references/topic.md", "content": "Detailed content for this reference file" }
+      ]
     }
   ],
   "skills_to_update": [
@@ -93,6 +97,30 @@ Analyze these observations and respond with ONLY valid JSON (no markdown, no cod
   "insights": ["One-line insight from this batch"],
   "summary": "One-line summary of synthesis actions"
 }
+
+## Skill Format Requirements
+
+Each skill must follow the split-skill format:
+
+1. \`name\` — MUST include \`llm-synthesized\` prefix (e.g., \`llm-synthesized-shell-patterns\`)
+2. \`description\` — One-line summary
+3. \`content\` — Concise SKILL.md with "## Reference Files" section linking to reference files
+4. \`reference_files\` — Array of \`{ path, content }\` for detailed content
+
+Example:
+\`\`\`json
+{
+  "name": "llm-synthesized-shell-patterns",
+  "description": "Common shell command patterns and safety rules",
+  "content": "# Shell Patterns\\n\\n## 🔴 HARD RULEs\\n- Never use \`&\` in commands\\n\\n## Reference Files\\n\\n| File | Content |\\n|------|--------|\\n| [\`references/command-safety.md\`](references/command-safety.md) | Safe command patterns and anti-patterns |\\n| [\`references/output-formatting.md\`](references/output-formatting.md) | Output formatting conventions |",
+  "reference_files": [
+    { "path": "references/command-safety.md", "content": "# Command Safety\\n\\nDetailed safety rules here..." },
+    { "path": "references/output-formatting.md", "content": "# Output Formatting\\n\\nFormatting conventions here..." }
+  ]
+}
+\`\`\`
+
+IMPORTANT: Group related concepts. If you identify 3 patterns about shell commands, create ONE \`llm-synthesized-shell-patterns\` skill with 3 reference files, NOT 3 separate skills.
 
 ### Skill Content Guidelines
 - Use 🔴 HARD RULE blocks for mandatory constraints
@@ -115,11 +143,29 @@ function validateResponse(raw: any): SynthesisLLMResult {
   if (!raw || typeof raw !== "object") return result;
 
   if (Array.isArray(raw.skills_to_create)) {
-    result.skills_to_create = raw.skills_to_create.slice(0, 5).map((s: any) => ({
-      name: String(s.name || "").slice(0, 64).replace(/[^a-z0-9-]/gi, "-").toLowerCase(),
-      description: String(s.description || "").slice(0, 200),
-      content: String(s.content || ""),
-    })).filter((s: { name: string; content: string }) => s.name && s.content);
+    result.skills_to_create = raw.skills_to_create.slice(0, 5).map((s: any) => {
+      let name = String(s.name || "").slice(0, 64).replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+      // Force llm-synthesized prefix
+      if (name && !name.startsWith("llm-synthesized")) {
+        name = "llm-synthesized-" + name;
+      }
+      const item: any = {
+        name,
+        description: String(s.description || "").slice(0, 200),
+        content: String(s.content || ""),
+      };
+      // Handle reference_files for split-skill format
+      if (s.reference_files && Array.isArray(s.reference_files)) {
+        item.reference_files = s.reference_files
+          .filter((rf: any) => rf.path && rf.content && rf.path.startsWith("references/"))
+          .slice(0, 10)  // cap at 10 reference files per skill
+          .map((rf: any) => ({
+            path: rf.path.replace(/[^a-zA-Z0-9_\-/\.]/g, ""),  // sanitize path
+            content: rf.content.slice(0, 8000),  // cap content length
+          }));
+      }
+      return item;
+    }).filter((s: { name: string; content: string }) => s.name && s.content);
   }
 
   if (Array.isArray(raw.skills_to_update)) {

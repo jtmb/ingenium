@@ -129,14 +129,16 @@ Docker starts a single container running 4 processes under supervisord: API (:40
 
 ## Plugins
 
-**What it does**: Manage OpenCode plugin lifecycle — enable, disable, and configure plugins. Track which plugins are active and their lifecycle hooks.
+**What it does**: Manage OpenCode plugin lifecycle — enable, disable, and configure plugins. Track which plugins are active and their lifecycle hooks. When creating a plugin, the API auto-populates source from disk if `sourceContent` is omitted.
 
 **How to use**:
 - View all plugins with their current status
 - Toggle plugins on/off
 - See lifecycle hooks each plugin registers for
+- Create a plugin by path reference: `ingenium_plugin_create(project, name, filePath)` — omitting `sourceContent` triggers auto-read from disk
+- Edit a file-backed plugin: the Edit button fetches raw source from `GET /plugins/:name/source` when DB content is empty
 
-**API**: GET /api/v1/plugins, POST /api/v1/plugins/:id/activate, POST /api/v1/plugins/:id/deactivate
+**API**: GET /api/v1/plugins, GET /api/v1/plugins/:name/source, POST /api/v1/plugins/:id/activate, POST /api/v1/plugins/:id/deactivate
 
 **Code**: services/ingenium-dashboard/src/app/plugins/page.tsx → services/ingenium-api/routes/plugins.ts → packages/ingenium-core/lib/tools/plugins.ts
 
@@ -218,13 +220,15 @@ These 14 skills provide guidance for specific contexts but are not required for 
 
 ## Synthesis & Cross-Project Features
 
-**What it does**: The synthesis pipeline processes observations into personality traits and skills. Cross-project synthesis evaluates patterns across multiple projects, creating global skills available to every project.
+**What it does**: The synthesis pipeline processes observations into personality traits and skills. When configured with an LLM (Phase 2), the pipeline creates skills in standard split-skill format (SKILL.md + metadata.json + references/). Cross-project synthesis evaluates patterns across multiple projects, creating global skills available to every project.
 
 **How to use**:
 - Observations are automatically processed via the scheduled synthesis pipeline (every 15 minutes)
 - Trigger manual synthesis via `ingenium_synthesis_run` for the current project
 - Use `ingenium_synthesis_cross_project` to evaluate observations and skills across all active projects
 - Global skills are created in the `global-default` project and shared across all projects
+
+**Split-skill output (LLM Phase 2):** When the LLM creates skills, it groups related concepts into one skill with multiple reference files rather than creating many small single-concept skills. All synthesized skill names use the `llm-synthesized` prefix (e.g., `llm-synthesized-email-workflows`).
 
 **MCP Tools**:
 | Tool | Purpose |
