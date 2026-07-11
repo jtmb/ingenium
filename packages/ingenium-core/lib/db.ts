@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql"]) {
+    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info(`Applied migration ${file}`);
@@ -150,6 +150,16 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "012_project_is_global.sql"), "utf-8");
       db.exec(sql);
       logger.info("Applied migration 012_project_is_global.sql");
+    }
+
+    // Check if plugins table still uses UNIQUE(name) instead of UNIQUE(project_id, name) (migration 013)
+    const pluginsCreateSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='plugins'"
+    ).get() as { sql: string } | undefined;
+    if (pluginsCreateSql && !pluginsCreateSql.sql.includes("UNIQUE(project_id, name)")) {
+      const sql = readFileSync(resolve(migrationsDir, "013_fix_plugins_unique.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 013_fix_plugins_unique.sql");
     }
   }
 }
