@@ -34,7 +34,7 @@
       "type": "local",
       "command": [
         "node",
-        "/home/brajam/repos/gh-llm-bootstrap/services/ingenium-server/dist/scripts/mcp-server.js"
+        "services/ingenium-server/dist/scripts/mcp-server.js"
       ],
       "enabled": true,
       "environment": {
