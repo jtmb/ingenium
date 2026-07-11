@@ -238,8 +238,8 @@ describe("synthesis LLM", () => {
     );
     expect(result.skills_to_create).toHaveLength(2);
     // /[^a-z0-9-]/gi → replace with "-", then toLowerCase
-    expect(result.skills_to_create[0].name).toBe("llm-synthesized-my-cool-skill---");
-    expect(result.skills_to_create[1].name).toBe("llm-synthesized-uppercase-name-here");
+    expect(result.skills_to_create[0].name).toBe("my-cool-skill---");
+    expect(result.skills_to_create[1].name).toBe("uppercase-name-here");
   });
 
   it("clamps trait confidence to [0, 0.95] range", async () => {
@@ -278,7 +278,7 @@ describe("synthesis LLM", () => {
       [makeObs(1)], [], [], endpoint(), "model", "key",
     );
     expect(result.skills_to_create).toHaveLength(1);
-    expect(result.skills_to_create[0].name).toBe("llm-synthesized-valid");
+    expect(result.skills_to_create[0].name).toBe("valid");
     expect(result.skills_to_update).toHaveLength(1);
     expect(result.skills_to_update[0].name).toBe("valid-update");
     expect(result.skills_to_update[0].patch_type).toBe("update-section");
@@ -293,7 +293,7 @@ describe("synthesis LLM", () => {
       [makeObs(1)], [], [], endpoint(), "model", "key",
     );
     expect(result.skills_to_create).toHaveLength(1);
-    expect(result.skills_to_create[0].name).toBe("llm-synthesized-extracted-skill");
+    expect(result.skills_to_create[0].name).toBe("extracted-skill");
     expect(result.summary).toBe("Done");
   });
 
@@ -358,7 +358,7 @@ describe("synthesis LLM", () => {
     expect(result.skills_to_create[0].reference_files).toHaveLength(10);
   });
 
-  it("preserves existing llm-synthesized prefix without doubling", async () => {
+  it("preserves valid kebab-case skill names as-is (no prefix forcing)", async () => {
     const payload = {
       skills_to_create: [
         {

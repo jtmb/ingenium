@@ -12,12 +12,14 @@ export interface SynthesisLLMResult {
     name: string;
     description: string;
     content: string;
+    tags?: string;
     reference_files?: Array<{ path: string; content: string }>;
   }>;
   skills_to_update: Array<{
     name: string;
     patch: string;
     patch_type: "add-rule" | "update-section" | "add-pattern";
+    reference_files?: Array<{ path: string; content: string }>;
   }>;
   personality_traits?: Array<{
     trait_type: PersonalityTrait["trait_type"];
@@ -80,6 +82,7 @@ Analyze these observations and respond with ONLY valid JSON (no markdown, no cod
       "name": "kebab-case-name",
       "description": "One-line description",
       "content": "Concise SKILL.md content with ## 🔴 HARD RULEs and ## Reference Files table",
+      "tags": "tag1,tag2,tag3",
       "reference_files": [
         { "path": "references/topic.md", "content": "Detailed content for this reference file" }
       ]
@@ -103,7 +106,7 @@ Analyze these observations and respond with ONLY valid JSON (no markdown, no cod
 
 Each skill must follow the split-skill format:
 
-1. \`name\` — MUST include \`llm-synthesized\` prefix (e.g., \`llm-synthesized-shell-patterns\`)
+1. \`name\` — Use a descriptive kebab-case name (e.g., \`shell-patterns\`, \`git-workflows\`). Do NOT include any prefix.
 2. \`description\` — One-line summary
 3. \`content\` — Concise SKILL.md with "## Reference Files" section linking to reference files
 4. \`reference_files\` — Array of \`{ path, content }\` for detailed content
@@ -111,9 +114,10 @@ Each skill must follow the split-skill format:
 Example:
 \`\`\`json
 {
-  "name": "llm-synthesized-shell-patterns",
+  "name": "shell-patterns",
   "description": "Common shell command patterns and safety rules",
   "content": "# Shell Patterns\\n\\n## 🔴 HARD RULEs\\n- Never use \`&\` in commands\\n\\n## Reference Files\\n\\n| File | Content |\\n|------|--------|\\n| [\`references/command-safety.md\`](references/command-safety.md) | Safe command patterns and anti-patterns |\\n| [\`references/output-formatting.md\`](references/output-formatting.md) | Output formatting conventions |",
+  "tags": "shell,scripting,error-handling",
   "reference_files": [
     { "path": "references/command-safety.md", "content": "# Command Safety\\n\\nDetailed safety rules here..." },
     { "path": "references/output-formatting.md", "content": "# Output Formatting\\n\\nFormatting conventions here..." }
@@ -121,9 +125,15 @@ Example:
 }
 \`\`\`
 
-IMPORTANT: Group related concepts. If you identify 3 patterns about shell commands, create ONE \`llm-synthesized-shell-patterns\` skill with 3 reference files, NOT 3 separate skills.
+IMPORTANT: Group related concepts. If you identify 3 patterns about shell commands, create ONE \`shell-patterns\` skill with 3 reference files, NOT 3 separate skills.
 
 CAPS: Max 5 skills_to_create, max 5 skills_to_update. Do NOT create a skill unless 3+ observations support it.
+
+### Skill Consolidation Rules
+- This project currently has ${existingSkills.length} skills. Target: maintain ≤20 skills.
+- STRONGLY prefer merging new knowledge into an EXISTING skill (via skills_to_update, adding a new references/ file) over creating a new one.
+- Only propose skills_to_create when NO existing skill covers the domain.
+- When updating an existing skill, include reference_files in the update to add new reference files to the skill.
 
 ### Skill Content Guidelines
 - Use 🔴 HARD RULE blocks for mandatory constraints
@@ -148,14 +158,11 @@ function validateResponse(raw: any): SynthesisLLMResult {
   if (Array.isArray(raw.skills_to_create)) {
     result.skills_to_create = raw.skills_to_create.slice(0, 5).map((s: any) => {
       let name = String(s.name || "").slice(0, 64).replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-      // Force llm-synthesized prefix
-      if (name && !name.startsWith("llm-synthesized")) {
-        name = "llm-synthesized-" + name;
-      }
       const item: any = {
         name,
         description: String(s.description || "").slice(0, 200),
         content: String(s.content || ""),
+        tags: s.tags ? String(s.tags) : undefined,
       };
       // Handle reference_files for split-skill format
       if (s.reference_files && Array.isArray(s.reference_files)) {
@@ -172,11 +179,23 @@ function validateResponse(raw: any): SynthesisLLMResult {
   }
 
   if (Array.isArray(raw.skills_to_update)) {
-    result.skills_to_update = raw.skills_to_update.slice(0, 5).map((s: any) => ({
-      name: String(s.name || ""),
-      patch: String(s.patch || ""),
-      patch_type: (s.patch_type === "update-section" || s.patch_type === "add-pattern") ? s.patch_type : "add-rule",
-    })).filter((s: { name: string; patch: string }) => s.name && s.patch);
+    result.skills_to_update = raw.skills_to_update.slice(0, 5).map((s: any) => {
+      const update: any = {
+        name: String(s.name || ""),
+        patch: String(s.patch || ""),
+        patch_type: (s.patch_type === "update-section" || s.patch_type === "add-pattern") ? s.patch_type : "add-rule",
+      };
+      if (s.reference_files && Array.isArray(s.reference_files)) {
+        update.reference_files = s.reference_files
+          .filter((rf: any) => rf.path && rf.content && rf.path.startsWith("references/"))
+          .slice(0, 10)
+          .map((rf: any) => ({
+            path: rf.path.replace(/[^a-zA-Z0-9_\-/\.]/g, ""),
+            content: rf.content.slice(0, 8000),
+          }));
+      }
+      return update;
+    }).filter((s: any) => s.name && s.patch);
   }
 
   if (Array.isArray(raw.personality_traits)) {

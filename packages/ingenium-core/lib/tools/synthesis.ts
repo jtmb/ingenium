@@ -307,7 +307,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
               skillToCreate.description,
               skillToCreate.content,
               "learning", // category
-              "llm-synthesized,auto-generated",
+              skillToCreate.tags || "auto-generated",
               1, // always_apply
               fileTree,
             );
@@ -339,7 +339,18 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
             const existing = skills.getSkill(projectId, skillToUpdate.name);
             if (existing) {
               const updatedContent = existing.content + `\n\n${skillToUpdate.patch}`;
-              skills.updateSkill(projectId, skillToUpdate.name, updatedContent);
+              // Merge reference_files into existing file_tree if the update provides them
+              let mergedFileTree: string | undefined;
+              if (skillToUpdate.reference_files && skillToUpdate.reference_files.length > 0) {
+                const existingTree = (existing as any).file_tree
+                  ? JSON.parse((existing as any).file_tree)
+                  : {};
+                for (const rf of skillToUpdate.reference_files) {
+                  existingTree[rf.path] = rf.content;
+                }
+                mergedFileTree = JSON.stringify(existingTree);
+              }
+              skills.updateSkill(projectId, skillToUpdate.name, updatedContent, undefined, undefined, undefined, mergedFileTree);
               // Best-effort disk write
               try {
                 const skillObj = skills.getSkill(projectId, skillToUpdate.name);
@@ -534,7 +545,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
           `[Cross-project] ${sampleSkill.description}`,
           sampleSkill.content,
           "global",
-          "cross-project,auto-generated",
+          sampleSkill.tags || "cross-project,auto-generated",
           1,
           fileTree,
         );
