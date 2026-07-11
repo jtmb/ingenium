@@ -439,7 +439,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 export declare const PipelineEventSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
-    event_type: z.ZodEnum<["session_created", "session_idle", "observation_created", "observation_imported", "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed", "trait_created", "trait_updated", "plugin_initialized", "plugin_error"]>;
+    event_type: z.ZodEnum<["session_created", "session_idle", "observation_created", "observation_imported", "observation_detected", "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed", "extraction_completed", "extraction_failed", "trait_created", "trait_updated", "plugin_initialized", "plugin_error"]>;
     event_source: z.ZodEnum<["agent", "plugin", "synthesis", "system"]>;
     title: z.ZodString;
     description: z.ZodOptional<z.ZodString>;
@@ -454,7 +454,7 @@ export declare const PipelineEventSchema: z.ZodObject<{
     project_id: string;
     title: string;
     importance: number;
-    event_type: "session_created" | "session_idle" | "observation_created" | "observation_imported" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "trait_created" | "trait_updated" | "plugin_initialized" | "plugin_error";
+    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "plugin_initialized" | "plugin_error";
     event_source: "agent" | "plugin" | "synthesis" | "system";
     description?: string | undefined;
     session_id?: string | undefined;
@@ -465,7 +465,7 @@ export declare const PipelineEventSchema: z.ZodObject<{
     created_at: string;
     project_id: string;
     title: string;
-    event_type: "session_created" | "session_idle" | "observation_created" | "observation_imported" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "trait_created" | "trait_updated" | "plugin_initialized" | "plugin_error";
+    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "plugin_initialized" | "plugin_error";
     event_source: "agent" | "plugin" | "synthesis" | "system";
     description?: string | undefined;
     session_id?: string | undefined;

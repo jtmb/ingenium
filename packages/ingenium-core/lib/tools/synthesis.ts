@@ -1,4 +1,3 @@
-import { Observation, PersonalityTrait } from "../schema.js";
 import * as observations from "./observations.js";
 import * as personality from "./personality.js";
 import * as skills from "./skills.js";
@@ -16,27 +15,6 @@ export interface SynthesisResult {
   observations_skipped: number;
   errors: string[];
   summary: string;
-}
-
-/**
- * Maps an observation type to the most appropriate personality trait type
- * for synthesis classification.
- */
-function mapObservationToTraitType(
-  obsType: Observation["observation_type"],
-): PersonalityTrait["trait_type"] {
-  switch (obsType) {
-    case "correction":   return "feedback_style";
-    case "preference":   return "code_preference";
-    case "pattern":      return "workflow_pattern";
-    case "insight":      return "domain_knowledge";
-    case "feedback":     return "feedback_style";
-    case "behavior":     return "interaction_pattern";
-    case "terminology":  return "terminology";
-    case "workflow":     return "workflow_pattern";
-    case "error":        return "priority_signal";
-    case "goal":         return "priority_signal";
-  }
 }
 
 /**
@@ -96,9 +74,6 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
     return result;
   }
 
-  // Track pre-synthesis trait count to distinguish created vs updated
-  const preTraitCount = personality.getTraits(projectId).length;
-
   // Log synthesis start
   let synthesisEventId: number | undefined;
   try {
@@ -115,90 +90,135 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
     synthesisEventId = evt.id;
   } catch (_) { /* non-fatal */ }
 
+  // ── Phase 1: Trait Consolidation via LLM ──
+  // Load existing active traits for the consolidation prompt
+  const existingActiveTraits = personality.getTraits(projectId);
+
+  const consolidation = await synthesisLlm.consolidateTraits(
+    projectId,
+    batch.map(o => ({ id: o.id, observation_type: o.observation_type, content: o.content })),
+    existingActiveTraits.map(t => ({ id: t.id, trait_type: t.trait_type, trait_value: t.trait_value, confidence: t.confidence })),
+  );
+
+  if (!consolidation) {
+    // LLM not configured or unavailable — leave observations PENDING for a future cycle
+    const reason = synthesisLlm.isLLMSynthesisConfigured(projectId)
+      ? "LLM consolidation API unreachable — leaving observations pending for retry"
+      : "LLM synthesis not configured — leaving observations pending until configured";
+    result.summary = reason;
+    result.errors.push(reason);
+    try {
+      logEvent(
+        projectId, "synthesis_completed", "synthesis",
+        "Synthesis skipped — LLM unavailable",
+        reason,
+        { ...result, model: synthModel, endpoint: synthEndpoint, provider: synthProvider },
+        synthesisEventId,
+        sessionId,
+      );
+    } catch (_) { /* non-fatal */ }
+    return result;
+  }
+
+  // Collect all observation IDs referenced by the LLM
+  const involvedObsIds = new Set<number>();
+  for (const c of consolidation.create) {
+    for (const oid of c.observation_ids) involvedObsIds.add(oid);
+  }
+  for (const c of consolidation.confirm) {
+    involvedObsIds.add(c.observation_id);
+  }
+
+  // Execute CREATE operations
+  for (const toCreate of consolidation.create) {
+    try {
+      const clampedConfidence = Math.min(0.15, Math.max(0.10, toCreate.confidence_hint));
+      // Use the first observation_id as the exemplar
+      const exemplarObsId = toCreate.observation_ids[0];
+      const exemplarObs = exemplarObsId ? batch.find(o => o.id === exemplarObsId) : undefined;
+
+      personality.upsertTrait(
+        projectId,
+        toCreate.trait_type,
+        toCreate.trait_value,
+        undefined, // label
+        clampedConfidence,
+        exemplarObsId,
+        exemplarObs?.content, // USE observation content as exemplar text (not trait_value — that's normalized)
+      );
+      result.traits_created++;
+
+      // Log trait_created event with normalized value
+      try {
+        logEvent(
+          projectId, "trait_created", "synthesis",
+          `Trait created: ${toCreate.trait_type} → ${toCreate.trait_value.substring(0, 60)}`,
+          `Normalized from ${toCreate.observation_ids.length} observation(s), confidence: ${clampedConfidence.toFixed(2)}`,
+          {
+            trait_type: toCreate.trait_type,
+            trait_value: toCreate.trait_value,
+            confidence: clampedConfidence,
+            observation_ids: toCreate.observation_ids,
+            project_name: projectName,
+            model: synthModel,
+          },
+          synthesisEventId,
+          sessionId,
+        );
+      } catch (_) { /* non-fatal */ }
+    } catch (err: any) {
+      result.errors.push(`Trait create "${toCreate.trait_value?.substring(0, 30)}": ${err.message}`);
+    }
+  }
+
+  // Execute CONFIRM operations
+  for (const toConfirm of consolidation.confirm) {
+    try {
+      const trait = existingActiveTraits.find(t => t.id === toConfirm.trait_id);
+      if (trait) {
+        personality.updateConfidence(
+          projectId,
+          trait.trait_type,
+          trait.trait_value,
+          0.15,
+        );
+        result.traits_updated++;
+
+        try {
+          logEvent(
+            projectId, "trait_updated", "synthesis",
+            `Trait confirmed: ${trait.trait_type} → ${trait.trait_value.substring(0, 60)}`,
+            `Boosted by observation #${toConfirm.observation_id}`,
+            {
+              trait_type: trait.trait_type,
+              trait_value: trait.trait_value,
+              observation_id: toConfirm.observation_id,
+              project_name: projectName,
+              model: synthModel,
+            },
+            synthesisEventId,
+            sessionId,
+          );
+        } catch (_) { /* non-fatal */ }
+      }
+    } catch (err: any) {
+      result.errors.push(`Trait confirm trait_id=${toConfirm.trait_id}: ${err.message}`);
+    }
+  }
+
+  // Mark involved observations as processed
   for (const obs of batch) {
     try {
-      const traitType = mapObservationToTraitType(obs.observation_type);
-
-      switch (obs.observation_type) {
-        case "correction":
-        case "preference":
-        case "terminology": {
-          // Only create/boost from user behavior observations, not implementation notes.
-          // New traits start below display threshold (0.15), re-observation boosts by 0.15.
-          const existing = personality.getTraits(projectId).find(t =>
-            t.trait_type === traitType && t.trait_value === obs.content
-          );
-          if (existing) {
-            // updateConfidence applies exact delta — avoids upsertTrait's implicit +0.1 override
-            personality.updateConfidence(projectId, traitType, obs.content, 0.15);
-          } else {
-            personality.upsertTrait(
-              projectId, traitType, obs.content, undefined, 0.15,
-              obs.id, obs.content,
-            );
-          }
-          break;
-        }
-        case "pattern":
-        case "insight":
-          // Patterns and insights are implementation notes — do NOT create personality traits.
-          // They are still processed for skill synthesis in Phase 2.
-          break;
-        case "feedback": {
-          // Update confidence on existing traits (fuzzy match by content)
-          const existingTraits = personality.getTraits(projectId);
-          for (const trait of existingTraits) {
-            if (obs.content.toLowerCase().includes(trait.trait_value.toLowerCase())) {
-              personality.updateConfidence(
-                projectId,
-                trait.trait_type,
-                trait.trait_value,
-                0.05,
-              );
-            }
-          }
-          break;
-        }
-        case "behavior":
-        case "workflow": {
-          // Behavior/workflow observations — low initial confidence, re-observation boosts by 0.10
-          const existing = personality.getTraits(projectId).find(t =>
-            t.trait_type === traitType && t.trait_value === obs.content
-          );
-          if (existing) {
-            personality.updateConfidence(projectId, traitType, obs.content, 0.10);
-          } else {
-            personality.upsertTrait(
-              projectId, traitType, obs.content, undefined, 0.10,
-              obs.id, obs.content,
-            );
-          }
-          break;
-        }
-        case "error":
-        case "goal": {
-          // Priority signals — very low initial confidence, re-observation boosts by 0.05
-          const existing = personality.getTraits(projectId).find(t =>
-            t.trait_type === traitType && t.trait_value === obs.content
-          );
-          if (existing) {
-            personality.updateConfidence(projectId, traitType, obs.content, 0.05);
-          } else {
-            personality.upsertTrait(
-              projectId, traitType, obs.content, undefined, 0.05,
-              obs.id, obs.content,
-            );
-          }
-          break;
-        }
+      if (involvedObsIds.has(obs.id)) {
+        observations.updateObservation(obs.id, { status: "processed" });
+        result.observations_processed++;
+      } else {
+        // Leave pending — not recognized by LLM yet
+        result.observations_skipped++;
       }
-
-      observations.updateObservation(obs.id, { status: "processed" });
-      result.observations_processed++;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       result.errors.push(`Observation ${obs.id}: ${msg}`);
-      // Mark as failed so it doesn't block future synthesis runs
       try {
         observations.updateObservation(obs.id, { status: "failed" });
       } catch {
@@ -206,16 +226,6 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
       }
     }
   }
-
-  // Determine how many traits were created vs updated
-  const postTraitCount = personality.getTraits(projectId).length;
-  result.traits_created = Math.max(0, postTraitCount - preTraitCount);
-
-  // Traits updated: upserted observations minus the ones that were truly new
-  const upsertedCount = batch.filter(o =>
-    ["correction", "preference", "terminology", "behavior", "workflow", "error", "goal"].includes(o.observation_type)
-  ).length;
-  result.traits_updated = Math.max(0, upsertedCount - result.traits_created);
 
   result.summary = `Processed ${result.observations_processed} observations: ${result.traits_created} traits created, ${result.traits_updated} traits updated.`;
   if (result.errors.length > 0) {
@@ -299,8 +309,15 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
             );
             result.skills_created++;
 
+            // Best-effort disk write (createSkill already writes to disk,
+            // but this provides defense-in-depth if the internal path changes)
+            try {
+              const skillObj = skills.getSkill(projectId, skillToCreate.name);
+              if (skillObj) skills.writeSkillToDisk(skillObj);
+            } catch (_) { /* non-fatal — disk write is best-effort */ }
+
             logEvent(
-              projectId, "trait_created", "synthesis",
+              projectId, "skill_created", "synthesis",
               `Skill created: ${skillToCreate.name}`,
               skillToCreate.description.substring(0, 200),
               { skill_name: skillToCreate.name, via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
@@ -319,8 +336,13 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
             if (existing) {
               const updatedContent = existing.content + `\n\n${skillToUpdate.patch}`;
               skills.updateSkill(projectId, skillToUpdate.name, updatedContent);
+              // Best-effort disk write
+              try {
+                const skillObj = skills.getSkill(projectId, skillToUpdate.name);
+                if (skillObj) skills.writeSkillToDisk(skillObj);
+              } catch (_) { /* non-fatal */ }
               logEvent(
-                projectId, "trait_updated", "synthesis",
+                projectId, "skill_updated", "synthesis",
                 `Skill updated: ${skillToUpdate.name}`,
                 `Patch type: ${skillToUpdate.patch_type}`,
                 { skill_name: skillToUpdate.name, patch_type: skillToUpdate.patch_type, via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
@@ -335,6 +357,41 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
           }
         }
 
+        // Execute LLM personality_traits — these were silently dropped before
+        if (llmResult.personality_traits && llmResult.personality_traits.length > 0) {
+          for (const pt of llmResult.personality_traits) {
+            try {
+              const clampedConf = Math.min(0.95, Math.max(0.05, pt.confidence));
+              personality.upsertTrait(
+                projectId,
+                pt.trait_type,
+                pt.trait_value,
+                undefined,
+                clampedConf,
+              );
+              try {
+                logEvent(
+                  projectId, "trait_created", "synthesis",
+                  `Trait (LLM): ${pt.trait_type} → ${pt.trait_value.substring(0, 60)}`,
+                  `LLM-synthesized trait, confidence: ${clampedConf.toFixed(2)}`,
+                  {
+                    trait_type: pt.trait_type,
+                    trait_value: pt.trait_value,
+                    confidence: clampedConf,
+                    via_llm: true,
+                    model: synthModel,
+                    project_name: projectName,
+                  },
+                  synthesisEventId,
+                  sessionId,
+                );
+              } catch (_) { /* non-fatal */ }
+            } catch (err: any) {
+              result.errors.push(`LLM trait "${pt.trait_value?.substring(0, 30)}": ${err.message}`);
+            }
+          }
+        }
+
         // Update summary to include skill info
         if (result.skills_created > 0 || llmResult.skills_to_update.length > 0) {
           result.summary += ` LLM synthesized ${result.skills_created} skill(s), ${llmResult.skills_to_update.filter(s => s.name).length} update(s).`;
@@ -344,24 +401,6 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
       result.errors.push(`LLM synthesis phase failed: ${err.message}`);
     }
   }
-
-  // Log trait created events for the newest traits
-  try {
-    const allTraits = personality.getTraits(projectId);
-    const newest = [...allTraits].sort((a, b) => b.created_at.localeCompare(a.created_at));
-    const recentlyCreated = newest.slice(0, Math.min(result.traits_created, 5));
-    for (const t of recentlyCreated) {
-      logEvent(
-        projectId, "trait_created", "synthesis",
-        `Trait: ${t.trait_type} → ${t.trait_value.substring(0, 60)}`,
-        `Confidence: ${t.confidence?.toFixed(2) ?? "N/A"}`,
-        { trait_type: t.trait_type, trait_value: t.trait_value,
-          confidence: t.confidence, id: t.id, observation_ids: batch.map(o => o.id), project_name: projectName, model: synthModel },
-        synthesisEventId,
-        sessionId,
-      );
-    }
-  } catch (_) { /* non-fatal */ }
 
   // Log synthesis completion
   try {
@@ -500,7 +539,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
         try {
           logEvent(
             globalProject.id,
-            "trait_created",
+            "skill_created",
             "synthesis",
             `Cross-project skill created: ${skillName}`,
             `Promoted from ${projectIds.length} projects`,

@@ -59,3 +59,28 @@ personalityRouter.post("/:id/disable", (req, res) => {
   personality.disableTrait(id);
   res.status(204).send();
 });
+
+// DELETE /:id — hard delete a single personality trait
+personalityRouter.delete("/:id", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: { code: "INVALID_ID", message: "Trait ID must be a number" } });
+    return;
+  }
+  const deleted = personality.deleteTrait(projectId, id);
+  if (!deleted) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Trait not found" } });
+    return;
+  }
+  res.status(204).send();
+});
+
+// DELETE / — hard delete ALL personality traits for the project
+personalityRouter.delete("/", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const count = personality.deleteAllTraits(projectId);
+  res.json({ data: { deleted: count } });
+});

@@ -11,6 +11,8 @@ import {
   updateObservation,
   countUnprocessed,
   getUnprocessedBatch,
+  deleteObservation,
+  deleteObservationsBySource,
 } from "../lib/tools/observations.js";
 
 let tempDir: string;
@@ -89,5 +91,30 @@ describe("observations", () => {
     expect(batch.length).toBeGreaterThanOrEqual(1);
     // First item should be highest importance
     expect(batch[0]!.importance).toBeGreaterThanOrEqual(8);
+  });
+
+  it("deletes a single observation by id scoped to project", () => {
+    const obs = storeObservation(projectId, "insight", "User prefers dark theme");
+    const deleted = deleteObservation(projectId, obs.id);
+    expect(deleted).toBe(true);
+    const refetched = getObservation(obs.id);
+    expect(refetched).toBeUndefined();
+  });
+
+  it("returns false when deleting non-existent observation", () => {
+    const deleted = deleteObservation(projectId, 99999);
+    expect(deleted).toBe(false);
+  });
+
+  it("deletes observations by source in bulk", () => {
+    storeObservation(projectId, "pattern", "Bulk delete test 1", 5, "manual");
+    storeObservation(projectId, "pattern", "Bulk delete test 2", 5, "manual");
+    const count = deleteObservationsBySource(projectId, "manual");
+    expect(count).toBeGreaterThanOrEqual(2);
+  });
+
+  it("returns 0 when no observations match source", () => {
+    const count = deleteObservationsBySource(projectId, "nonexistent-source");
+    expect(count).toBe(0);
   });
 });

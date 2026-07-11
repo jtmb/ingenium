@@ -137,3 +137,33 @@ observationsRouter.post("/enrich", async (req, res, next) => {
     next(err);
   }
 });
+
+// DELETE /:id — hard delete a single observation
+observationsRouter.delete("/:id", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: { code: "INVALID_ID", message: "Observation ID must be a number" } });
+    return;
+  }
+  const deleted = observations.deleteObservation(projectId, id);
+  if (!deleted) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Observation not found" } });
+    return;
+  }
+  res.status(204).send();
+});
+
+// DELETE / — bulk hard delete observations by source
+observationsRouter.delete("/", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const source = req.query.source as string | undefined;
+  if (!source) {
+    res.status(400).json({ error: { code: "MISSING_SOURCE", message: "source query parameter is required for bulk delete" } });
+    return;
+  }
+  const count = observations.deleteObservationsBySource(projectId, source);
+  res.json({ data: { deleted: count } });
+});

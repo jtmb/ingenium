@@ -9,6 +9,10 @@ export function listProjects() {
     return db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all();
 }
 export function createProject(name, isGlobal = false) {
+    // Idempotent: return existing project on container restart
+    const existing = getProject(name);
+    if (existing)
+        return existing;
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
         const now = new Date().toISOString();

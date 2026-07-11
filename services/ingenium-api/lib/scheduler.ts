@@ -29,6 +29,27 @@ async function triggerSynthesisForAllProjects(port: number) {
     const allProjects = (await projectsRes.json()).data || [];
 
     for (const p of allProjects) {
+      // 1. Extraction — LLM-based observation extraction from OpenCode messages
+      //    Runs BEFORE synthesis so new observations get processed the same cycle.
+      try {
+        const extractRes = await fetch(
+          `http://localhost:${port}/api/v1/extraction/run?project=${p.name}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{}",
+          },
+        );
+        if (extractRes.ok) {
+          logger.info("scheduler", `Extraction for "${p.name}" triggered`);
+        } else {
+          logger.debug("scheduler", `Extraction for "${p.name}" returned ${extractRes.status}`);
+        }
+      } catch (err: any) {
+        logger.debug("scheduler", `Extraction for "${p.name}" error: ${err.message}`);
+      }
+
+      // 2. Synthesis — processes pending observations into traits + skills
       try {
         const res = await fetch(
           `http://localhost:${port}/api/v1/synthesis/run?project=${p.name}`,

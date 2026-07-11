@@ -7,7 +7,7 @@
   "bin": {
     "@ingenium/extension": "dist/scripts/mcp-server.js"
   },
-  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js", "dist/"],
+  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js", "auto-observer.js", "dist/"],
   "scripts": {
     "build": "rm -rf dist && cp -r ../../services/ingenium-server/dist dist"
   },

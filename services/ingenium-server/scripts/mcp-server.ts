@@ -35,6 +35,7 @@ import {
 import {
   synthesisRun, synthesisStatus, synthesisCrossProject,
 } from "../lib/tools/synthesis.js";
+import { extractionRun } from "../lib/tools/extraction.js";
 import * as emailTools from "../lib/tools/emails.js";
 import * as configTools from "../lib/tools/configs.js";
 import * as logTools from "../lib/tools/logs.js";
@@ -258,6 +259,17 @@ server.registerTool(
     inputSchema: { project: projectParam },
   },
   wrapHandler("ingenium_synthesis_cross_project", async ({ project }) => synthesisCrossProject(project)),
+);
+
+// ── Extraction ──────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_extraction_run",
+  {
+    description: "Trigger LLM-based observation extraction — scans OpenCode messages since last watermark, pre-filters candidates via cheap regex, then uses the synthesis LLM to extract durable user behavior rules.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler("ingenium_extraction_run", async ({ project }) => extractionRun(project)),
 );
 
 // ── Tasks ───────────────────────────────────────────────
