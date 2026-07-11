@@ -217,7 +217,7 @@ export default function SettingsPage() {
     <div className="space-y-8">
       <h1 className="text-3xl font-bold">Settings</h1>
 
-      <div className="bg-white p-6 rounded border space-y-4">
+      <div className="bg-white p-6 rounded border space-y-4 hover:shadow-md transition-shadow">
         <div>
           <label className="block text-sm font-medium mb-1">Archive retention (days)</label>
           <p className="text-xs text-gray-500 mb-2">
@@ -239,7 +239,7 @@ export default function SettingsPage() {
       </div>
 
       {/* ── Synthesis LLM ── */}
-      <div className="bg-white p-4 rounded border space-y-3">
+      <div className="bg-white p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
         <h2 className="font-semibold text-lg">Synthesis LLM</h2>
         <p className="text-sm text-gray-500">Select an LLM provider for the self-learning pipeline to synthesize observations into skills and update personality traits.</p>
 

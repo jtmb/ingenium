@@ -78,7 +78,7 @@ export default function ObservationsPage() {
           </div>
         )}
         {observations.map((o: Observation) => (
-          <div key={o.id} className="bg-white p-4 rounded border cursor-pointer hover:shadow-sm" onClick={() => setSelected(o)}>
+          <div key={o.id} className="bg-white p-4 rounded border cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelected(o)}>
             <div className="flex gap-2 items-center mb-1 flex-wrap">
               <span className={`text-xs px-2 py-0.5 rounded ${TYPE_COLORS[o.observation_type] || "bg-gray-100 text-gray-700"}`}>
                 {o.observation_type}

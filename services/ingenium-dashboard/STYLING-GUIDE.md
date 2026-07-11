@@ -47,16 +47,18 @@ Any visual changes to the dashboard MUST be reflected in this document.
 | Card Grid (Desktop) | 3 columns | `grid grid-cols-1 md:grid-cols-3` |
 | Card Gap | 16px | `gap-4` |
 
-## Card Components
+## 🔴 Universal Card Component — Every Card Uses `hover:shadow-md transition-shadow`
+
+Every card on every page of the dashboard MUST use `hover:shadow-md transition-shadow`. This is a universal rule — not optional, not per-page. The only variation is size (`p-4` for list items, `p-6` for feature cards) and border radius (`rounded` for compact, `rounded-lg` for feature).
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
 | Background | White | `bg-white` |
 | Border | 1px light gray | `border` |
-| Border Radius | 6-8px | `rounded-lg` |
-| Padding | 24px | `p-6` |
-| Hover Effect | Light shadow | `hover:shadow-md` |
-| Transition | 150ms | `transition-shadow` |
+| Border Radius | 4-6px (compact) or 8px (feature) | `rounded` or `rounded-lg` |
+| Padding | 16px (compact) or 24px (feature) | `p-4` or `p-6` |
+| Hover Effect | Light shadow (ALWAYS) | `hover:shadow-md` |
+| Transition | 150ms (ALWAYS) | `transition-shadow` |
 
 ## Nav Bar
 
@@ -71,15 +73,18 @@ Any visual changes to the dashboard MUST be reflected in this document.
 ## 🔴 Rules That Must Not Be Broken
 
 1. **Card grid is always `md:grid-cols-3`** on desktop. Never change to 2 or 4 without updating this guide.
-2. **Hover effects use `transition-shadow`**, not `transition-all` or `transition-transform`. Performance matters.
+2. **Hover effects always use `transition-shadow`**. Never use `transition-all`, `transition-transform`, or omit `transition-shadow` on cards. Every card must have the full `hover:shadow-md transition-shadow` pair.
 3. **Nav uses `border-b` not `shadow`**. Flat design, not elevated.
 4. **All text must use gray-900/600/500 scale**. No custom hex colors in components.
-5. **Cards never have shadows** by default. Only `hover:shadow-md`.
+5. **Cards never have shadows** by default — only on hover via `hover:shadow-md transition-shadow`. Both classes must always appear together. No exceptions.
 6. **Page max-width is `max-w-6xl`**. No full-width layouts beyond navigation.
+7. **Every card on every page must have `hover:shadow-md transition-shadow`**. This includes settings cards, MCP server rows, MCP category cards, observations, pipeline events, and any other card-based element. If a new page adds cards, they MUST follow this rule.
 
 ---
 
-## Card Variants
+## Card Variants — All Use `hover:shadow-md transition-shadow`
+
+All cards below universally include `hover:shadow-md transition-shadow` (Rule #7). The only variation is padding and border radius.
 
 ### Homepage Feature Cards
 
@@ -91,12 +96,12 @@ Large promotional/feature cards used on the landing page.
 | Border | 1px light gray | `border` |
 | Border Radius | 8px | `rounded-lg` |
 | Padding | 24px | `p-6` |
-| Hover Effect | Light shadow | `hover:shadow-md` |
-| Transition | 150ms | `transition-shadow` |
+| Hover Effect | Light shadow (REQUIRED) | `hover:shadow-md` |
+| Transition | 150ms (REQUIRED) | `transition-shadow` |
 
 ### List Item Card
 
-Used for list items and card grids such as the skills grid, server list, and plugin list. These are denser than homepage feature cards because they appear in grids with many items.
+Used for list items and card grids such as the skills grid, server list, MCP server rows, plugin list, agents list, observation list, and pipeline events. These are denser than homepage feature cards.
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
@@ -104,15 +109,42 @@ Used for list items and card grids such as the skills grid, server list, and plu
 | Border | 1px light gray | `border` |
 | Border Radius | 4-6px | `rounded` |
 | Padding | 16px | `p-4` |
-| Hover Effect | Light shadow | `hover:shadow-md` |
-| Transition | 150ms | `transition-shadow` |
+| Hover Effect | Light shadow (REQUIRED) | `hover:shadow-md` |
+| Transition | 150ms (REQUIRED) | `transition-shadow` |
+
+### MCP Category Card
+
+Used for grouped category sections in the Tools tab — a larger container with a category header and a list of tools inside. May use `overflow-hidden` to clip the inner divide borders.
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Background | White | `bg-white` |
+| Border | 1px light gray | `border` |
+| Overflow | Clip children | `overflow-hidden` |
+| Hover Effect | Light shadow (REQUIRED) | `hover:shadow-md` |
+| Transition | 150ms (REQUIRED) | `transition-shadow` |
+
+### Stacked Form Card
+
+Used for settings panels and add forms. These are single-section cards with vertically stacked fields.
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Background | White | `bg-white` |
+| Border | 1px light gray | `border` |
+| Border Radius | 4-6px | `rounded` |
+| Padding | 16-24px | `p-4` or `p-6` |
+| Hover Effect | Light shadow (REQUIRED) | `hover:shadow-md` |
+| Transition | 150ms (REQUIRED) | `transition-shadow` |
 
 **When to use which:**
 
 | Card Type | CSS | Used In |
 |-----------|-----|---------|
 | Feature (large) | `p-6 rounded-lg` | Homepage, welcome/onboarding |
-| List item (compact) | `p-4 rounded border` | Skills grid, Server list, Plugin list |
+| List item (compact) | `p-4 rounded border` | Skills grid, MCP server rows, Plugin list, Agents, Observations, Pipeline events |
+| MCP Category | `rounded border overflow-hidden` | MCP Tools tab category groups |
+| Stacked Form | `p-4/p-6 rounded border` | Settings panels, Add Server form |
 
 ---
 
@@ -122,13 +154,15 @@ Forms with multiple fields (Server Add, Learnings Log, Settings) use a stacked c
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
-| Container | White card | `bg-white p-4 rounded border` |
+| Container | White card with hover shadow | `bg-white p-4 rounded border hover:shadow-md transition-shadow` |
 | Field Spacing | 12px vertical | `space-y-3` |
 | Submit Button | Full width, primary blue | `w-full bg-blue-600 text-white py-2 px-4 rounded` |
 
+> 🔴 **Rule**: Stacked form cards MUST include `hover:shadow-md transition-shadow` like every other card.
+
 **Pattern:**
 ```html
-<div class="bg-white p-4 rounded border space-y-3">
+<div class="bg-white p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
   <input class="w-full border-gray-200 rounded" />
   <textarea class="w-full border-gray-200 rounded"></textarea>
   <button class="w-full bg-blue-600 text-white py-2 px-4 rounded">
@@ -141,7 +175,7 @@ Forms with multiple fields (Server Add, Learnings Log, Settings) use a stacked c
 
 | Pattern | Layout | Used In |
 |---------|--------|---------|
-| Stacked card | `bg-white p-4 rounded border space-y-3` with full-width button at bottom | Servers Add, Learnings Log, Settings |
+| Stacked card | `bg-white p-4 rounded border space-y-3 hover:shadow-md transition-shadow` with full-width button at bottom | Servers Add, Settings panels |
 | Inline row | `flex flex-row gap-2 items-end` with input + button on same line | Projects Create (name field), Tasks Add |
 
 ---

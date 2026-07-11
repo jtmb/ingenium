@@ -382,7 +382,7 @@ export default function PipelinePage() {
                           {group.events.map((obs) => (
                             <div
                               key={obs.id}
-                              className="bg-white border rounded p-3 cursor-pointer hover:shadow-sm transition-shadow"
+                              className="bg-white border rounded p-3 cursor-pointer hover:shadow-md transition-shadow"
                               onClick={() => setSelected(obs)}
                             >
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -795,7 +795,7 @@ function EventRow({
           <div
             className={`bg-white rounded-lg border p-3 ${
               isChild ? "p-2" : "p-3"
-            } ${onClickDetail ? "cursor-pointer hover:shadow-sm transition-shadow" : ""}`}
+            } ${onClickDetail ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
             onClick={onClickDetail}
           >
             {/* Badge row */}
