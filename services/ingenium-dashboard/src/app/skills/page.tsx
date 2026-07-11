@@ -142,17 +142,14 @@ export default function SkillsPage() {
 
       {/* Overlay with split layout */}
       {selectedSkill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 z-50 flex items-start justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedSkill(null)} />
-          <div className="relative m-4 w-[calc(100%_-_32px)] h-[calc(100%_-_32px)] max-w-full bg-white rounded-lg shadow-2xl flex flex-col">
+          <div className="relative mt-8 mb-8 w-11/12 max-w-7xl bg-white rounded-lg shadow-2xl flex flex-col max-h-[90vh]">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
               <div>
                 <h2 className="text-xl font-bold">{selectedSkill.name}</h2>
                 <p className="text-sm text-gray-500">{selectedSkill.description}</p>
-                {selectedSkill.created_at && (
-                  <p className="text-xs text-gray-400 mt-0.5">Created {new Date(selectedSkill.created_at).toLocaleDateString()}</p>
-                )}
               </div>
               <button onClick={() => setSelectedSkill(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full">✕</button>
             </div>
