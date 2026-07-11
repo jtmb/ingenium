@@ -31,7 +31,11 @@ if [ ! -f "$OC_CONFIG" ]; then
         "INGENIUM_API_URL": "http://localhost:4097/api/v1"
       }
     }
-  }
+  },
+  "plugin": [
+    "/app/packages/ingenium-extension/observer.ts",
+    "/app/packages/ingenium-extension/skill-sync.ts"
+  ]
 }
 OCEOF
   echo "Seeded OpenCode config with Ingenium MCP"

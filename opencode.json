@@ -55,7 +55,7 @@
     }
   },
   "plugin": [
-    ".opencode/plugins/observer.ts",
-    ".opencode/plugins/observer-core.ts"
+    "packages/ingenium-extension/observer.ts",
+    "packages/ingenium-extension/skill-sync.ts"
   ]
 }

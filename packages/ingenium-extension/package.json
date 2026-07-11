@@ -1,0 +1,11 @@
+{
+  "name": "@ingenium/extension",
+  "version": "1.0.0",
+  "description": "OpenCode client-side plugins for the Ingenium self-learning pipeline — observer (session hooks, observations, synthesis triggers) and skill-sync (pulls skills from API to local .opencode/skills/)",
+  "type": "module",
+  "main": "index.js",
+  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js"],
+  "dependencies": {
+    "@opencode-ai/plugin": "*"
+  }
+}

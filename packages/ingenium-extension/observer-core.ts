@@ -4,7 +4,7 @@
  * into the DB. On session idle, triggers synthesis if configured.
  */
 
-const API_BASE = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
+const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 const DEFAULT_PROJECT = "gh-llm-bootstrap";
 
 async function apiFetch(path: string, options?: RequestInit): Promise<any> {
