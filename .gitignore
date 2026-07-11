@@ -37,6 +37,7 @@ build/
 
 # ── Learnings — DB-managed only, not on disk ──────────────
 .agents/skills/learnings.md
+.opencode/skills/learnings.md
 
 # ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env
