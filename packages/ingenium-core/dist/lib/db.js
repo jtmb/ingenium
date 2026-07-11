@@ -26,7 +26,7 @@ function runMigrations(db) {
     const tableCount = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table'").get();
     if (tableCount.count === 0) {
         // Fresh DB — run all migrations in order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql"]) {
             const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
             db.exec(sql);
             logger.info("db", `Applied migration ${file}`);
@@ -159,6 +159,25 @@ function runMigrations(db) {
             const sql = readFileSync(resolve(migrationsDir, "018_extraction_pipeline_events.sql"), "utf-8");
             db.exec(sql);
             logger.info("db", "Applied migration 018_extraction_pipeline_events.sql");
+        }
+        // Check if personality_traits FK uses ON DELETE SET NULL (migration 019)
+        // The default NO ACTION blocks observation deletes when traits reference them.
+        // Detect by checking if the CREATE SQL includes the 019_fk_setnull marker.
+        const traits019Sql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='personality_traits'").get();
+        if (traits019Sql && !traits019Sql.sql.includes("019_fk_setnull")) {
+            const sql = readFileSync(resolve(migrationsDir, "019_trait_exemplar_fk_setnull.sql"), "utf-8");
+            // Disable FK enforcement during migration to avoid cascading FTS trigger errors
+            db.pragma("foreign_keys = OFF");
+            db.exec(sql);
+            db.pragma("foreign_keys = ON");
+            logger.info("db", "Applied migration 019_trait_exemplar_fk_setnull.sql");
+        }
+        // Check if task_comments table exists (migration 020)
+        const taskCommentsCheck = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='task_comments'").get();
+        if (taskCommentsCheck.count === 0) {
+            const sql = readFileSync(resolve(migrationsDir, "020_kanban_board.sql"), "utf-8");
+            db.exec(sql);
+            logger.info("db", "Applied migration 020_kanban_board.sql");
         }
     }
 }

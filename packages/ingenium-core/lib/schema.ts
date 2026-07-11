@@ -52,11 +52,71 @@ export const TaskSchema = z.object({
   files: z.string().optional(),
   labels: z.string().optional(),
   session_id: z.string().optional(),
+  parent_id: z.string().optional().nullable(),
+  issue_type: z.enum(["epic", "story", "task", "subtask"]).default("task"),
+  priority: z.number().int().default(0),
+  due_date: z.string().optional().nullable(),
+  start_date: z.string().optional().nullable(),
+  estimate_minutes: z.number().int().optional().nullable(),
+  spent_minutes: z.number().int().default(0),
+  remaining_minutes: z.number().int().optional().nullable(),
+  custom_fields: z.string().optional().nullable(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
-  completed_at: z.string().datetime().optional(),
+  completed_at: z.string().datetime().optional().nullable(),
 });
 export type Task = z.infer<typeof TaskSchema>;
+
+export const TaskCommentSchema = z.object({
+  id: z.string(),
+  task_id: z.string(),
+  parent_comment_id: z.string().optional().nullable(),
+  author: z.string(),
+  body: z.string(),
+  reactions: z.string().default("{}"),
+  edited_at: z.string().optional().nullable(),
+  created_at: z.string().datetime(),
+});
+export type TaskComment = z.infer<typeof TaskCommentSchema>;
+
+export const TaskActivitySchema = z.object({
+  id: z.string(),
+  task_id: z.string(),
+  actor: z.string(),
+  event_type: z.string(),
+  payload: z.string().optional().nullable(),
+  created_at: z.string().datetime(),
+});
+export type TaskActivity = z.infer<typeof TaskActivitySchema>;
+
+export const TaskLinkSchema = z.object({
+  id: z.string(),
+  task_id: z.string(),
+  linked_task_id: z.string(),
+  link_type: z.enum(["blocks", "blocked_by", "relates_to"]),
+});
+export type TaskLink = z.infer<typeof TaskLinkSchema>;
+
+export const TaskNotificationSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  recipient: z.string(),
+  task_id: z.string(),
+  kind: z.enum(["mentioned", "assigned", "watched_status"]),
+  read_at: z.string().optional().nullable(),
+  created_at: z.string().datetime(),
+});
+export type TaskNotification = z.infer<typeof TaskNotificationSchema>;
+
+export const BoardConfigSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  columns: z.string(),
+  custom_field_defs: z.string().default("[]"),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+export type BoardConfig = z.infer<typeof BoardConfigSchema>;
 
 export const ContextSchema = z.object({
   id: z.number(),

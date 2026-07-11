@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-      for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql"]) {
+      for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -235,6 +235,16 @@ function runMigrations(db: Database.Database): void {
       db.exec(sql);
       db.pragma("foreign_keys = ON");
       logger.info("db", "Applied migration 019_trait_exemplar_fk_setnull.sql");
+    }
+
+    // Check if task_comments table exists (migration 020)
+    const taskCommentsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='task_comments'"
+    ).get() as { count: number };
+    if (taskCommentsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "020_kanban_board.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 020_kanban_board.sql");
     }
   }
 }
