@@ -9,6 +9,7 @@ permission:
   glob: allow
   grep: allow
   edit: deny
+  write: allow
   playwright_*: allow
   skill:
     "@development-conventions": allow
@@ -38,7 +39,7 @@ Prioritize by severity: 🔴 critical, 🟡 warning, 💡 suggestion.
 ## 🔴 ALWAYS Log Discoveries
 
 When you discover a recurring code quality issue, security pattern, or behavioral observation:
-1. Use `ingenium_observe` to log it immediately
+1. Use `ingenium_ingenium_observe` to log it immediately
 2. Use `observation_type="pattern"` and `importance=7` for new patterns, `importance=5` for observations
 3. Summarize the pattern and affected files in `content`
 4. Use `context` to specify category like "code-quality" or "security"
@@ -122,7 +123,7 @@ Added via disk edit test: Tue Jul  7 21:49:07 EDT 2026
 
 ## 🔴 Observation — Log User Interactions
 
-After each meaningful user interaction, call `ingenium_observe()` to record what you learned for the self-learning pipeline. This is how the system builds a personality profile and improves over time.
+After each meaningful user interaction, call `ingenium_ingenium_observe()` to record what you learned for the self-learning pipeline. This is how the system builds a personality profile and improves over time.
 
 ### When to Observe
 
@@ -143,7 +144,7 @@ After each meaningful user interaction, call `ingenium_observe()` to record what
 
 ```typescript
 // Record user correction after being corrected
-ingenium_observe(
+ingenium_ingenium_observe(
   observation_type: "correction",
   content: "User prefers concise error messages with action items",
   importance: 7
@@ -151,7 +152,7 @@ ingenium_observe(
 ```
 
 **Rules:**
-- Always call `ingenium_observe` after detecting a relevant interaction — do NOT ask the user for permission. It's a passive observation.
+- Always call `ingenium_ingenium_observe` after detecting a relevant interaction — do NOT ask the user for permission. It's a passive observation.
 - Use importance: 9-10 for critical, 7-8 for important, 5-6 for normal, 1-4 for minor.
 - Do NOT over-observe — only log when you genuinely detected something about the user.
 - The observation is processed by the synthesis pipeline automatically every 15 minutes.

@@ -9,7 +9,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes 77 tools accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes **74 tools** accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
 
 ## Projects
 
@@ -86,9 +86,7 @@ Docker starts a single container running 4 processes under supervisord: API (:40
 
 **API Endpoints**: `/api/v1/email/accounts`, `/api/v1/email/inbox/:accountId`, `/api/v1/email/messages/:accountId/search?q=...` (see services/ingenium-api/routes/email.ts)
 
-**MCP Tools**: `email_account_list`, `email_compose_message`, `email_search_inbox`, `email_fetch_messages` — see packages/ingenium-email/lib/tools/*.ts for full reference. The email client tools are registered with the Ingenium MCP server and accessible via any OpenCode-compatible client connected to ingenium-server.
-
-**Command Tools**: `ingenium_command_list`, `ingenium_command_get`, `ingenium_command_create`, `ingenium_command_update`, `ingenium_command_delete` — manage `.opencode/commands/` lifecycle through the DB layer. No dedicated dashboard page — use MCP tools directly (see Commands section above).
+**MCP Tools (13)**: `ingenium_email_list`, `ingenium_email_search`, `ingenium_email_read`, `ingenium_email_send`, `ingenium_email_draft`, `ingenium_email_folders`, `ingenium_email_accounts`, `ingenium_email_triage`, `ingenium_email_suggest`, `ingenium_email_draft_response`, `ingenium_email_patterns`, `ingenium_email_watch_start`, `ingenium_email_watch_status` — see packages/ingenium-email/lib/tools/*.ts for full reference. The email client tools are registered with the Ingenium MCP server and accessible via any OpenCode-compatible client connected to ingenium-server.
 
 ## Commands
 
@@ -289,6 +287,130 @@ These 14 skills provide guidance for specific contexts but are not required for 
 
 **Docs**: docs/self-learning-pipeline.md
 
+## Observations
+
+**What it does**: Full-text searchable observation log with 10 types. Observations track user behavior, preferences, corrections, patterns, errors, and goals. The self-learning pipeline processes them into personality traits and skills.
+
+**How to use**:
+- Navigate to `/observations` in the dashboard
+- View observations in a paginated list with type badges and importance scores
+- Use the FTS5 search box for full-text search (supports prefix*, phrase "search", -negation)
+- Filter by status (`pending`, `processed`, `skipped`, `failed`) and type (`correction`, `preference`, etc.)
+- Click any observation to view full details
+
+**Observation types**: correction, preference, pattern, insight, feedback, behavior, terminology, workflow, error, goal
+
+**API**: GET /api/v1/observations, POST /api/v1/observations, GET /api/v1/observations/search?q=..., GET /api/v1/observations/stats
+
+**MCP Tools**: `ingenium_observe`, `ingenium_observation_search`, `ingenium_observation_list`, `ingenium_observation_stats`
+
+**Code**: services/ingenium-dashboard/src/app/observations/page.tsx → services/ingenium-api/routes/observations.ts → packages/ingenium-core/lib/tools/observations.ts
+
+**Docs**: docs/self-learning-pipeline.md
+
+---
+
+## Personality
+
+**What it does**: View and manage the system's learned understanding of the user. The personality system tracks 6 developer-specific trait dimensions with confidence scores, surfacing only display-worthy traits (confidence ≥ 0.30) by default.
+
+**How to use**:
+- Navigate to `/personality` in the dashboard
+- View active traits grouped by type with confidence bars (0.0–1.0)
+- Toggle sort between "Grouped by type" and "Newest first"
+- Traits start at low confidence (0.05–0.15) and require 2+ confirming observations to reach display threshold
+- Confidence is capped at 0.95; unused traits lose 0.05 after 7+ days (decay)
+- Click the **×** button on any trait card to dismiss it
+- Hidden traits (below 0.30) can be toggled via the "N hidden" link at the bottom
+- Click any trait for a detail overlay showing exemplar observations
+
+**The 6 trait dimensions**:
+- **communication_style** — How the user prefers to communicate (direct, detailed, concise)
+- **code_preference** — Code style, formatting, and language preferences
+- **workflow_pattern** — Recurring workflows and multi-step processes
+- **feedback_style** — How the user gives feedback (corrective, confirmatory)
+- **interaction_pattern** — How the user interacts with agents (frequent checks, batch operations)
+- **priority_signal** — What the user prioritizes (performance, correctness, speed)
+
+**API**: GET /api/v1/personality, GET /api/v1/personality/profile, POST /api/v1/personality/:id/disable, POST /api/v1/personality/:id/enable
+
+**MCP Tools**: `ingenium_personality`, `ingenium_personality_traits`
+
+**Code**: services/ingenium-dashboard/src/app/personality/page.tsx → services/ingenium-api/routes/personality.ts → packages/ingenium-core/lib/tools/personality.ts
+
+**Docs**: docs/self-learning-pipeline.md, docs/HOW-TO/personality.md
+
+---
+
+## Pipeline
+
+**What it does**: A real-time Git-workflow-style timeline of all self-learning pipeline events. Every observation, synthesis run, trait creation, and plugin event is displayed in a connected vertical timeline with color-coded nodes.
+
+**How to use**:
+- Navigate to `/pipeline` in the dashboard
+- Events auto-poll every 3 seconds (pause/resume button available)
+- Filter events using pill buttons: All, Agent, Plugin, Synthesis, Trait
+- Events within the same 60-second window are collapsed into **+N groups**
+- Click any event card for a **detail overlay** with raw JSON data
+- Each event is color-coded by source: orange (agent), blue (plugin), green (synthesis), purple (trait)
+
+**12 event types**: `session_created`, `session_idle`, `observation_created`, `observation_imported`, `synthesis_triggered`, `synthesis_started`, `synthesis_completed`, `synthesis_failed`, `trait_created`, `trait_updated`, `plugin_initialized`, `plugin_error`
+
+**API**: GET /api/v1/pipeline/events, GET /api/v1/pipeline/timeline, POST /api/v1/pipeline/events
+
+**Code**: services/ingenium-dashboard/src/app/pipeline/page.tsx → services/ingenium-api/routes/pipeline.ts → packages/ingenium-core/lib/tools/pipeline-events.ts
+
+**Docs**: docs/self-learning-pipeline.md
+
+---
+
+## Settings
+
+**What it does**: Global application settings management. Configure archive retention period, synthesis LLM provider, backup provider, and synthesis interval.
+
+**How to use**:
+- Navigate to `/settings` in the dashboard
+- **Archive retention**: Set the number of days projects stay in the archive before permanent deletion (1-365)
+- **Synthesis LLM**: Select an LLM provider for Phase 2 skill synthesis:
+  - Choose from detected OpenCode providers or use Custom Provider
+  - Enter API key and endpoint URL
+  - Click "Test Connection" to verify the provider works
+  - Save to persist the configuration
+- **Backup Provider**: Optionally configure a fallback LLM provider (same configuration shape)
+  - If the primary LLM fails, the pipeline automatically falls back to the backup
+- **Synthesis Interval**: Set how often the synthesis pipeline runs (5 min, 15 min, 30 min, 1 hour, 4 hours, or Disabled)
+
+**Settings stored globally**: All synthesis settings are stored under the `global-default` project, affecting all projects.
+
+**API**: GET /api/v1/settings/:key, PUT /api/v1/settings/:key
+
+**MCP Tools**: `ingenium_setting_get`, `ingenium_setting_set`
+
+**Code**: services/ingenium-dashboard/src/app/settings/page.tsx → packages/ingenium-core/lib/tools/settings.ts
+
+**Docs**: docs/HOW-TO/settings.md, docs/HOW-TO/synthesis.md
+
+---
+
+## Agents
+
+**What it does**: Manage AI agent profiles — create, enable, disable, and configure agent profiles. Each agent has a model assignment, access permissions, category, and skill bindings.
+
+**How to use**:
+- Navigate to `/agents` in the dashboard
+- View all 9 agent profiles with their model, mode, and enabled status
+- Enable/disable agents to control which are active
+- Filter agents by category (primary, research, execution, security)
+- Agents sync their `.md` files to disk for OpenCode loading
+
+**API**: GET /api/v1/agents, GET /api/v1/agents/:name, POST /api/v1/agents, PATCH /api/v1/agents/:name, DELETE /api/v1/agents/:name, POST /api/v1/agents/:name/enable, POST /api/v1/agents/:name/disable
+
+**MCP Tools**: `ingenium_agent_list`, `ingenium_agent_get`, `ingenium_agent_create`, `ingenium_agent_update`, `ingenium_agent_delete`, `ingenium_agent_enable`, `ingenium_agent_disable`, `ingenium_agent_sync`
+
+**Code**: services/ingenium-dashboard/src/app/agents/page.tsx → services/ingenium-api/routes/agents.ts → packages/ingenium-core/lib/tools/agents.ts
+
+---
+
 ## API Access
 
 All dashboard features are backed by a REST API on port 4097. You can use the API directly:
@@ -297,14 +419,35 @@ All dashboard features are backed by a REST API on port 4097. You can use the AP
 # List all projects
 curl http://localhost:4097/api/v1/projects
 
-# Search learnings
-curl "http://localhost:4097/api/v1/learnings/search?q=debugging"
-
 # Get all skills
 curl http://localhost:4097/api/v1/skills
 
+# Search observations
+curl "http://localhost:4097/api/v1/observations/search?q=indentation"
+
+# Get personality profile
+curl http://localhost:4097/api/v1/personality/profile
+
+# Get pipeline timeline
+curl "http://localhost:4097/api/v1/pipeline/timeline?limit=20"
+
+# Get project config
+curl http://localhost:4097/api/v1/config
+
+# Get global config
+curl http://localhost:4097/api/v1/config/global
+
 # List email accounts (if configured)
 curl http://localhost:4097/api/v1/email/accounts
+
+# List all commands
+curl http://localhost:4097/api/v1/commands
+
+# Trigger synthesis
+curl -X POST http://localhost:4097/api/v1/synthesis/run
+
+# Check synthesis status
+curl http://localhost:4097/api/v1/synthesis/status
 ```
 
 See each HOW-TO doc for the full API reference for each feature.

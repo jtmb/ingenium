@@ -9,8 +9,8 @@ Email Client → OAuth2 + IMAP/SMTP → Mail Providers (Gmail, Outlook)
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **66 tools**. It talks to the API over HTTP. Zero DB access.
-- `ingenium-dashboard` is a Next.js 16 App Router frontend with **11 pages**. It talks to the API over HTTP.
+- `ingenium-server` runs as an MCP stdio transport with **74 tools**. It talks to the API over HTTP. Zero DB access.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **15 pages**. It talks to the API over HTTP.
 
 ## Skill System
 
@@ -65,14 +65,115 @@ The orchestrator agent (`.opencode/agents/primary/ingenium-orchestrator.md`) inc
 
 Both paths ensure skill coverage stays in sync with learnings. See `.opencode/agents/primary/ingenium-orchestrator.md` lines 137-148 for the full protocol.
 
+## Config Management Architecture
+
+The `configs` table stores `opencode.json` (project-level) and `opencode.jsonc` (global) content in the DB, enabling round-trip editing through the dashboard and MCP tools.
+
+### Global Config Path Resolution
+
+Global projects write skills, plugins, and commands to `/home/appuser/.config/opencode/` instead of the project root. This is handled by `packages/ingenium-core/lib/tools/paths.ts`:
+
+- **`resolveProjectBase(projectId?)`** — Checks if a project has `is_global=1`. If so, returns `INGENIUM_GLOBAL_CONFIG_PATH` (default: `/home/appuser/.config/opencode/`). Otherwise returns the project root derived from `INGENIUM_CORE_DB_PATH`.
+- **`getSkillsBase()`**, **`getPluginsBase()`**, **`getCommandsBase()`** — Resolve the appropriate `.opencode/` subdirectory based on project type.
+- **`getConfigPath()`** — Resolves to `opencode.jsonc` for global projects (JSONC supports comments) and `opencode.json` for regular projects.
+
+### Data Flow
+
+```
+Dashboard /config page  ──HTTP──▶  API (PUT /api/v1/config)
+                                          │
+                                   writes to DB (configs table)
+                                          │
+                                   writes to disk (opencode.json/jsonc)
+```
+
+### API Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/config` | Get project config |
+| GET | `/api/v1/config/global` | Get global config |
+| PUT | `/api/v1/config` | Update project config (writes DB + disk) |
+| PUT | `/api/v1/config/global` | Update global config |
+| POST | `/api/v1/config/sync` | Sync project config from disk to DB |
+| POST | `/api/v1/config/global/sync` | Sync global config from disk to DB |
+
+## Pipeline Observability Architecture
+
+Every pipeline event is logged to the `pipeline_events` table and displayed at `/pipeline` in the dashboard:
+
+### Event Sources
+
+| Source | Events Emitted |
+|--------|---------------|
+| `observations.ts` — `storeObservation()` | `observation_created` |
+| `synthesis.ts` — `runSynthesis()` | `synthesis_started`, `trait_created`, `trait_updated`, `synthesis_completed`, `synthesis_failed` |
+| `observer.ts` plugin | `session_created`, `session_idle`, `plugin_initialized`, `plugin_error` |
+| `observer-core.ts` | `observation_imported`, `synthesis_triggered` |
+| API Server (scheduled) | Auto-triggers synthesis + skill sync every 15 minutes |
+
+### Timeline Architecture
+
+The `/pipeline` dashboard page uses a Git-workflow-style vertical timeline:
+
+1. **Client polls** every 3 seconds via `GET /api/v1/pipeline/timeline`
+2. **Parent-child nesting**: Synthesis run is parent, individual trait operations are children linked via `parent_event_id`
+3. **Collapsing**: Events within the same 60-second window are grouped into +N collapsible cards
+4. **Filtering**: Source filter pills (All/Agent/Plugin/Synthesis/Trait) filter client-side
+5. **Detail overlays**: Click any event to show raw JSON payload in a modal overlay
+
+Event colors map to sources: orange (agent), blue (plugin), green (synthesis), purple (trait), gray (system).
+
+## Cross-Project Synthesis Flow
+
+Cross-project synthesis evaluates observations and skills across multiple projects:
+
+1. **`ingenium_synthesis_cross_project`** iterates all active projects
+2. **Pattern detection**: Compares observations across projects, looking for shared patterns
+3. **Promotion**: Shared patterns are synthesized into skills in the `global-default` project
+4. **Resolution**: Global skills are accessible from every project via `resolveProjectBase()` path resolution
+5. **`ingenium_project_set_global(project, name, isGlobal)`** marks/unmarks a project as the global-default
+
+This runs as part of the scheduled 15-minute maintenance cycle or can be triggered manually.
+
+## Plugin Source Auto-Populate Architecture
+
+When creating a plugin via `ingenium_plugin_create(project, name, filePath)` without `sourceContent`, the API:
+
+1. Reads the file at `filePath` from disk
+2. Sets `sourceContent` to the file contents automatically
+3. Stores it in the DB alongside the reference
+
+This allows plugins to be created by path reference alone. The dashboard Edit button similarly fetches source from `GET /plugins/:name/source` when DB content is empty.
+
+### Auto-Config Sync
+
+Every plugin lifecycle operation (create, enable, disable, delete, update) triggers:
+1. Write/remove `.opencode/plugins/<file>.ts` on disk
+2. Sync `opencode.json`'s `plugin` array
+3. This prevents "disconnected config" bugs
+
+## Backup LLM Provider Architecture
+
+The synthesis pipeline uses a two-tier LLM provider architecture for fault tolerance:
+
+1. **Primary provider**: Configured via Settings (provider, model, API key, endpoint)
+2. **Backup provider**: Optional failover (same configuration shape)
+
+If the primary LLM call fails during Phase 2 skill synthesis:
+1. The pipeline catches the error and logs it to `result.errors`
+2. It attempts the backup provider with the same observation batch
+3. If both fail, Phase 1 trait results are still saved
+4. The Test Connection button tests both independently
+
 ## Dataset Reference
 
 | Package | Description | DB Access |
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 66 tools. Calls API via HTTP. Zero DB access. | No |
-| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 11 pages. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 74 tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 15 pages. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | IMAP/SMTP + OAuth2 email engine (imapflow, nodemailer, mailparser). DB Access: No. | No |
 
 ## Dashboard Pages
@@ -101,32 +202,24 @@ The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 
 ### MCP Tool Count
 
-The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **66 tools**. Tool categories:
-- Settings: 2 (get, set)
-- Skills: 9 (list, load, search, create, update, delete, enable, disable, sync)
-- Learnings: 4 (log, search, list, skill_from_learnings)
-- Tasks: 5 (create, list, move, complete, next)
-- Plans (Context): 3 (save, search, list)
-- Projects: 6 (list, init, delete, restore, list_archived, purge)
-- Plugins: 7 (list, get, enable, disable, create, delete, update)
-- Commands: 5 (list, get, create, update, delete) — manages `.opencode/commands/` lifecycle with DB migration `010_commands.sql` and core tools in `packages/ingenium-core/lib/tools/commands.ts`
-- Servers: 3 (list, add, remove)
-- Agents: 8 (list, get, create, update, delete, enable, disable, sync)
-- Plus: `process_learnings` (from learnings plugin)
+The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **74 tools**. Tool categories:
 
-| Type | When used |
-|------|-----------|
-| `pattern` | Repeated convention, workflow, or discovered pattern |
-| `decision` | Architecture or design decision with rationale |
-| `bug` | Bug fix with root cause and prevention |
-| `preference` | User preference or configuration choice |
-| `research` | Investigation findings (doc ingestion, model comparison) |
-| `skill` | Skill created, updated, or retired |
-| `agent` | Agent definition changed or added |
-| `config` | Configuration change (`opencode.json`, `models.yaml`) |
-| `hook` | Hook lifecycle trigger created or modified |
-| `plugin` | Plugin created, enabled, or disabled |
-| `architecture` | Architecture decision or structural change |
+| Category | Count | Tools |
+|----------|-------|-------|
+| Settings | 2 | `ingenium_setting_get`, `ingenium_setting_set` |
+| Skills | 9 | list, load, search, create, update, delete, enable, disable, sync |
+| Observations | 4 | observe, search, list, stats |
+| Personality | 2 | personality, personality_traits |
+| Synthesis | 3 | run, status, cross_project |
+| Tasks | 5 | create, list, move, complete, next |
+| Plans (Context) | 3 | save, search, list |
+| Projects | 7 | list, init, delete, restore, list_archived, purge, set_global |
+| Plugins | 7 | list, get, enable, disable, create, delete, update |
+| Commands | 5 | list, get, create, update, delete |
+| Config | 3 | get, set, sync |
+| Servers | 3 | list, add, remove |
+| Agents | 8 | list, get, create, update, delete, enable, disable, sync |
+| Email | 13 | list, search, read, send, draft, folders, accounts, triage, suggest, draft_response, patterns, watch_start, watch_status |
 
 ---
 
@@ -175,10 +268,11 @@ services:
       - ingenium_data:/app/.ingenium/data
 ```
 
-Inside the container, **supervisord** manages three processes:
-1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads
-2. **Dashboard** (Next.js on :3000) — highlight.js syntax highlighting in Preview/Source modes
-3. **opencode-server** (on :4096) — appuser home dirs pre-created for config persistence
+Inside the container, **supervisord** manages four processes:
+1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
+2. **Dashboard** (Next.js on :3000) — 15 route-based pages with highlight.js syntax highlighting in Preview/Source modes
+3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
+4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded dashboard use
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
@@ -186,3 +280,24 @@ Start with:
 ```bash
 docker compose up --build
 ```
+
+### Port Mappings
+
+| Host Port | Service | Description |
+|-----------|---------|-------------|
+| `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
+| `4096` | OpenCode Server | Auth-enabled MCP server |
+| `4097` | API | Express REST gateway (sole DB authority) |
+| `4098` | OpenCode Iframe | No-auth iframe for embedded use |
+
+> Note: Dockerfile `EXPOSE` only covers ports 3000, 4096, 4097. Port 4098 is mapped in docker-compose.yml but not in Dockerfile `EXPOSE`.
+
+### Volume Configurations
+
+| Volume Name | Mount Path | Purpose |
+|-------------|------------|---------|
+| `ingenium-data` | `/app/.ingenium` | SQLite databases, learnings, tasks, projects, commands |
+| `opencode-config` | `/home/appuser/.config` | OpenCode configuration (persists across rebuilds) |
+| `opencode-data` | `/home/appuser/.local` | OpenCode user data, session state |
+
+**Workspace bind-mount:** Your local `~/repos` is mounted at `/workspace` for file editing.

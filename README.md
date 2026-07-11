@@ -7,8 +7,8 @@
 ### All your AI agent development tools in one place. One MCP server, hundreds of tools.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-14%20total-green?style=flat-square" alt="14 skills" />
-  <img src="https://img.shields.io/badge/MCP%20tools-61-blue?style=flat-square" alt="61 MCP tools" />
+  <img src="https://img.shields.io/badge/skills-22%20total-green?style=flat-square" alt="22 skills" />
+  <img src="https://img.shields.io/badge/MCP%20tools-74-blue?style=flat-square" alt="74 MCP tools" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
 
@@ -16,16 +16,16 @@
 
 </div>
 
-**Ingenium** is a self-learning AI agent skill system and MCP server. It provides skills, learnings, tasks, context, plugins, servers, email client, and project management through a single MCP stdio transport, with a Next.js dashboard for visual management.
+**Ingenium** is a self-learning AI agent skill system and MCP server. It provides skills, observations, personality traits, synthesis pipeline, tasks, context, plugins, commands, servers, email client, agents, config management, and project management through a single MCP stdio transport, with a Next.js 16 dashboard for visual management.
 
 ### OpenCode Web UI Embedded in Dashboard
 The dashboard includes an embedded OpenCode service at `/opencode` — a second OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
 
-Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to 61 tools spanning project management, skill management, task boards, full-text knowledge search, plugin lifecycle, agent management, server configuration, email client integration with Gmail/Outlook OAuth2 + IMAP/SMTP support, and settings. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
+Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to **74 tools** spanning project management, skill management, observations, personality, synthesis pipeline, task boards, full-text knowledge search, plugin lifecycle, commands, config management, agent management, server configuration, email client integration with Gmail/Outlook OAuth2 + IMAP/SMTP support, and settings. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
-**The system learns from you.** Patterns you teach, conventions you establish, and decisions you make are stored in a searchable knowledge base. The `update-skills` agent autonomously detects new dependencies, repeated patterns, missing coverage, and stale content — creating, updating, or retiring skills as your codebase evolves. Every change is logged with before/after commit hashes for full auditability.
+**The system learns from you.** Patterns you teach, conventions you establish, and decisions you make are processed through a self-learning pipeline. The Observer plugin captures observations during your workflow, the synthesis pipeline (Phase 1 heuristic + optional Phase 2 LLM) transforms them into personality traits and skills, and the `/pipeline` timeline provides full observability into every step. The system supports cross-project synthesis, sharing learned patterns across all your projects.
 
-11 dashboard pages provide visual management for every feature. Each page is a standalone feature with its own documentation.
+15 dashboard pages provide visual management for every feature. Each page is a standalone feature with its own documentation.
 
 ## Quick Start
 
@@ -64,7 +64,7 @@ docker compose up --build
 }
 ```
 
-**Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js`. The server speaks stdio MCP with 61 tools. No HTTP port, no network config.
+**Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js`. The server speaks stdio MCP with **74 tools**. No HTTP port, no network config.
 
 **Docker Deployment** — Single-container deployment via `docker compose up --build` manages three processes: API (`:4097`), Dashboard (`:3000`), and opencode-server (`:4096`) via supervisord. Build-time UID matching ensures write access to workspace. Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
@@ -102,12 +102,28 @@ MCP server configuration and proxy engine — start, stop, configure MCP servers
 → [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md)
 
 ### 👤 Agents
-Agent profile management — create, enable, disable, and configure AI agent profiles. Each agent has a model assignment, access permissions, category, and skill bindings. Manage agent profiles via the dashboard or `ingenium_agent_*` MCP tools.
+Agent profile management — create, enable, disable, and configure AI agent profiles (9 agents). Each agent has a model assignment, access permissions, category, and skill bindings. Manage agent profiles via the dashboard or `ingenium_agent_*` MCP tools. Agents support sync from disk to DB for round-trip editing.
 → [docs/agents.md](docs/agents.md)
 
+### 👁️ Observations
+Full-text searchable observation log with 10 types (correction, preference, pattern, insight, feedback, behavior, terminology, workflow, error, goal). FTS5-powered search, type/status filters, and pipeline integration. Powered by the self-learning pipeline — every user interaction is logged automatically.
+→ [docs/HOW-TO/self-learning.md](docs/HOW-TO/self-learning.md)
+
+### 🧬 Personality
+Learned personality profile with 6 trait dimensions (communication_style, code_preference, workflow_pattern, feedback_style, interaction_pattern, priority_signal). Confidence model with display threshold (≥0.30), time decay, and dismiss support. Traits inform agent behavior adjustments.
+→ [docs/self-learning-pipeline.md](docs/self-learning-pipeline.md)
+
+### 🕐 Pipeline
+Git-workflow-style real-time timeline of all pipeline events. Auto-polls every 3 seconds, filter pills (All/Agent/Plugin/Synthesis/Trait), +N collapse for rapid events, detail overlays with raw JSON. 12 event types spanning observations, synthesis, traits, and plugins.
+→ [docs/self-learning-pipeline.md](docs/self-learning-pipeline.md)
+
 ### ⚙️ Settings
-Application settings management — configure key-value settings at the project level. Settings control archive retention, API behavior, and other project-scoped preferences.
+Application settings management — configure key-value settings at the project level. Settings control archive retention (days), synthesis interval (minutes), synthesis LLM provider (with backup provider fallback), API key, endpoint URL, and Test Connection verification.
 → [docs/HOW-TO/settings.md](docs/HOW-TO/settings.md)
+
+### 🔧 Config
+OpenCode configuration editor with Project/Global tabs. Edit `opencode.json` (project-level) and `opencode.jsonc` (global) directly from the dashboard. Sync from disk to reload filesystem changes, save to persist to DB and write to disk.
+→ [docs/USAGE.md](docs/USAGE.md)
 
 ### 🗄️ Archive
 Project archiving and lifecycle management — view archived projects, restore them to active status, or purge expired projects. Archive tab in the Projects page provides Active/Archived toggle with rename, archive, and restore actions.
@@ -117,15 +133,15 @@ Project archiving and lifecycle management — view archived projects, restore t
 ```
 ingenium/
 ├── packages/
-│   ├── ingenium-core/        # Shared library: SQLite WAL + FTS5, 8 tool modules, Zod schemas
+│   ├── ingenium-core/        # Shared library: SQLite WAL + FTS5, 16 tool modules, Zod schemas, pipeline events
 │   └── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser) with OAuth2 for Gmail/Outlook
 ├── services/
 │   ├── ingenium-api/          # Express REST gateway on port 4097. Sole database authority.
-│   ├── ingenium-server/       # MCP stdio server with 64 tools. Calls API via HTTP. Zero DB access.
-│   └── ingenium-dashboard/    # Next.js 16 App Router frontend with 11 feature pages. Calls API via HTTP. Zero DB access.
+│   ├── ingenium-server/       # MCP stdio server with 74 tools. Calls API via HTTP. Zero DB access.
+│   └── ingenium-dashboard/    # Next.js 16 App Router frontend with 15 feature pages. Calls API via HTTP. Zero DB access.
 ├── seed/
-│   ├── skills/                # 17 canonical skill sources in split-skill format (SKILL.md + metadata.json + references/)
-│   └── plugins/               # 4 seed plugins (.ts files)
+│   ├── skills/                # Canonical skill sources in split-skill format (SKILL.md + metadata.json + references/)
+│   └── plugins/               # Seed plugins (.ts files)
 ├── .opencode/
 │   ├── skills/                # Skills written to disk from DB (split-skill format)
 │   ├── plugins/               # Plugin .ts files synced from DB
@@ -141,14 +157,15 @@ ingenium/
 
 ```mermaid
 graph LR
-    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>61 tools]
+    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>74 tools]
     B -->|HTTP| C[ingenium-api<br/>port 4097]
     D[Browser<br/>Dashboard] -->|HTTP| C
     C -->|SQLite WAL| E[(SQLite<br/>FTS5)]
     
-    F[Agent Session] -->|skill-load| G[.opencode/skills/<br/>14 skills]
-    G -->|update-skills| H[Self-learning<br/>engine]
-    H -->|Logs to| E
+    F[Agent Session] -->|skill-load| G[.opencode/skills/<br/>22 skills]
+    G -->|self-learning| H[Synthesis<br/>Pipeline]
+    H -->|observations| E
+    H -->|traits| E
     
     I[Orchestrator] -->|QA verify| J[@ingenium-qa<br/>review + test]
     I -->|docs update| K[@ingenium-docs<br/>documentation]
@@ -163,16 +180,20 @@ graph LR
 | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | Naming, file organization, error handling, observation logging, plugin auto-config sync |
 | [docs/VARIABLES.md](docs/VARIABLES.md) | All environment variables with defaults |
 | [docs/agents.md](docs/agents.md) | Agent profiles and pipeline lifecycle |
-| [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md) | Project management feature guide |
-| [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md) | Skill system usage and file_tree format |
+| [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | Quick start guide with Docker, local dev, and MCP config |
+| [docs/USAGE.md](docs/USAGE.md) | Comprehensive dashboard user guide for all 15 pages |
+| [docs/self-learning-pipeline.md](docs/self-learning-pipeline.md) | Full self-learning pipeline reference (observations, personality, synthesis) |
+| [AGENTS.md](AGENTS.md) | Skill system protocol — agent entry point with all conventions |
+| [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md) | Project management (create, archive, global vs regular, cross-project) |
+| [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md) | Skill system usage, file_tree format, split-skill editing |
+| [docs/HOW-TO/synthesis.md](docs/HOW-TO/synthesis.md) | Synthesis pipeline configuration (LLM, backup provider, interval) |
+| [docs/HOW-TO/personality.md](docs/HOW-TO/personality.md) | Personality trait confidence model, dismiss, sort, hidden traits |
 | [docs/HOW-TO/self-learning.md](docs/HOW-TO/self-learning.md) | Self-learning pipeline with observations and personality traits |
 | [docs/HOW-TO/learnings.md](docs/HOW-TO/learnings.md) | Old learnings documentation (deprecated, kept for reference) |
 | [docs/HOW-TO/tasks.md](docs/HOW-TO/tasks.md) | Kanban task board feature guide |
 | [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md) | Plugin lifecycle management guide |
 | [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md) | MCP server configuration guide |
-| [docs/HOW-TO/settings.md](docs/HOW-TO/settings.md) | Settings management guide |
-| [docs/USAGE.md](./docs/USAGE.md) | Dashboard user guide and API access reference |
-| [AGENTS.md](./AGENTS.md) | Skill system protocol — agent entry point |
+| [docs/HOW-TO/settings.md](docs/HOW-TO/settings.md) | Settings management (archive retention, synthesis LLM, interval) |
 | [services/ingenium-dashboard/STYLING-GUIDE.md](./services/ingenium-dashboard/STYLING-GUIDE.md) | Dashboard styling conventions and component design |
 
 ## Docker Deployment
@@ -187,14 +208,16 @@ services:
       - "4097:4097"   # API
       - "3000:3000"   # Dashboard
       - "4096:4096"   # opencode-server (managed by supervisord)
+      - "4098:4098"   # opencode-iframe (no-auth for embedded use)
     volumes:
       - ingenium_data:/app/.ingenium/data
 ```
 
-Inside the container, **supervisord** manages three processes:
+Inside the container, **supervisord** manages four processes:
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads
-2. **Dashboard** (Next.js on :3000) — highlight.js syntax highlighting in Preview/Source modes
-3. **opencode-server** (on :4096) — appuser home dirs pre-created for config persistence
+2. **Dashboard** (Next.js on :3000) — 15 route-based pages with highlight.js syntax highlighting
+3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
+4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded dashboard use
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 

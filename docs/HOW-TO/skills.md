@@ -29,11 +29,14 @@ The `file_tree` column (TEXT, JSON) enables complete data round-trips between DB
 ## How to Use
 1. Navigate to `/skills` from the dashboard nav bar
 2. Use the search input to filter skills by name or description
-3. Each skill card shows the skill name and description
-4. Click a skill card to open a split-pane overlay:
-   - **Left sidebar (FileTree)** — shows a navigable file tree of the skill's files: SKILL.md, metadata.json, and any reference files from `file_tree`. Click any file to view its content.
-   - **Right pane (MarkdownViewer)** — displays the file content with a Preview/Source toggle. Code blocks are highlighted using highlight.js with language-aware syntax coloring.
-   - **Inline editing** — click "Edit" to modify the current file directly in the overlay. For reference files (not SKILL.md), edits update the `file_tree` JSON. Click "Save" to persist to the DB.
+3. Use the **Sort** dropdown to order skills:
+   - **Alphabetical** (A-Z) — sort by name (default)
+   - **Newest first** — sort by creation date
+4. Each skill card shows the skill name and description
+5. Click a skill card to open a split-pane overlay:
+   - **Left sidebar (FileTree)** — shows a navigable file tree of the skill's files: SKILL.md, metadata.json, and any reference files from `file_tree`. Supports collapsible tree navigation. Click any file to view its content.
+   - **Right pane (MarkdownViewer)** — displays the file content with a Preview/Source toggle. Code blocks are highlighted using highlight.js with language-aware syntax coloring (github.css for light, hljs-dark.css for dark).
+   - **Inline editing** — click "Edit" to modify the current file directly in the overlay. For SKILL.md, edits update the main content. For reference files (not SKILL.md), edits update the `file_tree` JSON. Click "Save" to persist to the DB.
 
 ## API Endpoints
 - `GET /api/v1/skills?project=<name>` — list all skills
