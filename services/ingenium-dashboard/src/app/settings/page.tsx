@@ -32,6 +32,9 @@ export default function SettingsPage() {
   const [backupProviderId, setBackupProviderId] = useState("");
   const [backupSelectedModel, setBackupSelectedModel] = useState("");
   const [backupApiKey, setBackupApiKey] = useState("");
+  const [backupIsCustom, setBackupIsCustom] = useState(false);
+  const [backupCustomEndpoint, setBackupCustomEndpoint] = useState("");
+  const [backupCustomModel, setBackupCustomModel] = useState("");
   const backupProvider = providers.find(p => p.id === backupProviderId);
   const backupModels = backupProvider ? Object.entries(backupProvider.models || {}) as [string, any][] : [];
   const selectedProvider = providers.find(p => p.id === providerId);
@@ -138,13 +141,18 @@ export default function SettingsPage() {
       // Save backup config
       if (backupProviderId) {
         await api.settings.set("synthesis_backup_provider", backupProviderId, "global-default");
-        const bp = backupProvider;
-        const bModels = bp ? Object.entries(bp.models || {}) as [string, any][] : [];
-        const bModel = bModels.find(([k]) => k === backupSelectedModel) || bModels[0];
-        const bModelId = bModel ? bModel[1]?.id || "" : "";
-        const bEp = bModel ? bModel[1]?.api?.url || "" : "";
-        if (bModelId) await api.settings.set("synthesis_backup_model", bModelId, "global-default");
-        if (bEp) await api.settings.set("synthesis_backup_endpoint", bEp, "global-default");
+        if (backupIsCustom) {
+          if (backupCustomModel) await api.settings.set("synthesis_backup_model", backupCustomModel, "global-default");
+          if (backupCustomEndpoint) await api.settings.set("synthesis_backup_endpoint", backupCustomEndpoint, "global-default");
+        } else {
+          const bp = backupProvider;
+          const bModels = bp ? Object.entries(bp.models || {}) as [string, any][] : [];
+          const bModel = bModels.find(([k]) => k === backupSelectedModel) || bModels[0];
+          const bModelId = bModel ? bModel[1]?.id || "" : "";
+          const bEp = bModel ? bModel[1]?.api?.url || "" : "";
+          if (bModelId) await api.settings.set("synthesis_backup_model", bModelId, "global-default");
+          if (bEp) await api.settings.set("synthesis_backup_endpoint", bEp, "global-default");
+        }
       }
       if (backupApiKey) await api.settings.set("synthesis_backup_api_key", backupApiKey, "global-default");
       setEndpoint(ep);
@@ -323,7 +331,10 @@ export default function SettingsPage() {
                 <select value={backupProviderId} onChange={(e) => {
                   const val = e.target.value;
                   setBackupProviderId(val);
-                  if (val) {
+                  setBackupIsCustom(val === "__custom__");
+                  if (val === "__custom__") {
+                    setBackupSelectedModel("");
+                  } else if (val) {
                     const p = providers.find(x => x.id === val);
                     const models = p ? Object.entries(p.models || {}) : [];
                     setBackupSelectedModel(models[0]?.[0] || "");
@@ -332,6 +343,7 @@ export default function SettingsPage() {
                   }
                 }} className="border p-2 rounded w-full text-sm">
                   <option value="">— None —</option>
+                  <option value="__custom__">— Custom Provider —</option>
                   {(() => {
                     const sorted = [...providers]
                       .filter(p => Object.keys(p.models || {}).length > 0)
@@ -346,6 +358,18 @@ export default function SettingsPage() {
                   })()}
                 </select>
               </div>
+              {backupIsCustom && (
+                <div className="space-y-3 p-3 bg-gray-50 rounded border">
+                  <div>
+                    <label className="block text-sm font-medium">Endpoint</label>
+                    <input type="text" value={backupCustomEndpoint} onChange={(e) => setBackupCustomEndpoint(e.target.value)} placeholder="https://api.myprovider.com/v1" className="border p-2 rounded w-full text-sm font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium">Model ID</label>
+                    <input type="text" value={backupCustomModel} onChange={(e) => setBackupCustomModel(e.target.value)} placeholder="model-id" className="border p-2 rounded w-full text-sm font-mono" />
+                  </div>
+                </div>
+              )}
               {backupProviderId && backupModels.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium">Model</label>
