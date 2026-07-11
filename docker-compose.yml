@@ -8,6 +8,7 @@ services:
       - "4098:4098"   # OpenCode iframe (no auth)
     environment:
       - OPENCODE_SERVER_PASSWORD=test
+      - INGENIUM_GLOBAL_CONFIG_PATH=/home/appuser/.config/opencode
     security_opt: ["seccomp=unconfined"]
     volumes:
       - ingenium-data:/app/.ingenium

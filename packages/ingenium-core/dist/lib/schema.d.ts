@@ -390,6 +390,29 @@ export declare const AgentSchema: z.ZodObject<{
     skills?: string | undefined;
 }>;
 export type Agent = z.infer<typeof AgentSchema>;
+export declare const ConfigSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    type: z.ZodEnum<["project", "global"]>;
+    content: z.ZodString;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    updated_at: string;
+    type: "project" | "global";
+    project_id: string;
+    content: string;
+}, {
+    id: string;
+    created_at: string;
+    updated_at: string;
+    type: "project" | "global";
+    project_id: string;
+    content: string;
+}>;
+export type Config = z.infer<typeof ConfigSchema>;
 export declare const PipelineEventSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;

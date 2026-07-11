@@ -2,12 +2,13 @@ import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { Command } from "../schema.js";
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { resolve, relative, isAbsolute } from "node:path";
+import { getCommandsBase } from "./paths.js";
 
-function validateCommandPath(filePath: string): string {
+function validateCommandPath(filePath: string, projectId?: string): string {
   if (!/^[a-zA-Z0-9_\-./]+$/.test(filePath)) {
     throw new Error(`Invalid command file path: ${filePath}`);
   }
-  const baseDir = resolve(getProjectRoot(), ".opencode/commands");
+  const baseDir = getCommandsBase(projectId);
   const resolved = resolve(baseDir, filePath);
   const rel = relative(baseDir, resolved);
   if (rel.startsWith("..") || isAbsolute(rel)) {
@@ -16,12 +17,8 @@ function validateCommandPath(filePath: string): string {
   return filePath;
 }
 
-function getProjectRoot(): string {
-  return resolve(process.env.INGENIUM_CORE_DB_PATH ?? "./data", "..", "..");
-}
-
-export function ensureCommandDir(): void {
-  const dir = resolve(getProjectRoot(), ".opencode/commands");
+export function ensureCommandDir(projectId?: string): void {
+  const dir = getCommandsBase(projectId);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
@@ -44,7 +41,7 @@ export function createCommand(
 ): Command {
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    validateCommandPath(filePath);
+    validateCommandPath(filePath, projectId);
     const now = new Date().toISOString();
     const id = `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const body = content ?? "";
@@ -54,9 +51,9 @@ export function createCommand(
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(id, projectId, name, filePath, body, now, now);
 
-    ensureCommandDir();
+    ensureCommandDir(projectId);
     if (body) {
-      writeFileSync(resolve(getProjectRoot(), ".opencode/commands", filePath), body);
+      writeFileSync(resolve(getCommandsBase(projectId), filePath), body);
     }
 
     checkpointAfterWrite();
@@ -72,7 +69,7 @@ export function deleteCommand(projectId: string, name: string): boolean {
     if (!cmd) return false;
 
     try {
-      const resolvedPath = resolve(getProjectRoot(), ".opencode/commands", validateCommandPath(cmd.file_path));
+      const resolvedPath = resolve(getCommandsBase(projectId), validateCommandPath(cmd.file_path, projectId));
       if (existsSync(resolvedPath)) unlinkSync(resolvedPath);
     } catch { /* file may already be gone */ }
 
@@ -97,25 +94,25 @@ export function updateCommand(
     const newFilePath = updates.file_path ?? existing.file_path;
     const newContent = updates.content !== undefined ? updates.content : (existing.content ?? "");
 
-    if (updates.file_path) validateCommandPath(updates.file_path);
+    if (updates.file_path) validateCommandPath(updates.file_path, projectId);
 
     db.prepare(
       "UPDATE commands SET file_path = ?, content = ?, updated_at = ? WHERE id = ?"
     ).run(newFilePath, newContent, now, existing.id);
 
     if (updates.content !== undefined) {
-      ensureCommandDir();
+      ensureCommandDir(projectId);
       if (updates.file_path && updates.file_path !== existing.file_path) {
         try {
-          const oldPath = resolve(getProjectRoot(), ".opencode/commands", existing.file_path);
+          const oldPath = resolve(getCommandsBase(projectId), existing.file_path);
           if (existsSync(oldPath)) unlinkSync(oldPath);
         } catch { /* ignore */ }
       }
-      writeFileSync(resolve(getProjectRoot(), ".opencode/commands", newFilePath), newContent);
+      writeFileSync(resolve(getCommandsBase(projectId), newFilePath), newContent);
     } else if (updates.file_path && updates.file_path !== existing.file_path) {
-      ensureCommandDir();
-      const oldPath = resolve(getProjectRoot(), ".opencode/commands", existing.file_path);
-      const newPath = resolve(getProjectRoot(), ".opencode/commands", newFilePath);
+      ensureCommandDir(projectId);
+      const oldPath = resolve(getCommandsBase(projectId), existing.file_path);
+      const newPath = resolve(getCommandsBase(projectId), newFilePath);
       if (existsSync(oldPath)) {
         const body = readFileSync(oldPath, "utf-8");
         writeFileSync(newPath, body);

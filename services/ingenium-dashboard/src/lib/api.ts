@@ -402,4 +402,12 @@ export const api = {
         endpoint: endpoint.data?.value || "",
       })),
   },
+  configs: {
+    get: (type: string = "project", project = DEFAULT_PROJECT) =>
+      request<{ data: { id: string; content: string } | null }>(`/config?project=${encodeURIComponent(project)}&type=${encodeURIComponent(type)}`),
+    set: (type: string, content: string, project = DEFAULT_PROJECT) =>
+      request<{ data: { id: string; content: string } }>(`/config?project=${encodeURIComponent(project)}&type=${encodeURIComponent(type)}`, { method: "PUT", body: JSON.stringify({ content }) }),
+    sync: (type: string = "project", project = DEFAULT_PROJECT) =>
+      request<{ data: { id: string; content: string } | null }>(`/config/sync?project=${encodeURIComponent(project)}&type=${encodeURIComponent(type)}`, { method: "POST" }),
+  },
 };

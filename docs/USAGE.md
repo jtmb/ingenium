@@ -218,6 +218,29 @@ These 14 skills provide guidance for specific contexts but are not required for 
 
 **Docs**: docs/HOW-TO/servers.md
 
+## Config
+
+**What it does**: Manage OpenCode configuration via a dedicated `/config` dashboard page with tabbed editing. The `configs` table stores `opencode.json` (project-level) and `opencode.jsonc` (global) content in the DB, enabling round-trip editing through the dashboard and MCP tools. Global projects write skills, plugins, and commands to `/home/appuser/.config/opencode/` (configurable via `INGENIUM_GLOBAL_CONFIG_PATH`) instead of the project root.
+
+**How to use**:
+- Navigate to `/config` in the dashboard
+- Use the **Project** tab to edit `opencode.json` for the active project
+- Use the **Global** tab to edit `opencode.jsonc` for global configuration
+- Click **Sync from disk** to reload config from the filesystem into the editor
+- Click **Save** to persist editor content to the DB and write to disk
+- Use MCP tools for direct programmatic access
+
+**MCP Tools**:
+| Tool | Purpose |
+|------|---------|
+| `ingenium_config_get` | Retrieve opencode config (project or global) |
+| `ingenium_config_set` | Update opencode config content |
+| `ingenium_config_sync` | Sync config between disk and DB (bidirectional) |
+
+**API**: GET /api/v1/config, GET /api/v1/config/global, PUT /api/v1/config, PUT /api/v1/config/global, POST /api/v1/config/sync, POST /api/v1/config/global/sync
+
+**Code**: services/ingenium-dashboard/src/app/config/page.tsx → services/ingenium-api/routes/config.ts → packages/ingenium-core/lib/tools/paths.ts
+
 ## Synthesis & Cross-Project Features
 
 **What it does**: The synthesis pipeline processes observations into personality traits and skills. When configured with an LLM (Phase 2), the pipeline creates skills in standard split-skill format (SKILL.md + metadata.json + references/). Cross-project synthesis evaluates patterns across multiple projects, creating global skills available to every project.
