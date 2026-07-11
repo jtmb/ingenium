@@ -1,0 +1,7 @@
+{
+  "name": "dashboard-screenshots",
+  "description": "Playwright-based screenshot workflow for all Ingenium Dashboard pages",
+  "category": "testing",
+  "tags": ["playwright", "screenshots", "dashboard", "testing", "ui", "visual"],
+  "alwaysApply": false
+}
