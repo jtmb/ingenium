@@ -15,3 +15,9 @@ export async function synthesisStatus(project: string) {
   const res = await api.get("/synthesis/status", { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** Trigger cross-project synthesis */
+export async function synthesisCrossProject(project: string) {
+  const res = await api.post("/synthesis/cross-project", {}, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res) }] };
+}

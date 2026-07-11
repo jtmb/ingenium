@@ -9,4 +9,5 @@ export declare function enableSkill(projectId: string, name: string): Skill | un
 export declare function disableSkill(projectId: string, name: string): Skill | undefined;
 export declare function syncSkillFromDisk(projectId: string, name: string): Skill | undefined;
 export declare function syncAllSkills(projectId: string, db?: any): number;
+export declare function copySkills(sourceProjectId: string, targetProjectId: string): number;
 //# sourceMappingURL=skills.d.ts.map

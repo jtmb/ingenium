@@ -4,11 +4,13 @@ export declare const ProjectSchema: z.ZodObject<{
     name: z.ZodString;
     path: z.ZodOptional<z.ZodString>;
     archived_at: z.ZodOptional<z.ZodString>;
+    is_global: z.ZodDefault<z.ZodBoolean>;
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     id: string;
     name: string;
+    is_global: boolean;
     created_at: string;
     updated_at: string;
     path?: string | undefined;
@@ -20,6 +22,7 @@ export declare const ProjectSchema: z.ZodObject<{
     updated_at: string;
     path?: string | undefined;
     archived_at?: string | undefined;
+    is_global?: boolean | undefined;
 }>;
 export type Project = z.infer<typeof ProjectSchema>;
 export declare const SkillSchema: z.ZodObject<{

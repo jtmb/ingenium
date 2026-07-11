@@ -6,12 +6,12 @@ projectsRouter.get("/", (_req, res) => {
     res.json({ data: list });
 });
 projectsRouter.post("/", (req, res) => {
-    const { name } = req.body;
+    const { name, is_global } = req.body;
     if (!name || typeof name !== "string") {
         res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "name is required" } });
         return;
     }
-    const project = projects.createProject(name);
+    const project = projects.createProject(name, !!is_global);
     res.status(201).json({ data: project });
 });
 projectsRouter.patch("/:name", (req, res) => {
@@ -51,4 +51,17 @@ projectsRouter.post("/purge", (req, res) => {
     const retentionDays = req.body.retention_days ?? 7;
     const purged = projects.purgeExpiredProjects(retentionDays);
     res.json({ data: { purged_count: purged } });
+});
+projectsRouter.patch("/:name/global", (req, res) => {
+    const { is_global } = req.body;
+    if (is_global === undefined || typeof is_global !== "boolean") {
+        res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "is_global (boolean) is required" } });
+        return;
+    }
+    const updated = projects.setProjectGlobal(req.params.name, is_global);
+    if (!updated) {
+        res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${req.params.name}' not found` } });
+        return;
+    }
+    res.json({ data: { name: req.params.name, is_global } });
 });

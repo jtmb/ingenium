@@ -9,7 +9,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes 76 tools accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes 77 tools accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
 
 ## Projects
 
@@ -24,6 +24,8 @@ Docker starts a single container running 4 processes under supervisord: API (:40
 - Purge expired projects (configurable retention period in Settings)
 
 **API**: GET /api/v1/projects, POST /api/v1/projects, PATCH /api/v1/projects/:name, DELETE /api/v1/projects/:name, GET /api/v1/projects/archive, POST /api/v1/projects/:name/restore, POST /api/v1/projects/purge
+
+**MCP Tools**: `ingenium_project_set_global` — marks a project as the global-default, enabling shared skill resolution and cross-project observation evaluation.
 
 **Code**: services/ingenium-dashboard/src/app/projects/page.tsx → services/ingenium-api/routes/projects.ts → packages/ingenium-core/lib/tools/projects.ts
 
@@ -213,6 +215,27 @@ These 14 skills provide guidance for specific contexts but are not required for 
 **Code**: services/ingenium-dashboard/src/app/servers/page.tsx → services/ingenium-api/routes/servers.ts → packages/ingenium-core/lib/tools/servers.ts
 
 **Docs**: docs/HOW-TO/servers.md
+
+## Synthesis & Cross-Project Features
+
+**What it does**: The synthesis pipeline processes observations into personality traits and skills. Cross-project synthesis evaluates patterns across multiple projects, creating global skills available to every project.
+
+**How to use**:
+- Observations are automatically processed via the scheduled synthesis pipeline (every 15 minutes)
+- Trigger manual synthesis via `ingenium_synthesis_run` for the current project
+- Use `ingenium_synthesis_cross_project` to evaluate observations and skills across all active projects
+- Global skills are created in the `global-default` project and shared across all projects
+
+**MCP Tools**:
+| Tool | Purpose |
+|------|---------|
+| `ingenium_synthesis_run` | Trigger synthesis for the current project |
+| `ingenium_synthesis_cross_project` | Trigger cross-project synthesis across all active projects |
+| `ingenium_project_set_global` | Mark a project as global-default for shared skill resolution |
+
+**API**: POST /api/v1/synthesis/run, GET /api/v1/synthesis/status
+
+**Code**: services/ingenium-api/routes/synthesis.ts → packages/ingenium-core/lib/tools/synthesis.ts
 
 ## API Access
 

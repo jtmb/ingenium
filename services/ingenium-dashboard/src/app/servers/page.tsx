@@ -12,10 +12,16 @@ import { api, Server } from "../../lib/api";
 export default function ServersPage() {
   const project = useProject();
   const [servers, setServers] = useState<Server[]>([]);
+  const [isGlobal, setIsGlobal] = useState(false);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
 
-  useEffect(() => { api.servers.list(project).then((r) => setServers(r.data)).catch(() => {}); }, [project]);
+  useEffect(() => {
+    api.servers.list(project).then((r) => {
+      setServers(r.data);
+      setIsGlobal(r.is_global);
+    }).catch(() => {});
+  }, [project]);
 
   /** Creates a new server entry and prepends it to the list. */
   const create = async () => {
@@ -44,8 +50,15 @@ export default function ServersPage() {
             <span className={`text-xs px-2 py-0.5 rounded ${
               s.source === "ingenium"
                 ? (s.running ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500")
-                : "bg-blue-100 text-blue-700"
-            }`}>{s.source === "ingenium" ? (s.running ? "Running" : "Stopped") : "External"}</span>
+                : isGlobal
+                  ? (s.enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500")
+                  : "bg-blue-100 text-blue-700"
+            }`}>
+              {s.source === "ingenium"
+                ? (s.running ? "Running" : "Stopped")
+                : isGlobal
+                  ? (s.enabled ? "Enabled" : "Disabled")
+                  : "External"}</span>
           </div>
         ))}
       </div>

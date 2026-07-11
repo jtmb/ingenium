@@ -248,7 +248,7 @@ export const api = {
       request<{ data: Agent }>(`/agents/${encodeURIComponent(name)}/disable?project=${project}`, { method: "POST" }),
   },
   servers: {
-    list: (project = DEFAULT_PROJECT) => request<{ data: Server[] }>(`/servers?project=${project}`),
+    list: (project = DEFAULT_PROJECT) => request<{ data: Server[]; is_global: boolean }>(`/servers?project=${project}`),
     create: (name: string, command: string, project = DEFAULT_PROJECT) =>
       request<{ data: Server }>(`/servers?project=${project}`, { method: "POST", body: JSON.stringify({ name, command }) }),
   },

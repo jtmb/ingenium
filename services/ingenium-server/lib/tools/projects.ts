@@ -11,8 +11,8 @@ export async function projectList() {
 }
 
 /** Initialise a new project on the Ingenium API. */
-export async function projectInit(name: string) {
-  const res = await api.post("/projects", { name });
+export async function projectInit(name: string, isGlobal?: boolean) {
+  const res = await api.post("/projects", { name, is_global: isGlobal ?? false });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -37,5 +37,11 @@ export async function projectListArchived(project: string) {
 /** Purge old projects based on retention period. */
 export async function projectPurge(project: string, retentionDays?: number) {
   const res = await api.post(`/projects/purge?project=${project}`, { retention_days: retentionDays });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Mark a project as global (or unmark). */
+export async function projectSetGlobal(project: string, name: string, isGlobal: boolean) {
+  const res = await api.patch(`/projects/${encodeURIComponent(name)}/global`, { is_global: isGlobal }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }

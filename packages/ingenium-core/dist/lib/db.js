@@ -26,7 +26,7 @@ function runMigrations(db) {
     const tableCount = db.prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table'").get();
     if (tableCount.count === 0) {
         // Fresh DB — run all migrations in order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql"]) {
             const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
             db.exec(sql);
             logger.info(`Applied migration ${file}`);
@@ -102,6 +102,13 @@ function runMigrations(db) {
             const sql = readFileSync(resolve(migrationsDir, "011_server_source.sql"), "utf-8");
             db.exec(sql);
             logger.info("Applied migration 011_server_source.sql");
+        }
+        // Check if is_global column exists on projects (migration 012)
+        const isGlobalColCheck = db.prepare("SELECT count(*) as count FROM pragma_table_info('projects') WHERE name = 'is_global'").get();
+        if (isGlobalColCheck.count === 0) {
+            const sql = readFileSync(resolve(migrationsDir, "012_project_is_global.sql"), "utf-8");
+            db.exec(sql);
+            logger.info("Applied migration 012_project_is_global.sql");
         }
     }
 }
