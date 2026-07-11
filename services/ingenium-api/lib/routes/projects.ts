@@ -46,6 +46,16 @@ projectsRouter.delete("/:name", (req, res) => {
   res.status(200).json({ data: { archived: true } });
 });
 
+// DELETE /api/v1/projects/:name/purge — permanently delete a project
+projectsRouter.delete("/:name/purge", (req, res) => {
+  const result = projects.deleteProject(req.params.name!);
+  if (!result) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+    return;
+  }
+  res.status(204).send();
+});
+
 projectsRouter.post("/:name/restore", (req, res) => {
   const restored = projects.unarchiveProject(req.params.name!);
   if (!restored) {

@@ -2,6 +2,7 @@
 export const dynamic = "force-dynamic";
 import { useState, useEffect, useMemo } from "react";
 import { api, Project } from "../../lib/api";
+import Overlay from "../components/Overlay";
 
 function formatRelative(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -21,6 +22,7 @@ export default function ProjectsPage() {
   const [view, setView] = useState<"active" | "archived">("active");
   const [details, setDetails] = useState<Record<string, any>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const load = () => {
     api.projects.list().then((r) => setProjects(r.data)).catch(() => {});
@@ -54,7 +56,19 @@ export default function ProjectsPage() {
     }
   };
 
-  const displayed = view === "active" ? projects : archived;
+  const handleDelete = async (name: string) => {
+    try {
+      await api.projects.purgeOne(name);
+      setConfirmDelete(null);
+      load();
+    } catch {
+      alert("Failed to delete project");
+      setConfirmDelete(null);
+    }
+  };
+
+  const activeProjects = projects.filter(p => !p.archived_at);
+  const displayed = view === "active" ? activeProjects : archived;
 
   return (
     <div className="space-y-6">
@@ -101,7 +115,10 @@ export default function ProjectsPage() {
                     </>
                   )}
                   {view === "archived" && (
-                    <button onClick={() => restore(p.name)} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-green-50 text-green-600">Restore</button>
+                    <div className="flex gap-2">
+                      <button onClick={() => restore(p.name)} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-green-50 text-green-600">Restore</button>
+                      <button onClick={() => setConfirmDelete(p.name)} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-red-50 text-red-600">Delete</button>
+                    </div>
                   )}
                   <button onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="text-xs px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded text-gray-600 font-medium">{expanded === p.name ? "Collapse" : "Detail ▸"}</button>
                 </div>
@@ -188,6 +205,23 @@ export default function ProjectsPage() {
         })}
         {displayed.length === 0 && <p className="text-gray-400 py-8 text-center">No {view} projects.</p>}
       </div>
+
+      {/* Delete confirmation */}
+      <Overlay isOpen={confirmDelete !== null} onClose={() => setConfirmDelete(null)}
+        title="Delete Project" subtitle="This action cannot be undone.">
+        {confirmDelete && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Are you sure you want to permanently delete <strong>{confirmDelete}</strong>?
+              All skills, observations, pipeline events, and settings for this project will be permanently removed.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 border border-gray-200 rounded text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={() => handleDelete(confirmDelete)} className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700">Delete</button>
+            </div>
+          </div>
+        )}
+      </Overlay>
     </div>
   );
 }
