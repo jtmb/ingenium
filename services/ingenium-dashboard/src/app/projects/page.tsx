@@ -96,7 +96,7 @@ export default function ProjectsPage() {
           const synthCount = synth ? formatRelative(synth) : "—";
 
           return (
-            <div key={p.id} className="bg-white rounded border overflow-hidden">
+            <div key={p.id} onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="bg-white rounded border overflow-hidden hover:shadow-md transition-shadow cursor-pointer">
               {/* Card header */}
               <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                 <div>
@@ -110,17 +110,17 @@ export default function ProjectsPage() {
                 <div className="flex gap-2">
                   {view === "active" && (
                     <>
-                      <button onClick={() => rename(p.name)} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-gray-50 text-gray-600">Rename</button>
-                      <button onClick={() => archive(p.name)} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-red-50 text-red-600">Archive</button>
+                      <button onClick={(e) => { e.stopPropagation(); rename(p.name); }} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-gray-50 text-gray-600">Rename</button>
+                      <button onClick={(e) => { e.stopPropagation(); archive(p.name); }} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-red-50 text-red-600">Archive</button>
                     </>
                   )}
                   {view === "archived" && (
                     <div className="flex gap-2">
-                      <button onClick={() => restore(p.name)} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-green-50 text-green-600">Restore</button>
-                      <button onClick={() => setConfirmDelete(p.name)} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-red-50 text-red-600">Delete</button>
+                      <button onClick={(e) => { e.stopPropagation(); restore(p.name); }} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-green-50 text-green-600">Restore</button>
+                      <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(p.name); }} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-red-50 text-red-600">Delete</button>
                     </div>
                   )}
-                  <button onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="text-xs px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded text-gray-600 font-medium">{expanded === p.name ? "Collapse" : "Detail ▸"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); setExpanded(expanded === p.name ? null : p.name); }} className="text-xs px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded text-gray-600 font-medium">{expanded === p.name ? "Collapse" : "Detail ▸"}</button>
                 </div>
               </div>
 
