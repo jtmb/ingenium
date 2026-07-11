@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { settings } from "ingenium-core";
+import { settings, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 export const settingsRouter = Router();
@@ -59,6 +59,7 @@ settingsRouter.post("/test-llm", (req, res) => {
       res.json({ data: { ok: true } });
     })
     .catch((err: Error) => {
+      logger.error("settings", `LLM test connection failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
       res.json({ data: { ok: false, status: 0, message: err.message } });
     });
 });

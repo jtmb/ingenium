@@ -51,7 +51,14 @@ export function errorHandler(
   }
 
   // Unexpected error
-  logger.error("api", "Unhandled error", { error: err?.message });
+  logger.error("api", `${_req.method} ${_req.originalUrl} → ${err?.name || "Error"}: ${err?.message}`, {
+    error: err?.message,
+    name: err?.name,
+    stack: err?.stack,
+    method: _req.method,
+    path: _req.originalUrl,
+    requestId,
+  });
   res.status(500).json({
     error: {
       code: "INTERNAL_ERROR",

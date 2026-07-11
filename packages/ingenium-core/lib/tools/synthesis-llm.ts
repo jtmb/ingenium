@@ -296,7 +296,7 @@ export async function callSynthesisLLM(
     if (err.name === "AbortError") {
       return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis was cancelled." };
     }
-    logger.error("synthesis-llm", "LLM synthesis call failed", { err: String(err?.message || err) });
+    logger.error("synthesis-llm", `LLM synthesis call failed: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
     return { skills_to_create: [], skills_to_update: [], insights: [`LLM error: ${String(err?.message || err)}`], summary: "LLM synthesis failed" };
   }
 }
@@ -481,7 +481,7 @@ For each new observation, decide ONE of:
 
     return { create, confirm, ignore };
   } catch (err: any) {
-    logger.warn("synthesis-llm", "consolidateTraits fetch failed", { err: String(err?.message || err) });
+    logger.warn("synthesis-llm", `consolidateTraits fetch failed: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
     return null;
   }
 }
@@ -682,7 +682,7 @@ export async function enrichObservations(
         return observations.map(o => ({ ...o, skip: false }));
       }
       if (attempt < maxRetries) continue;
-      logger.error("synthesis-llm", "LLM enrichment call failed, falling back to raw observations", { err: String(err?.message || err) });
+      logger.error("synthesis-llm", `LLM enrichment call failed, falling back to raw observations: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
       return observations.map(o => ({ ...o, skip: false }));
     }
   }

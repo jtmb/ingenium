@@ -31,7 +31,7 @@ async function triggerSynthesisForAllProjects(port: number) {
       const extractResult = await extraction.runExtraction(p.id, p.name);
       logger.info("scheduler", `Extraction for "${p.name}": scanned=${extractResult.scanned}, created=${extractResult.created}`);
     } catch (err: any) {
-      logger.warn("scheduler", `Extraction for "${p.name}" failed: ${err.message}`);
+      logger.warn("scheduler", `Extraction for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
     }
 
     // 2. Synthesis — processes pending observations into traits + skills
@@ -42,10 +42,7 @@ async function triggerSynthesisForAllProjects(port: number) {
         `Synthesis for "${p.name}": ${result.summary}`,
       );
     } catch (err: any) {
-      logger.warn(
-        "scheduler",
-        `Synthesis for "${p.name}" failed: ${err.message}`,
-      );
+      logger.warn("scheduler", `Synthesis for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
     }
 
     // Force WAL checkpoint after synthesis (no readers active)
@@ -70,10 +67,7 @@ async function triggerSynthesisForAllProjects(port: number) {
         }
       }
     } catch (err: any) {
-      logger.debug(
-        "scheduler",
-        `Skill sync for "${p.name}" error: ${err.message}`,
-      );
+      logger.debug("scheduler", `Skill sync for "${p.name}" error: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
     }
   }
 
@@ -83,7 +77,10 @@ async function triggerSynthesisForAllProjects(port: number) {
       method: "POST",
     });
   } catch (e) {
-    logger.debug("scheduler", "Cross-project synthesis failed", { error: e instanceof Error ? e.message : String(e) });
+    const msg = e instanceof Error ? e.message : String(e);
+    const name = e instanceof Error ? e.name : "Unknown";
+    const stack = e instanceof Error ? e.stack : undefined;
+    logger.debug("scheduler", `Cross-project synthesis failed: ${msg}`, { error: msg, name, stack: stack?.split("\n").slice(0, 5).join("\n") });
   }
 }
 
@@ -180,12 +177,12 @@ function runJobScheduler(): void {
 
         // Fire-and-forget the execution
         executeJobRun(result.id, job, job.prompt_template).catch((err: Error) => {
-          logger.error("job-scheduler", `Fire-and-forget executeJobRun failed: ${err.message}`);
+          logger.error("job-scheduler", `Fire-and-forget executeJobRun failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
         });
       }
     }
   } catch (err: any) {
-    logger.warn("job-scheduler", `Job scheduler tick failed: ${err.message}`);
+    logger.warn("job-scheduler", `Job scheduler tick failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
   }
 
   // Schedule next tick

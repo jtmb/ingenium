@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { commands } from "ingenium-core";
+import { commands, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 export const commandsRouter = Router();
@@ -25,6 +25,7 @@ commandsRouter.post("/", (req, res) => {
     const cmd = commands.createCommand(projectId, name, file_path, content);
     res.status(201).json({ data: cmd });
   } catch (err: any) {
+    logger.error("commands", `Command creation failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
   }
 });
@@ -53,6 +54,7 @@ commandsRouter.put("/:name", (req, res) => {
     }
     res.json({ data: updated });
   } catch (err: any) {
+    logger.error("commands", `Command update failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
   }
 });

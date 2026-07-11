@@ -181,7 +181,7 @@ async function callLLMForExtraction(
       return rules;
     } catch (err: any) {
       if (attempt === 0) continue;
-      logger.error("extraction", "LLM call failed", { error: String(err?.message || err) });
+      logger.error("extraction", `LLM call failed: ${err?.message}`, { error: String(err?.message || err), name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
       return [];
     }
   }
@@ -346,7 +346,7 @@ export async function runExtraction(
           );
           created++;
         } catch (err: any) {
-          logger.warn("extraction", "Failed to store observation", { error: String(err?.message || err) });
+          logger.warn("extraction", `Failed to store observation: ${err?.message}`, { error: String(err?.message || err), name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
           skipped++;
         }
       }
@@ -380,13 +380,13 @@ export async function runExtraction(
         },
       );
     } catch (err: any) {
-      logger.error("extraction", "Failed to log pipeline event", { error: String(err?.message || err) });
+      logger.error("extraction", `Failed to log pipeline event: ${err?.message}`, { error: String(err?.message || err), name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
     }
 
     return { scanned, candidates, created, skipped, watermark: highestTimestamp || watermark };
   } catch (err: any) {
     // Log failure but don't throw — scheduler must continue
-    logger.error("extraction", "Extraction run failed", { error: String(err?.message || err), stack: err.stack });
+    logger.error("extraction", `Extraction run failed: ${err?.message}`, { error: String(err?.message || err), name: err?.name || "Error", stack: err.stack });
 
     try {
       logEvent(

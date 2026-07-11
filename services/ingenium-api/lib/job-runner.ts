@@ -133,10 +133,10 @@ export async function executeJobRun(
     logger.info("job-runner", `Run ${runId} cleaned up (active: ${activeRunCount}/${MAX_CONCURRENT_RUNS})`);
   });
 
-  proc.on("error", (err) => {
+  proc.on("error", (err: Error) => {
     if (timeoutHandle) clearTimeout(timeoutHandle);
 
-    logger.error("job-runner", `Run ${runId} spawn error: ${err.message}`);
+    logger.error("job-runner", `Run ${runId} spawn error: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
     jobs.finishJobRun(runId, "failed", -1);
     jobs.appendRunLog(runId, "stderr", `Spawn error: ${err.message}`);
 

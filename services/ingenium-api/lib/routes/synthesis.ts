@@ -15,7 +15,7 @@ synthesisRouter.post("/run", (req, res) => {
       const result = await synthesis.runSynthesis(projectId, sessionId);
       logger.info("synthesis", `Completed: ${JSON.stringify(result)}`);
     } catch (err: any) {
-      logger.error("synthesis", "Pipeline failed", { error: err.message });
+      logger.error("synthesis", `Synthesis pipeline failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     }
   });
   res.json({ data: { status: "started", message: "Synthesis pipeline triggered. Check back via GET /status." } });
@@ -32,7 +32,12 @@ synthesisRouter.get("/status", (req, res) => {
 // POST /cross-project — trigger cross-project synthesis
 synthesisRouter.post("/cross-project", (_req, res) => {
   setImmediate(() => {
-    synthesis.runCrossProjectSynthesis().catch((e) => logger.error("synthesis", "Cross-project synthesis failed", { error: e instanceof Error ? e.message : String(e) }));
+    synthesis.runCrossProjectSynthesis().catch((e) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      const name = e instanceof Error ? e.name : "Unknown";
+      const stack = e instanceof Error ? e.stack : undefined;
+      logger.error("synthesis", `Cross-project synthesis failed: ${msg}`, { error: msg, name, stack: stack?.split("\n").slice(0, 5).join("\n") });
+    });
   });
   res.json({ status: "started" });
 });

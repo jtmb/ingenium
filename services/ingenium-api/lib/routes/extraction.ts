@@ -23,7 +23,7 @@ extractionRouter.post("/run", (req, res) => {
       const result = await extraction.runExtraction(projectId, projectName, { limit });
       logger.info("extraction", `Completed: scanned=${result.scanned} candidates=${result.candidates} created=${result.created}`);
     } catch (err: any) {
-      logger.error("extraction", `Failed: ${err.message}`);
+      logger.error("extraction", `Extraction run failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
     }
   });
 

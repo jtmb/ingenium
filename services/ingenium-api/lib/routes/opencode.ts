@@ -47,7 +47,7 @@ opencodeRouter.get("/messages", (req, res) => {
 
     res.json({ data: { messages, total: messages.length } });
   } catch (err: any) {
-    logger.error("opencode", "Failed to read OpenCode DB", { error: err.message });
+    logger.error("opencode", `Failed to read OpenCode DB: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.json({ data: { messages: [], total: 0, error: err.message } });
   }
 });
