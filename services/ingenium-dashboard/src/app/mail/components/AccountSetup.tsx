@@ -75,6 +75,7 @@ export default function AccountSetup({
         setError(json.error?.message || "Failed to get OAuth URL — check credentials in Settings");
         return;
       }
+      localStorage.setItem("oauth_provider", provider);
       window.location.href = json.data.url;
     } catch (err: any) {
       setError(`OAuth failed: ${err.message}`);
