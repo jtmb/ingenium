@@ -167,6 +167,7 @@ export default function SettingsPage() {
     setTesting(true);
     setLlmStatus("");
     try {
+      // Primary
       const modelId = isCustom
         ? customModel
         : (() => {
@@ -174,13 +175,27 @@ export default function SettingsPage() {
             const match = models.find(([k]) => k === selectedModel) || models[0];
             return match?.[1]?.id || selectedModel || providerId;
           })();
-      const ep = isCustom
-        ? endpoint
-        : endpoint;
+      const ep = isCustom ? endpoint : endpoint;
 
-      const result = await api.settings.testLlm(ep, modelId, apiKeyState);
-      if (result.ok) setLlmStatus("✅ Connection successful");
-      else setLlmStatus(`❌ ${result.status || "error"}: ${result.message || "unknown"}`);
+      let status = "";
+      const pr = await api.settings.testLlm(ep, modelId, apiKeyState);
+      status = pr.ok ? "✅ Primary OK" : `❌ Primary: ${pr.status || "error"} ${pr.message || ""}`;
+
+      // Backup
+      if (backupProviderId) {
+        const bModelId = backupIsCustom
+          ? backupCustomModel
+          : (() => {
+              const models = backupModels;
+              const match = models.find(([k]) => k === backupSelectedModel) || models[0];
+              return match?.[1]?.id || backupSelectedModel || backupProviderId;
+            })();
+        const bEp = backupIsCustom ? backupCustomEndpoint : (backupModels[0]?.[1] as any)?.api?.url || backupCustomEndpoint;
+        const br = await api.settings.testLlm(bEp, bModelId, backupApiKey);
+        status += br.ok ? " | ✅ Backup OK" : ` | ❌ Backup: ${br.status || "error"} ${br.message || ""}`;
+      }
+
+      setLlmStatus(status);
     } catch (err: any) {
       setLlmStatus(`❌ ${err.message}`);
     }
