@@ -49,16 +49,19 @@ After ANY code change, you MUST run the applicable self-improvement commands:
 
 These are not optional. Skip none of them.
 
+> 🔴 **Observation is now automatic** via the Auto-Observer plugin (`auto-observer.ts`), which scans OpenCode message history for behavior patterns. Manual `ingenium_observe` calls should only be used for exceptional cases where the auto-observer cannot detect the pattern. See the Auto-Observer Plugin section below.
+
 ---
 
 ## Repository Structure
 
-**Monorepo with 5 packages:**
+**Monorepo with 6 packages:**
 
 ```
 packages/
 ├── ingenium-core/        # Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed)
-└── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser). OAuth2 for Gmail/Outlook. No DB access.
+├── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser). OAuth2 for Gmail/Outlook. No DB access.
+└── ingenium-extension/   # Client-side OpenCode package — MCP server, observer plugin, skill-sync plugin, auto-observer. Installable via `npx -y @ingenium/extension`.
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
@@ -171,8 +174,6 @@ healthcheck:
   start_period: 15s
 ```
 
-> **Architecture reference**: See [`packages/ingenium-extension/ARCHITECTURE.md`](./packages/ingenium-extension/ARCHITECTURE.md) for the definitive client/server split, data flow, and process ownership.
-
 ---
 
 ## Testing
@@ -204,7 +205,7 @@ The self-learning pipeline uses **observations** instead of the deprecated `inge
 
 ## 🔴 HARD RULE — Observe user behavior, NOT implementation
 
-Never log implementation notes as observations. Observations track the USER's behavior, preferences, and feedback — not what code was written or what features were implemented. Implementation activity belongs in pipeline events and git commits.
+Never log implementation notes as observations. Observations track the USER's behavior, preferences, and feedback — not what code was written or what features were implemented. Implementation activity belongs in pipeline events and git commits. **The Auto-Observer plugin handles this automatically** by scanning OpenCode message history — no manual `ingenium_observe` calls needed in agent code.
 
 ✅ LOG THESE (user behavior):
 - "User prefers 2-space indentation over 4-space"
@@ -217,6 +218,8 @@ Never log implementation notes as observations. Observations track the USER's be
 - "Implemented global config path resolution"
 - "Fixed plugins table UNIQUE constraint"
 - Any description of code changes or architecture decisions
+
+> 🔴 **Agent files updated**: All 9 agent `.md` files had their "🔴 Observation — Log User Interactions" sections removed. Observation is now automatic via the Auto-Observer plugin scanning OpenCode message history. Do not re-add manual observation sections to agent files.
 
 **Observation types:**
 - `correction` — User corrects agent behavior
@@ -250,6 +253,69 @@ The **Observer Plugin** (`packages/ingenium-extension/observer.ts` + `observer-c
 - **Pipeline events** — Logs events to the `/pipeline` dashboard timeline (`session_created`, `observation_imported`, `synthesis_triggered`)
 - **MCP tool** — Registers `synthesize_observations` tool for manual pipeline triggers
 
+### @ingenium/extension Package
+
+The `@ingenium/extension` package (`packages/ingenium-extension/`) is a client-side npm package that bundles everything needed to connect OpenCode to an Ingenium API:
+
+- **Install**: `npx -y @ingenium/extension`
+- **Package name**: `@ingenium/extension`
+- **`bin` field**: `dist/scripts/mcp-server.js` — the MCP stdio server
+- **Plugins shipped**:
+  - `observer.ts` — session event handling, observation import, synthesis trigger
+  - `skill-sync.ts` — bidirectional skill sync from API to local `.opencode/skills/`
+  - `auto-observer.ts` — automatic behavior pattern detection from OpenCode DB
+
+**MCP client config** (in `opencode.json`):
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "ingenium": {
+        "type": "local",
+        "command": ["npx", "-y", "@ingenium/extension"],
+        "disabled": false,
+        "env": {
+          "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+          "INGENIUM_API_TIMEOUT": "10000",
+          "LOG_LEVEL": "info"
+        }
+      }
+    }
+  }
+}
+```
+
+**Plugin references** (in `opencode.json`):
+```jsonc
+"plugin": [
+  "packages/ingenium-extension/observer.ts",
+  "packages/ingenium-extension/skill-sync.ts"
+]
+```
+
+> 📖 **Architecture reference**: See [`packages/ingenium-extension/ARCHITECTURE.md`](./packages/ingenium-extension/ARCHITECTURE.md) for the definitive client/server split, data flow, and process ownership.
+
+### Auto-Observer Plugin
+
+The **Auto-Observer** (`packages/ingenium-extension/auto-observer.ts`) is a third OpenCode plugin that automatically detects user behavior patterns by reading the OpenCode message history database.
+
+**How it works:**
+1. On `session.created` and every 5th `session.idle` event, opens the OpenCode SQLite DB at `~/.local/share/opencode/opencode.db`
+2. Reads recent user messages from `session_input.prompt`, `part.data`, and `message.data` tables
+3. Runs regex pattern matching against four categories:
+   - **correction** — `"no, use ..."`, `"change ... to ..."`, `"that's wrong"`
+   - **preference** — `"I prefer ..."`, `"I always use ..."`, `"don't like ..."`
+   - **terminology** — `"call it ..."`, `"known as ..."`, `"renamed to ..."`
+   - **workflow** — `"run tests first"`, `"commit before push"`
+4. POSTs detected patterns as observations to the API (`POST /api/v1/observations?project=...`)
+5. Logs a pipeline event for dashboard observability via `POST /api/v1/pipeline/events`
+
+**MCP tool**: Registers `auto_observe_now` — manually triggers pattern detection against recent message history and returns detected + created counts.
+
+**Configuration**: Uses `INGENIUM_API_URL` env var (default: `http://localhost:4097/api/v1`). Requires `better-sqlite3` available in the runtime (resolved from project's `node_modules` first, then via dynamic import).
+
+> 🔴 **Note**: The Auto-Observer replaces manual `ingenium_observe` calls in agent code. All 9 agent files had their "🔴 Observation — Log User Interactions" sections removed since observation is now automatic.
+
 ### LLM Skill Synthesis (Phase 2)
 
 When configured in **Settings → Synthesis LLM**, the pipeline runs a second phase after heuristic trait generation:
@@ -275,17 +341,21 @@ Every pipeline event is logged to the `pipeline_events` table and displayed at *
 
 | Event | Source | Meaning |
 |-------|--------|---------|
-| `session_created` | plugin | OpenCode session started |
+| `session_created` | plugin | OpenCode session started; includes `Scheduled` label for timer triggers or session ID for manual triggers |
 | `synthesis_triggered` | plugin | Observer triggered synthesis |
-| `synthesis_started` | synthesis | Pipeline began processing |
-| `synthesis_completed` | synthesis | Pipeline finished successfully |
+| `synthesis_started` | synthesis | Pipeline began processing; includes batch size, observation IDs, model info |
+| `synthesis_completed` | synthesis | Pipeline finished successfully; enriched with `model`, `endpoint`, `provider`, `insights`, observation counts, and trait statistics |
 | `synthesis_failed` | synthesis | Pipeline errored out |
-| `trait_created` | synthesis | New personality trait generated |
+| `trait_created` | synthesis | New personality trait generated; includes `trait_type`, `trait_value`, `confidence`, `observation_ids`, `skill_links`, and `model` info |
 | `trait_updated` | synthesis | Existing trait confidence adjusted |
 | `observation_created` | agent | Agent called `ingenium_observe` |
 | `observation_imported` | plugin | File fallback imported into DB |
+| `plugin_initialized` | plugin | Observer/skill-sync/auto-observer plugin loaded |
+| `plugin_error` | plugin | Plugin encountered an error |
 
-The timeline auto-polls every 3 seconds, supports filter pills (All/Agent/Plugin/Synthesis/Trait), collapses rapid events into +N groups, and shows detail overlays on click.
+**Enriched event data**: `synthesis_completed` events carry full pipeline metadata (model name, endpoint URL, provider ID, LLM-generated insights). `trait_created` events link back to parent observations (`observation_ids`) and include model attribution and skill references. The `session_created` event shows "Scheduled" when triggered by the timer-based scheduler versus the session ID for manual triggers.
+
+The timeline auto-polls every 3 seconds, supports filter pills (All/Agent/Plugin/Synthesis/Trait), collapses rapid events into +N groups, and shows detail overlays on click. Pipeline stats now include a skills count alongside observation and trait counts.
 
 ### Personality Trait Confidence Model
 
