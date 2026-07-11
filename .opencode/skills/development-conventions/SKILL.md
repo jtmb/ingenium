@@ -127,6 +127,12 @@ tags: ["development", "conventions", "readme", "api", "nextjs", "python"]
 |------|---------|
 | [`references/write-docs/guide.md`](references/write-docs/guide.md) | README structure, API docs, ADRs, GETTING-STARTED.md, VARIABLES.md, HOW-TO conventions |
 
+### Useful Comments
+
+| File | Content |
+|------|---------|
+| [`references/useful-comments/guidelines.md`](references/useful-comments/guidelines.md) | When and how to write comments: explain WHY not WHAT, avoid redundant/obsolete comments, annotation conventions, quality checklist |
+
 ## Cross-References
 
 - **`local-models`** — Command safety rules and model profiles for running dev servers
