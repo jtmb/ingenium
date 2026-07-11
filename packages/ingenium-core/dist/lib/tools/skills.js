@@ -244,3 +244,22 @@ export function syncAllSkills(projectId, db) {
     }
     return skills.length;
 }
+export function copySkills(sourceProjectId, targetProjectId) {
+    return execTransaction(() => {
+        const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+        const sourceSkills = db.prepare("SELECT * FROM skills WHERE project_id = ? AND enabled = 1").all(sourceProjectId);
+        let count = 0;
+        for (const skill of sourceSkills) {
+            const now = new Date().toISOString();
+            const id = randomUUID();
+            const result = db.prepare(`INSERT INTO skills (id, project_id, name, description, content, category, tags, always_apply, file_tree, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, targetProjectId, skill.name, skill.description, skill.content, skill.category ?? null, skill.tags ?? null, skill.always_apply ?? 0, skill.file_tree ?? null, now, now);
+            // Sync FTS5 index
+            db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
+                .run(result.lastInsertRowid, skill.content, skill.description);
+            count++;
+        }
+        checkpointAfterWrite();
+        return count;
+    });
+}

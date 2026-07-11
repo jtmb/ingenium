@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { servers } from "ingenium-core";
+import { servers, projects } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 export const serversRouter = Router();
 serversRouter.get("/", (req, res) => {
@@ -7,7 +7,10 @@ serversRouter.get("/", (req, res) => {
     if (!projectId)
         return;
     const list = servers.listServers(projectId);
-    res.json({ data: list });
+    // Query the project record for is_global flag
+    const projectName = req.query.project;
+    const project = projects.getProject(projectName);
+    res.json({ data: list, is_global: project?.is_global ?? false });
 });
 serversRouter.post("/", (req, res) => {
     const projectId = requireProject(req, res);

@@ -6,7 +6,7 @@ export declare function projectList(): Promise<{
     }[];
 }>;
 /** Initialise a new project on the Ingenium API. */
-export declare function projectInit(name: string): Promise<{
+export declare function projectInit(name: string, isGlobal?: boolean): Promise<{
     content: {
         type: "text";
         text: string;
@@ -35,6 +35,13 @@ export declare function projectListArchived(project: string): Promise<{
 }>;
 /** Purge old projects based on retention period. */
 export declare function projectPurge(project: string, retentionDays?: number): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Mark a project as global (or unmark). */
+export declare function projectSetGlobal(project: string, name: string, isGlobal: boolean): Promise<{
     content: {
         type: "text";
         text: string;

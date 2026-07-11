@@ -100,6 +100,13 @@ if (SYNTHESIS_INTERVAL_MS > 0) {
         catch (err) {
             console.debug(`[scheduler] Error fetching projects: ${err.message}`);
         }
+        // Cross-project synthesis — runs once after all per-project synthesis
+        try {
+            await fetch(`http://localhost:${config.port}/api/v1/synthesis/cross-project`, { method: "POST" });
+        }
+        catch (e) {
+            console.debug("Cross-project synthesis failed:", e);
+        }
     }
     // First run 30 seconds after startup, then every N ms
     setTimeout(() => triggerSynthesisForAllProjects(), 30000);

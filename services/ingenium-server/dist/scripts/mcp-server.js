@@ -19,7 +19,7 @@ import * as projectTools from "../lib/tools/projects.js";
 import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
 import { settingGet, settingSet } from "../lib/tools/settings.js";
-import { projectRestore, projectListArchived, projectPurge } from "../lib/tools/projects.js";
+import { projectRestore, projectListArchived, projectPurge, projectSetGlobal } from "../lib/tools/projects.js";
 import { pluginGet } from "../lib/tools/plugins.js";
 import * as commandTools from "../lib/tools/commands.js";
 import { commandGet } from "../lib/tools/commands.js";
@@ -27,7 +27,7 @@ import { planList } from "../lib/tools/context.js";
 import * as agentTools from "../lib/tools/agents.js";
 import { observationStore, observationSearch, observationList, observationStats, } from "../lib/tools/observations.js";
 import { personalityProfile, personalityTraits, } from "../lib/tools/personality.js";
-import { synthesisRun, synthesisStatus, } from "../lib/tools/synthesis.js";
+import { synthesisRun, synthesisStatus, synthesisCrossProject, } from "../lib/tools/synthesis.js";
 import * as emailTools from "../lib/tools/emails.js";
 /** Shared required project parameter. Projects must be created explicitly via ingenium_project_init or the dashboard. */
 const projectParam = z.string();
@@ -102,6 +102,10 @@ server.registerTool("ingenium_synthesis_status", {
     description: "Check the synthesis pipeline status (pending count, last run, processed count).",
     inputSchema: { project: projectParam },
 }, async ({ project }) => synthesisStatus(project));
+server.registerTool("ingenium_synthesis_cross_project", {
+    description: "Trigger cross-project synthesis — evaluates patterns across all projects and promotes shared patterns to the global-default project.",
+    inputSchema: { project: projectParam },
+}, async ({ project }) => synthesisCrossProject(project));
 // ── Tasks ───────────────────────────────────────────────
 server.registerTool("ingenium_task_create", {
     description: "Create a new task with optional description and assignee.",
@@ -131,11 +135,12 @@ server.registerTool("ingenium_plan_search", { description: "Full-text search acr
 server.registerTool("ingenium_plan_list", { description: "List plan/context entries.", inputSchema: { project: projectParam } }, async ({ project }) => planList(project));
 // ── Projects ────────────────────────────────────────────
 server.registerTool("ingenium_project_list", { description: "List all projects known to the Ingenium API.", inputSchema: {} }, async () => projectTools.projectList());
-server.registerTool("ingenium_project_init", { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string() } }, async ({ name }) => projectTools.projectInit(name));
+server.registerTool("ingenium_project_init", { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string(), isGlobal: z.boolean().optional() } }, async ({ name, isGlobal }) => projectTools.projectInit(name, isGlobal));
 server.registerTool("ingenium_project_delete", { description: "Delete a project by name.", inputSchema: { name: z.string() } }, async ({ name }) => projectTools.projectDelete(name));
 server.registerTool("ingenium_project_restore", { description: "Restore an archived project.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => projectRestore(project, name));
 server.registerTool("ingenium_project_list_archived", { description: "List archived projects.", inputSchema: { project: projectParam } }, async ({ project }) => projectListArchived(project));
 server.registerTool("ingenium_project_purge", { description: "Purge old projects.", inputSchema: { project: projectParam, retentionDays: z.number().optional() } }, async ({ project, retentionDays }) => projectPurge(project, retentionDays));
+server.registerTool("ingenium_project_set_global", { description: "Mark a project as global (or unmark).", inputSchema: { project: projectParam, name: z.string(), isGlobal: z.boolean() } }, async ({ project, name, isGlobal }) => projectSetGlobal(project, name, isGlobal));
 // ── Plugins ─────────────────────────────────────────────
 server.registerTool("ingenium_plugin_list", { description: "List all plugins available for a project.", inputSchema: { project: projectParam } }, async ({ project }) => pluginTools.pluginList(project));
 server.registerTool("ingenium_plugin_get", { description: "Get a single plugin by name.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => pluginGet(project, name));

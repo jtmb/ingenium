@@ -2,7 +2,7 @@
 name: ingenium-explore
 description: "Fast read-only agent for codebase exploration — find files, search code, understand project structure, locate patterns. Invoke via @ingenium-explore when you need to quickly navigate the codebase without making changes."
 mode: subagent
-model: lmstudio/qwen/qwen3.5-9b
+model: deepseek/deepseek-v4-flash
 permission:
   read: allow
   glob: allow

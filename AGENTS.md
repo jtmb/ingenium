@@ -62,7 +62,7 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 69 tools. Calls API via HTTP. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 70 tools. Calls API via HTTP. Zero DB access.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend. Calls API via HTTP. Zero DB access.
 ```
 
@@ -291,6 +291,16 @@ The API server (`services/ingenium-api/scripts/api-server.ts`) automatically run
 2. **Skill sync**: Triggers `/api/v1/skills/sync-all` — bidirectional disk↔DB sync (imports new skills from disk, writes DB skills to disk)
 
 Configure via `SYNTHESIS_INTERVAL_MS` env var (default: 900000ms). Set to `0` to disable.
+
+### Cross-Project Synthesis
+
+The synthesis pipeline can now evaluate observations and skills across multiple projects to create global skills available to all projects:
+
+1. **`ingenium_synthesis_cross_project`** — MCP tool that triggers cross-project synthesis across all active projects. Patterns discovered in one project can benefit all others.
+2. **Global skills** — Skills synthesized from cross-project patterns are created in the `global-default` project and made available to every project via shared skill resolution.
+3. **`ingenium_project_set_global`** — MCP tool that marks a project as the global-default, enabling shared skill resolution and cross-project observation evaluation.
+
+Cross-project synthesis runs as part of the scheduled maintenance cycle (every 15 minutes) or can be triggered manually via the `ingenium_synthesis_cross_project` tool.
 
 ### Plugin Auto-Config Sync
 

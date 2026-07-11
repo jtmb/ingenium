@@ -20,7 +20,7 @@ import * as projectTools from "../lib/tools/projects.js";
 import * as pluginTools from "../lib/tools/plugins.js";
 import * as serverTools from "../lib/tools/servers.js";
 import { settingGet, settingSet } from "../lib/tools/settings.js";
-import { projectRestore, projectListArchived, projectPurge } from "../lib/tools/projects.js";
+import { projectRestore, projectListArchived, projectPurge, projectSetGlobal } from "../lib/tools/projects.js";
 import { pluginGet } from "../lib/tools/plugins.js";
 import * as commandTools from "../lib/tools/commands.js";
 import { commandGet } from "../lib/tools/commands.js";
@@ -33,7 +33,7 @@ import {
   personalityProfile, personalityTraits,
 } from "../lib/tools/personality.js";
 import {
-  synthesisRun, synthesisStatus,
+  synthesisRun, synthesisStatus, synthesisCrossProject,
 } from "../lib/tools/synthesis.js";
 import * as emailTools from "../lib/tools/emails.js";
 
@@ -217,6 +217,15 @@ server.registerTool(
   async ({ project }) => synthesisStatus(project),
 );
 
+server.registerTool(
+  "ingenium_synthesis_cross_project",
+  {
+    description: "Trigger cross-project synthesis — evaluates patterns across all projects and promotes shared patterns to the global-default project.",
+    inputSchema: { project: projectParam },
+  },
+  async ({ project }) => synthesisCrossProject(project),
+);
+
 // ── Tasks ───────────────────────────────────────────────
 
 server.registerTool(
@@ -297,8 +306,8 @@ server.registerTool(
 
 server.registerTool(
   "ingenium_project_init",
-  { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string() } },
-  async ({ name }) => projectTools.projectInit(name),
+  { description: "Initialise a new project on the Ingenium API.", inputSchema: { name: z.string(), isGlobal: z.boolean().optional() } },
+  async ({ name, isGlobal }) => projectTools.projectInit(name, isGlobal),
 );
 
 server.registerTool(
@@ -323,6 +332,12 @@ server.registerTool(
   "ingenium_project_purge",
   { description: "Purge old projects.", inputSchema: { project: projectParam, retentionDays: z.number().optional() } },
   async ({ project, retentionDays }) => projectPurge(project, retentionDays),
+);
+
+server.registerTool(
+  "ingenium_project_set_global",
+  { description: "Mark a project as global (or unmark).", inputSchema: { project: projectParam, name: z.string(), isGlobal: z.boolean() } },
+  async ({ project, name, isGlobal }) => projectSetGlobal(project, name, isGlobal),
 );
 
 // ── Plugins ─────────────────────────────────────────────

@@ -4,6 +4,7 @@ export const ProjectSchema = z.object({
     name: z.string().min(1).max(64),
     path: z.string().optional(),
     archived_at: z.string().datetime().optional(),
+    is_global: z.coerce.boolean().default(false),
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
 });

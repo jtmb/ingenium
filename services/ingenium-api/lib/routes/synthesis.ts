@@ -27,3 +27,11 @@ synthesisRouter.get("/status", (req, res) => {
   const status = synthesis.getSynthesisStatus(projectId);
   res.json({ data: status });
 });
+
+// POST /cross-project — trigger cross-project synthesis
+synthesisRouter.post("/cross-project", (_req, res) => {
+  setImmediate(() => {
+    synthesis.runCrossProjectSynthesis().catch((e) => console.error("Cross-project synthesis failed:", e));
+  });
+  res.json({ status: "started" });
+});

@@ -2,6 +2,7 @@ import { Observation, PersonalityTrait } from "../schema.js";
 import * as observations from "./observations.js";
 import * as personality from "./personality.js";
 import * as skills from "./skills.js";
+import * as projects from "./projects.js";
 import * as synthesisLlm from "./synthesis-llm.js";
 import { getSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
@@ -326,4 +327,166 @@ export function getSynthesisStatus(projectId: string): {
     trait_count: traits.length,
     last_synthesis_at: processedObservations.length > 0 ? processedObservations[0]!.updated_at : null,
   };
+}
+
+/**
+ * Cross-project synthesis: identifies patterns present in 2+ projects
+ * and promotes them to the global-default project as shared skills and traits.
+ */
+export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
+  const result: SynthesisResult = {
+    observations_processed: 0,
+    traits_created: 0,
+    traits_updated: 0,
+    skills_created: 0,
+    observations_skipped: 0,
+    errors: [],
+    summary: "",
+  };
+
+  try {
+    logEvent(
+      "global-default",
+      "synthesis_started",
+      "synthesis",
+      "Cross-project synthesis started",
+      "Evaluating patterns across all non-global projects",
+    );
+  } catch (_) { /* non-fatal */ }
+
+  // Find global project
+  const globalProject = projects.getGlobalProject();
+  if (!globalProject) {
+    result.errors.push("No global project found. Mark a project as global first via setProjectGlobal().");
+    result.summary = "No global project configured.";
+    return result;
+  }
+
+  // Find all non-global, non-archived projects
+  const allProjects = projects.listProjects();
+  const nonGlobalProjects = allProjects.filter(
+    p => !p.is_global && !p.archived_at && p.id !== globalProject.id,
+  );
+
+  if (nonGlobalProjects.length === 0) {
+    result.summary = "No non-global projects found for cross-project synthesis.";
+    return result;
+  }
+
+  // ── Skill frequency analysis ──
+  // Build map: skillName -> { projectIds[], sample skill }
+  const skillMap = new Map<string, { projectIds: string[]; sampleSkill: any }>();
+
+  for (const proj of nonGlobalProjects) {
+    try {
+      const projSkills = skills.listSkills(proj.id);
+      for (const sk of projSkills) {
+        const entry = skillMap.get(sk.name);
+        if (entry) {
+          entry.projectIds.push(proj.id);
+        } else {
+          skillMap.set(sk.name, { projectIds: [proj.id], sampleSkill: sk });
+        }
+      }
+    } catch (err) {
+      // Skip projects that fail to load skills
+    }
+  }
+
+  // Promote skills present in 2+ projects to global-default
+  for (const [skillName, { projectIds, sampleSkill }] of skillMap) {
+    if (projectIds.length < 2) continue;
+
+    try {
+      const existing = skills.getSkill(globalProject.id, skillName);
+      if (!existing) {
+        skills.createSkill(
+          globalProject.id,
+          sampleSkill.name,
+          `[Cross-project] ${sampleSkill.description}`,
+          sampleSkill.content,
+          "global",
+          "cross-project,auto-generated",
+          1,
+        );
+        result.skills_created++;
+
+        try {
+          logEvent(
+            globalProject.id,
+            "trait_created",
+            "synthesis",
+            `Cross-project skill created: ${skillName}`,
+            `Promoted from ${projectIds.length} projects`,
+            { skill_name: skillName, project_count: projectIds.length, cross_project: true },
+          );
+        } catch (_) { /* non-fatal */ }
+      } else {
+        // Update description to note cross-project nature
+        const updatedDesc = existing.description.includes("[Cross-project]")
+          ? existing.description
+          : `[Cross-project] ${existing.description}`;
+        skills.updateSkill(globalProject.id, skillName, existing.content, updatedDesc);
+      }
+    } catch (err: any) {
+      result.errors.push(`Skill "${skillName}": ${err.message}`);
+    }
+  }
+
+  // ── Cross-project traits ──
+  // Aggregate traits from all non-global projects
+  const traitMap = new Map<string, { count: number; trait: any }>();
+  for (const proj of nonGlobalProjects) {
+    try {
+      const traits = personality.getTraits(proj.id);
+      for (const t of traits) {
+        if (t.confidence < 0.7) continue;
+        const key = `${t.trait_type}::${t.trait_value}`;
+        const entry = traitMap.get(key);
+        if (entry) {
+          entry.count++;
+        } else {
+          traitMap.set(key, { count: 1, trait: t });
+        }
+      }
+    } catch (_) { /* skip */ }
+  }
+
+  // Promote traits with confidence ≥ 0.7 present in 2+ projects to global-default
+  for (const [, { count, trait }] of traitMap) {
+    if (count < 2) continue;
+
+    try {
+      personality.upsertTrait(
+        globalProject.id,
+        trait.trait_type,
+        trait.trait_value,
+        trait.display_label,
+        trait.confidence,
+        trait.exemplar_observation_id,
+        trait.exemplar_text,
+      );
+      result.traits_created++;
+    } catch (err: any) {
+      result.errors.push(`Trait "${trait.trait_value}": ${err.message}`);
+    }
+  }
+
+  result.summary = `Cross-project synthesis complete: ${result.skills_created} skill(s) promoted, ${result.traits_created} trait(s) aggregated from ${nonGlobalProjects.length} project(s).`;
+  if (result.errors.length > 0) {
+    result.summary += ` ${result.errors.length} error(s) encountered.`;
+  }
+
+  try {
+    logEvent(
+      globalProject.id,
+      "synthesis_completed",
+      "synthesis",
+      "Cross-project synthesis completed",
+      result.summary,
+      { ...result },
+    );
+  } catch (_) { /* non-fatal */ }
+
+  return result;
 }

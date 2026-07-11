@@ -2,11 +2,12 @@ import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
+import * as skills from "./skills.js";
 export function listProjects() {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all();
 }
-export function createProject(name) {
+export function createProject(name, isGlobal = false) {
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
         const now = new Date().toISOString();
@@ -16,9 +17,17 @@ export function createProject(name) {
         if (!existsSync(projectPath)) {
             mkdirSync(projectPath, { recursive: true });
         }
-        db.prepare(`INSERT INTO projects (id, name, path, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`).run(id, name, projectPath, now, now);
+        db.prepare(`INSERT INTO projects (id, name, path, is_global, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`).run(id, name, projectPath, isGlobal ? 1 : 0, now, now);
         checkpointAfterWrite();
+        // Auto-load global skills into new project
+        const globalProject = db.prepare("SELECT * FROM projects WHERE is_global = 1").get();
+        if (globalProject && globalProject.id !== id) {
+            const count = skills.copySkills(globalProject.id, id);
+            if (count > 0) {
+                console.log(`[projects] Auto-loaded ${count} global skill(s) into project "${name}"`);
+            }
+        }
         return db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
     });
 }
@@ -73,4 +82,20 @@ export function updateProject(currentName, newName) {
         checkpointAfterWrite();
         return db.prepare("SELECT * FROM projects WHERE id = ?").get(existing.id);
     });
+}
+export function setProjectGlobal(name, isGlobal) {
+    return execTransaction(() => {
+        const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+        const existing = db.prepare("SELECT * FROM projects WHERE name = ?").get(name);
+        if (!existing)
+            return false;
+        const now = new Date().toISOString();
+        db.prepare("UPDATE projects SET is_global = ?, updated_at = ? WHERE name = ?").run(isGlobal ? 1 : 0, now, name);
+        checkpointAfterWrite();
+        return true;
+    });
+}
+export function getGlobalProject() {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    return db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL LIMIT 1").get();
 }
