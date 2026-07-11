@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import { importObservationsFromFile, triggerSynthesis, logPipelineEvent } from "./observer-core"
+import { importObservationsFromFile, triggerSynthesis, logPipelineEvent } from "./observer-core.js"
 
 // Configuration
 const SYNC_INTERVAL = 0  // 0 = disabled, set via env

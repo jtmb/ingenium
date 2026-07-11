@@ -171,6 +171,8 @@ healthcheck:
   start_period: 15s
 ```
 
+> **Architecture reference**: See [`packages/ingenium-extension/ARCHITECTURE.md`](./packages/ingenium-extension/ARCHITECTURE.md) for the definitive client/server split, data flow, and process ownership.
+
 ---
 
 ## Testing
@@ -241,7 +243,7 @@ Never log implementation notes as observations. Observations track the USER's be
 
 ### Observer Plugin
 
-The **Observer Plugin** (`.opencode/plugins/observer.ts` + `observer-core.ts`) is the bridge between OpenCode sessions and the self-learning pipeline:
+The **Observer Plugin** (`packages/ingenium-extension/observer.ts` + `observer-core.ts`) is the bridge between OpenCode sessions and the self-learning pipeline:
 
 - **`session.created`** — On session start, imports file-fallback observations from `observations.md`, triggers initial synthesis
 - **`session.idle`** — On idle events, optionally triggers synthesis at a configurable interval (`OBSERVER_CHECK_INTERVAL`)
