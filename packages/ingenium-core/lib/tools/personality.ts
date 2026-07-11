@@ -10,7 +10,7 @@ export function upsertTrait(
   exemplarObservationId?: number,
   exemplarText?: string,
 ): PersonalityTrait {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
     const now = new Date().toISOString();
 
@@ -49,12 +49,11 @@ export function upsertTrait(
       db.prepare(
         `UPDATE personality_traits SET ${updates.join(", ")} WHERE id = ?`
       ).run(...params);
-      checkpointAfterWrite();
       return db.prepare("SELECT * FROM personality_traits WHERE id = ?").get(existing.id) as PersonalityTrait;
     }
 
     // New trait: insert with provided or default confidence
-    const result = db.prepare(
+    const insertResult = db.prepare(
       `INSERT INTO personality_traits (project_id, trait_type, trait_value, display_label, confidence, exemplar_observation_id, exemplar_text, source, is_active, metadata, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'synthesis', 1, NULL, ?, ?)`
     ).run(
@@ -68,9 +67,10 @@ export function upsertTrait(
       now,
       now,
     );
-    checkpointAfterWrite();
-    return db.prepare("SELECT * FROM personality_traits WHERE id = ?").get(result.lastInsertRowid) as PersonalityTrait;
+    return db.prepare("SELECT * FROM personality_traits WHERE id = ?").get(insertResult.lastInsertRowid) as PersonalityTrait;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function listTraits(projectId: string, includeInactive = false): PersonalityTrait[] {
@@ -97,24 +97,25 @@ export function getProfile(projectId: string): Array<{ project_id: string; trait
 }
 
 export function disableTrait(id: number): boolean {
-  return execTransaction(() => {
+  const ok = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
     const now = new Date().toISOString();
     const result = db.prepare(
       "UPDATE personality_traits SET is_active = 0, updated_at = ? WHERE id = ?"
     ).run(now, id);
-    checkpointAfterWrite();
     return result.changes > 0;
   });
+  checkpointAfterWrite();
+  return ok;
 }
 
 export function setActive(projectId: string, traitId: number, active: boolean): void {
-  return execTransaction(() => {
+  execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
     db.prepare("UPDATE personality_traits SET is_active = ? WHERE project_id = ? AND id = ?")
       .run(active ? 1 : 0, projectId, traitId);
-    checkpointAfterWrite();
   });
+  checkpointAfterWrite();
 }
 
 export function updateConfidence(
@@ -123,7 +124,7 @@ export function updateConfidence(
   traitValue: string,
   delta: number,
 ): PersonalityTrait | null {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
 
     const existing = db.prepare(
@@ -137,7 +138,10 @@ export function updateConfidence(
     db.prepare(
       "UPDATE personality_traits SET confidence = ?, updated_at = ? WHERE id = ?"
     ).run(newConfidence, new Date().toISOString(), existing.id);
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM personality_traits WHERE id = ?").get(existing.id) as PersonalityTrait;
   });
+  if (result) {
+    checkpointAfterWrite();
+  }
+  return result;
 }

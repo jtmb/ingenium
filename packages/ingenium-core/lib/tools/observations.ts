@@ -112,14 +112,17 @@ export function updateObservation(
 
   params.push(id);
 
-  return execTransaction(() => {
+  const transactionResult = execTransaction(() => {
     const result = db.prepare(
       `UPDATE observations SET ${sets.join(", ")} WHERE id = ?`
     ).run(...params);
     if (result.changes === 0) return null;
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM observations WHERE id = ?").get(id) as Observation;
   });
+  if (transactionResult) {
+    checkpointAfterWrite();
+  }
+  return transactionResult;
 }
 
 export function countUnprocessed(projectId: string): number {
