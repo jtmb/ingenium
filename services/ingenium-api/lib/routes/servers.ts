@@ -14,8 +14,8 @@ serversRouter.get("/", (req, res) => {
 serversRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const { name, command, args, env } = req.body;
-  const server = servers.registerServer(projectId, name, command, args, env);
+  const { name, command, args, env, source } = req.body;
+  const server = servers.registerServer(projectId, name, command, args, env, source);
   res.status(201).json({ data: server });
 });
 

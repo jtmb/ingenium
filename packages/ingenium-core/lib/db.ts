@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql"]) {
+    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info(`Applied migration ${file}`);
@@ -130,6 +130,16 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "010_commands.sql"), "utf-8");
       db.exec(sql);
       logger.info("Applied migration 010_commands.sql");
+    }
+
+    // Check if source column exists on servers (migration 011)
+    const sourceColCheck = db.prepare(
+      "SELECT count(*) as count FROM pragma_table_info('servers') WHERE name = 'source'"
+    ).get() as { count: number };
+    if (sourceColCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "011_server_source.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("Applied migration 011_server_source.sql");
     }
   }
 }

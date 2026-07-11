@@ -175,6 +175,7 @@ export declare const ServerSchema: z.ZodObject<{
     command: z.ZodString;
     args: z.ZodOptional<z.ZodString>;
     env: z.ZodOptional<z.ZodString>;
+    source: z.ZodDefault<z.ZodEnum<["opencode", "ingenium"]>>;
     enabled: z.ZodDefault<z.ZodBoolean>;
     running: z.ZodDefault<z.ZodBoolean>;
     created_at: z.ZodString;
@@ -185,6 +186,7 @@ export declare const ServerSchema: z.ZodObject<{
     project_id: string;
     enabled: boolean;
     command: string;
+    source: "opencode" | "ingenium";
     running: boolean;
     args?: string | undefined;
     env?: string | undefined;
@@ -197,6 +199,7 @@ export declare const ServerSchema: z.ZodObject<{
     enabled?: boolean | undefined;
     args?: string | undefined;
     env?: string | undefined;
+    source?: "opencode" | "ingenium" | undefined;
     running?: boolean | undefined;
 }>;
 export type Server = z.infer<typeof ServerSchema>;
@@ -219,9 +222,9 @@ export declare const ObservationSchema: z.ZodObject<{
     status: "pending" | "processed" | "failed" | "skipped";
     project_id: string;
     content: string;
+    source: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual";
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
     importance: number;
-    source: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual";
     session_id?: string | undefined;
     context?: string | undefined;
 }, {
@@ -233,8 +236,8 @@ export declare const ObservationSchema: z.ZodObject<{
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
     status?: "pending" | "processed" | "failed" | "skipped" | undefined;
     session_id?: string | undefined;
-    importance?: number | undefined;
     source?: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | undefined;
+    importance?: number | undefined;
     context?: string | undefined;
 }>;
 export type Observation = z.infer<typeof ObservationSchema>;
