@@ -1,6 +1,7 @@
 import { tool } from "@opencode-ai/plugin";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 const PROJECT = "gh-llm-bootstrap";
@@ -56,14 +57,26 @@ function getDbPath(): string {
  * Returns observations to create. Uses dynamic import for better-sqlite3 to avoid
  * crashing if the module is unavailable.
  */
-async function detectPatterns(dbPath: string): Promise<Array<{ type: string; content: string }>> {
+async function detectPatterns(dbPath: string, worktree?: string): Promise<Array<{ type: string; content: string }>> {
   const results: Array<{ type: string; content: string }> = [];
 
   try {
     if (!existsSync(dbPath)) return results;
 
-    // Dynamic import — fails gracefully if better-sqlite3 isn't in the runtime
-    const Database = (await import("better-sqlite3")).default;
+    let Database: any;
+
+    // Try resolving better-sqlite3 from the worktree first, then fall back to import
+    if (worktree) {
+      try {
+        const req = createRequire(resolve(worktree, "noop.js"));
+        Database = req("better-sqlite3");
+      } catch {
+        try { Database = (await import("better-sqlite3")).default; } catch { return results; }
+      }
+    } else {
+      try { Database = (await import("better-sqlite3")).default; } catch { return results; }
+    }
+
     const db = new Database(dbPath, { readonly: true });
 
     // Get recent user messages — try multiple tables
@@ -192,6 +205,12 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
     event: async ({ event }: { event: any }) => {
       if (event.type === "session.created") {
         turnCount = 0;
+        // Run detection immediately on session start
+        const dbPath = getDbPath();
+        const observations = await detectPatterns(dbPath, worktree);
+        if (observations.length > 0) {
+          await createObservations(observations, ctx.client, worktree);
+        }
       }
 
       if (event.type === "session.idle") {
@@ -199,7 +218,7 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
         if (turnCount % CHECK_INTERVAL !== 0) return;
 
         const dbPath = getDbPath();
-        const observations = await detectPatterns(dbPath);
+        const observations = await detectPatterns(dbPath, worktree);
         if (observations.length > 0) {
           await createObservations(observations, ctx.client, worktree);
         }
@@ -213,7 +232,7 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
         args: {},
         async execute(_args: any, context: { worktree: string }) {
           const dbPath = getDbPath();
-          const observations = await detectPatterns(dbPath);
+          const observations = await detectPatterns(dbPath, context.worktree);
           const created = await createObservations(observations, ctx.client, context.worktree);
           return JSON.stringify(
             { detected: observations.length, created, observations },
