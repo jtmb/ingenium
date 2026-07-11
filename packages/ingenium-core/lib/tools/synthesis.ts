@@ -66,6 +66,10 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
   const batch = observations.getUnprocessedBatch(projectId, 50);
   if (batch.length === 0) {
     result.summary = "No pending observations to process.";
+    // Log completion event so the pipeline timeline shows activity
+    try {
+      logEvent(projectId, "synthesis_completed", "synthesis", "No pending observations.", result.summary, { observations_processed: 0 });
+    } catch (_) { /* non-fatal */ }
     return result;
   }
 
