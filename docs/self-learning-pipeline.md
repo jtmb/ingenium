@@ -11,34 +11,34 @@ The **self-learning pipeline** is a three-phase architecture that enables agents
 ### Why It Exists
 
 - **Problem**: The old agent self-reporting system was inconsistent, lacked confidence tracking, and didn't distinguish between different types of user feedback
-- **Solution**: A structured pipeline that captures observations, synthesizes them into personality traits, and maintains confidence scores over time
+- **Solution**: A structured pipeline that captures observations via LLM-based extraction from OpenCode messages, consolidates them into personality traits, and maintains confidence scores over time
 
 ```mermaid
 flowchart TB
-    subgraph Phase1["Phase 1: Observation"]
-        A1[Agent calls ingenium_observe]
+    subgraph Phase0["Phase 0: Extraction (Server-Side)"]
+        A0[OpenCode Message DB<br>/var/opencode/opencode.db]
+        A1[Extraction Engine<br>extraction.ts]
         A2[(SQLite observations table + FTS5)]
-        A1 -->|POST /api/v1/observations| A2
+        A0 -->|watermark-gated read| A1
+        A1 -->|regex pre-filter + LLM extraction| A2
     end
 
     subgraph Phase2["Phase 2: Synthesis"]
         direction TB
-        B1{Observer Plugin}
-        B2{Scheduled 15min Scheduler}
-        B3[Heuristic Trait Synthesis]
-        B4{LLM Configured?}
-        B5[LLM Skill Synthesis]
-        B6[(SQLite personality_traits)]
-        B7[(SQLite skills)]
+        B1{Scheduled 15min Scheduler}
+        B2[LLM Trait Consolidation<br>CONFIRM / CREATE / IGNORE]
+        B3{LLM Configured?}
+        B4[LLM Skill Synthesis]
+        B5[(SQLite personality_traits)]
+        B6[(SQLite skills)]
         
-        B1 -->|session events| B3
-        B2 -->|POST /synthesis/run| B3
-        B3 -->|upsert traits| B6
-        B3 --> B4
-        B4 -->|yes| B5
-        B4 -->|no| B8[Skip Phase 2]
-        B5 -->|create/update skills| B7
-        B5 -->|suggest traits| B6
+        B1 -->|trigger synthesis| B2
+        B2 -->|upsert normalized traits| B5
+        B2 --> B3
+        B3 -->|yes| B4
+        B3 -->|no| B7[Skip Phase 2]
+        B4 -->|writeSkillToDisk| B6
+        B4 -->|create traits| B5
     end
 
     subgraph Phase3["Phase 3: Personality & Skills"]
@@ -64,13 +64,13 @@ flowchart TB
         E1 --> E4
         E2 --> E3
         E2 --> E4
-        E3 --> B7
-        B7 --> E4
+        E3 --> B6
+        B6 --> E4
     end
 
-    Phase1 --> Phase2
+    Phase0 --> Phase2
     Phase2 --> Phase3
-    Phase1 -.->|pipeline events| Observability
+    Phase0 -.->|pipeline events| Observability
     Phase2 -.->|pipeline events| Observability
     Sync -.->|keeps skills in sync| Phase2
 ```
@@ -79,27 +79,28 @@ flowchart TB
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  PHASE 1: OBSERVATION                                       │
-│  - Auto-Observer plugin detects behavior from OpenCode DB   │
-│  - Legacy: Agents call ingenium_observe()                   │
-│  - Observations stored in DB with type, importance, source  │
+│  PHASE 0: EXTRACTION (Server-Side)                          │
+│  - Extraction engine reads OpenCode messages via API        │
+│  - Watermark-gated, content-hash dedup                      │
+│  - Regex pre-filter selects candidates, LLM extracts rules  │
+│  - No-LLM = no observations (zero regex fallback garbage)   │
 └─────────────────────────────────────────────────────────────┘
-                          ↓
+                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  PHASE 2: SYNTHESIS                                         │
-│  - Observer plugin triggers pipeline on session events      │
-│  - Reads pending observations (ordered by importance)       │
-│  - Phase 2a (heuristic): Classifies, upserts traits         │
-│    → pattern + insight observations are SKIPPED             │
-│  - Phase 2b (LLM, optional): Creates/updates skills         │
-│    → Falls back to backup provider if primary fails         │
+│  PHASE 1: CONSOLIDATION                                     │
+│  - LLM consolidation: CONFIRM / CREATE / IGNORE             │
+│  - Traits become NORMALIZED statements (not raw snippets)   │
+│  - Semantic merge prevents near-duplicate traits            │
+│  - If LLM unavailable, observations stay PENDING            │
 └─────────────────────────────────────────────────────────────┘
-                          ↓
+                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  PHASE 3: PERSONALITY + CROSS-PROJECT                       │
-│  - Aggregated trait profile available via API/MCP tools     │
-│  - Confidence scores decay over time (-0.05 after 7 days)   │
-│  - Traits inform agent behavior adjustments                 │
+│  PHASE 2: SKILL SYNTHESIS + PERSONALITY                     │
+│  - Groups 3+ related observations → LLM creates skills     │
+│  - Skills written to disk via writeSkillToDisk()            │
+│  - LLM-suggested personality_traits actually created        │
+│  - Confidence: 0.10–0.15 start, +0.15/confirmation,        │
+│    cap 0.95, display gate ≥0.30, 7-day decay -0.05         │
 │  - Cross-project: skills in 2+ projects promoted to global  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -111,15 +112,21 @@ flowchart TB
 ```
 User interacts with OpenCode (:4098)
   │
-  ├─ Agent uses ingenium_observe() during workflow (legacy — use auto-observer)
+  ├─ Agent uses ingenium_observe() during workflow (manual, for exceptional cases)
   │   → POST /api/v1/observations → stored in DB (status: pending)
   │
-  ├─ Auto-Observer Plugin (auto-observer.ts)
-  │   → on session.created and every 5th session.idle
-  │   → reads OpenCode DB at ~/.local/share/opencode/opencode.db
-  │   → detects behavior patterns via regex (correction, preference, terminology, workflow)
-  │   → POSTs observations to API automatically
-  │   → logs pipeline events for observability
+  ├─ Server-Side Extraction Engine (extraction.ts, runs in API scheduler)
+  │   → reads OpenCode DB at /var/opencode/opencode.db via GET /api/v1/opencode/messages
+  │   → watermark-gated read + content-hash dedup prevents re-processing
+  │   → cheap regex pre-filter selects candidate messages (NOT final extraction)
+  │   → batches of 15 sent to synthesis LLM for durable behavior rule extraction
+  │   → only LLM output becomes observations — raw snippets NEVER enter DB
+  │   → pipeline event: extraction_completed
+  │
+  ├─ Auto-Observer Plugin (auto-observer.ts, thin trigger only)
+  │   → on session.idle, POSTs /api/v1/extraction/run (no detection logic)
+  │   → if plugin fails to load, scheduler covers extraction anyway
+  │   → auto_observe_now tool for manual trigger
   │
   ├─ Observer Plugin (observer.ts, session.created / session.idle)
   │   → imports local file fallbacks if API was down
@@ -131,23 +138,25 @@ User interacts with OpenCode (:4098)
   │   → writes missing skills to .opencode/skills/<name>/ (SKILL.md + metadata.json + references/)
   │
   ├─ Scheduled Scheduler (every 15 min in API server)
-  │   → POST /api/v1/synthesis/run for ALL active projects
-  │   → POST /api/v1/skills/sync-all (bidirectional disk↔DB)
+  │   → runs extraction BEFORE synthesis for ALL active projects
+  │   → then synthesis (consolidation → skill synthesis)
+  │   → then POST /api/v1/skills/sync-all (bidirectional disk↔DB)
   │
-  └─ Synthesis Pipeline (POST /api/v1/synthesis/run)
-      Phase 1 (always): Heuristic Trait Synthesis
-      → reads pending observations (ordered by importance DESC)
-      → classifies each observation by type
-      → upserts personality_traits (with confidence tracking)
-      → marks observations as processed
+  └─ Synthesis Pipeline (consolidateTraits + runSynthesis)
+      Phase 1: LLM Trait Consolidation
+      → sends each pending observation to LLM
+      → LLM decides: CONFIRM existing trait / CREATE new normalized trait / IGNORE noise
+      → semantic merge prevents near-duplicate traits
+      → if LLM unavailable, observations stay PENDING (no garbage heuristic)
       
       Phase 2 (if LLM configured): LLM Skill Synthesis
-      → groups processed observations from current batch
+      → groups 3+ related observations from batch
       → sends to LLM with existing skills + traits as context
-      → creates/updates skills based on LLM analysis
+      → creates/updates skills with writeSkillToDisk() + llm-synthesized prefix
+      → LLM-suggested personality_traits actually created (previously dropped)
       → logs errors but doesn't block Phase 1 results
 
-      Phase 3 (cross-project, manual/scheduled): Cross-Project Synthesis
+      Cross-Project (manual/scheduled): Cross-Project Synthesis
       → evaluates skills across all non-global, non-archived projects
       → promotes skills present in 2+ projects to global-default
       → logs cross-project skill events to pipeline timeline
@@ -157,72 +166,79 @@ User interacts with OpenCode (:4098)
 
 | Component | Responsibility |
 |-----------|----------------|
-| **Agent** | Calls `ingenium_observe()` during workflow to record user interactions (legacy — Auto-Observer replaces manual calls) |
+| **Agent** | Calls `ingenium_observe()` during workflow to record user interactions (manual, for exceptional cases — extraction engine handles most detection) |
+| **Extraction Engine** (extraction.ts) | **Server-side**: Reads OpenCode messages via API, watermark-gated + content-hash dedup, regex pre-filter selects candidates, LLM batch extraction creates durable behavior rule observations. Runs in the scheduler. |
 | **Observer Plugin** (observer.ts) | Monitors session events, imports file fallbacks, triggers synthesis |
-| **Auto-Observer Plugin** (auto-observer.ts) | Reads OpenCode message history DB, detects behavior patterns via regex (correction, preference, terminology, workflow), auto-creates observations without agent involvement |
+| **Auto-Observer Plugin** (auto-observer.ts) | **Thin trigger only**: On session.idle, POSTs `/api/v1/extraction/run`. Zero detection logic — all extraction is server-side. If plugin fails to load, scheduler covers extraction. |
 | **Skill Sync Plugin** (skill-sync.ts) | Fetches skills from API on session events, writes missing skills to `.opencode/skills/<name>/` |
-| **Synthesis Pipeline** | Processes observations, generates/upserts personality traits (Phase 1 heuristic), optionally runs LLM skill synthesis (Phase 2 with backup provider fallback), and cross-project skill promotion (Phase 3) |
-| **API Layer** | REST endpoints for all operations (sole DB authority) |
+| **Synthesis Pipeline** | Processes observations via LLM consolidation (CONFIRM/CREATE/IGNORE), generates normalized personality traits (Phase 1), optionally runs LLM skill synthesis (Phase 2 with backup provider fallback), and cross-project skill promotion |
+| **API Layer** | REST endpoints for all operations (sole DB authority). New: `POST /api/v1/extraction/run`, DELETE observations/personality endpoints |
 | **MCP Server** | Tool handlers that forward to API layer |
 | **Dashboard** | UI for viewing and managing observations/personality/pipeline events |
 | **Database** | SQLite with three core tables (`observations` with FTS5, `personality_traits` with confidence tracking, `pipeline_events` with parent-child nesting) plus `personality_profile` aggregated view |
-| **LLM Provider** | (Optional) OpenAI-compatible API for Phase 2 skill synthesis, configured via Settings → Synthesis LLM with model dropdown, API key, endpoint URL, and backup provider |
+| **LLM Provider** | (Optional) OpenAI-compatible API for extraction (Phase 0), trait consolidation (Phase 1), and skill synthesis (Phase 2), configured via Settings → Synthesis LLM with model dropdown, API key, endpoint URL, and backup provider |
 
 ---
 
-## 2.5 Auto-Observer Plugin
+## 2.5 Extraction Engine (Server-Side)
 
-The **Auto-Observer** (`packages/ingenium-extension/auto-observer.ts`) is an OpenCode plugin that automatically detects user behavior patterns by reading the OpenCode message history database. It replaces the need for manual `ingenium_observe()` calls in agent code.
+Observation detection runs **server-side in the API** — the client-side auto-observer plugin is now only a thin trigger. The extraction engine (`packages/ingenium-core/lib/tools/extraction.ts`, `runExtraction(projectId, projectName)`) reads OpenCode messages via the existing `GET /api/v1/opencode/messages` endpoint.
 
 ### Architecture
 
 ```
+Extraction Engine (extraction.ts)
+  │
+  ├─ Scheduler: runs before synthesis every 15 min (or triggered manually)
+  │   → reads OpenCode DB mounted at /var/opencode/opencode.db
+  │
+  ├─ Watermark + Dedup gate
+  │   → Per-project setting: extraction_watermark (last-processed message ID)
+  │   → Per-project setting: extraction_seen_hashes (content-hash set for dedup)
+  │   → Only new messages since last run are considered
+  │
+  ├─ Regex Pre-Filter (candidate selection only — NOT final extraction)
+  │   → Identifies messages that MAY contain user behavior
+  │   → Cheap, fast filtering — no observations created at this stage
+  │
+  ├─ LLM Batch Extraction
+  │   → Candidate messages batched (up to 15 per batch)
+  │   → Each batch sent to synthesis LLM with structured prompt
+  │   → LLM extracts DURABLE USER BEHAVIOR RULES as JSON
+  │   → Only LLM output becomes observations — raw snippets NEVER enter DB
+  │
+  └─ No-LLM = No Observations
+      → If no synthesis LLM configured, extraction creates 0 observations
+      → Zero regex fallback to garbage
+      → Pipeline event: extraction_failed (or extraction_completed with 0 observations)
+```
+
+### When It Runs
+
+| Trigger | Mechanism |
+|---------|-----------|
+| **Scheduler** (every 15 min) | `services/ingenium-api/lib/scheduler.ts` runs extraction before synthesis for all active projects |
+| **Auto-Observer Plugin** | On `session.idle`, POSTs `POST /api/v1/extraction/run` (thin trigger) |
+| **MCP Tool** | `ingenium_extraction_run` — manual trigger |
+| **API Endpoint** | `POST /api/v1/extraction/run` — direct API call |
+
+### How the Auto-Observer Plugin Works Now
+
+The **Auto-Observer** (`packages/ingenium-extension/auto-observer.ts`) is now a ~62-line thin trigger:
+
+```
 Auto-Observer Plugin (auto-observer.ts)
   │
-  ├─ Hook: session.created
-  │   → Opens OpenCode DB at ~/.local/share/opencode/opencode.db
-  │   → Reads recent user messages from session_input, part, message tables
-  │   → Runs regex pattern matching (4 categories)
-  │   → POSTs observations to POST /api/v1/observations?project=...
-  │   → Logs pipeline event for dashboard observability
-  │
-  ├─ Hook: session.idle (every 5th idle event)
-  │   → Same flow as session.created
-  │   → Dedup via lastRunAt timestamp per session
+  ├─ Hook: session.idle
+  │   → POSTs /api/v1/extraction/run
+  │   → No detection logic — all extraction runs server-side
   │
   └─ MCP Tool: auto_observe_now
-      → Manual trigger for immediate pattern detection
+      → Manual trigger for immediate server-side extraction
       → Returns JSON with { detected, created, observations }
 ```
 
-### Pattern Detection Categories
-
-| Category | Regex Patterns | Example Match |
-|----------|---------------|---------------|
-| **correction** | `no, use...`, `change X to Y`, `that's wrong`, `should be...instead` | "no, use 2-space indentation" |
-| **preference** | `I prefer...`, `I always use...`, `don't like...`, convention/style keywords | "I prefer snake_case" |
-| **terminology** | `call it...`, `known as...`, `renamed to...`, `refers to...` | "call it deploy not release" |
-| **workflow** | `run...test/build/lint`, `commit...before/after`, CI/CD pipeline | "run tests before commit" |
-
-### Database Queries
-
-The plugin tries three tables in order of specificity:
-
-1. **`session_input.prompt`** — Primary source for actual user text (most reliable)
-2. **`part.data`** — Parsed JSON with `type: "text"` entries (fallback)
-3. **`message.data`** — Raw message data with `role: "user"` (last resort)
-
-### Deduplication
-
-- Tracks `lastRunAt` to skip messages older than the current session
-- Uses a `Set<string>` keyed by `type:snippet_prefix(60)` to avoid duplicate observations for the same pattern within one scan
-- Each idle check runs at most every 5th idle event
-
-### Error Handling
-
-- Non-fatal: if `better-sqlite3` is not available in the runtime, the plugin silently returns no results
-- Individual observation POST failures don't block the batch
-- Pipeline event logging is best-effort (non-blocking)
+If the plugin fails to load in OpenCode, the scheduler covers extraction anyway — plugin loading is no longer a dependency. The plugin requires no `better-sqlite3` dependency since it only makes HTTP calls.
 
 ---
 
@@ -417,7 +433,7 @@ Observations must describe **user behavior**, not implementation activity:
 
 Implementation activity belongs in pipeline events, git commits, and the `/pipeline` timeline — not in observations. The synthesis pipeline only processes behavior-focused observations into personality traits.
 
-> 🔴 **The Auto-Observer plugin handles observation automatically** by scanning OpenCode message history for behavior patterns. Manual `ingenium_observe()` calls in agent code are no longer needed. All 9 agent files had their "🔴 Observation — Log User Interactions" sections removed.
+> 🔴 **The extraction engine handles observation automatically** by reading OpenCode message history via the API and using the synthesis LLM to extract durable user behavior rules. Manual `ingenium_observe()` calls in agent code are only needed for exceptional cases. All 9 agent files had their "🔴 Observation — Log User Interactions" sections removed.
 
 ---
 
@@ -426,7 +442,7 @@ Implementation activity belongs in pipeline events, git commits, and the `/pipel
 | Trait Type | Generated From | Confidence Behavior | Display Label Example |
 |------------|----------------|---------------------|----------------------|
 | `communication_style` | correction, preference | Boosted by repeated observations, decays over time | "Direct and concise" |
-| `code_preference` | preference, correction | +0.1 on re-observation, max 1.0 | "Prefers TypeScript strict mode" |
+| `code_preference` | preference, correction | +0.15 on re-observation, cap 0.95 | "Prefers TypeScript strict mode" |
 | `workflow_pattern` | pattern, workflow | Starts at 0.4, +0.1 per repeat | "Tests before commit" |
 | `terminology` | terminology observations | Starts at 0.5, +0.1 per confirmation | "Uses 'deploy' not 'release'" |
 | `priority_signal` | behavior, goal, error | Lower base (0.3), contextual | "High priority: improve test coverage" |
@@ -436,29 +452,19 @@ Implementation activity belongs in pipeline events, git commits, and the `/pipel
 | `learned_skill` | pattern, workflow | Starts at 0.4, +0.1 per success | "Knows how to debug Docker issues" |
 | `personality_trait` | All types | General trait, adjusts slowly | "Patient and thorough" |
 
-### Confidence Calculation Rules
+### Confidence Calculation Rules (LLM Consolidation Model)
 
-**Base Confidence by Trait Type:**
-- `code_preference`: 0.5 (starts higher due to explicit preferences)
-- `workflow_pattern`: 0.4 (needs multiple observations)
-- `terminology`: 0.5 (clear signal from terminology)
-- `priority_signal`: 0.3 (contextual, lower confidence)
-- `feedback_style`: 0.5 (moderate confidence)
-- `interaction_pattern`: 0.4 (behavioral inference)
-- `domain_knowledge`: 0.5 (insight-based)
-- `learned_skill`: 0.4 (skill acquisition)
-- `communication_style`: 0.3 (subtle, hard to measure)
-- `personality_trait`: 0.2 (general, broad inference)
+**Confidence model:**
+- Traits start at 0.10–0.15 confidence from LLM-extracted observations
+- +0.15 per LLM consolidation confirmation (CONFIRM decision)
+- Cap: **0.95** (never reaches 1.0)
+- Display threshold: **≥0.30** in `getProfile()`
+- Freshly-extracted traits (0.10–0.15) stay below display threshold → hidden behind "N hidden" toggle
+- 7-day inactivity decay: -0.05
 
 **Confidence Boosting:**
-- Repeated observation of same trait: +0.1 per occurrence
-- High importance observations: +0.2 bonus
-- Multiple sources agreeing: +0.15 bonus
-- Time decay: -0.01 per day since last update
-
-**Confidence Decay:**
-- Daily decay: -0.01 per day (configurable)
-- Inactivity decay: -0.05 after 7 days without new observations
+- LLM CONFIRM of existing trait: +0.15
+- Semantic match (LLM finds observation matches existing trait meaning, not just keywords): +0.15
 - Manual override: User can disable traits via dashboard
 
 ---
@@ -473,7 +479,7 @@ Implementation activity belongs in pipeline events, git commits, and the `/pipel
 | `ingenium_observation_search` | FTS5 search | `query` (string) | Array of matching observations |
 | `ingenium_observation_list` | List with filters | `status?`, `type?`, `project_id?` | Array of observations |
 | `ingenium_observation_stats` | Pipeline stats | — | `{ total, pending, processed, by_type }` |
-| `ingenium_observation_delete` | Delete observation | `id` | `{ success: boolean }` |
+| `ingenium_extraction_run` | Trigger server-side extraction | — | `{ detected, created, observations }` |
 
 ### Email Tools (13 tools)
 
@@ -514,16 +520,18 @@ All deprecated learning log tools (`ingenium_learning_log`, etc.) have been **re
 | `/api/v1/observations` | POST | Store observation | Body: `{ observation_type, content, importance?, source?, context? }` |
 | `/api/v1/observations/search` | GET | FTS5 search | `q` (query string) |
 | `/api/v1/observations/stats` | GET | Pipeline statistics | — |
-| `/api/v1/observations/:id` | PATCH | Update observation status | Body: `{ status }` |
 | `/api/v1/observations/:id` | DELETE | Delete observation | — |
+| `/api/v1/observations` | DELETE | Delete all observations from a source | `source` (required — refuses unscoped mass delete) |
+| `/api/v1/extraction/run` | POST | Trigger server-side extraction | — |
 
 ### Personality Endpoints
 
 | Endpoint | Method | Purpose | Query Parameters |
 |----------|--------|---------|------------------|
 | `/api/v1/personality` | GET | List traits | `trait_type`, `project_id` |
-| `/api/v1/personality` | POST | Upsert trait | Body: `{ trait_type, trait_value, confidence?, display_label? }` |
+| `/api/v1/personality` | DELETE | Delete all traits (project-scoped) | — |
 | `/api/v1/personality/profile` | GET | Get aggregated profile | — |
+| `/api/v1/personality/:id` | DELETE | Delete a single trait | — |
 | `/api/v1/personality/:id/disable` | POST | Disable trait | — |
 | `/api/v1/personality/:id/enable` | POST | Enable trait | — |
 
@@ -565,21 +573,24 @@ curl http://localhost:4097/api/v1/personality/profile
 
 Every step of the self-learning pipeline is tracked as `pipeline_events` and displayed in a **visual Git-workflow-style timeline** at **`/pipeline`** in the dashboard. This replaces `console.log()` debugging with a structured, filterable, live-updating view.
 
-### Event Types (13)
+### Event Types (14)
 
 | Event | Source | Meaning |
 |-------|--------|---------|
 | `session_created` | plugin | OpenCode session started; "Scheduled" for timer triggers, session ID for manual |
 | `session_idle` | plugin | Session went idle |
-| `observation_created` | agent | Agent called `ingenium_observe` (legacy) or auto-observer detected pattern |
+| `extraction_completed` | synthesis | Extraction engine finished scanning OpenCode messages; includes candidate count, observation count, model info |
+| `extraction_failed` | synthesis | Extraction engine errored out |
+| `observation_created` | agent | Agent called `ingenium_observe` (manual) or extraction engine created from LLM output |
 | `observation_imported` | plugin | File fallback imported into DB |
-| `observation_detected` | auto-observer | Auto-observer detected behavior patterns from OpenCode message history |
 | `synthesis_triggered` | plugin | Observer triggered synthesis |
 | `synthesis_started` | synthesis | Pipeline began processing; includes batch size, observation IDs, model info |
 | `synthesis_completed` | synthesis | Pipeline finished successfully; enriched with `model`, `endpoint`, `provider`, `insights`, observation counts, and trait statistics |
 | `synthesis_failed` | synthesis | Pipeline errored out |
 | `trait_created` | synthesis | New personality trait generated; includes `trait_type`, `trait_value`, `confidence`, `observation_ids`, `skill_links`, and `model` info |
 | `trait_updated` | synthesis | Existing trait confidence adjusted |
+| `skill_created` | synthesis | New skill synthesized by LLM Phase 2 |
+| `skill_updated` | synthesis | Existing skill updated by LLM Phase 2 |
 | `plugin_initialized` | plugin | Observer/skill-sync/auto-observer plugin loaded |
 | `plugin_error` | plugin | Plugin encountered an error |
 
@@ -605,7 +616,7 @@ The `/pipeline` dashboard page displays events as a connected vertical timeline:
 |--------|------|-------------|
 | `id` | INTEGER | Primary key |
 | `project_id` | TEXT | FK to projects |
-| `event_type` | TEXT | 12 event types (see above) |
+| `event_type` | TEXT | 16 event types (see above) |
 | `event_source` | TEXT | agent/plugin/synthesis/system |
 | `title` | TEXT | Short human-readable title |
 | `description` | TEXT | Optional longer description |
@@ -628,17 +639,19 @@ The `/pipeline` dashboard page displays events as a connected vertical timeline:
 | Where | Event(s) emitted |
 |-------|-----------------|
 | `observations.ts` — `storeObservation()` | `observation_created` |
-| `synthesis.ts` — `runSynthesis()` | `synthesis_started`, `trait_created`, `trait_updated`, `synthesis_completed`, `synthesis_failed` (enriched with model/endpoint/insights) |
+| `extraction.ts` — `runExtraction()` | `extraction_completed`, `extraction_failed` |
+| `synthesis.ts` — `consolidateTraits()` + `runSynthesis()` | `synthesis_started`, `trait_created`, `trait_updated`, `synthesis_completed`, `synthesis_failed` (enriched with model/endpoint/insights) |
+| `synthesis.ts` — LLM skill creation/update | `skill_created`, `skill_updated` |
 | `observer.ts` — `session.created` handler | `session_created` (includes "Scheduled" or session ID) |
 | `observer-core.ts` — `importObservationsFromFile()` | `observation_imported` |
 | `observer-core.ts` — `triggerSynthesis()` | `synthesis_triggered` |
-| `auto-observer.ts` — `detectPatterns()` | `observation_detected` (auto-detected behavior patterns) |
+| `auto-observer.ts` — thin trigger | POSTs `/api/v1/extraction/run` (no pipeline events — extraction engine logs its own events) |
 | `skill-sync.ts` — `syncSkillsFromApi()` | `plugin_initialized` (skill sync completed) |
-| **API Server** (scheduled) | Auto-triggers synthesis + skill sync every 15 minutes for ALL active projects |
+| **API Server** (scheduled) | Auto-runs extraction → synthesis → skill sync every 15 minutes for ALL active projects |
 
 ### Scheduled Synthesis
 
-The API server automatically triggers the synthesis pipeline every **15 minutes** (configurable via `SYNTHESIS_INTERVAL_MS` environment variable, default: 900000ms). This ensures observations are processed without requiring manual intervention.
+The API server automatically runs the full pipeline every **15 minutes** (configurable via `SYNTHESIS_INTERVAL_MS` environment variable, default: 900000ms). The cycle runs extraction → synthesis → skill sync in sequence for all active projects. Extraction runs BEFORE synthesis so freshly extracted observations are consolidated in the same cycle.
 
 **Configuration:**
 ```typescript
@@ -772,10 +785,11 @@ The synthesis pipeline can optionally use an LLM to analyze observations and aut
 
 When configured, the 15-minute synthesis pipeline runs two phases:
 
-**Phase 1: Trait Synthesis** (always runs, heuristic)
-- Classifies observations into personality traits
-- Creates/updates traits with confidence tracking
-- (This is the original behavior)
+**Phase 1: Trait Consolidation** (always runs, LLM-powered)
+- Sends each observation to the LLM for CONFIRM/CREATE/IGNORE decisions
+- Creates normalized trait statements from observations
+- Semantic merge prevents near-duplicate traits
+- (If LLM not configured, observations stay PENDING — no heuristic fallback)
 
 **Phase 2: LLM Skill Synthesis** (only if model configured)
 - Groups processed observations from the current batch
@@ -896,7 +910,7 @@ Two utility functions control Phase 2 execution:
 | File | Purpose |
 |------|---------|
 | `packages/ingenium-core/lib/tools/synthesis-llm.ts` | LLM client: `SynthesisLLMResult` interface, `buildPrompt()`, `callSynthesisLLM()`, `validateResponse()`, `tryParseJSON()`, `isLLMSynthesisConfigured()`, `getLLMSynthesisConfig()` |
-| `packages/ingenium-core/lib/tools/synthesis.ts` | Synthesis orchestrator: `runSynthesis()` (Phase 1: heuristic traits, Phase 2: LLM skills), `getSynthesisStatus()` |
+| `packages/ingenium-core/lib/tools/synthesis.ts` | Synthesis orchestrator: `consolidateTraits()` (Phase 1: LLM consolidation), `runSynthesis()` (Phase 2: LLM skills), `getSynthesisStatus()` |
 | `services/ingenium-dashboard/src/app/settings/page.tsx` | Settings UI: provider-based model dropdown, API key input, Test Connection, Save |
 
 ---
@@ -906,64 +920,64 @@ Two utility functions control Phase 2 execution:
 ### Processing Flow
 
 ```
-1. Trigger: Observer plugin fires on session.created or session.idle
+1. Trigger: Observer plugin fires on session.created or scheduler timer
 2. Import Fallbacks: Read .opencode/skills/learnings.md if API was down
-3. Fetch Pending: SELECT * FROM observations WHERE status = 'pending' ORDER BY importance DESC
-4. Process Each Observation:
-    a. Classify by observation_type
-    b. If pattern or insight → SKIP trait creation (implementation notes)
-    c. Determine target trait_type using mapping rules
-    d. Calculate confidence score
-    e. Upsert personality_trait record
+3. Fetch Pending: SELECT * FROM observations WHERE status = 'pending'
+4. Phase 1 — LLM Trait Consolidation (consolidateTraits):
+     a. Send each pending observation to the synthesis LLM
+     b. LLM decides for each observation:
+        - CONFIRM → link to an existing matching trait, boost confidence
+        - CREATE → generate a new NORMALIZED trait statement (not raw snippet)
+        - IGNORE → observation is noise, skip it
+     c. Semantic merge prevents near-duplicate traits
+     d. Confidence: 0.10–0.15 start, +0.15 per confirmation, cap 0.95
+     e. If LLM unavailable, observations stay PENDING (no garbage heuristic)
 5. Mark Processed: UPDATE observations SET status = 'processed' WHERE id IN (...)
 6. Update Profile: Refresh personality_profile view
 7. Phase 2 (optional): Send processed batch to LLM for skill synthesis
-    a. Try primary provider → if fails, try backup provider
-    b. Validate response, create/update skills, log pipeline events
+     a. Groups 3+ related observations from the current batch
+     b. LLM returns structured JSON with skills to create/update
+     c. Skills written to disk via writeSkillToDisk() (split-skill format, llm-synthesized prefix)
+     d. LLM-suggested personality_traits actually created (previously dropped)
+     e. Try primary provider → if fails, try backup provider
+     f. Validate response, log pipeline events (skill_created, skill_updated)
 ```
 
-### Trait Mapping Rules
 
-| Observation Type | Target Trait Type | Base Confidence | Notes |
-|------------------|-------------------|-----------------|-------|
-| `correction` | `feedback_style` | 0.5 | Adjusts with delta from previous value |
-| `preference` | `code_preference` | 0.5 | +0.1 on re-observation, max 1.0 |
-| `pattern` | _(none — skipped)_ | — | **Implementation notes — do NOT create traits.** Sent to LLM Phase 2 for skill synthesis only |
-| `insight` | _(none — skipped)_ | — | **Implementation notes — do NOT create traits.** Used only for LLM skill synthesis context |
-| `feedback` | `feedback_style` | 0.5 | Boosts confidence on matching traits |
-| `behavior` | `interaction_pattern` | 0.4 | Behavioral inference |
-| `terminology` | `terminology` | 0.5 | +0.1 per confirmation |
-| `workflow` | `workflow_pattern` | 0.4 | Multi-step process recognition |
-| `error` | `priority_signal` | 0.3 | Lower base, contextual |
-| `goal` | `priority_signal` | 0.3 | Stated goals have lower confidence |
+### Trait Consolidation Model
 
-> 🔴 **Pattern and insight observations are implementation notes** — they track code/architecture changes, not user behavior. They are skipped during Phase 1 trait synthesis but are still sent to Phase 2 LLM skill synthesis as context. Use them for tracking discovery patterns and system architecture insights.
+The synthesis pipeline uses **LLM consolidation** instead of heuristic classification rules. For each pending observation, the LLM receives the observation content along with existing traits and decides:
 
-### Confidence Calculation Formula
+| LLM Decision | Meaning | Effect |
+|-------------|---------|--------|
+| **CONFIRM** | Observation matches an existing trait | Boost trait confidence, link observation as exemplar |
+| **CREATE** | New pattern — create a NORMALIZED trait statement | Trait starts at 0.10–0.15 confidence, hidden below 0.30 threshold |
+| **IGNORE** | Observation is noise / not user behavior | Observation marked processed, no trait created |
+
+**Why LLM consolidation is superior**:
+- Traits are **normalized statements** like "User prefers to rebuild and test after every change." — not raw snippets copied verbatim
+- **Semantic merge** prevents near-duplicate traits (e.g., "User prefers TypeScript" and "User likes TS" merge into one trait)
+- If the LLM is unavailable, observations stay PENDING — no garbage heuristic fallback to copy raw text into traits
+
+### Confidence Calculation
 
 ```typescript
-function calculateConfidence(observation: Observation, existingTrait?: Trait): number {
-  let confidence = BASE_CONFIDENCE[observation.type];
+function calculateConfidence(trait: Trait, confirmations: number): number {
+  let confidence = 0.10 + (confirmations * 0.15); // Start 0.10-0.25, +0.15 per confirmation
+  return Math.min(0.95, Math.max(0.05, confidence)); // Cap at 0.95
+}
+```
+
+Traits need 2+ confirming observations to reach the display threshold of ≥0.30. Freshly-extracted traits at 0.10–0.15 are hidden behind the dashboard "N hidden" toggle until confirmed.
+
+### Confidence Calculation Formula (Consolidated)
+
+```typescript
+function calculateConfidence(trait: Trait, confirmations: number): number {
+  let confidence = 0.10 + (confirmations * 0.15);
   
-  // Boost for repeated observations
-  if (existingTrait) {
-    const repeatCount = getRepeatCount(existingTrait);
-    confidence += Math.min(0.3, repeatCount * 0.1);
-  }
-  
-  // Boost for high importance
-  if (observation.importance >= 8) {
-    confidence += 0.2;
-  }
-  
-  // Boost for multiple sources
-  const sources = getSourcesForTrait(observation.type);
-  if (sources.length > 1) {
-    confidence += 0.15;
-  }
-  
-  // Cap at 1.0
-  return Math.min(1.0, Math.max(0.0, confidence));
+  // Cap at 0.95
+  return Math.min(0.95, Math.max(0.05, confidence));
 }
 ```
 
@@ -971,17 +985,14 @@ function calculateConfidence(observation: Observation, existingTrait?: Trait): n
 
 ```typescript
 function applyTimeDecay(trait: Trait): number {
-  const daysSinceUpdate = (new Date().getTime() - trait.updated_at) / (1000 * 60 * 60 * 24);
-  
-  // Daily decay
-  let decayed = trait.confidence - (daysSinceUpdate * 0.01);
+  const daysSinceUpdate = (Date.now() - new Date(trait.updated_at).getTime()) / (1000 * 60 * 60 * 24);
   
   // Inactivity decay (after 7 days)
   if (daysSinceUpdate > 7) {
-    decayed -= (daysSinceUpdate - 7) * 0.05;
+    return Math.max(0.0, trait.confidence - 0.05);
   }
   
-  return Math.max(0.0, decayed);
+  return trait.confidence;
 }
 ```
 
@@ -995,7 +1006,8 @@ function applyTimeDecay(trait: Trait): number {
 |------|---------|----------|
 | `lib/tools/observations.ts` | Core observation DB operations (CRUD, FTS5) | `packages/ingenium-core/lib/tools/` |
 | `lib/tools/personality.ts` | Core personality trait operations (upsert, profile) | `packages/ingenium-core/lib/tools/` |
-| `lib/tools/synthesis.ts` | Synthesis pipeline orchestrator (`runSynthesis`, `getSynthesisStatus`) | `packages/ingenium-core/lib/tools/` |
+| `lib/tools/synthesis.ts` | Synthesis pipeline orchestrator (`consolidateTraits`, `runSynthesis`, `getSynthesisStatus`) | `packages/ingenium-core/lib/tools/` |
+| `lib/tools/extraction.ts` | Server-side extraction engine (`runExtraction`) — reads OpenCode messages, watermark-gated, LLM batch extraction | `packages/ingenium-core/lib/tools/` |
 | `lib/tools/synthesis-llm.ts` | LLM synthesis client (`callSynthesisLLM`, prompt builder, validator, `tryParseJSON`, config checks) | `packages/ingenium-core/lib/tools/` |
 | `lib/tools/pipeline-events.ts` | Pipeline event logging (`logEvent`, `getEvents`, `getTimeline`) | `packages/ingenium-core/lib/tools/` |
 | `lib/schema.ts` | Zod schemas: `ObservationSchema`, `PersonalityTraitSchema`, `PipelineEventSchema` | `packages/ingenium-core/lib/` |
@@ -1028,7 +1040,7 @@ function applyTimeDecay(trait: Trait): number {
 | `observer.ts` | OpenCode observer plugin: session events, `synthesize_observations` tool registration | `packages/ingenium-extension/` |
 | `observer-core.ts` | Plugin core: `importObservationsFromFile()`, `triggerSynthesis()`, `logPipelineEvent()` | `packages/ingenium-extension/` |
 | `skill-sync.ts` | Plugin: fetches skills from API, writes missing skills to `.opencode/skills/<name>/` on session events | `packages/ingenium-extension/` |
-| `auto-observer.ts` | Plugin: reads OpenCode DB, detects behavior patterns via regex (4 categories), auto-creates observations | `packages/ingenium-extension/` |
+| `auto-observer.ts` | Plugin: thin trigger — POSTs `/api/v1/extraction/run` on session.idle. Zero detection logic | `packages/ingenium-extension/` |
 | `index.ts` | Package exports: `ObserverPlugin`, `SkillSyncPlugin`, `AutoObserverPlugin` | `packages/ingenium-extension/` |
 | `package.json` | `@ingenium/extension` npm package with `bin` field for `npx -y` installation | `packages/ingenium-extension/` |
 | `ARCHITECTURE.md` | Definitive client/server split, data flow, process ownership reference | `packages/ingenium-extension/` |
@@ -1065,6 +1077,8 @@ function applyTimeDecay(trait: Trait): number {
 | `data/migrations/007_observations.sql` | Create observations table with FTS5 | `packages/ingenium-core/data/migrations/` |
 | `data/migrations/008_personality_traits.sql` | Create personality traits table and profile view | `packages/ingenium-core/data/migrations/` |
 | `data/migrations/009_pipeline_events.sql` | Create pipeline events table | `packages/ingenium-core/data/migrations/` |
+| `data/migrations/018_extraction_events.sql` | Add `extraction_completed` and `extraction_failed` to pipeline_events CHECK constraint | `packages/ingenium-core/data/migrations/` |
+| `data/migrations/019_trait_fk_set_null.sql` | Change personality_traits FK to ON DELETE SET NULL for safe observation deletion | `packages/ingenium-core/data/migrations/` |
 
 ### Test Files
 
@@ -1072,8 +1086,9 @@ function applyTimeDecay(trait: Trait): number {
 |------|---------|----------|
 | `tests/observations.test.ts` | Tests for observation CRUD and FTS5 search | `packages/ingenium-core/tests/` |
 | `tests/personality.test.ts` | Tests for personality trait upsert and profile | `packages/ingenium-core/tests/` |
-| `tests/synthesis.test.ts` | Tests for synthesis pipeline (heuristic classification) | `packages/ingenium-core/tests/` |
+| `tests/synthesis.test.ts` | Tests for synthesis pipeline (LLM consolidation + skill synthesis) | `packages/ingenium-core/tests/` |
 | `tests/synthesis-llm.test.ts` | Tests for LLM synthesis client (prompt, validation, retry) | `packages/ingenium-core/tests/` |
+| `tests/extraction.test.ts` | Tests for server-side extraction engine (watermark, pre-filter, batch extraction) | `packages/ingenium-core/tests/` |
 | `tests/pipeline-events.test.ts` | Tests for pipeline event logging and timeline | `packages/ingenium-core/tests/` |
 | `tests/ingenium-dashboard/pipeline.spec.ts` | Playwright E2E test for pipeline timeline page | `tests/ingenium-dashboard/` |
 
@@ -1334,7 +1349,8 @@ curl -X POST http://localhost:4097/api/v1/skills/sync-all?project=gh-llm-bootstr
 | 2.2.0 | 2026-07-10 | Added `/sync-skills` command, `self-learning` skill, `docs/HOW-TO/self-learning.md`, expanded LLM synthesis docs (`SynthesisLLMResult`, retry logic, `tryParseJSON`, validation), scheduled skill sync in API server, comprehensive Files Reference |
 | 2.3.0 | 2026-07-10 | Removed deprecated `/learnings` page and `ingenium_learning_log` tools. Added local-persistence skill for DB→disk sync. `docs/self-learning-pipeline.md` moved from root. |
 | 3.0.0 | 2026-07-11 | **Auto-Observer**: New `auto-observer.ts` plugin reads OpenCode DB, detects behavior patterns via regex (4 categories), auto-creates observations. **Pattern/insight skip**: `pattern` and `insight` observation types no longer create personality traits. **Confidence overhaul**: Starting confidence reduced to 0.05–0.15, requires 2+ confirmations to reach display threshold (0.30), capped at 0.95, decays -0.05 after 7 days. **Pipeline enrichment**: `synthesis_completed` includes model/endpoint/insights, `trait_created` includes observation_ids/skill_links/model. **Cross-project synthesis (Phase 3)**: Skills used in 2+ projects promoted to global-default. **Backup LLM provider**: Automatic fallback if primary provider fails. **@ingenium/extension package**: New npm package bundling MCP server + 3 plugins. **Global config path resolution**: Global projects write to `~/.config/opencode/` via shared `paths.ts` module. **Projects page overhaul**: Rich cards with detail panel, expandable views, delete confirmation. **Config tracking**: DB-backed `configs` table with `/config` dashboard page. |
+| 4.0.0 | 2026-07-11 | **Server-Side Extraction**: Rewrote observation detection from regex-based plugin to LLM-first server-side architecture. The `auto-observer.ts` plugin is now a ~62-line thin trigger; all extraction runs in the API scheduler via `extraction.ts`. **LLM consolidation**: Phase 1 synthesis now uses LLM consolidation (CONFIRM/CREATE/IGNORE) instead of heuristic mapping — traits are normalized statements, not raw snippets. **Confidence model fixed**: Traits start at 0.10–0.15, +0.15 per confirmation, cap 0.95, display gate ≥0.30 with "N hidden" toggle. **Phase 2 fixes**: LLM-synthesized skills written to disk via `writeSkillToDisk()`, 3+ observation minimum for skill creation, LLM personality_traits now actually created. **DELETE endpoints**: New `/observations/:id`, `/observations?source=X`, `/personality/:id`, `/personality` DELETE capabilities. **Migrations 018/019**: Extraction events + FK SET NULL for safe observation deletion. **Pipeline events**: Added `extraction_completed`, `extraction_failed`, `skill_created`, `skill_updated`. Scheduler now runs extraction → synthesis → skill-sync in sequence. |
 
 ---
 
-*Last updated: July 11, 2026 (v3.0.0 — auto-observer, pattern/insight skip, confidence overhaul, cross-project, backup provider, extension package)*
+*Last updated: July 11, 2026 (v4.0.0 — server-side extraction, LLM consolidation, confidence model fixed, DELETE endpoints, migrations 018/019)*

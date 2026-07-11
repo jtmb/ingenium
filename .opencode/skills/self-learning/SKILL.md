@@ -23,7 +23,16 @@ Instead of the old `ingenium_learning_log` → keyword-based classification → 
 ```
 User OpenCode Session (:4098)
   │
-  ├─ Agent uses ingenium_observe() during workflow
+  ├─ Server-Side Extraction Engine (extraction.ts)
+  │   → reads OpenCode DB via API (watermark-gated, content-hash dedup)
+  │   → regex pre-filter selects candidates, LLM batch extraction creates observations
+  │   → no-LLM = no observations (no regex fallback to garbage)
+  │
+  ├─ Auto-Observer Plugin (auto-observer.ts, thin trigger only)
+  │   → on session.idle, POSTs /api/v1/extraction/run
+  │   → if plugin fails to load, scheduler covers extraction anyway
+  │
+  ├─ Agent uses ingenium_observe() during workflow (manual, exceptional cases)
   │   → observation stored in DB (pending)
   │
   ├─ Observer Plugin (session.idle / session.created)
@@ -31,10 +40,10 @@ User OpenCode Session (:4098)
   │   → triggers synthesis
   │
   └─ Synthesis Pipeline (triggered by /synthesize or plugin)
-      → classifies observations
-      → updates personality_traits
-      → marks observations as processed
-      → updates skills
+      → LLM consolidates observations → CONFIRM / CREATE / IGNORE
+      → traits become normalized statements, not raw snippets
+      → optionally creates skills via LLM (3+ related observations minimum)
+      → skills written to disk via writeSkillToDisk(), traits actually created
 ```
 
 ## Database Tables
@@ -135,12 +144,13 @@ Run `/synthesize` to trigger the synthesis pipeline, or wait for the background 
 
 ## MCP Tools
 
-### Core Observation Tools (8 tools)
+### Core Observation Tools (6 tools)
 
 - \`ingenium_observe\` — Store an observation (10 types available)
 - \`ingenium_observation_search\` — FTS5 search across observations with ranking
 - \`ingenium_observation_list\` — List observations with filters (type, status, importance)
 - \`ingenium_observation_stats\` — Get pipeline statistics (pending/processed counts)
+- \`ingenium_extraction_run\` — Trigger server-side extraction from OpenCode messages
 
 ### Email Tools (13 tools)
 
@@ -160,10 +170,15 @@ Run `/synthesize` to trigger the synthesis pipeline, or wait for the background 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/v1/observations` | GET | List observations with filters |
+| `/api/v1/observations` | DELETE | Delete all observations from a source (source param required) |
 | `/api/v1/observations/search` | GET | FTS5 search across observations |
 | `/api/v1/observations/stats` | GET | Pipeline statistics |
+| `/api/v1/observations/:id` | DELETE | Delete a single observation |
+| `/api/v1/extraction/run` | POST | Trigger server-side extraction from OpenCode messages |
 | `/api/v1/personality` | GET | Full personality profile |
+| `/api/v1/personality` | DELETE | Delete all traits (project-scoped) |
 | `/api/v1/personality/traits` | GET | List personality traits |
+| `/api/v1/personality/:id` | DELETE | Delete a single trait |
 | `/api/v1/synthesis/run` | POST | Trigger synthesis pipeline |
 | `/api/v1/synthesis/status` | GET | Check pipeline status |
 

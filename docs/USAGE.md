@@ -381,7 +381,7 @@ These 14 skills provide guidance for specific contexts but are not required for 
 - Click any event card for a **detail overlay** with raw JSON data
 - Each event is color-coded by source: orange (agent), blue (plugin), green (synthesis), purple (trait)
 
-**13 event types**: `session_created`, `session_idle`, `observation_created`, `observation_imported`, `synthesis_triggered`, `synthesis_started`, `synthesis_completed`, `synthesis_failed`, `trait_created`, `trait_updated`, `plugin_initialized`, `plugin_error`, `observation_detected` (from auto-observer)
+**16 event types**: `session_created`, `session_idle`, `extraction_completed`, `extraction_failed`, `observation_created`, `observation_imported`, `synthesis_triggered`, `synthesis_started`, `synthesis_completed`, `synthesis_failed`, `trait_created`, `trait_updated`, `skill_created`, `skill_updated`, `plugin_initialized`, `plugin_error`
 
 **Enriched event data**: `synthesis_completed` events carry full pipeline metadata (model name, endpoint URL, provider ID, LLM-generated insights). `trait_created` events link back to parent observations (`observation_ids`) and include model attribution and skill references. Pipeline stats include a skills count alongside observation and trait counts.
 
