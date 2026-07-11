@@ -9,8 +9,8 @@ export async function serverList(project) {
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }
 /** Add a new child MCP server definition. */
-export async function serverAdd(project, name, command, args, env) {
-    const res = await api.post("/servers", { name, command, args, env }, { project });
+export async function serverAdd(project, name, command, args, env, source) {
+    const res = await api.post("/servers", { name, command, args, env, source }, { project });
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }
 /** Remove a child MCP server definition. */

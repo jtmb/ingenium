@@ -42,8 +42,10 @@ export default function ServersPage() {
               <span className="text-sm text-gray-500 ml-2">{s.command}</span>
             </div>
             <span className={`text-xs px-2 py-0.5 rounded ${
-              s.running ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
-            }`}>{s.running ? "Running" : "Stopped"}</span>
+              s.source === "ingenium"
+                ? (s.running ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500")
+                : "bg-blue-100 text-blue-700"
+            }`}>{s.source === "ingenium" ? (s.running ? "Running" : "Stopped") : "External"}</span>
           </div>
         ))}
       </div>

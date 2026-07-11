@@ -7,15 +7,15 @@ export function listServers(projectId: string): Server[] {
   return db.prepare("SELECT * FROM servers WHERE project_id = ?").all(projectId) as Server[];
 }
 
-export function registerServer(projectId: string, name: string, command: string, args?: string, env?: string): Server {
+export function registerServer(projectId: string, name: string, command: string, args?: string, env?: string, source?: string): Server {
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
     const id = randomUUID();
     db.prepare(
-      `INSERT INTO servers (id, project_id, name, command, args, env, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, projectId, name, command, args ?? null, env ?? null, now);
+      `INSERT INTO servers (id, project_id, name, command, args, env, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, projectId, name, command, args ?? null, env ?? null, source ?? "opencode", now);
     checkpointAfterWrite();
     return db.prepare("SELECT * FROM servers WHERE id = ?").get(id) as Server;
   });

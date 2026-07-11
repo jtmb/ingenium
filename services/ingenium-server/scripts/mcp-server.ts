@@ -431,10 +431,11 @@ server.registerTool(
       command: z.string(),
       args: z.string().optional(),
       env: z.string().optional(),
+      source: z.string().optional(),
     },
   },
-  async ({ project, name, command, args, env }) =>
-    serverTools.serverAdd(project, name, command, args, env),
+  async ({ project, name, command, args, env, source }) =>
+    serverTools.serverAdd(project, name, command, args, env, source),
 );
 
 server.registerTool(

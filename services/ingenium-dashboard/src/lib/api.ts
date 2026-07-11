@@ -47,7 +47,7 @@ export type Agent = {
 };
 
 /** An MCP server configuration. */
-export type Server = { id: string; name: string; command: string; running: boolean; enabled: boolean };
+export type Server = { id: string; name: string; command: string; running: boolean; enabled: boolean; source?: "opencode" | "ingenium" };
 
 /** An observation recorded by the agent during interactions. */
 export type Observation = {

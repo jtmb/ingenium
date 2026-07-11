@@ -6,7 +6,7 @@ export declare function serverList(project: string): Promise<{
     }[];
 }>;
 /** Add a new child MCP server definition. */
-export declare function serverAdd(project: string, name: string, command: string, args?: string, env?: string): Promise<{
+export declare function serverAdd(project: string, name: string, command: string, args?: string, env?: string, source?: string): Promise<{
     content: {
         type: "text";
         text: string;

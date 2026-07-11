@@ -64,6 +64,7 @@ export const ServerSchema = z.object({
     command: z.string(),
     args: z.string().optional(),
     env: z.string().optional(),
+    source: z.enum(["opencode", "ingenium"]).default("opencode"),
     enabled: z.coerce.boolean().default(true),
     running: z.coerce.boolean().default(false),
     created_at: z.string().datetime(),

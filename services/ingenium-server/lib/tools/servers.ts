@@ -11,8 +11,8 @@ export async function serverList(project: string) {
 }
 
 /** Add a new child MCP server definition. */
-export async function serverAdd(project: string, name: string, command: string, args?: string, env?: string) {
-  const res = await api.post("/servers", { name, command, args, env }, { project });
+export async function serverAdd(project: string, name: string, command: string, args?: string, env?: string, source?: string) {
+  const res = await api.post("/servers", { name, command, args, env, source }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 

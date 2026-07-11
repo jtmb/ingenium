@@ -172,8 +172,9 @@ server.registerTool("ingenium_server_add", {
         command: z.string(),
         args: z.string().optional(),
         env: z.string().optional(),
+        source: z.string().optional(),
     },
-}, async ({ project, name, command, args, env }) => serverTools.serverAdd(project, name, command, args, env));
+}, async ({ project, name, command, args, env, source }) => serverTools.serverAdd(project, name, command, args, env, source));
 server.registerTool("ingenium_server_remove", {
     description: "Remove a child MCP server definition.",
     inputSchema: { project: projectParam, name: z.string() },
