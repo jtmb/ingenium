@@ -98,22 +98,12 @@ export default function SettingsPage() {
         ? customModel
         : (Object.values(selectedProvider?.models || {})[0] as any)?.id || providerId;
       const ep = isCustom
-        ? endpoint.replace(/\/v1\/?$/, "")
+        ? endpoint
         : endpoint;
 
-      const testHeaders: Record<string, string> = { "Content-Type": "application/json" };
-      if (apiKeyState) testHeaders["Authorization"] = `Bearer ${apiKeyState}`;
-      const res = await fetch(`${ep}/v1/chat/completions`, {
-        method: "POST",
-        headers: testHeaders,
-        body: JSON.stringify({
-          model: modelId,
-          messages: [{ role: "user", content: "Reply with just 'ok'" }],
-          max_tokens: 10,
-        }),
-      });
-      if (res.ok) setLlmStatus("✅ Connection successful");
-      else setLlmStatus(`❌ ${res.status}: ${await res.text().catch(() => "unknown")}`);
+      const result = await api.settings.testLlm(ep, modelId, apiKeyState);
+      if (result.ok) setLlmStatus("✅ Connection successful");
+      else setLlmStatus(`❌ ${result.status || "error"}: ${result.message || "unknown"}`);
     } catch (err: any) {
       setLlmStatus(`❌ ${err.message}`);
     }

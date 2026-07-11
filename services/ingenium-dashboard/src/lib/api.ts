@@ -401,6 +401,10 @@ export const api = {
         apiKey: key.data?.value || "",
         endpoint: endpoint.data?.value || "",
       })),
+    testLlm: (endpoint: string, model: string, apiKey: string, project = DEFAULT_PROJECT) =>
+      request<{ data: { ok: boolean; status?: number; message?: string } }>(`/settings/test-llm?project=${project}`, {
+        method: "POST", body: JSON.stringify({ endpoint, model, apiKey }),
+      }).then((r) => r.data),
   },
   configs: {
     get: (type: string = "project", project = DEFAULT_PROJECT) =>
