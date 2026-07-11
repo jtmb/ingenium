@@ -148,6 +148,38 @@ export default function MailPage() {
 
   // No accounts — show empty / setup state
   if (accounts.length === 0 && !showAccountSetup) {
+    const loadDemoAccount = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/emails/accounts?project=${PROJECT}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: "demo@example.com",
+            name: "Demo Account",
+            provider: "custom",
+            authType: "app_password",
+          }),
+        });
+        if (res.ok) {
+          // Refresh accounts to trigger 3-pane render
+          const acctsRes = await fetch(`${API_BASE}/emails/accounts?project=${PROJECT}`);
+          if (acctsRes.ok) {
+            const data = await acctsRes.json();
+            const accts = data.data || [];
+            setAccounts(accts);
+            if (accts.length > 0) {
+              setSelectedAccount(accts[0].id);
+            }
+          }
+        } else {
+          const data = await res.json();
+          alert(data.error?.message || "Failed to create demo account");
+        }
+      } catch (err: any) {
+        alert("Failed to create demo account: " + (err.message || "Unknown error"));
+      }
+    };
+
     return (
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
@@ -155,6 +187,14 @@ export default function MailPage() {
           message="No email accounts configured"
           action={{ label: "Add Account", onClick: () => setShowAccountSetup(true) }}
         />
+        <div className="text-center">
+          <button
+            onClick={loadDemoAccount}
+            className="text-xs text-gray-400 hover:text-gray-600 underline"
+          >
+            Load demo account for UI testing
+          </button>
+        </div>
       </div>
     );
   }

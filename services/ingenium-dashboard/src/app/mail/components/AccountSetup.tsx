@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 /**
  * AccountSetup — two modes: provider selection grid and manual (app password) form.
@@ -25,6 +25,45 @@ export default function AccountSetup({
   const [testResult, setTestResult] = useState<string | null>(null);
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+  const PROJECT = "gh-llm-bootstrap";
+
+  // Check if OAuth credentials are configured in settings
+  const [credsConfigured, setCredsConfigured] = useState<boolean | null>(null);
+  useEffect(() => {
+    fetch(`${apiBase}/settings?project=${PROJECT}&key=oauth_gmail_client_id`)
+      .then(r => r.json())
+      .then(d => {
+        const hasGmail = !!d.data?.value;
+        // Also check for Outlook
+        return fetch(`${apiBase}/settings?project=${PROJECT}&key=oauth_outlook_client_id`)
+          .then(r => r.json())
+          .then(d2 => setCredsConfigured(hasGmail || !!d2.data?.value));
+      })
+      .catch(() => setCredsConfigured(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadDemoAccount = async () => {
+    try {
+      const res = await fetch(`${apiBase}/emails/accounts?project=${PROJECT}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: "demo@example.com",
+          name: "Demo Account",
+          provider: "custom",
+          authType: "app_password",
+        }),
+      });
+      if (res.ok) {
+        onComplete();
+      } else {
+        const data = await res.json();
+        alert(data.error?.message || "Failed to create demo account");
+      }
+    } catch (err: any) {
+      alert("Failed to create demo account: " + (err.message || "Unknown error"));
+    }
+  };
 
   const handleOAuthRedirect = (provider: string) => {
     window.location.href = `${apiBase}/emails/accounts/oauth/url?project=gh-llm-bootstrap&provider=${provider}`;
@@ -118,6 +157,20 @@ export default function AccountSetup({
     return (
       <div className="bg-white p-6 rounded-lg border space-y-6 max-w-xl mx-auto">
         <h2 className="text-lg font-semibold text-gray-900">Add Email Account</h2>
+
+        {/* OAuth not configured warning */}
+        {credsConfigured === false && (
+          <div className="bg-amber-50 border border-amber-200 rounded p-4 text-center">
+            <p className="text-amber-800 font-medium">OAuth not configured</p>
+            <p className="text-amber-600 text-sm mt-1">
+              Enter your Google or Microsoft OAuth credentials in Settings before adding an account.
+            </p>
+            <a href="/settings" className="inline-block mt-3 text-sm text-blue-600 hover:underline">
+              Go to Settings →
+            </a>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Gmail */}
           <button
@@ -146,7 +199,14 @@ export default function AccountSetup({
             <p className="text-sm text-gray-600 mt-1">Set up manually</p>
           </button>
         </div>
-        <div className="flex justify-end">
+        <div className="flex justify-between items-center">
+          <button
+            onClick={loadDemoAccount}
+            className="text-xs text-gray-400 hover:text-gray-600 underline"
+            title="Create a demo account for UI testing"
+          >
+            Load demo account for UI testing
+          </button>
           <button
             onClick={onCancel}
             className="text-gray-600 hover:text-gray-900 py-2 px-4 rounded text-sm font-medium"
