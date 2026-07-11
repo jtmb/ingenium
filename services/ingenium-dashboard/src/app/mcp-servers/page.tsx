@@ -133,7 +133,7 @@ export default function MCPServersPage() {
           <div className="flex items-center justify-between">
             <div className="flex gap-3 items-center">
               <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tools..." className="border border-gray-200 rounded px-3 py-1.5 text-sm w-56" />
-              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white">
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white hover:bg-gray-50 cursor-pointer">
                 <option value="All">All categories</option>
                 {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>

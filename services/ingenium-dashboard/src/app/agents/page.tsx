@@ -146,13 +146,13 @@ export default function AgentsPage() {
             onChange={e => setNewDesc(e.target.value)}
           />
           <div className="flex gap-4">
-            <select className="border p-2 rounded flex-1" value={newCat} onChange={e => setNewCat(e.target.value)}>
+            <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={newCat} onChange={e => setNewCat(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="execution">Execution</option>
               <option value="research">Research</option>
               <option value="security">Security</option>
             </select>
-            <select className="border p-2 rounded flex-1" value={newMode} onChange={e => setNewMode(e.target.value)}>
+            <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={newMode} onChange={e => setNewMode(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="subagent">Subagent</option>
             </select>
@@ -203,7 +203,7 @@ export default function AgentsPage() {
                       onChange={e => setEditDesc(e.target.value)}
                     />
                     <div className="flex gap-4">
-                      <select className="border p-2 rounded flex-1" value={editCat} onChange={e => setEditCat(e.target.value)}>
+                      <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={editCat} onChange={e => setEditCat(e.target.value)}>
                         <option value="primary">Primary</option>
                         <option value="execution">Execution</option>
                         <option value="research">Research</option>

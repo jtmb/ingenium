@@ -62,7 +62,7 @@ export default function PersonalityPage() {
         <h1 className="text-3xl font-bold">Personality Profile</h1>
         <div className="flex items-center gap-3">
           <span className="text-sm text-gray-400">Sort:</span>
-          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white text-gray-600">
+          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white text-gray-600 hover:bg-gray-50 cursor-pointer">
             <option value="grouped">Grouped by type</option>
             <option value="newest">Newest first</option>
           </select>

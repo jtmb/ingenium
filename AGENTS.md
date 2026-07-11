@@ -73,7 +73,7 @@ services/
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
 
 | Page | Purpose |
 |------|---------|
@@ -83,6 +83,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 | `/archive` | Archived projects with restore/purge |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
 | `/learnings` | Deprecated — redirects to `/observations` |
+| `/mail` | 3-pane email client (FolderSidebar, EmailList, EmailReader), AccountSetup when no accounts configured |
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
@@ -115,7 +116,7 @@ Move any DB logic to the API layer immediately.
 **Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing four processes:
 
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
-2. **Dashboard** (Next.js on :3000) — 15 route-based pages with highlight.js syntax highlighting in Preview/Source modes
+2. **Dashboard** (Next.js on :3000) — 16 route-based pages with highlight.js syntax highlighting in Preview/Source modes
 3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
 4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded dashboard use
 
@@ -527,8 +528,10 @@ Every service with a frontend must have a `STYLING-GUIDE.md` in its service dire
 - Color palette with exact values
 - Typography scale
 - Layout grid and spacing
-- Component-level styles (nav, cards, forms)
+- Component-level styles (nav, cards, forms, selects)
 - Immutable rules that must not be broken
+
+> 🔴 **Select elements**: All `<select>` elements across the dashboard use `hover:bg-gray-50 cursor-pointer` for consistent hover feedback. See the "Select / Dropdown Styling" section in `STYLING-GUIDE.md` for the full spec and the list of pages with selects.
 
 ### 🔴 QA-First Workflow
 

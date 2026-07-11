@@ -47,7 +47,7 @@ export default function FolderSidebar({
 
       {/* Account selector */}
       <select
-        className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900 bg-white"
+        className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm text-gray-900 bg-white hover:bg-gray-50 cursor-pointer"
         value={selectedAccount}
         onChange={(e) => {
           const val = e.target.value;

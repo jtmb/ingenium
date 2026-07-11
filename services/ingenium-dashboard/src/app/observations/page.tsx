@@ -49,14 +49,14 @@ export default function ObservationsPage() {
       </div>
 
       <div className="flex gap-2">
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border p-2 rounded text-sm">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-gray-50 cursor-pointer">
           <option value="">All statuses</option>
           <option value="pending">Pending</option>
           <option value="processed">Processed</option>
           <option value="skipped">Skipped</option>
           <option value="failed">Failed</option>
         </select>
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="border p-2 rounded text-sm">
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-gray-50 cursor-pointer">
           <option value="">All types</option>
           <option value="correction">Correction</option>
           <option value="preference">Preference</option>

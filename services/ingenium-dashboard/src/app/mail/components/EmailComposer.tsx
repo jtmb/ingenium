@@ -34,7 +34,7 @@ export default function EmailComposer({
       <div>
         <label className="block text-sm font-medium text-gray-900 mb-1">From</label>
         <select
-          className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-900"
+          className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-900 hover:bg-gray-50 cursor-pointer"
           value={fromAccount}
           onChange={(e) => setFromAccount(e.target.value)}
         >
