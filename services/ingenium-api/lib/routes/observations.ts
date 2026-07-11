@@ -46,6 +46,15 @@ observationsRouter.post("/", (req, res) => {
   res.status(201).json({ data: entry });
 });
 
+// GET /stats — counts for dashboard (MUST be before /:id to avoid route capture)
+observationsRouter.get("/stats", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const pending = observations.countUnprocessed(projectId);
+  const all = observations.getObservations(projectId);
+  res.json({ data: { total: all.length, pending } });
+});
+
 // GET /:id — fetch a single observation
 observationsRouter.get("/:id", (req, res) => {
   const projectId = requireProject(req, res);
@@ -82,15 +91,6 @@ observationsRouter.patch("/:id", (req, res) => {
     return;
   }
   res.json({ data: result });
-});
-
-// GET /stats — counts for dashboard
-observationsRouter.get("/stats", (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
-  const pending = observations.countUnprocessed(projectId);
-  const all = observations.getObservations(projectId);
-  res.json({ data: { total: all.length, pending } });
 });
 
 // POST /enrich — enrich raw auto-observer observations via LLM
