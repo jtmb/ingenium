@@ -62,15 +62,15 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with ~73 tools. Calls API via HTTP. Zero DB access.
-└── ingenium-dashboard/   # Next.js 16 App Router frontend. Calls API via HTTP. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 74 tools. Calls API via HTTP. Zero DB access.
+└── ingenium-dashboard/   # Next.js 16 App Router frontend (15 pages). Calls API via HTTP. Zero DB access.
 ```
 
 **API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer. Commands are captured in the DB alongside skills, agents, and plugins.
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 
 | Page | Purpose |
 |------|---------|
@@ -111,10 +111,10 @@ Move any DB logic to the API layer immediately.
 
 **Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing four processes:
 
-1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads, commands CRUD operations
-2. **Dashboard** (Next.js on :3000) — highlight.js syntax highlighting in Preview/Source modes
+1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
+2. **Dashboard** (Next.js on :3000) — 15 route-based pages with highlight.js syntax highlighting in Preview/Source modes
 3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
-4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded use
+4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded dashboard use
 
 > The API layer is the sole authority for all 5 `.opencode/` resources: skills, agents, plugins, commands, and configs.
 
@@ -326,13 +326,51 @@ Configure via `SYNTHESIS_INTERVAL_MS` env var (default: 900000ms). Set to `0` to
 
 ### Cross-Project Synthesis
 
-The synthesis pipeline can now evaluate observations and skills across multiple projects to create global skills available to all projects:
+The synthesis pipeline can evaluate observations and skills across multiple projects to create global skills available to all projects:
 
 1. **`ingenium_synthesis_cross_project`** — MCP tool that triggers cross-project synthesis across all active projects. Patterns discovered in one project can benefit all others.
 2. **Global skills** — Skills synthesized from cross-project patterns are created in the `global-default` project and made available to every project via shared skill resolution.
-3. **`ingenium_project_set_global`** — MCP tool that marks a project as the global-default, enabling shared skill resolution and cross-project observation evaluation.
+3. **`ingenium_project_set_global`** — MCP tool that marks/unmarks a project as the global-default (`isGlobal: boolean`), enabling shared skill resolution and cross-project observation evaluation.
 
 Cross-project synthesis runs as part of the scheduled maintenance cycle (every 15 minutes) or can be triggered manually via the `ingenium_synthesis_cross_project` tool.
+
+### Servers Page — `source` Column
+
+The Servers dashboard page (`/servers`) displays a `source` badge for each server with three states:
+- **External** (blue badge) — Standard user-added server
+- **Enabled** (green badge) — Server on a global project, inherited across all projects
+- **Running** (green badge) — Server sourced from `ingenium` (proxied via the MCP proxy engine)
+- **Stopped/Disabled** (gray badge) — Inactive server
+
+The `source` column (stored in the `servers` table) tracks where each server definition originates: `"ingenium"` for built-in proxy servers, or user-defined for external servers. The `is_global` project flag determines whether a server is shared project-wide.
+
+### Backup Synthesis LLM Provider
+
+The synthesis pipeline supports a **backup LLM provider** for fault tolerance. Configured via the Settings page:
+
+| Setting Key | Description |
+|------------|-------------|
+| `synthesis_backup_provider` | Backup provider ID (e.g., `deepseek`, or `__custom__`) |
+| `synthesis_backup_model` | Backup model ID |
+| `synthesis_backup_endpoint` | Backup OpenAI-compatible API URL |
+| `synthesis_backup_api_key` | Backup API key |
+
+If the primary LLM fails during Phase 2 skill synthesis, the pipeline automatically falls back to the backup provider. Both primary and backup can be tested independently via the **Test Connection** button in Settings.
+
+### Synthesis Interval Configuration
+
+The synthesis interval can be configured via the Settings page or directly via MCP tools:
+
+```typescript
+// Set synthesis interval to 30 minutes
+await ingenium_setting_set({
+  project: "global-default",
+  key: "synthesis_interval_ms",
+  value: "1800000"
+});
+```
+
+Options: 5 min, 15 min (default), 30 min, 1 hour, 4 hours, or Disabled (0). The setting is stored globally and affects all projects.
 
 ### Config Management
 

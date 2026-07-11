@@ -7,7 +7,7 @@ import { defineConfig } from "@playwright/test";
  * as managed web servers, then runs tests in the tests/ directory.
  */
 export default defineConfig({
-  testDir: "./tests",
+  testDir: ".",
   timeout: 15000,
   retries: 1,
   fullyParallel: false,

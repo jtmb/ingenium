@@ -90,7 +90,7 @@ To make Ingenium available in **all** your OpenCode projects, add the same entry
 
 Add the `ingenium` entry under the `mcp.servers` section, using the same JSON structure from Step 3. The global config uses JSONC format (supports comments), so you can add explanatory notes.
 
-Once added, every OpenCode project on your machine will have access to Ingenium's 66 MCP tools.
+Once added, every OpenCode project on your machine will have access to Ingenium's 74 MCP tools.
 
 ---
 
@@ -104,8 +104,9 @@ docker compose up --build
 
 This starts all services in a single container:
   - **API** on http://localhost:4097 — REST API gateway, sole database authority  
-  - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend  
-  - **opencode-server** on stdio (port :4096) — MCP server with 66 tools
+  - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend (15 pages)  
+  - **opencode-server** on stdio (port :4096) — Auth-enabled OpenCode web server
+  - **opencode-iframe** on port :4098 — No-auth iframe for embedded dashboard use
 
 The container runs supervisord managing all processes. Press `Ctrl+C` to stop gracefully.
 
@@ -142,16 +143,20 @@ Run these checks to confirm everything is working:
 
 Navigate to [http://localhost:3000](http://localhost:3000). You should see these pages in the nav bar:
 - **Home** — dashboard overview with feature cards
-- **Projects** — manage project configurations
-- **Skills** — browse and search AI agent skills
-- **Learnings** — log and search learning entries
-- **Mail** — email client setup (Gmail/Outlook OAuth2 + IMAP)
-- **Tasks** — Kanban task board
-- **Plugins** — plugin lifecycle management
-- **Agents** — agent profile management
-- **Servers** — MCP server configuration
-- **Settings** — application settings
-- **Archive** — purged/archived project management
+- **OpenCode** — embedded OpenCode web UI iframe
+- **Projects** — manage project configurations (create, rename, archive)
+- **Archive** — archived projects with restore/purge
+- **Skills** — browse and search AI agent skills with file tree navigation
+- **Tasks** — Kanban task board (todo → in_progress → review → done)
+- **Plugins** — plugin lifecycle management (create, enable, disable)
+- **Mail** — email client setup (Gmail/Outlook OAuth2 + IMAP/SMTP)
+- **Agents** — agent profile management (model, mode, enable/disable)
+- **Servers** — MCP server configuration (External/Enabled/Running badges)
+- **Config** — OpenCode JSON editor (Project/Global tabs, sync from disk)
+- **Observations** — full-text searchable observation log
+- **Personality** — personality traits with confidence bars
+- **Pipeline** — real-time pipeline event timeline
+- **Settings** — application settings + Synthesis LLM configuration
 
 ### 2. Check the API Health
 
@@ -184,13 +189,54 @@ If the tools don't appear, restart your OpenCode session (the MCP server list is
 
 ---
 
+## Step 7 — Configure Synthesis LLM (Optional)
+
+The self-learning pipeline can optionally use an LLM to synthesize observations into skills. To enable this:
+
+1. Navigate to **Settings → Synthesis LLM** in the dashboard
+2. Select a provider from the dropdown (populated from OpenCode's configured providers)
+3. Select a model from the provider's available models
+4. Enter the API key for the provider
+5. Click **Test Connection** to verify the provider works
+6. Click **Save** to persist the configuration
+
+### Configure Backup Provider (Optional)
+
+For fault tolerance, optionally configure a backup LLM provider:
+1. Click **▸ Backup Provider (fallback)** to expand the section
+2. Select a backup provider and model
+3. Enter the backup API key and endpoint URL
+4. Click **Test Connection** to verify both primary and backup independently
+
+### Configure Synthesis Interval
+
+Set how often the synthesis pipeline runs:
+- Options: 5 min, 15 min (default), 30 min, 1 hour, 4 hours, or Disabled
+- The setting affects all projects (stored globally under `global-default`)
+- Changes take effect immediately (the API server reads the setting live)
+
+### Verify Pipeline Operation
+
+1. Trigger manual synthesis: `curl -X POST http://localhost:4097/api/v1/synthesis/run`
+2. Check the Pipeline page at `/pipeline` to see events in real-time
+3. Create a test observation:
+   ```bash
+   curl -X POST http://localhost:4097/api/v1/observations \
+     -H "Content-Type: application/json" \
+     -d '{"observation_type":"preference","content":"User prefers 2-space indentation","importance":6}'
+   ```
+4. View personality traits at `/personality`
+
+---
+
 ## Next Steps
 
 Once everything is running:
 
-- **Explore the dashboard** — open [http://localhost:3000](http://localhost:3000) and click through all 10 pages
-- **Read feature guides** — see `docs/HOW-TO/` for per-feature instructions (projects, skills, learnings, tasks, plugins, servers, settings)
-- **Initialize a project** — use the `/init-project` command to create a project, skills, agents, and plugins from seed sources
+- **Explore the dashboard** — open [http://localhost:3000](http://localhost:3000) and click through all 15 pages
+- **Read feature guides** — see `docs/HOW-TO/` for per-feature instructions (projects, skills, synthesis, personality, tasks, plugins, servers, settings)
+- **Initialize a project** — use `/init-project` command or `ingenium_project_init` MCP tool
 - **Understand the architecture** — read `docs/ARCHITECTURE.md` for the full system design, data flow, and component responsibilities
+- **Learn the self-learning pipeline** — read `docs/self-learning-pipeline.md` for observations, personality traits, and synthesis
 - **Configure environment** — read `docs/VARIABLES.md` for all environment variable options and defaults
 - **Learn conventions** — read `docs/CONVENTIONS.md` for naming, file organization, git practices, and file_tree format
