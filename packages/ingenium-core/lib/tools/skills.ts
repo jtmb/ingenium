@@ -6,6 +6,38 @@ import { resolve } from "node:path";
 import { logger } from "../logger.js";
 import { getSkillsBase } from "./paths.js";
 
+/**
+ * Strip ALL leading YAML frontmatter blocks from text.
+ * Handles BOM, CRLF, and stacked/repeated blocks (idempotent).
+ * Returns text unchanged if no frontmatter is found.
+ */
+export function stripLeadingFrontmatter(text: string): string {
+  // Strip BOM
+  let t = text;
+  if (t.codePointAt(0) === 0xFEFF) t = t.slice(1);
+
+  // Pattern: ---(optional trailing space)\n...\n---(optional trailing space)(\n)?
+  const fmRegex = /^---[ \t]*\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n)?/;
+
+  // Strip all consecutive frontmatter blocks (handles stacking from the bug)
+  let prev = t;
+  while (fmRegex.test(t)) {
+    const match = t.match(fmRegex)!;
+    t = t.slice(match[0].length);
+
+    // Trim exactly one leading newline (the separator between blocks / body)
+    if (t.startsWith("\r\n")) t = t.slice(2);
+    else if (t.startsWith("\n")) t = t.slice(1);
+    else break; // nothing more to strip
+
+    // Safety: guard against non-advancing regex
+    if (t === prev) break;
+    prev = t;
+  }
+
+  return t;
+}
+
 export function listSkills(projectId: string): Skill[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   return db.prepare("SELECT * FROM skills WHERE project_id = ? AND enabled = 1")
@@ -40,7 +72,9 @@ name: ${skill.name}
 description: "${(skill.description || "").replace(/"/g, '\\"')}"
 ---
 `;
-  writeFileSync(resolve(dir, "SKILL.md"), frontmatter + "\n" + skill.content);
+  // Strip any existing frontmatter from content so we don't stack blocks
+  const body = stripLeadingFrontmatter(skill.content);
+  writeFileSync(resolve(dir, "SKILL.md"), frontmatter + "\n" + body);
 
   // Write metadata.json
   const tags = skill.tags ? skill.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [];

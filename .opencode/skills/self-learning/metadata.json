@@ -1,4 +1,6 @@
 {
-  "tags": ["self-learning", "synthesis", "observations", "personality", "pipeline"],
-  "alwaysApply": false
+  "name": "self-learning",
+  "description": "Self-learning pipeline: server-side LLM extraction of user-behavior observations, LLM trait consolidation, and automatic skill synthesis.",
+  "tags": ["self-learning", "observations", "synthesis", "personality", "extraction"],
+  "alwaysApply": true
 }
