@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { api } from "../../lib/api";
+import PageHeader from "../components/PageHeader";
 
 /**
  * Settings page — user-configurable preferences for the Ingenium dashboard.
@@ -206,9 +207,9 @@ export default function SettingsPage() {
       }
       if (backupApiKey) await api.settings.set("synthesis_backup_api_key", backupApiKey, "global-default");
       setEndpoint(ep);
-      setLlmStatus("✅ Configuration saved");
+      setLlmStatus("\u2705 Configuration saved");
     } catch (err: any) {
-      setLlmStatus(`❌ Save failed: ${err.message}`);
+      setLlmStatus(`\u274C Save failed: ${err.message}`);
     }
     setSavingLlm(false);
   };
@@ -229,7 +230,7 @@ export default function SettingsPage() {
 
       let status = "";
       const pr = await api.settings.testLlm(ep, modelId, apiKeyState);
-      status = pr.ok ? "✅ Primary OK" : `❌ Primary: ${pr.status || "error"} ${pr.message || ""}`;
+      status = pr.ok ? "\u2705 Primary OK" : `\u274C Primary: ${pr.status || "error"} ${pr.message || ""}`;
 
       // Backup
       if (backupProviderId) {
@@ -242,48 +243,53 @@ export default function SettingsPage() {
             })();
         const bEp = backupIsCustom ? backupCustomEndpoint : (backupModels[0]?.[1] as any)?.api?.url || backupCustomEndpoint;
         const br = await api.settings.testLlm(bEp, bModelId, backupApiKey);
-        status += br.ok ? " | ✅ Backup OK" : ` | ❌ Backup: ${br.status || "error"} ${br.message || ""}`;
+        status += br.ok ? " | \u2705 Backup OK" : ` | \u274C Backup: ${br.status || "error"} ${br.message || ""}`;
       }
 
       setLlmStatus(status);
     } catch (err: any) {
-      setLlmStatus(`❌ ${err.message}`);
+      setLlmStatus(`\u274C ${err.message}`);
     }
     setTesting(false);
   };
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-bold">Settings</h1>
+      <PageHeader title="Settings" subtitle="Configure the self-learning pipeline and system preferences" />
 
       <div className="bg-white p-6 rounded border space-y-4 hover:shadow-md transition-shadow">
-        <div>
-          <label className="block text-sm font-medium mb-1">Archive retention (days)</label>
-          <p className="text-xs text-gray-500 mb-2">
-            Projects stay in the archive for this many days before being permanently deleted.
-          </p>
-          <div className="flex items-center gap-3">
-            <input
-              type="number"
-              min={1}
-              max={365}
-              value={retentionDays}
-              onChange={(e) => save(parseInt(e.target.value, 10) || 7)}
-              className="border p-2 rounded w-24"
-            />
-            <span className="text-sm text-gray-600">days</span>
-            {saved && <span className="text-sm text-green-600">Saved!</span>}
-          </div>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">\uD83D\uDDC4\uFE0F</span>
+          <h2 className="font-semibold text-lg">Archive Retention</h2>
+        </div>
+        <label className="block text-sm font-medium mb-1">Archive retention (days)</label>
+        <p className="text-xs text-gray-500 mb-2">
+          Projects stay in the archive for this many days before being permanently deleted.
+        </p>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={retentionDays}
+            onChange={(e) => save(parseInt(e.target.value, 10) || 7)}
+            className="border p-2 rounded w-24"
+          />
+          <span className="text-sm text-gray-600">days</span>
+          {saved && <span className="text-sm text-green-600">Saved!</span>}
         </div>
       </div>
 
       {/* ── Synthesis LLM ── */}
       <div className="bg-white p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
-        <h2 className="font-semibold text-lg">Synthesis LLM</h2>
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">\uD83E\uDDE0</span>
+          <h2 className="font-semibold text-lg">Synthesis LLM</h2>
+        </div>
         <p className="text-sm text-gray-500">Select an LLM provider for the self-learning pipeline to synthesize observations into skills and update personality traits.</p>
 
         {providers.length === 0 ? (
-          <p className="text-sm text-amber-600">No OpenCode providers detected. Configure a provider or use "Custom Provider" below.</p>
+          <p className="text-sm text-amber-600">No OpenCode providers detected. Configure a provider or use &quot;Custom Provider&quot; below.</p>
         ) : null}
 
         <div>
@@ -302,7 +308,7 @@ export default function SettingsPage() {
               setEndpoint((firstModel?.[1] as any)?.api?.url || "");
               setSelectedModel(firstModel?.[0] || "");
             }
-          }} className="border p-2 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
+          }} className="border border-gray-200 bg-white px-3 py-1.5 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
             <option value="">— No LLM (heuristics only) —</option>
             <option value="__custom__">— Custom Provider —</option>
             {(() => {
@@ -337,7 +343,7 @@ export default function SettingsPage() {
         {!isCustom && providerId && providerModels.length > 0 && (
           <div>
             <label className="block text-sm font-medium">Model</label>
-            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
+            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="border border-gray-200 bg-white px-3 py-1.5 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
               {providerModels.map(([key, val]) => (
                 <option key={key} value={key}>{key} {(val as any)?.id ? `(${(val as any).id})` : ""}</option>
               ))}
@@ -373,7 +379,7 @@ export default function SettingsPage() {
 
         <div>
           <label className="block text-sm font-medium mb-1">Run every</label>
-          <select value={String(intervalMin)} onChange={(e) => { setIntervalMin(Number(e.target.value)); handleIntervalSave(Number(e.target.value)); }} className="border p-2 rounded w-48 text-sm hover:bg-gray-50 cursor-pointer">
+          <select value={String(intervalMin)} onChange={(e) => { setIntervalMin(Number(e.target.value)); handleIntervalSave(Number(e.target.value)); }} className="border border-gray-200 bg-white px-3 py-1.5 rounded w-48 text-sm hover:bg-gray-50 cursor-pointer">
             <option value="5">5 minutes</option>
             <option value="15">15 minutes</option>
             <option value="30">30 minutes</option>
@@ -387,7 +393,7 @@ export default function SettingsPage() {
         {/* Backup Provider */}
         <div className="border-t pt-3 mt-3">
           <button type="button" onClick={() => setShowBackup(!showBackup)} className="text-sm font-medium text-gray-600 hover:text-gray-900">
-            {showBackup ? "▾" : "▸"} Backup Provider (fallback)
+            {showBackup ? "\u25BE" : "\u25B8"} Backup Provider (fallback)
           </button>
           {showBackup && (
             <div className="mt-3 space-y-3">
@@ -406,7 +412,7 @@ export default function SettingsPage() {
                   } else {
                     setBackupSelectedModel("");
                   }
-                }} className="border p-2 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
+                }} className="border border-gray-200 bg-white px-3 py-1.5 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
                   <option value="">— None —</option>
                   <option value="__custom__">— Custom Provider —</option>
                   {(() => {
@@ -438,7 +444,7 @@ export default function SettingsPage() {
               {backupProviderId && backupModels.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium">Model</label>
-                  <select value={backupSelectedModel} onChange={(e) => setBackupSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
+                  <select value={backupSelectedModel} onChange={(e) => setBackupSelectedModel(e.target.value)} className="border border-gray-200 bg-white px-3 py-1.5 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
                     {backupModels.map(([key, val]) => (
                       <option key={key} value={key}>{key} {(val as any)?.id ? `(${(val as any).id})` : ""}</option>
                     ))}
@@ -462,7 +468,7 @@ export default function SettingsPage() {
           <button onClick={testLlmConnection} disabled={testing || !endpoint} className="bg-gray-200 text-gray-700 p-2 rounded hover:bg-gray-300 disabled:opacity-50 text-sm">
             {testing ? "Testing..." : "Test Connection"}
           </button>
-          {llmStatus && <span className={`text-sm ${llmStatus.startsWith("✅") ? "text-green-600" : "text-red-600"}`}>{llmStatus}</span>}
+          {llmStatus && <span className={`text-sm ${llmStatus.startsWith("\u2705") ? "text-green-600" : "text-red-600"}`}>{llmStatus}</span>}
         </div>
 
         {isCustom && customModel && endpoint && (

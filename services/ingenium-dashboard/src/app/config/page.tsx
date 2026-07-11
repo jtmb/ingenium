@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api } from "../../lib/api";
+import PageHeader from "../components/PageHeader";
 
 export default function ConfigPage() {
   const project = useProject();
@@ -45,7 +46,7 @@ export default function ConfigPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Config</h1>
+      <PageHeader title="Config" subtitle="Edit OpenCode project and global configuration" />
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200">
@@ -68,7 +69,7 @@ export default function ConfigPage() {
       </div>
 
       {/* Editor */}
-      <div className="bg-white border border-gray-200 rounded p-4 space-y-3">
+      <div className="bg-white border border-gray-200 rounded p-4 space-y-3 hover:shadow-md transition-shadow">
         <div className="text-sm text-gray-500">{tab === "project" ? "opencode.json" : "opencode.jsonc"}</div>
         <textarea
           value={content}
