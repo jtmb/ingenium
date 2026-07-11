@@ -5,11 +5,11 @@
   "type": "module",
   "main": "index.js",
   "bin": {
-    "@ingenium/extension": "dist/mcp-server.js"
+    "@ingenium/extension": "dist/scripts/mcp-server.js"
   },
-  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js", "dist/mcp-server.js"],
+  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js", "dist/"],
   "scripts": {
-    "build": "cp ../ingenium-server/dist/scripts/mcp-server.js dist/mcp-server.js"
+    "build": "rm -rf dist && cp -r ../../services/ingenium-server/dist dist"
   },
   "dependencies": {
     "@opencode-ai/plugin": "*"
