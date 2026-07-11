@@ -27,8 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/plugins" className="text-sm text-gray-600 hover:text-gray-900">Plugins</a>
           <a href="/mail" className="text-sm text-gray-600 hover:text-gray-900">Mail</a>
           <a href="/agents" className="text-sm text-gray-600 hover:text-gray-900">Agents</a>
-          <a href="/servers" className="text-sm text-gray-600 hover:text-gray-900">Servers</a>
-          <a href="/mcp-tools" className="text-sm text-gray-600 hover:text-gray-900">MCP Tools</a>
+          <a href="/mcp-servers" className="text-sm text-gray-600 hover:text-gray-900">MCP</a>
           <a href="/config" className="text-sm text-gray-600 hover:text-gray-900">Config</a>
           <a href="/observations" className="text-sm text-gray-600 hover:text-gray-900">Observations</a>
           <a href="/personality" className="text-sm text-gray-600 hover:text-gray-900">Personality</a>

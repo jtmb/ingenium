@@ -9,7 +9,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes **74 tools** accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes **73 tools** accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
 
 ### Connecting an MCP Client
 
@@ -239,19 +239,27 @@ These 14 skills provide guidance for specific contexts but are not required for 
 | `test-debug` | When debugging test failures or writing test infrastructure |
 | `uncensored-direct-response` | When bypassing safety filters for trusted development tasks |
 
-## Servers
+## MCP (Servers + Tool Manager)
 
-**What it does**: Configure and manage MCP servers through a proxy engine. Start, stop, restart, and monitor MCP server configurations.
+**What it does**: Configure and manage MCP servers and tools through a dual-tab page at `/mcp-servers`. The **Servers** tab manages MCP server lifecycle (add, start, stop). The **Tools** tab provides a categorized view of all 73 MCP tools across 15 categories with search, category filter, and per-tool or per-category enable/disable toggles. Tool state is checked at the MCP server level before each tool execution — a disabled tool returns a `TOOL_DISABLED` error instead of executing.
 
-**How to use**:
-- View all configured MCP servers
-- Start/stop servers through the proxy engine
-- View server status and logs
-- Add new MCP server configurations
+**Servers tab — How to use**:
+- View all configured MCP servers with `source` badges: **External** (blue), **Enabled** (green, inherited from global project), **Running** (green, built-in proxy), **Stopped/Disabled** (gray)
+- Add new server configurations with name and command
+- See inherited servers from the global-default project marked as "Enabled"
 
-**API**: GET /api/v1/servers, POST /api/v1/servers, POST /api/v1/servers/:id/start, POST /api/v1/servers/:id/stop
+**Tools tab — How to use**:
+- View all 73 tools grouped into 15 categories (e.g., Settings, Skills, Projects, Email, Tasks, etc.)
+- Search tools by name using the search box
+- Filter by category using the dropdown (defaults to "All categories")
+- Toggle individual tools on/off using the green/gray toggle switches
+- Toggle entire categories on/off using the "Enable All" / "Disable All" buttons
+- Stats bar shows enabled/disabled/total counts (`{enabled} enabled, {disabled} disabled, {total} total`)
 
-**Code**: services/ingenium-dashboard/src/app/servers/page.tsx → services/ingenium-api/routes/servers.ts → packages/ingenium-core/lib/tools/servers.ts
+**API** (Servers): GET /api/v1/servers, POST /api/v1/servers, POST /api/v1/servers/:id/start, POST /api/v1/servers/:id/stop
+**API** (Tools): GET /api/v1/mcp-tools?project=...&include_categories=true, PUT /api/v1/mcp-tools/:name, PUT /api/v1/mcp-tools/category/:category
+
+**Code**: services/ingenium-dashboard/src/app/mcp-servers/page.tsx → services/ingenium-api/routes/servers.ts (servers) + routes/mcp-tools.ts (tools) → packages/ingenium-core/lib/tools/servers.ts
 
 **Docs**: docs/HOW-TO/servers.md
 
