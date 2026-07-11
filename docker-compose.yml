@@ -9,6 +9,12 @@ services:
     environment:
       - OPENCODE_SERVER_PASSWORD=test
       - INGENIUM_GLOBAL_CONFIG_PATH=/home/appuser/.config/opencode
+      - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
+      - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
+      - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
+      - INGENIUM_EMAIL_ENCRYPTION_KEY=${INGENIUM_EMAIL_ENCRYPTION_KEY:-}
+      - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-http://localhost:3000/mail/oauth/callback}
     security_opt: ["seccomp=unconfined"]
     volumes:
       - ingenium-data:/app/.ingenium

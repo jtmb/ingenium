@@ -125,27 +125,25 @@ function getRedirectUri(): string {
   return process.env.OAUTH_REDIRECT_URI ?? "http://localhost:3000/mail/oauth/callback";
 }
 
-function importGoogleOAuthClient(): typeof import("google-auth-library").OAuth2Client {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { OAuth2Client } = require("google-auth-library") as typeof import("google-auth-library");
-  return OAuth2Client;
-}
+let _googleOAuthClient: Awaited<ReturnType<typeof cachedGoogleClient>>["client"] | undefined;
 
-function getGoogleClient(): import("google-auth-library").OAuth2Client {
-  const OAuth2Client = importGoogleOAuthClient();
-  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID ?? "";
-  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "";
-  return new OAuth2Client(clientId, clientSecret, getRedirectUri());
+async function cachedGoogleClient(): Promise<{ client: import("google-auth-library").OAuth2Client }> {
+  if (!_googleOAuthClient) {
+    const mod = await import("google-auth-library");
+    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID ?? "";
+    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "";
+    _googleOAuthClient = new mod.OAuth2Client(clientId, clientSecret, getRedirectUri());
+  }
+  return { client: _googleOAuthClient };
 }
 
 // ── Microsoft OAuth2 ──────────────────────────────────────────────────────
 
 let _msalApp: import("@azure/msal-node").ConfidentialClientApplication | undefined;
 
-function getMsalApp(): import("@azure/msal-node").ConfidentialClientApplication {
+async function getMsalApp(): Promise<import("@azure/msal-node").ConfidentialClientApplication> {
   if (!_msalApp) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const msal = require("@azure/msal-node") as typeof import("@azure/msal-node");
+    const msal = await import("@azure/msal-node");
     _msalApp = new msal.ConfidentialClientApplication({
       auth: {
         clientId: process.env.MS_OAUTH_CLIENT_ID ?? "",
@@ -171,7 +169,7 @@ export async function getOAuthUrl(
   settings.setSetting(pid, `oauth_state_${provider}`, state);
 
   if (provider === "gmail") {
-    const gClient = getGoogleClient();
+    const { client: gClient } = await cachedGoogleClient();
     const url = gClient.generateAuthUrl({
       access_type: "offline",
       scope: "https://mail.google.com/",
@@ -182,7 +180,7 @@ export async function getOAuthUrl(
   }
 
   if (provider === "outlook") {
-    const msalApp = getMsalApp();
+    const msalApp = await getMsalApp();
     const url = await msalApp.getAuthCodeUrl({
       scopes: [
         "https://outlook.office.com/IMAP.AccessAsUser.All",
@@ -221,7 +219,7 @@ export async function exchangeCode(
   const redirectUri = _redirectUri ?? getRedirectUri();
 
   if (provider === "gmail") {
-    const gClient = getGoogleClient();
+    const { client: gClient } = await cachedGoogleClient();
     const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
     return {
       accessToken: tokens.access_token ?? "",
@@ -232,7 +230,7 @@ export async function exchangeCode(
   }
 
   if (provider === "outlook") {
-    const msalApp = getMsalApp();
+    const msalApp = await getMsalApp();
     const result = await msalApp.acquireTokenByCode({
       code,
       scopes: [
@@ -259,7 +257,7 @@ export async function refreshAccessToken(
   refreshToken: string,
 ): Promise<OAuthToken> {
   if (provider === "gmail") {
-    const gClient = getGoogleClient();
+    const { client: gClient } = await cachedGoogleClient();
     gClient.setCredentials({ refresh_token: refreshToken });
     const { credentials } = await gClient.refreshAccessToken();
     return {
@@ -271,7 +269,7 @@ export async function refreshAccessToken(
   }
 
   if (provider === "outlook") {
-    const msalApp = getMsalApp();
+    const msalApp = await getMsalApp();
     const result = await msalApp.acquireTokenByRefreshToken({
       refreshToken,
       scopes: [
