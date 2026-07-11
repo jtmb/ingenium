@@ -70,6 +70,7 @@ export function writeSkillToDisk(skill: Skill): void {
   const frontmatter = `---
 name: ${skill.name}
 description: "${(skill.description || "").replace(/"/g, '\\"')}"
+created: ${(skill as any).created_at || new Date().toISOString()}
 ---
 `;
   // Strip any existing frontmatter from content so we don't stack blocks
@@ -202,7 +203,7 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
     const skillsBase = getSkillsBase(projectId);
     const filePath = resolve(skillsBase, name, "SKILL.md");
     if (!existsSync(filePath)) {
-      logger.warn("skills", "Skill file not found on disk", { name, filePath });
+      logger.debug("skills", "Skill file not found on disk", { name, filePath });
       return undefined;
     }
 

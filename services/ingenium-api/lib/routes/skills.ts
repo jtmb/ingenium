@@ -108,6 +108,8 @@ skillsRouter.post("/sync-all", (req, res) => {
       const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
       for (const e of entries) {
         if (e.isDirectory()) {
+          const skillMdPath = path.join(skillsDir, e.name, "SKILL.md");
+          if (!fs.existsSync(skillMdPath)) continue;
           try {
             const existing = skills.getSkill(projectId, e.name);
             if (!existing) {
