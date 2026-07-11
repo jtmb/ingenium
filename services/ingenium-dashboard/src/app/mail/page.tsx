@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import FolderSidebar from "./components/FolderSidebar";
 import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
 import EmptyState from "./components/EmptyState";
 import AccountSetup from "./components/AccountSetup";
+import Overlay from "../components/Overlay";
+import EmailComposer from "./components/EmailComposer";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 const PROJECT = "gh-llm-bootstrap";
@@ -16,8 +17,6 @@ const PROJECT = "gh-llm-bootstrap";
  * Fetches accounts on mount, then emails for the selected folder.
  */
 export default function MailPage() {
-  const router = useRouter();
-
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("");
   const [selectedFolder, setSelectedFolder] = useState("INBOX");
@@ -29,6 +28,9 @@ export default function MailPage() {
   const [total, setTotal] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [showAccountSetup, setShowAccountSetup] = useState(false);
+  const [showCompose, setShowCompose] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   // Fetch accounts on mount
   useEffect(() => {
@@ -80,7 +82,7 @@ export default function MailPage() {
       }
     };
     fetchEmails();
-  }, [selectedAccount, selectedFolder, page, searchQuery]);
+  }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey]);
 
   const handleSelectEmail = useCallback(async (uid: number) => {
     setSelectedEmailLoading(true);
@@ -100,8 +102,65 @@ export default function MailPage() {
   }, [selectedAccount]);
 
   const handleCompose = useCallback(() => {
-    router.push("/mail/compose");
-  }, [router]);
+    setShowCompose(true);
+  }, []);
+
+  const handleComposeSend = useCallback(async (data: any) => {
+    setSending(true);
+    try {
+      const body: Record<string, any> = { account: data.accountId, subject: data.subject };
+      if (data.to) body.to = data.to.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
+      if (data.cc) body.cc = data.cc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
+      if (data.bcc) body.bcc = data.bcc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
+      if (data.body) body.text = data.body;
+
+      const res = await fetch(`${API_BASE}/emails?project=${PROJECT}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setShowCompose(false);
+        setRefreshKey(k => k + 1);
+      } else {
+        const errData = await res.json().catch(() => ({ error: { message: "Send failed" } }));
+        alert(errData.error?.message || "Failed to send");
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to send");
+    } finally {
+      setSending(false);
+    }
+  }, []);
+
+  const handleComposeSave = useCallback(async (data: any) => {
+    try {
+      const body: Record<string, any> = { account: data.accountId, subject: data.subject };
+      if (data.to) body.to = data.to.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
+      if (data.cc) body.cc = data.cc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
+      if (data.bcc) body.bcc = data.bcc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
+      if (data.body) body.text = data.body;
+
+      const res = await fetch(`${API_BASE}/emails/draft?project=${PROJECT}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setShowCompose(false);
+        setRefreshKey(k => k + 1);
+      } else {
+        const errData = await res.json().catch(() => ({ error: { message: "Save failed" } }));
+        alert(errData.error?.message || "Failed to save draft");
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to save draft");
+    }
+  }, []);
+
+  const handleComposeCancel = useCallback(() => {
+    setShowCompose(false);
+  }, []);
 
   const handleDelete = useCallback(async () => {
     if (!selectedEmail) return;
@@ -261,6 +320,24 @@ export default function MailPage() {
           onArchive={handleArchive}
         />
       </div>
+
+      {/* Compose overlay */}
+      <Overlay
+        isOpen={showCompose}
+        onClose={handleComposeCancel}
+        title="Compose"
+        fullScreen
+      >
+        <EmailComposer
+          accounts={accounts}
+          onSend={handleComposeSend}
+          onSave={handleComposeSave}
+          onCancel={handleComposeCancel}
+        />
+        {sending && (
+          <p className="text-sm text-gray-500 text-center mt-4">Sending...</p>
+        )}
+      </Overlay>
     </div>
   );
 }

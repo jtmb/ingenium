@@ -77,16 +77,25 @@ tasksRouter.post("/notifications/:id/read", (req, res) => {
 tasksRouter.post("/bulk", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const { taskIds, fields } = req.body;
-  if (!Array.isArray(taskIds) || taskIds.length === 0) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "taskIds array is required" } });
+  const { task_ids, ...fields } = req.body;
+  if (!Array.isArray(task_ids) || task_ids.length === 0) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "task_ids array is required" } });
     return;
   }
-  if (!fields || typeof fields !== "object") {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "fields object is required" } });
+  // Filter out undefined values; explicit empty strings mean "clear"
+  const cleanFields: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === "") {
+      cleanFields[k] = null;
+    } else if (v !== undefined) {
+      cleanFields[k] = v;
+    }
+  }
+  if (Object.keys(cleanFields).length === 0) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "at least one field to update is required" } });
     return;
   }
-  const count = tasks.bulkUpdateTasks(projectId, taskIds, fields);
+  const count = tasks.bulkUpdateTasks(projectId, task_ids, cleanFields as any);
   res.json({ data: { updated: count } });
 });
 

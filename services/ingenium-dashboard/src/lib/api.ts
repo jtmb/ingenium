@@ -79,7 +79,7 @@ export type TaskComment = {
 export type TaskActivity = { id: string; task_id: string; action: string; field?: string; old_value?: string; new_value?: string; actor?: string; created_at: string };
 
 /** A link between tasks. */
-export type TaskLink = { id: string; source_task_id: string; target_task_id: string; link_type: string; created_at: string };
+export type TaskLink = { id: string; task_id: string; linked_task_id: string; link_type: string };
 
 /** A task notification. */
 export type TaskNotification = { id: string; task_id: string; recipient: string; type: string; message: string; read: boolean; created_at: string };
@@ -323,8 +323,8 @@ export const api = {
       request<{ data: Task[] }>(`/tasks/search?project=${project}&q=${encodeURIComponent(query)}`),
     comments: (taskId: string, project = DEFAULT_PROJECT) =>
       request<{ data: TaskComment[] }>(`/tasks/${taskId}/comments?project=${project}`),
-    addComment: (taskId: string, body: string, parentCommentId?: string, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskComment }>(`/tasks/${taskId}/comments?project=${project}`, { method: "POST", body: JSON.stringify({ body, parent_comment_id: parentCommentId }) }),
+    addComment: (taskId: string, body: string, author = "user", parentCommentId?: string, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskComment }>(`/tasks/${taskId}/comments?project=${project}`, { method: "POST", body: JSON.stringify({ author, body, parent_comment_id: parentCommentId }) }),
     reactToComment: (taskId: string, commentId: string, reaction: string, project = DEFAULT_PROJECT) =>
       request<{ data: TaskComment }>(`/tasks/${taskId}/comments/${commentId}/react?project=${project}`, { method: "POST", body: JSON.stringify({ reaction }) }),
     boardConfig: (project = DEFAULT_PROJECT) =>
@@ -343,7 +343,7 @@ export const api = {
       request<{ data: TaskActivity[] }>(`/tasks/${taskId}/activity?project=${project}`),
     links: (taskId: string, project = DEFAULT_PROJECT) =>
       request<{ data: TaskLink[] }>(`/tasks/${taskId}/links?project=${project}`),
-    addLink: (taskId: string, data: { target_task_id: string; link_type: string }, project = DEFAULT_PROJECT) =>
+    addLink: (taskId: string, data: { linked_task_id: string; link_type: string }, project = DEFAULT_PROJECT) =>
       request<{ data: TaskLink }>(`/tasks/${taskId}/links?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
     removeLink: (taskId: string, linkId: string, project = DEFAULT_PROJECT) =>
       request(`/tasks/${taskId}/links/${linkId}?project=${project}`, { method: "DELETE" }),

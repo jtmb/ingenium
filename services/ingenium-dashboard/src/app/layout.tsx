@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import "./globals.css";
 import "highlight.js/styles/github.css";
 import "./hljs-dark.css";
+import MainContainer from "./components/MainContainer";
 import OpenCodeFrame from "./components/OpenCodeFrame";
 import ProjectSelector from "./components/ProjectSelector";
 
@@ -37,9 +38,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/settings" className="text-sm text-gray-600 hover:text-gray-900">Settings</a>
           <div className="ml-auto"><Suspense><ProjectSelector /></Suspense></div>
         </nav>
-        <main className="p-6 max-w-6xl mx-auto">
+        <MainContainer>
           <Suspense>{children}</Suspense>
-        </main>
+        </MainContainer>
         <OpenCodeFrame />
       </body>
     </html>

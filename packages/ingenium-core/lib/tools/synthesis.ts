@@ -683,7 +683,33 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
   }));
 
   const prompt = synthesisLlm.buildConsolidationPrompt(skillSummaries, allSkills.length);
-  const result = await synthesisLlm.callConsolidationLLM(projectId, prompt);
+
+  // Try primary LLM; fall back to backup provider on failure
+  let result: synthesisLlm.ConsolidationSkillResult;
+  try {
+    result = await synthesisLlm.callConsolidationLLM(projectId, prompt);
+  } catch (primaryErr: any) {
+    logger.warn("synthesis", `Consolidation primary LLM failed: ${primaryErr.message} — trying backup`);
+    result = { merges: [], delete: [] };
+  }
+
+  // If primary returned empty (or threw), try backup provider
+  if (result.merges.length === 0 && result.delete.length === 0) {
+    const backupModel = getSetting(gid, "synthesis_backup_model");
+    const backupEndpoint = getSetting(gid, "synthesis_backup_endpoint");
+    const backupApiKey = getSetting(gid, "synthesis_backup_api_key");
+
+    if (backupModel && backupEndpoint) {
+      logger.info("synthesis", "Consolidation primary returned empty — falling back to backup provider");
+      try {
+        result = await synthesisLlm.callConsolidationLLM(
+          projectId, prompt, backupEndpoint, backupModel, backupApiKey || undefined,
+        );
+      } catch (backupErr: any) {
+        logger.warn("synthesis", `Consolidation backup LLM also failed: ${backupErr.message}`);
+      }
+    }
+  }
 
   let merged = 0;
   let deleted = 0;
@@ -741,5 +767,23 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
   }
 
   const summary = `Consolidated ${allSkills.length} → ${allSkills.length - merged - deleted} skills (${merged} merged, ${deleted} deleted)`;
+
+  // Log consolidation result
+  logger.info("synthesis", `Skill consolidation: ${summary}`);
+
+  // Log pipeline event
+  try {
+    logEvent(
+      projectId,
+      "synthesis_completed",
+      "synthesis",
+      `Skill consolidation: ${summary}`,
+      summary,
+      { merged, deleted, total: allSkills.length },
+      undefined,
+      undefined,
+    );
+  } catch (_) { /* non-fatal */ }
+
   return { merged, deleted, summary };
 }

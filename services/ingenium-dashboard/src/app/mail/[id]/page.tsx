@@ -27,10 +27,10 @@ export default function EmailDetailPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Redirect "compose" id to compose page
+  // Redirect "compose" id to inbox (compose is now an overlay on /mail)
   useEffect(() => {
     if (id === "compose") {
-      router.replace("/mail/compose");
+      router.replace("/mail");
     }
   }, [id, router]);
 
@@ -63,17 +63,13 @@ export default function EmailDetailPage({
 
   const handleReply = () => {
     if (email) {
-      router.push(
-        `/mail/compose?to=${encodeURIComponent(email.from?.[0]?.address || "")}&subject=${encodeURIComponent("Re: " + (email.subject || ""))}`
-      );
+      router.push("/mail");
     }
   };
 
   const handleForward = () => {
     if (email) {
-      router.push(
-        `/mail/compose?subject=${encodeURIComponent("Fwd: " + (email.subject || ""))}`
-      );
+      router.push("/mail");
     }
   };
 

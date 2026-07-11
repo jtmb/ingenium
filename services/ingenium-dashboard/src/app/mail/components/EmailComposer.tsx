@@ -8,11 +8,13 @@ import { useState } from "react";
  */
 export default function EmailComposer({
   initialData,
+  accounts,
   onSend,
   onSave,
   onCancel,
 }: {
   initialData?: { to?: string; subject?: string; body?: string };
+  accounts?: { id: string; email: string; name?: string }[];
   onSend: (data: any) => void;
   onSave: (data: any) => void;
   onCancel: () => void;
@@ -39,6 +41,11 @@ export default function EmailComposer({
           onChange={(e) => setFromAccount(e.target.value)}
         >
           <option value="">Select account</option>
+          {accounts?.map((acct) => (
+            <option key={acct.id} value={acct.id}>
+              {acct.email}
+            </option>
+          ))}
         </select>
       </div>
 

@@ -7,7 +7,10 @@ import { randomUUID } from "node:crypto";
 // ============================================================================
 
 function dbPath(): string {
-  return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
+  // Use the same default as other core modules ("data" not "data.db").
+  // The INGENIUM_CORE_DB_PATH env var is set by supervisord to the canonical path
+  // (e.g. /app/.ingenium/data). The fallback "data" avoids creating a separate .db file.
+  return process.env.INGENIUM_CORE_DB_PATH ?? "./data";
 }
 
 /**
