@@ -34,6 +34,10 @@ Append a bug, issue, or feature request to the tracking document `next-steps-pla
    - Bugs: `N. Description text here.`
    - Features: `N. Description text here.`
 7. Shows a confirmation message: `Added as Bug #N under ### /section: description` or `Added as Feature #N under ### FEATURE-NAME: description`
+8. After appending, regenerates the `# REQUEST/DIRECTIVE:` block at the top of the file. The directive must:
+   - Summarize ALL current bugs (count per section) and features into a one-shot directive
+   - Include the orchestrator weakness clause exactly: *"The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below."*
+   - End with a blank line before `## Bugs:`
 
 ## Categorization rules
 
