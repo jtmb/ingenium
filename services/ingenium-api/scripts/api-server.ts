@@ -22,6 +22,7 @@ import { commandsRouter } from "../lib/routes/commands.js";
 import { configRouter } from "../lib/routes/configs.js";
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
 import { logsRouter } from "../lib/routes/logs.js";
+import { opencodeRouter } from "../lib/routes/opencode.js";
 import { startScheduler } from "../lib/scheduler.js";
 
 const app = express();
@@ -54,6 +55,7 @@ app.use("/api/v1/commands", commandsRouter);
 app.use("/api/v1/config", configRouter);
 app.use("/api/v1/mcp-tools", mcpToolsRouter);
 app.use("/api/v1/logs", logsRouter);
+app.use("/api/v1/opencode", opencodeRouter);
 
 // Error handler
 app.use(errorHandler);

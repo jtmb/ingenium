@@ -16,6 +16,7 @@ services:
       - opencode-data:/home/appuser/.local
       - ./opencode.json:/app/opencode.json:ro
       - ${HOME:-~}/repos:/workspace
+      - ${HOME:-~}/.local/share/opencode:/var/opencode:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4097/api/v1/health"]
       interval: 30s

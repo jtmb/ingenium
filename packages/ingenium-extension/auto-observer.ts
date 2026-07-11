@@ -1,6 +1,4 @@
 import { tool } from "@opencode-ai/plugin";
-import { resolve } from "node:path";
-import { existsSync } from "node:fs";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 // TODO: PROJECT should be dynamic (derived from worktree or env) rather than hardcoded.
@@ -44,126 +42,75 @@ const PATTERNS: Map<string, RegExp[]> = new Map(Object.entries({
 }));
 
 /**
- * Resolve the OpenCode DB path from the user's home directory.
+ * Fetch recent user messages from the Ingenium API (which reads the OpenCode DB server-side).
+ * This avoids the bun:sqlite sandbox issue in OpenCode's plugin runtime.
  */
-function getDbPath(): string {
-  const home = process.env.HOME || process.env.USERPROFILE || "";
-  return resolve(home, ".local", "share", "opencode", "opencode.db");
-}
-
-/**
- * Open the OpenCode DB using Bun's built-in SQLite.
- * Bun's `bun:sqlite` is the native runtime for OpenCode plugins — no native addons needed.
- */
-function openDb(): any {
-  const dbPath = getDbPath();
+async function fetchUserMessages(since: number, limit: number = 500): Promise<Array<{ text: string; time_created: number }>> {
   try {
-    const { Database } = require("bun:sqlite") as any;
-    const db = new Database(dbPath, { readonly: true });
-    console.log(`[auto-observer] Opened DB at ${dbPath}`);
-    return db;
-  } catch (err: any) {
-    console.error(`[auto-observer] ERROR: Cannot open OpenCode DB at ${dbPath}:`, err.message);
-    return null;
-  }
-}
-
-/**
- * Read recent user messages from the OpenCode DB and detect behavior patterns.
- *
- * OpenCode v2 DB schema:
- *   - `part` table: id, message_id, session_id, time_created, time_updated, data (JSON)
- *   - `message` table: id, session_id, role, ...
- *   - `session_input` table exists but has 0 rows (dead table — do NOT query it)
- *
- * Uses json_extract() to access fields inside the `data` JSON column.
- * Joins with `message` table to filter for role='user' messages only.
- * Only scans messages newer than `lastRunAt` to avoid rescanning.
- */
-async function detectPatterns(): Promise<Array<{ type: string; content: string; context?: string }>> {
-  const dbPath = getDbPath();
-
-  if (!existsSync(dbPath)) {
-    console.warn(`[auto-observer] DB not found at ${dbPath} — skipping pattern detection`);
-    return [];
-  }
-
-  const db = openDb();
-  if (!db) {
-    console.warn("[auto-observer] DB not available — skipping pattern detection");
-    return [];
-  }
-
-  try {
-    // Query part table using json_extract — joins with message table for role filtering.
-    // Only scan messages after lastRunAt to avoid rescanning.
-    // LIMIT 2000 because agent reasoning/tool-call entries vastly outnumber user text entries
-    // (ratio typically 30:1 or higher).
-    // message.data is a JSON blob with {role, model, agent, time, summary}
-    // part.data is a JSON blob with {type, text} — use json_extract for both
-    const rows = db.query(`
-      SELECT
-        json_extract(p.data, '$.text') as text,
-        p.time_created
-      FROM part p
-      JOIN message m ON p.message_id = m.id
-      WHERE json_extract(m.data, '$.role') = 'user'
-        AND json_extract(p.data, '$.type') = 'text'
-        AND length(json_extract(p.data, '$.text')) > 10
-        AND p.time_created > ?
-      ORDER BY p.time_created DESC
-      LIMIT 2000
-    `).all(lastRunAt);
-
-    console.log(`[auto-observer] Scanned ${rows.length} recent user messages from OpenCode DB (since ${new Date(lastRunAt).toISOString()})`);
-
-    if (rows.length === 0) {
-      console.log("[auto-observer] No new messages to scan since last run");
+    const url = `${API_BASE}/opencode/messages?project=${PROJECT}&since=${since}&limit=${limit}`;
+    console.log(`[auto-observer] Fetching messages from API: ${url}`);
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error(`[auto-observer] API returned ${res.status} for /opencode/messages`);
       return [];
     }
+    const json = await res.json();
+    const messages = json?.data?.messages ?? [];
+    console.log(`[auto-observer] API returned ${messages.length} user messages`);
+    return messages;
+  } catch (err: any) {
+    console.error(`[auto-observer] Failed to fetch messages from API:`, err.message);
+    return [];
+  }
+}
 
-    const seen = new Set<string>();
-    const observations: Array<{ type: string; content: string; context?: string }> = [];
+/**
+ * Scan user messages for behavior patterns using regex.
+ */
+async function detectPatterns(): Promise<Array<{ type: string; content: string; context?: string }>> {
+  console.log(`[auto-observer] Starting pattern detection (lastRunAt=${lastRunAt}, since=${new Date(lastRunAt).toISOString()})`);
 
-    for (const row of rows) {
-      const text = String(row.text || "").trim();
-      if (!text || text.length < 10) continue;
+  const messages = await fetchUserMessages(lastRunAt, 2000);
 
-      // Update lastRunAt to the latest message time
-      if (row.time_created && typeof row.time_created === 'number' && row.time_created > lastRunAt) {
-        lastRunAt = row.time_created;
-      }
+  if (messages.length === 0) {
+    console.log("[auto-observer] No new messages to scan since last run");
+    return [];
+  }
 
-      for (const [obsType, patterns] of PATTERNS) {
-        for (const pattern of patterns) {
-          const match = text.match(pattern);
-          if (match) {
-            const snippet = match[1] || match[0] || text.substring(0, 200);
-            const key = `${obsType}:${snippet.substring(0, 60)}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              observations.push({
-                type: obsType,
-                content: snippet,
-                context: text.substring(0, 500),
-              });
-            }
-            break; // One match per pattern category
+  const seen = new Set<string>();
+  const observations: Array<{ type: string; content: string; context?: string }> = [];
+
+  for (const msg of messages) {
+    const text = String(msg.text || "").trim();
+    if (!text || text.length < 10) continue;
+
+    // Update lastRunAt to the latest message time
+    if (msg.time_created && typeof msg.time_created === 'number' && msg.time_created > lastRunAt) {
+      lastRunAt = msg.time_created;
+    }
+
+    for (const [obsType, patterns] of PATTERNS) {
+      for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+          const snippet = match[1] || match[0] || text.substring(0, 200);
+          const key = `${obsType}:${snippet.substring(0, 60)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            observations.push({
+              type: obsType,
+              content: snippet,
+              context: text.substring(0, 500),
+            });
           }
+          break; // One match per pattern category per message
         }
       }
     }
-
-    console.log(`[auto-observer] Pattern detection complete: ${observations.length} patterns found across ${PATTERNS.size} categories`);
-    return observations;
-  } catch (err: any) {
-    console.error(`[auto-observer] ERROR during pattern detection:`, err.message, err.stack);
-    return [];
-  } finally {
-    if (db && typeof db.close === 'function') {
-      try { db.close(); } catch { /* best effort */ }
-    }
   }
+
+  console.log(`[auto-observer] Pattern detection complete: ${observations.length} patterns found across ${PATTERNS.size} categories`);
+  return observations;
 }
 
 /**
