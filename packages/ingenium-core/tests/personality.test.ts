@@ -10,6 +10,8 @@ import {
   getProfile,
   disableTrait,
   updateConfidence,
+  setActive,
+  listTraits,
 } from "../lib/tools/personality.js";
 
 let tempDir: string;
@@ -83,5 +85,49 @@ describe("personality traits", () => {
     expect(above.confidence).toBeCloseTo(1.0, 1);
     const below = updateConfidence(projectId, "personality_trait", "test-clamp", -2.0);
     expect(below.confidence).toBeCloseTo(0.0, 1);
+  });
+
+  it("dismiss sets is_active to false", () => {
+    const obs = storeObservation(projectId, "preference", "User likes camelCase naming");
+    const trait = upsertTrait(projectId, "code_preference", "camelCase-naming", "Prefers camelCase", 0.5, obs.id);
+    expect(trait.is_active).toBe(1);
+
+    setActive(projectId, trait.id, false);
+
+    // Verify via listTraits with includeInactive
+    const allTraits = listTraits(projectId, true);
+    const dismissed = allTraits.find(t => t.id === trait.id);
+    expect(dismissed).toBeDefined();
+    expect(dismissed!.is_active).toBe(0);
+  });
+
+  it("listTraits excludes inactive by default", () => {
+    // Create two traits
+    const obs1 = storeObservation(projectId, "preference", "User uses TypeScript strict mode");
+    const obs2 = storeObservation(projectId, "correction", "User prefers explicit return types");
+    upsertTrait(projectId, "code_preference", "ts-strict-mode", "Uses strict mode", 0.6, obs1.id);
+    upsertTrait(projectId, "feedback_style", "explicit-returns", "Explicit return types", 0.4, obs2.id);
+
+    // Dismiss one
+    const all = listTraits(projectId, true);
+    const toDismiss = all.find(t => t.trait_value === "ts-strict-mode")!;
+    setActive(projectId, toDismiss.id, false);
+
+    // Default list should exclude inactive
+    const active = listTraits(projectId);
+    expect(active.some(t => t.trait_value === "ts-strict-mode")).toBe(false);
+    expect(active.some(t => t.trait_value === "explicit-returns")).toBe(true);
+  });
+
+  it("includeInactive flag shows all traits", () => {
+    const all = listTraits(projectId, true);
+    const active = listTraits(projectId, false);
+
+    // includeInactive=true should return at least as many as the default
+    expect(all.length).toBeGreaterThanOrEqual(active.length);
+
+    // The includeInactive list should contain previously dismissed trait
+    expect(all.some(t => t.trait_value === "ts-strict-mode")).toBe(true);
+    expect(all.some(t => t.trait_value === "explicit-returns")).toBe(true);
   });
 });

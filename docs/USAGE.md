@@ -264,6 +264,31 @@ These 14 skills provide guidance for specific contexts but are not required for 
 
 **Code**: services/ingenium-api/routes/synthesis.ts → packages/ingenium-core/lib/tools/synthesis.ts
 
+## Personality
+
+**What it does**: View and manage the system's learned understanding of the user. The personality system tracks 6 developer-specific trait dimensions with confidence scores, surfacing only display-worthy traits (confidence ≥ 0.30) by default.
+
+**How to use**:
+- Navigate to `/personality` in the dashboard
+- View active traits with confidence bars (0.0–1.0)
+- Traits start at low confidence (0.05–0.15) and require 2+ confirming observations to reach display threshold
+- Confidence is capped at 0.95; unused traits lose 0.05 after 7+ days (decay)
+- Click the **×** button on any trait card to dismiss it
+- Hidden traits (below 0.30) can be toggled via the "N hidden" link at the bottom of the profile
+- The 6 trait dimensions tracked:
+  - **communication_style** — How the user prefers to communicate (direct, detailed, concise)
+  - **code_preference** — Code style, formatting, and language preferences
+  - **workflow_pattern** — Recurring workflows and multi-step processes
+  - **feedback_style** — How the user gives feedback (corrective, confirmatory)
+  - **interaction_pattern** — How the user interacts with agents (frequent checks, batch operations)
+  - **priority_signal** — What the user prioritizes (performance, correctness, speed)
+
+**API**: GET /api/v1/personality, GET /api/v1/personality/profile, POST /api/v1/personality, POST /api/v1/personality/:id/disable, POST /api/v1/personality/:id/enable
+
+**Code**: services/ingenium-dashboard/src/app/personality/page.tsx → services/ingenium-api/routes/personality.ts → packages/ingenium-core/lib/tools/personality.ts
+
+**Docs**: docs/self-learning-pipeline.md
+
 ## API Access
 
 All dashboard features are backed by a REST API on port 4097. You can use the API directly:

@@ -65,6 +65,17 @@ Aggregates observations into personality trait profiles.
 | `created_at` | DATETIME | When trait was created |
 | `updated_at` | DATETIME | Last update timestamp |
 
+## 🔴 HARD RULE — Only observe USER behavior
+
+Never observe what the agent did (implementation notes). Only observe what the USER did or said — their preferences, corrections, feedback, behavior patterns. Example:
+
+✅ "User prefers camelCase over snake_case" (preference)
+✅ "User corrected indentation from 4 to 2 spaces" (correction)
+✅ "User ran tests before committing" (workflow)
+❌ "Added sort filters to dashboard" (implementation — use pipeline events)
+❌ "Implemented global config path resolution" (implementation — use pipeline events)
+❌ "Fixed plugins table UNIQUE constraint" (implementation — use pipeline events)
+
 ## Observation Types
 
 Use these 10 observation types when calling `ingenium_observe`:

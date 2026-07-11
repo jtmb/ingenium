@@ -24,6 +24,7 @@ export default function PersonalityPage() {
   const [profile, setProfile] = useState<any>(null);
   const [selectedTrait, setSelectedTrait] = useState<any>(null);
   const [sortMode, setSortMode] = useState<"grouped" | "newest">("grouped");
+  const [showHidden, setShowHidden] = useState(false);
 
   function formatRelative(iso: string): string {
     const diff = Date.now() - new Date(iso).getTime();
@@ -41,6 +42,15 @@ export default function PersonalityPage() {
     api.personality.profile(project).then((r) => setProfile(r.data || [])).catch(() => {});
   }, [project]);
 
+  const hiddenCount = traits.filter(t => (t.confidence || 0) < 0.3).length;
+
+  const handleDismiss = async (id: number) => {
+    try {
+      await api.personality.dismiss(id, project);
+      setTraits(prev => prev.map(t => t.id === id ? { ...t, is_active: false } : t));
+    } catch {}
+  };
+
   const grouped = traits.reduce((acc: Record<string, PersonalityTrait[]>, t: PersonalityTrait) => {
     (acc[t.trait_type] ??= []).push(t);
     return acc;
@@ -56,13 +66,23 @@ export default function PersonalityPage() {
             <option value="grouped">Grouped by type</option>
             <option value="newest">Newest first</option>
           </select>
-          <span className="text-sm text-gray-500">{traits.length} trait(s)</span>
+          <span className="text-sm text-gray-500">
+            {traits.filter(t => (t.confidence || 0) >= 0.3).length} trait(s)
+            {hiddenCount > 0 && (
+              <button onClick={() => setShowHidden(!showHidden)} className="ml-2 text-xs text-gray-400 hover:text-gray-600 underline">
+                {showHidden ? "Hide" : `${hiddenCount} hidden`}
+              </button>
+            )}
+          </span>
         </div>
       </div>
 
       {sortMode === "newest" && (
         <div className="bg-white rounded border divide-y">
-          {[...traits].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((t) => (
+          {[...traits]
+            .filter(t => showHidden || (t.confidence || 0) >= 0.3)
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+            .map((t) => (
             <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50 flex justify-between items-center" onClick={() => setSelectedTrait(t)}>
               <div className="flex items-center gap-3">
                 <span>{TYPE_ICONS[t.trait_type] || "📌"}</span>
@@ -72,6 +92,7 @@ export default function PersonalityPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Dismiss trait">&times;</button>
                 <span className="text-xs text-gray-400">{formatRelative(t.created_at)}</span>
                 <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                   <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
@@ -88,14 +109,17 @@ export default function PersonalityPage() {
         </div>
       )}
 
-      {sortMode === "grouped" && Object.entries(grouped).map(([type, typeTraits]) => (
+      {sortMode === "grouped" && Object.entries(grouped).map(([type, typeTraits]) => {
+        const visibleTraits = (typeTraits as PersonalityTrait[]).filter(t => showHidden || (t.confidence || 0) >= 0.3);
+        if (visibleTraits.length === 0) return null;
+        return (
         <div key={type} className="bg-white rounded border overflow-hidden">
           <div className="bg-gray-50 px-4 py-2 border-b font-semibold text-sm flex items-center gap-2">
             <span>{TYPE_ICONS[type] || "📌"}</span>
             <span className="capitalize">{type.replace(/_/g, " ")}</span>
           </div>
           <div className="divide-y">
-            {(typeTraits as PersonalityTrait[]).map((t: PersonalityTrait) => (
+            {visibleTraits.map((t: PersonalityTrait) => (
               <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50" onClick={() => setSelectedTrait(t)}>
                 <div className="flex justify-between items-center">
                   <div>
@@ -103,6 +127,7 @@ export default function PersonalityPage() {
                     {t.exemplar_text && <p className="text-xs text-gray-400 mt-0.5">"{t.exemplar_text.substring(0, 100)}"</p>}
                   </div>
                   <div className="flex items-center gap-2">
+                    <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Dismiss trait">&times;</button>
                     <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
                       <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
                     </div>
@@ -113,7 +138,7 @@ export default function PersonalityPage() {
             ))}
           </div>
         </div>
-      ))}
+      )})}
 
       <Overlay isOpen={selectedTrait !== null} onClose={() => setSelectedTrait(null)}
         title={selectedTrait?.display_label || selectedTrait?.trait_value || "Trait Detail"}
@@ -138,6 +163,9 @@ export default function PersonalityPage() {
                 <pre className="bg-gray-50 p-4 rounded border text-xs font-mono">{selectedTrait.metadata}</pre>
               </div>
             )}
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => { handleDismiss(selectedTrait.id); setSelectedTrait(null); }} className="text-sm text-red-500 hover:text-red-700">Dismiss trait</button>
+            </div>
           </div>
         )}
       </Overlay>

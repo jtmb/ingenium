@@ -73,20 +73,20 @@ export function upsertTrait(
   });
 }
 
-export function getTraits(projectId: string, traitType?: PersonalityTrait["trait_type"]): PersonalityTrait[] {
+export function listTraits(projectId: string, includeInactive = false): PersonalityTrait[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+  const query = includeInactive
+    ? "SELECT * FROM personality_traits WHERE project_id = ? ORDER BY confidence DESC"
+    : "SELECT * FROM personality_traits WHERE project_id = ? AND is_active = 1 ORDER BY confidence DESC";
+  return db.prepare(query).all(projectId) as PersonalityTrait[];
+}
+
+export function getTraits(projectId: string, traitType?: PersonalityTrait["trait_type"]): PersonalityTrait[] {
+  const all = listTraits(projectId, false);
   if (traitType) {
-    return db.prepare(
-      `SELECT * FROM personality_traits
-       WHERE project_id = ? AND trait_type = ? AND is_active = 1
-       ORDER BY confidence DESC`
-    ).all(projectId, traitType) as PersonalityTrait[];
+    return all.filter(t => t.trait_type === traitType);
   }
-  return db.prepare(
-    `SELECT * FROM personality_traits
-     WHERE project_id = ? AND is_active = 1
-     ORDER BY confidence DESC`
-  ).all(projectId) as PersonalityTrait[];
+  return all;
 }
 
 export function getProfile(projectId: string): Array<{ project_id: string; trait_type: string; traits: string }> {
@@ -105,6 +105,15 @@ export function disableTrait(id: number): boolean {
     ).run(now, id);
     checkpointAfterWrite();
     return result.changes > 0;
+  });
+}
+
+export function setActive(projectId: string, traitId: number, active: boolean): void {
+  return execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+    db.prepare("UPDATE personality_traits SET is_active = ? WHERE project_id = ? AND id = ?")
+      .run(active ? 1 : 0, projectId, traitId);
+    checkpointAfterWrite();
   });
 }
 

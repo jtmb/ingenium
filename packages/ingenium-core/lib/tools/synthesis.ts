@@ -45,11 +45,14 @@ function mapObservationToTraitType(
  * Classification heuristics:
  *   - "correction" observations → upsert feedback_style trait
  *   - "preference" observations → upsert code_preference trait
- *   - "pattern" observations → upsert workflow_pattern trait
  *   - "terminology" observations → upsert terminology trait
  *   - "feedback" observations → update confidence on matching existing traits
- *   - "insight", "behavior", "workflow" → upsert with lower initial confidence (0.4)
- *   - "error", "goal" → upsert priority_signal with low confidence (0.3)
+ *   - "behavior", "workflow" → upsert with low initial confidence (0.10)
+ *   - "error", "goal" → upsert priority_signal with very low confidence (0.05)
+ *   - "pattern", "insight" → implementation notes, no trait creation
+ *
+ * Confidence gating: new traits start below display threshold (0.3).
+ * Only repeated observations of the same trait boost confidence into display range.
  *
  * Future phases will replace these heuristics with LLM-based analysis.
  */
@@ -72,6 +75,18 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
   const projectName = projects.getProject(projectId)?.name || "unknown";
 
   const batch = observations.getUnprocessedBatch(projectId, 50);
+
+  // Apply trait decay — traits untouched for 7+ days lose confidence
+  const allTraits = personality.getTraits(projectId);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  for (const trait of allTraits) {
+    if (trait.updated_at < sevenDaysAgo && trait.confidence > 0.05) {
+      try {
+        personality.updateConfidence(projectId, trait.trait_type, trait.trait_value, -0.05);
+      } catch (_) { /* non-fatal — skip on missing trait */ }
+    }
+  }
+
   if (batch.length === 0) {
     result.summary = "No pending observations to process.";
     // Log completion event so the pipeline timeline shows activity
@@ -107,20 +122,28 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
       switch (obs.observation_type) {
         case "correction":
         case "preference":
-        case "pattern":
         case "terminology": {
-          // Upsert a trait — creates if new, boosts confidence if existing
-          personality.upsertTrait(
-            projectId,
-            traitType,
-            obs.content,
-            undefined,          // label — derive from content later in LLM phase
-            undefined,          // confidence — use default or boost on existing
-            obs.id,
-            obs.content,
+          // Only create/boost from user behavior observations, not implementation notes.
+          // New traits start below display threshold (0.15), re-observation boosts by 0.15.
+          const existing = personality.getTraits(projectId).find(t =>
+            t.trait_type === traitType && t.trait_value === obs.content
           );
+          if (existing) {
+            // updateConfidence applies exact delta — avoids upsertTrait's implicit +0.1 override
+            personality.updateConfidence(projectId, traitType, obs.content, 0.15);
+          } else {
+            personality.upsertTrait(
+              projectId, traitType, obs.content, undefined, 0.15,
+              obs.id, obs.content,
+            );
+          }
           break;
         }
+        case "pattern":
+        case "insight":
+          // Patterns and insights are implementation notes — do NOT create personality traits.
+          // They are still processed for skill synthesis in Phase 2.
+          break;
         case "feedback": {
           // Update confidence on existing traits (fuzzy match by content)
           const existingTraits = personality.getTraits(projectId);
@@ -136,33 +159,36 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
           }
           break;
         }
-        case "insight":
         case "behavior":
         case "workflow": {
-          // New traits with slightly lower initial confidence
-          personality.upsertTrait(
-            projectId,
-            traitType,
-            obs.content,
-            undefined,
-            0.4,
-            obs.id,
-            obs.content,
+          // Behavior/workflow observations — low initial confidence, re-observation boosts by 0.10
+          const existing = personality.getTraits(projectId).find(t =>
+            t.trait_type === traitType && t.trait_value === obs.content
           );
+          if (existing) {
+            personality.updateConfidence(projectId, traitType, obs.content, 0.10);
+          } else {
+            personality.upsertTrait(
+              projectId, traitType, obs.content, undefined, 0.10,
+              obs.id, obs.content,
+            );
+          }
           break;
         }
         case "error":
         case "goal": {
-          // Priority signals — record but don't over-weight
-          personality.upsertTrait(
-            projectId,
-            traitType,
-            obs.content,
-            undefined,
-            0.3,
-            obs.id,
-            obs.content,
+          // Priority signals — very low initial confidence, re-observation boosts by 0.05
+          const existing = personality.getTraits(projectId).find(t =>
+            t.trait_type === traitType && t.trait_value === obs.content
           );
+          if (existing) {
+            personality.updateConfidence(projectId, traitType, obs.content, 0.05);
+          } else {
+            personality.upsertTrait(
+              projectId, traitType, obs.content, undefined, 0.05,
+              obs.id, obs.content,
+            );
+          }
           break;
         }
       }
@@ -187,7 +213,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
 
   // Traits updated: upserted observations minus the ones that were truly new
   const upsertedCount = batch.filter(o =>
-    ["correction", "preference", "pattern", "terminology"].includes(o.observation_type)
+    ["correction", "preference", "terminology", "behavior", "workflow", "error", "goal"].includes(o.observation_type)
   ).length;
   result.traits_updated = Math.max(0, upsertedCount - result.traits_created);
 
