@@ -6,6 +6,9 @@ import { createRequire } from "node:module";
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 const PROJECT = "gh-llm-bootstrap";
 
+// Track last run time for dedup — skip messages older than this
+let lastRunAt = Date.now();
+
 /**
  * Patterns to detect in user messages.
  * Key: observation_type, Value: regex patterns
@@ -196,6 +199,27 @@ async function createObservations(
   return created;
 }
 
+/**
+ * POST a pipeline event to the Ingenium API for observability.
+ */
+async function logPipelineEvent(project: string, title: string, data: any) {
+  try {
+    await fetch(`${API_BASE}/pipeline/events?project=${project}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event_type: "observation_imported",
+        event_source: "plugin",
+        title,
+        description: JSON.stringify(data),
+        importance: 4,
+      }),
+    });
+  } catch {
+    // Non-fatal — pipeline event logging is best-effort
+  }
+}
+
 export const AutoObserverPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
   let turnCount = 0;
@@ -205,11 +229,23 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
     event: async ({ event }: { event: any }) => {
       if (event.type === "session.created") {
         turnCount = 0;
-        // Run detection immediately on session start
-        const dbPath = getDbPath();
-        const observations = await detectPatterns(dbPath, worktree);
-        if (observations.length > 0) {
-          await createObservations(observations, ctx.client, worktree);
+        try {
+          // Run detection immediately on session start
+          const dbPath = getDbPath();
+          const observations = await detectPatterns(dbPath, worktree);
+          if (observations.length > 0) {
+            const created = await createObservations(observations, ctx.client, worktree);
+            await logPipelineEvent(
+              PROJECT,
+              `Auto-observer: ${observations.length} detected, ${created} created`,
+              { detected: observations.length, created, dbfound: true },
+            );
+          }
+        } catch (err: any) {
+          await logPipelineEvent(PROJECT, "Auto-observer: failed", {
+            error: err?.message ?? String(err),
+            dbfound: false,
+          });
         }
       }
 
@@ -217,10 +253,22 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
         turnCount++;
         if (turnCount % CHECK_INTERVAL !== 0) return;
 
-        const dbPath = getDbPath();
-        const observations = await detectPatterns(dbPath, worktree);
-        if (observations.length > 0) {
-          await createObservations(observations, ctx.client, worktree);
+        try {
+          const dbPath = getDbPath();
+          const observations = await detectPatterns(dbPath, worktree);
+          if (observations.length > 0) {
+            const created = await createObservations(observations, ctx.client, worktree);
+            await logPipelineEvent(
+              PROJECT,
+              `Auto-observer: ${observations.length} detected, ${created} created`,
+              { detected: observations.length, created, dbfound: true },
+            );
+          }
+        } catch (err: any) {
+          await logPipelineEvent(PROJECT, "Auto-observer: failed", {
+            error: err?.message ?? String(err),
+            dbfound: false,
+          });
         }
       }
     },

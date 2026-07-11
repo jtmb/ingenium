@@ -99,3 +99,31 @@ export function getGlobalProject() {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL LIMIT 1").get();
 }
+export function getProjectDetail(name) {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const project = db.prepare("SELECT * FROM projects WHERE name = ?").get(name);
+    if (!project)
+        return undefined;
+    const skillsCount = db.prepare("SELECT COUNT(*) as c FROM skills WHERE project_id = ? AND enabled = 1").get(project.id);
+    const recentSkills = db.prepare("SELECT name, description, created_at FROM skills WHERE project_id = ? AND enabled = 1 ORDER BY created_at DESC LIMIT 5").all(project.id);
+    const obsTotal = db.prepare("SELECT COUNT(*) as c FROM observations WHERE project_id = ?").get(project.id);
+    const obsPending = db.prepare("SELECT COUNT(*) as c FROM observations WHERE project_id = ? AND status != 'processed'").get(project.id);
+    const obsProcessed = db.prepare("SELECT COUNT(*) as c FROM observations WHERE project_id = ? AND status = 'processed'").get(project.id);
+    const recentObs = db.prepare("SELECT observation_type, content, created_at FROM observations WHERE project_id = ? ORDER BY created_at DESC LIMIT 5").all(project.id);
+    const pipeline = db.prepare("SELECT event_type, title, created_at FROM pipeline_events WHERE project_id = ? ORDER BY created_at DESC LIMIT 5").all(project.id);
+    const latestSynth = db.prepare("SELECT created_at FROM pipeline_events WHERE project_id = ? AND event_type = 'synthesis_completed' ORDER BY created_at DESC LIMIT 1").get(project.id);
+    return {
+        project,
+        skills_count: skillsCount.c,
+        recent_skills: recentSkills,
+        observation_stats: {
+            total: obsTotal.c,
+            pending: obsPending.c,
+            processed: obsProcessed.c,
+            recent: recentObs,
+        },
+        pipeline,
+        latest_synthesis: latestSynth?.created_at ?? null,
+        latest_synthesis_result: null,
+    };
+}

@@ -17,7 +17,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 /** A project managed by Ingenium. */
-export type Project = { id: string; name: string; path?: string; archived_at?: string; created_at: string; updated_at: string };
+export type Project = { id: string; name: string; path?: string; archived_at?: string; created_at: string; updated_at: string; is_global?: boolean };
 
 /** An AI agent skill with its full content. */
 export type Skill = { id: string; name: string; description: string; content: string; category?: string; enabled: boolean; tags?: string; always_apply?: number; file_tree?: string; created_at: string; updated_at: string };
@@ -185,6 +185,7 @@ export const api = {
     listArchived: () => request<{ data: Project[] }>("/projects/archive"),
     update: (currentName: string, newName: string) =>
       request<{ data: Project }>(`/projects/${encodeURIComponent(currentName)}`, { method: "PATCH", body: JSON.stringify({ name: newName }) }),
+    detail: (name: string) => request<{ data: any }>(`/projects/${encodeURIComponent(name)}/detail`),
   },
   skills: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Skill[] }>(`/skills?project=${project}`),
