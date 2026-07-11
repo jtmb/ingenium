@@ -191,7 +191,13 @@ export default function PipelinePage() {
       observations: events.filter((e) => e.event_type === "observation_created").length,
       syntheses: events.filter((e) => e.event_type.startsWith("synthesis_")).length,
       traits: events.filter((e) => e.event_type.startsWith("trait_")).length,
-      skills: events.filter((e) => e.event_type === "skill_created" || e.event_type === "skill_updated").length,
+      skills: events.filter((e) => {
+        if (e.event_type === "trait_created" || e.event_type === "trait_updated") {
+          const d = typeof e.data === "string" ? JSON.parse(e.data || "{}") : (e.data || {});
+          return d.skill_name || d.via_llm;
+        }
+        return false;
+      }).length,
     }),
     [events],
   );
