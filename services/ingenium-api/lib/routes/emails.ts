@@ -113,7 +113,7 @@ emailsRouter.get("/accounts/oauth/url", (req, res) => {
   getOAuthUrl(provider as EmailProvider, projectId)
     .then((result) => res.json({ data: result }))
     .catch((err: any) => {
-      logger.error("email", `Failed to generate OAuth URL for ${provider}`, { error: err.message });
+      logger.error("email", `Failed to generate OAuth URL for ${provider}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
       res.status(500).json({ error: { code: "OAUTH_ERROR", message: err.message } });
     });
 });
@@ -139,7 +139,7 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
     }
     res.json({ data: { success: true, accountId: accountId ?? null } });
   } catch (err: any) {
-    logger.error("email", "OAuth code exchange failed", { error: err.message });
+    logger.error("email", "OAuth code exchange failed", { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "OAUTH_ERROR", message: err.message } });
   }
 });
@@ -262,7 +262,7 @@ emailsRouter.get("/search", async (req, res) => {
     );
     res.json({ data: uids, total: uids.length });
   } catch (err: any) {
-    logger.error("email", `Search failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Search failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });
@@ -281,7 +281,7 @@ emailsRouter.get("/folders", async (req, res) => {
     const folders = await withImapConnection(account, auth, (id) => listFolders(id));
     res.json({ data: folders, total: folders.length });
   } catch (err: any) {
-    logger.error("email", `List folders failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `List folders failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });
@@ -304,7 +304,7 @@ emailsRouter.get("/triage", async (req, res) => {
     );
     res.json({ data: triageResults, total: triageResults.length });
   } catch (err: any) {
-    logger.error("email", `Triage failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Triage failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });
@@ -341,7 +341,7 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     }
     res.json({ data: suggestion });
   } catch (err: any) {
-    logger.error("email", `Suggest response failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Suggest response failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });
@@ -365,7 +365,7 @@ emailsRouter.post("/watch/start", async (req, res) => {
     await startWatcher(projectId, accountId);
     res.json({ data: { running: true, accountId } });
   } catch (err: any) {
-    logger.error("email", `Failed to start watcher for account ${accountId}`, { error: err.message });
+    logger.error("email", `Failed to start watcher for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "WATCHER_ERROR", message: err.message } });
   }
 });
@@ -387,7 +387,7 @@ emailsRouter.post("/watch/stop", async (req, res) => {
     await stopWatcher(accountId);
     res.json({ data: { running: false, accountId } });
   } catch (err: any) {
-    logger.error("email", `Failed to stop watcher for account ${accountId}`, { error: err.message });
+    logger.error("email", `Failed to stop watcher for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "WATCHER_ERROR", message: err.message } });
   }
 });
@@ -432,7 +432,7 @@ emailsRouter.get("/", async (req, res) => {
     );
     res.json({ data: messages, total });
   } catch (err: any) {
-    logger.error("email", `List emails failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `List emails failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });
@@ -467,7 +467,7 @@ emailsRouter.post("/draft", async (req, res) => {
     const messageId = await saveDraft(account, auth, options);
     res.status(201).json({ data: { messageId } });
   } catch (err: any) {
-    logger.error("email", `Save draft failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Save draft failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "SMTP_ERROR", message: err.message } });
   }
 });
@@ -502,7 +502,7 @@ emailsRouter.post("/", async (req, res) => {
     const messageId = await sendEmail(account, auth, options);
     res.status(201).json({ data: { messageId } });
   } catch (err: any) {
-    logger.error("email", `Send email failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Send email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "SMTP_ERROR", message: err.message } });
   }
 });
@@ -541,7 +541,7 @@ emailsRouter.get("/:uid", async (req, res) => {
     }
     res.json({ data: email });
   } catch (err: any) {
-    logger.error("email", `Get email failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Get email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });
@@ -578,7 +578,7 @@ emailsRouter.patch("/:uid/move", async (req, res) => {
     );
     res.json({ data: { moved: true, uid, fromFolder, toFolder } });
   } catch (err: any) {
-    logger.error("email", `Move email failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Move email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });
@@ -615,7 +615,7 @@ emailsRouter.patch("/:uid/flags", async (req, res) => {
     );
     res.json({ data: { flagsSet: true, uid, folder, flags } });
   } catch (err: any) {
-    logger.error("email", `Set flags failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Set flags failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });
@@ -647,7 +647,7 @@ emailsRouter.delete("/:uid", async (req, res) => {
     res.status(204).send();
     return;
   } catch (err: any) {
-    logger.error("email", `Delete email failed for account ${accountId}`, { error: err.message });
+    logger.error("email", `Delete email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
 });

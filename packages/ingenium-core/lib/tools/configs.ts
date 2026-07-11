@@ -31,7 +31,10 @@ export function saveConfig(projectId: string, type: "project" | "global", conten
       writeFileSync(configPath, content, "utf-8");
     } catch (e) {
       // Disk write failure is non-fatal for the DB operation
-      logger.warn("configs", "Failed to write config to disk", { error: e instanceof Error ? e.message : String(e) });
+      const cfgErrMsg = e instanceof Error ? e.message : String(e);
+      const cfgErrName = e instanceof Error ? e.name : "Unknown";
+      const cfgErrStack = e instanceof Error ? e.stack : undefined;
+      logger.warn("configs", `Failed to write config to disk: ${cfgErrMsg}`, { error: cfgErrMsg, name: cfgErrName, stack: cfgErrStack?.split("\n").slice(0, 5).join("\n") });
     }
     checkpointAfterWrite();
     return db.prepare("SELECT * FROM configs WHERE project_id = ? AND type = ?").get(projectId, type) as Config;

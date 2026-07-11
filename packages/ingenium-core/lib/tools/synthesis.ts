@@ -6,6 +6,7 @@ import * as synthesisLlm from "./synthesis-llm.js";
 import type { SynthesisLLMResult } from "./synthesis-llm.js";
 import { getSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
+import { logger } from "../logger.js";
 
 export interface SynthesisResult {
   observations_processed: number;
@@ -167,6 +168,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
         );
       } catch (_) { /* non-fatal */ }
     } catch (err: any) {
+      logger.error("synthesis", `Trait create failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
       result.errors.push(`Trait create "${toCreate.trait_value?.substring(0, 30)}": ${err.message}`);
     }
   }
@@ -202,6 +204,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
         } catch (_) { /* non-fatal */ }
       }
     } catch (err: any) {
+      logger.error("synthesis", `Trait confirm failed for trait_id=${toConfirm.trait_id}: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
       result.errors.push(`Trait confirm trait_id=${toConfirm.trait_id}: ${err.message}`);
     }
   }
@@ -222,6 +225,9 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      const errName = err instanceof Error ? err.name : "Unknown";
+      const stack = err instanceof Error ? err.stack : undefined;
+      logger.error("synthesis", `Observation ${obs.id} processing failed: ${msg}`, { error: msg, name: errName, stack: stack?.split("\n").slice(0, 5).join("\n") });
       result.errors.push(`Observation ${obs.id}: ${msg}`);
       try {
         observations.updateObservation(obs.id, { status: "failed" });
@@ -329,6 +335,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
               sessionId,
             );
           } catch (err: any) {
+            logger.error("synthesis", `Skill create "${skillToCreate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
             result.errors.push(`Skill create "${skillToCreate.name}": ${err.message}`);
           }
         }
@@ -368,6 +375,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
               result.errors.push(`Skill update "${skillToUpdate.name}": not found`);
             }
           } catch (err: any) {
+            logger.error("synthesis", `Skill update "${skillToUpdate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
             result.errors.push(`Skill update "${skillToUpdate.name}": ${err.message}`);
           }
         }
@@ -402,6 +410,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
                 );
               } catch (_) { /* non-fatal */ }
             } catch (err: any) {
+              logger.error("synthesis", `LLM trait "${pt.trait_value?.substring(0, 30)}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
               result.errors.push(`LLM trait "${pt.trait_value?.substring(0, 30)}": ${err.message}`);
             }
           }
@@ -413,6 +422,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
         }
       }
     } catch (err: any) {
+      logger.error("synthesis", `LLM synthesis phase failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
       result.errors.push(`LLM synthesis phase failed: ${err.message}`);
     }
   }
@@ -569,6 +579,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
         skills.updateSkill(globalProject.id, skillName, existing.content, updatedDesc);
       }
     } catch (err: any) {
+      logger.error("synthesis", `Cross-project skill promotion "${skillName}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
       result.errors.push(`Skill "${skillName}": ${err.message}`);
     }
   }
@@ -608,6 +619,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
       );
       result.traits_created++;
     } catch (err: any) {
+      logger.error("synthesis", `Cross-project trait promotion "${trait.trait_value}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
       result.errors.push(`Trait "${trait.trait_value}": ${err.message}`);
     }
   }

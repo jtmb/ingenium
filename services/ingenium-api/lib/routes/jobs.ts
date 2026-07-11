@@ -160,7 +160,7 @@ jobsRouter.post("/:id/run", (req, res) => {
   // Fire-and-forget the actual execution
   executeJobRun(result.id, job, job.prompt_template).catch((err: Error) => {
     import("ingenium-core").then(({ logger }) => {
-      logger.error("jobs-route", `Fire-and-forget executeJobRun failed: ${err.message}`);
+      logger.error("jobs-route", `Fire-and-forget executeJobRun failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     });
   });
 

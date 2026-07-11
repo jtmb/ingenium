@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { tasks } from "ingenium-core";
+import { tasks, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 export const tasksRouter = Router();
@@ -294,6 +294,7 @@ tasksRouter.post("/:id/links", (req, res) => {
     const link = tasks.linkTasks(projectId, req.params.id!, linked_task_id, link_type, actor);
     res.status(201).json({ data: link });
   } catch (err: any) {
+    logger.error("tasks", `Task link creation failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
   }
 });

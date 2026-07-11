@@ -24,6 +24,7 @@ export default function ProjectsPage() {
   const [details, setDetails] = useState<Record<string, any>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
 
   const load = () => {
     api.projects.list().then((r) => setProjects(r.data)).catch(() => {});
@@ -74,24 +75,17 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Projects</h1>
-
-      {/* View toggle + create */}
-      <div className="flex gap-2 justify-between items-center">
-        <div className="flex gap-2">
-          <button onClick={() => setView("active")} className={`px-4 py-1.5 rounded text-sm font-medium ${view === "active" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>Active</button>
-          <button onClick={() => setView("archived")} className={`px-4 py-1.5 rounded text-sm font-medium ${view === "archived" ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"}`}>Archived</button>
-        </div>
-        {view === "active" && (
-          <div className="flex gap-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Project name" className="border border-gray-200 p-2 rounded text-sm w-48" />
-            <button onClick={create} disabled={!name} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700 disabled:opacity-50">Create</button>
-          </div>
-        )}
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Projects</h1>
+        <button onClick={() => setShowCreate(true)} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">+ New Project</button>
       </div>
 
-      {/* Search */}
-      <div className="flex gap-2">
+      {/* View toggle + search */}
+      <div className="flex gap-2 justify-between items-center">
+        <div className="flex gap-2 items-center">
+          <button onClick={() => setView("active")} className={`px-3 py-1 rounded text-sm font-medium ${view === "active" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Active</button>
+          <button onClick={() => setView("archived")} className={`px-3 py-1 rounded text-sm font-medium ${view === "archived" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Archived</button>
+        </div>
         <input
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
@@ -217,6 +211,30 @@ export default function ProjectsPage() {
         })}
         {displayed.length === 0 && <p className="text-gray-400 py-8 text-center">No {view} projects.</p>}
       </div>
+
+      {/* Create modal */}
+      {showCreate && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowCreate(false)}>
+          <div className="bg-white p-6 rounded-lg shadow-xl w-96" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold mb-4">New Project</h3>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Project name"
+              className="border border-gray-200 p-2 rounded text-sm w-full mb-3"
+              autoFocus
+            />
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 rounded border border-gray-200 text-sm text-gray-600">Cancel</button>
+              <button
+                onClick={() => { create(); setShowCreate(false); }}
+                disabled={!name}
+                className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+              >Create</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirmation */}
       <Overlay isOpen={confirmDelete !== null} onClose={() => setConfirmDelete(null)}
