@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import { config } from "../config/index.js";
+import { settings, projects } from "ingenium-core";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { projectsRouter } from "../lib/routes/projects.js";
@@ -50,69 +51,99 @@ app.listen(config.port, () => {
     console.log(`ingenium-api listening on port ${config.port}`);
 });
 // ── Scheduled Synthesis ─────────────────────────────────
-// Auto-trigger the synthesis pipeline every 15 minutes for ALL active projects
-const SYNTHESIS_INTERVAL_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
-if (SYNTHESIS_INTERVAL_MS > 0) {
-    async function triggerSynthesisForAllProjects() {
-        try {
-            // Fetch all active (non-archived) projects
-            const projectsRes = await fetch(`http://localhost:${config.port}/api/v1/projects`);
-            if (!projectsRes.ok) {
-                console.warn(`[scheduler] Failed to fetch projects: ${projectsRes.status}`);
-                return;
+// Auto-trigger the synthesis pipeline for ALL active projects
+// Default interval from env var; dynamically read from settings table after each cycle
+const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
+/** Read the synthesis interval from the global-default project's settings. Falls back to SYNTHESIS_DEFAULT_MS. */
+function getSynthesisInterval() {
+    try {
+        const gid = projects.getGlobalProject()?.id;
+        if (gid) {
+            const val = settings.getSetting(gid, "synthesis_interval_ms");
+            if (val !== undefined) {
+                const n = parseInt(val, 10);
+                if (!isNaN(n) && n >= 0)
+                    return n;
             }
-            const projects = (await projectsRes.json()).data || [];
-            for (const p of projects) {
-                try {
-                    const res = await fetch(`http://localhost:${config.port}/api/v1/synthesis/run?project=${p.name}`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: "{}",
-                    });
-                    if (res.ok) {
-                        const result = await res.json();
-                        console.log(`[scheduler] Synthesis for "${p.name}": ${JSON.stringify(result.data)}`);
-                    }
-                    else {
-                        console.warn(`[scheduler] Synthesis for "${p.name}" failed: ${res.status}`);
-                    }
-                }
-                catch (err) {
-                    console.debug(`[scheduler] Synthesis for "${p.name}" error: ${err.message}`);
-                }
-                // Sync skills: disk→DB then DB→disk
-                try {
-                    const syncRes = await fetch(`http://localhost:${config.port}/api/v1/skills/sync-all?project=${p.name}`, {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: "{}",
-                    });
-                    if (syncRes.ok) {
-                        const syncData = (await syncRes.json()).data;
-                        if (syncData.synced_to_db > 0 || syncData.written_to_disk > 0) {
-                            console.log(`[scheduler] Skill sync for "${p.name}": ${syncData.synced_to_db} from disk, ${syncData.written_to_disk} to disk`);
-                        }
-                    }
-                }
-                catch (err) {
-                    console.debug(`[scheduler] Skill sync for "${p.name}" error: ${err.message}`);
-                }
-            }
-        }
-        catch (err) {
-            console.debug(`[scheduler] Error fetching projects: ${err.message}`);
-        }
-        // Cross-project synthesis — runs once after all per-project synthesis
-        try {
-            await fetch(`http://localhost:${config.port}/api/v1/synthesis/cross-project`, { method: "POST" });
-        }
-        catch (e) {
-            console.debug("Cross-project synthesis failed:", e);
         }
     }
-    // First run 30 seconds after startup, then every N ms
-    setTimeout(() => triggerSynthesisForAllProjects(), 30000);
-    setInterval(triggerSynthesisForAllProjects, SYNTHESIS_INTERVAL_MS);
-    console.log(`[scheduler] Auto-synthesis every ${SYNTHESIS_INTERVAL_MS / 1000}s for all projects (first run in 30s)`);
+    catch {
+        // fall through to default
+    }
+    return SYNTHESIS_DEFAULT_MS;
 }
+async function triggerSynthesisForAllProjects() {
+    try {
+        // Fetch all active (non-archived) projects
+        const projectsRes = await fetch(`http://localhost:${config.port}/api/v1/projects`);
+        if (!projectsRes.ok) {
+            console.warn(`[scheduler] Failed to fetch projects: ${projectsRes.status}`);
+            return;
+        }
+        const allProjects = (await projectsRes.json()).data || [];
+        for (const p of allProjects) {
+            try {
+                const res = await fetch(`http://localhost:${config.port}/api/v1/synthesis/run?project=${p.name}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: "{}",
+                });
+                if (res.ok) {
+                    const result = await res.json();
+                    console.log(`[scheduler] Synthesis for "${p.name}": ${JSON.stringify(result.data)}`);
+                }
+                else {
+                    console.warn(`[scheduler] Synthesis for "${p.name}" failed: ${res.status}`);
+                }
+            }
+            catch (err) {
+                console.debug(`[scheduler] Synthesis for "${p.name}" error: ${err.message}`);
+            }
+            // Sync skills: disk→DB then DB→disk
+            try {
+                const syncRes = await fetch(`http://localhost:${config.port}/api/v1/skills/sync-all?project=${p.name}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: "{}",
+                });
+                if (syncRes.ok) {
+                    const syncData = (await syncRes.json()).data;
+                    if (syncData.synced_to_db > 0 || syncData.written_to_disk > 0) {
+                        console.log(`[scheduler] Skill sync for "${p.name}": ${syncData.synced_to_db} from disk, ${syncData.written_to_disk} to disk`);
+                    }
+                }
+            }
+            catch (err) {
+                console.debug(`[scheduler] Skill sync for "${p.name}" error: ${err.message}`);
+            }
+        }
+    }
+    catch (err) {
+        console.debug(`[scheduler] Error fetching projects: ${err.message}`);
+    }
+    // Cross-project synthesis — runs once after all per-project synthesis
+    try {
+        await fetch(`http://localhost:${config.port}/api/v1/synthesis/cross-project`, { method: "POST" });
+    }
+    catch (e) {
+        console.debug("Cross-project synthesis failed:", e);
+    }
+}
+function scheduleNext() {
+    const interval = getSynthesisInterval();
+    if (interval > 0) {
+        console.log(`[scheduler] Next synthesis in ${interval / 1000}s`);
+        setTimeout(() => {
+            triggerSynthesisForAllProjects().finally(() => scheduleNext());
+        }, interval);
+    }
+    else {
+        console.log(`[scheduler] Synthesis disabled (interval = 0)`);
+    }
+}
+// First run 30 seconds after startup, then schedule dynamically from settings
+console.log(`[scheduler] Auto-synthesis initial default: ${SYNTHESIS_DEFAULT_MS / 1000}s (reads settings after first cycle)`);
+setTimeout(() => triggerSynthesisForAllProjects(), 30000);
+// Start the dynamic cycle after the initial 30s run
+setTimeout(() => scheduleNext(), 30000);
 export default app;
