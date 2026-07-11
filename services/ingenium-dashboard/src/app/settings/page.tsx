@@ -29,9 +29,11 @@ export default function SettingsPage() {
 
   // Backup synthesis LLM state
   const [showBackup, setShowBackup] = useState(false);
-  const [backupEndpoint, setBackupEndpoint] = useState("");
-  const [backupModel, setBackupModel] = useState("");
+  const [backupProviderId, setBackupProviderId] = useState("");
+  const [backupSelectedModel, setBackupSelectedModel] = useState("");
   const [backupApiKey, setBackupApiKey] = useState("");
+  const backupProvider = providers.find(p => p.id === backupProviderId);
+  const backupModels = backupProvider ? Object.entries(backupProvider.models || {}) as [string, any][] : [];
   const selectedProvider = providers.find(p => p.id === providerId);
   const providerModels = selectedProvider ? Object.entries(selectedProvider.models || {}) as [string, any][] : [];
 
@@ -87,12 +89,13 @@ export default function SettingsPage() {
   // Load backup synthesis config
   useEffect(() => {
     Promise.all([
-      api.settings.get("synthesis_backup_endpoint", "global-default"),
+      api.settings.get("synthesis_backup_provider", "global-default"),
       api.settings.get("synthesis_backup_model", "global-default"),
+      api.settings.get("synthesis_backup_endpoint", "global-default"),
       api.settings.get("synthesis_backup_api_key", "global-default"),
-    ]).then(([e, m, k]) => {
-      if (e.data?.value) { setBackupEndpoint(e.data.value); setShowBackup(true); }
-      if (m.data?.value) setBackupModel(m.data.value);
+    ]).then(([pr, m, e, k]) => {
+      if (pr.data?.value) { setBackupProviderId(pr.data.value); setShowBackup(true); }
+      if (m.data?.value) setBackupSelectedModel(m.data.value);
       if (k.data?.value) setBackupApiKey(k.data.value);
     }).catch(() => {});
   }, []);
@@ -133,8 +136,16 @@ export default function SettingsPage() {
       if (apiKeyState) await api.settings.set("synthesis_api_key", apiKeyState, "global-default");
       await api.settings.set("synthesis_endpoint", ep, "global-default");
       // Save backup config
-      if (backupEndpoint) await api.settings.set("synthesis_backup_endpoint", backupEndpoint, "global-default");
-      if (backupModel) await api.settings.set("synthesis_backup_model", backupModel, "global-default");
+      if (backupProviderId) {
+        await api.settings.set("synthesis_backup_provider", backupProviderId, "global-default");
+        const bp = backupProvider;
+        const bModels = bp ? Object.entries(bp.models || {}) as [string, any][] : [];
+        const bModel = bModels.find(([k]) => k === backupSelectedModel) || bModels[0];
+        const bModelId = bModel ? bModel[1]?.id || "" : "";
+        const bEp = bModel ? bModel[1]?.api?.url || "" : "";
+        if (bModelId) await api.settings.set("synthesis_backup_model", bModelId, "global-default");
+        if (bEp) await api.settings.set("synthesis_backup_endpoint", bEp, "global-default");
+      }
       if (backupApiKey) await api.settings.set("synthesis_backup_api_key", backupApiKey, "global-default");
       setEndpoint(ep);
       setLlmStatus("✅ Configuration saved");
@@ -308,19 +319,49 @@ export default function SettingsPage() {
           {showBackup && (
             <div className="mt-3 space-y-3">
               <div>
-                <label className="block text-sm font-medium">Backup Endpoint</label>
-                <input type="text" value={backupEndpoint} onChange={(e) => setBackupEndpoint(e.target.value)} placeholder="https://api.backup-provider.com/v1" className="border p-2 rounded w-full text-sm font-mono" />
+                <label className="block text-sm font-medium">Provider</label>
+                <select value={backupProviderId} onChange={(e) => {
+                  const val = e.target.value;
+                  setBackupProviderId(val);
+                  if (val) {
+                    const p = providers.find(x => x.id === val);
+                    const models = p ? Object.entries(p.models || {}) : [];
+                    setBackupSelectedModel(models[0]?.[0] || "");
+                  } else {
+                    setBackupSelectedModel("");
+                  }
+                }} className="border p-2 rounded w-full text-sm">
+                  <option value="">— None —</option>
+                  {(() => {
+                    const sorted = [...providers]
+                      .filter(p => Object.keys(p.models || {}).length > 0)
+                      .sort((a, b) => {
+                        const rank = (n: string) => n.toLowerCase().includes("opencode zen") ? 0 : n.toLowerCase().includes("deepseek") ? 1 : 999;
+                        return rank(a.name) - rank(b.name) || a.name.localeCompare(b.name);
+                      });
+                    return sorted.map(p => {
+                      const isFree = p.id === "opencode";
+                      return <option key={p.id} value={p.id}>{p.name}{isFree ? " (Free)" : ""}</option>;
+                    });
+                  })()}
+                </select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              {backupProviderId && backupModels.length > 0 && (
                 <div>
-                  <label className="block text-sm font-medium">Backup Model</label>
-                  <input type="text" value={backupModel} onChange={(e) => setBackupModel(e.target.value)} placeholder="model-id" className="border p-2 rounded w-full text-sm font-mono" />
+                  <label className="block text-sm font-medium">Model</label>
+                  <select value={backupSelectedModel} onChange={(e) => setBackupSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm">
+                    {backupModels.map(([key, val]) => (
+                      <option key={key} value={key}>{key} {(val as any)?.id ? `(${(val as any).id})` : ""}</option>
+                    ))}
+                  </select>
                 </div>
+              )}
+              {backupProviderId && (
                 <div>
-                  <label className="block text-sm font-medium">Backup API Key</label>
+                  <label className="block text-sm font-medium">API Key {backupProviderId === "opencode" ? <span className="text-gray-400 font-normal">(optional for free tier)</span> : ""}</label>
                   <input type="password" value={backupApiKey} onChange={(e) => setBackupApiKey(e.target.value)} placeholder="sk-..." className="border p-2 rounded w-full text-sm" />
                 </div>
-              </div>
+              )}
             </div>
           )}
         </div>
