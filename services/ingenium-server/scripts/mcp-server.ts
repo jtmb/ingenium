@@ -36,6 +36,7 @@ import {
   synthesisRun, synthesisStatus, synthesisCrossProject,
 } from "../lib/tools/synthesis.js";
 import * as emailTools from "../lib/tools/emails.js";
+import * as configTools from "../lib/tools/configs.js";
 
 /** Shared required project parameter. Projects must be created explicitly via ingenium_project_init or the dashboard. */
 const projectParam = z.string();
@@ -426,6 +427,35 @@ server.registerTool(
   "ingenium_command_delete",
   { description: "Delete a command.", inputSchema: { project: projectParam, name: z.string() } },
   async ({ project, name }) => commandTools.commandDelete(project, name),
+);
+
+// ── Config ───────────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_config_get",
+  {
+    description: "Get config (opencode.json/opencode.jsonc) content for a project",
+    inputSchema: { project: projectParam, type: z.enum(["project", "global"]).optional().default("project") },
+  },
+  async ({ project, type }: { project: string; type: string }) => configTools.configGet(project, type),
+);
+
+server.registerTool(
+  "ingenium_config_set",
+  {
+    description: "Set config content for a project (writes to DB and disk)",
+    inputSchema: { project: projectParam, type: z.enum(["project", "global"]).optional().default("project"), content: z.string() },
+  },
+  async ({ project, type, content }: { project: string; type: string; content: string }) => configTools.configSet(project, type, content),
+);
+
+server.registerTool(
+  "ingenium_config_sync",
+  {
+    description: "Sync config from disk to DB",
+    inputSchema: { project: projectParam, type: z.enum(["project", "global"]).optional().default("project") },
+  },
+  async ({ project, type }: { project: string; type: string }) => configTools.configSync(project, type),
 );
 
 // ── Servers ─────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { logger } from "../logger.js";
+import { getSkillsBase } from "./paths.js";
 export function listSkills(projectId) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM skills WHERE project_id = ? AND enabled = 1")
@@ -20,11 +21,10 @@ export function searchSkills(projectId, query) {
      WHERE s.project_id = ? AND skills_fts MATCH ?
      ORDER BY rank`).all(projectId, query);
 }
-function getSkillsDir() {
-    return resolve(process.env.INGENIUM_CORE_DB_PATH ?? "./data", "..", "..", ".opencode", "skills");
-}
 function writeSkillToDisk(skill) {
-    const dir = resolve(getSkillsDir(), skill.name);
+    const projectId = skill.project_id;
+    const skillsBase = getSkillsBase(projectId);
+    const dir = resolve(skillsBase, skill.name);
     if (!existsSync(dir))
         mkdirSync(dir, { recursive: true });
     // Write SKILL.md with YAML frontmatter
@@ -55,8 +55,9 @@ description: "${(skill.description || "").replace(/"/g, '\\"')}"
         }
     }
 }
-function removeSkillFromDisk(name) {
-    const dir = resolve(getSkillsDir(), name);
+function removeSkillFromDisk(name, projectId) {
+    const skillsBase = getSkillsBase(projectId);
+    const dir = resolve(skillsBase, name);
     const filePath = resolve(dir, "SKILL.md");
     const metaPath = resolve(dir, "metadata.json");
     try {
@@ -118,7 +119,7 @@ export function deleteSkill(projectId, name) {
             return false;
         db.prepare("DELETE FROM skills_fts WHERE rowid = ?").run(current.rowid);
         db.prepare("DELETE FROM skills WHERE project_id = ? AND name = ?").run(projectId, name);
-        removeSkillFromDisk(name);
+        removeSkillFromDisk(name, projectId);
         checkpointAfterWrite();
         return true;
     });
@@ -143,7 +144,7 @@ export function disableSkill(projectId, name) {
         const now = new Date().toISOString();
         db.prepare("UPDATE skills SET enabled = 0, updated_at = ? WHERE project_id = ? AND name = ?")
             .run(now, projectId, name);
-        removeSkillFromDisk(name);
+        removeSkillFromDisk(name, projectId);
         checkpointAfterWrite();
         return db.prepare("SELECT * FROM skills WHERE project_id = ? AND name = ?")
             .get(projectId, name);
@@ -152,7 +153,8 @@ export function disableSkill(projectId, name) {
 export function syncSkillFromDisk(projectId, name) {
     return execTransaction(() => {
         // Find the file on disk
-        const filePath = resolve(process.env.INGENIUM_CORE_DB_PATH ?? "./data", "..", "..", ".opencode", "skills", name, "SKILL.md");
+        const skillsBase = getSkillsBase(projectId);
+        const filePath = resolve(skillsBase, name, "SKILL.md");
         if (!existsSync(filePath)) {
             logger.warn({ name, filePath }, "Skill file not found on disk");
             return undefined;

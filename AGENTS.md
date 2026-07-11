@@ -62,7 +62,7 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 70 tools. Calls API via HTTP. Zero DB access.
+├── ingenium-server/      # MCP stdio server with ~73 tools. Calls API via HTTP. Zero DB access.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend. Calls API via HTTP. Zero DB access.
 ```
 
@@ -70,7 +70,7 @@ services/
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
 
 | Page | Purpose |
 |------|---------|
@@ -84,6 +84,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
 | `/servers` | MCP servers list with add/edit/delete |
+| `/config` | OpenCode config editor (Project/Global tabs, sync from disk, save) |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
@@ -115,7 +116,7 @@ Move any DB logic to the API layer immediately.
 3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
 4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded use
 
-> The API layer is the sole authority for all 4 `.opencode/` resources: skills, agents, plugins, and commands.
+> The API layer is the sole authority for all 5 `.opencode/` resources: skills, agents, plugins, commands, and configs.
 
 ### Start/Stop Commands
 
@@ -311,6 +312,45 @@ The synthesis pipeline can now evaluate observations and skills across multiple 
 
 Cross-project synthesis runs as part of the scheduled maintenance cycle (every 15 minutes) or can be triggered manually via the `ingenium_synthesis_cross_project` tool.
 
+### Config Management
+
+The `configs` table stores `opencode.json` (project-level) and `opencode.jsonc` (global) content in the DB, enabling round-trip editing through the dashboard and MCP tools.
+
+#### Global Config Path Resolution
+
+Global projects write skills, plugins, and commands to `/home/appuser/.config/opencode/` instead of the project root. This ensures global resources are shared across all projects at a well-known OS-level path.
+
+- **Default path**: `/home/appuser/.config/opencode/`
+- **Override**: Set `INGENIUM_GLOBAL_CONFIG_PATH` env var to a custom directory
+- **Shared module**: `packages/ingenium-core/lib/tools/paths.ts` centralizes all path resolution for disk operations
+
+#### Config MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `ingenium_config_get` | Retrieve opencode config (project or global) |
+| `ingenium_config_set` | Update opencode config content |
+| `ingenium_config_sync` | Sync config between disk and DB (bidirectional) |
+
+#### Dashboard — `/config` Page
+
+The `/config` page provides a tabbed editor:
+- **Project tab** — Edit `opencode.json` for the active project
+- **Global tab** — Edit `opencode.jsonc` for global configuration
+- **Sync from disk** — Reload config from the filesystem into the editor
+- **Save** — Persist editor content to the DB and write to disk
+
+#### API Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/config` | Get project config |
+| GET | `/api/v1/config/global` | Get global config |
+| PUT | `/api/v1/config` | Update project config |
+| PUT | `/api/v1/config/global` | Update global config |
+| POST | `/api/v1/config/sync` | Sync project config from disk to DB |
+| POST | `/api/v1/config/global/sync` | Sync global config from disk to DB |
+
 ### Plugin Auto-Config Sync
 
 Every plugin lifecycle operation (create, enable, disable, delete, update) MUST also sync:
@@ -378,6 +418,7 @@ See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrato
 | `INGENIUM_API_TOKEN` | _(none)_ | ingenium-api | Bearer token for API auth |
 | `INGENIUM_CORE_DB_PATH` | `./.ingenium/data.db` | core + API | SQLite database file path |
 | `INGENIUM_HOME` | `~/.ingenium` | core, supervisord | Ingenium data home directory |
+| `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | ingenium-core | Global config path for skills/plugins/commands; overridable to custom directory |
 | `LOG_LEVEL` | `info` | ingenium-server | Pino log level |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4097/api/v1` | ingenium-dashboard | API base URL for dashboard (browser-side) |
 | `CORS_ORIGIN` | `*` | ingenium-api | Allowed CORS origin |

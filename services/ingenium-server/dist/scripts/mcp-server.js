@@ -29,6 +29,7 @@ import { observationStore, observationSearch, observationList, observationStats,
 import { personalityProfile, personalityTraits, } from "../lib/tools/personality.js";
 import { synthesisRun, synthesisStatus, synthesisCrossProject, } from "../lib/tools/synthesis.js";
 import * as emailTools from "../lib/tools/emails.js";
+import * as configTools from "../lib/tools/configs.js";
 /** Shared required project parameter. Projects must be created explicitly via ingenium_project_init or the dashboard. */
 const projectParam = z.string();
 const server = new McpServer({ name: config.mcpName, version: config.mcpVersion }, { capabilities: { tools: {}, resources: {} } });
@@ -167,6 +168,19 @@ server.registerTool("ingenium_command_update", {
     inputSchema: { project: projectParam, name: z.string(), file_path: z.string().optional(), content: z.string().optional() }
 }, async ({ project, name, file_path, content }) => commandTools.commandUpdate(project, name, { file_path, content }));
 server.registerTool("ingenium_command_delete", { description: "Delete a command.", inputSchema: { project: projectParam, name: z.string() } }, async ({ project, name }) => commandTools.commandDelete(project, name));
+// ── Config ───────────────────────────────────────────────
+server.registerTool("ingenium_config_get", {
+    description: "Get config (opencode.json/opencode.jsonc) content for a project",
+    inputSchema: { project: projectParam, type: z.enum(["project", "global"]).optional().default("project") },
+}, async ({ project, type }) => configTools.configGet(project, type));
+server.registerTool("ingenium_config_set", {
+    description: "Set config content for a project (writes to DB and disk)",
+    inputSchema: { project: projectParam, type: z.enum(["project", "global"]).optional().default("project"), content: z.string() },
+}, async ({ project, type, content }) => configTools.configSet(project, type, content));
+server.registerTool("ingenium_config_sync", {
+    description: "Sync config from disk to DB",
+    inputSchema: { project: projectParam, type: z.enum(["project", "global"]).optional().default("project") },
+}, async ({ project, type }) => configTools.configSync(project, type));
 // ── Servers ─────────────────────────────────────────────
 server.registerTool("ingenium_server_list", { description: "List all registered child MCP servers for a project.", inputSchema: { project: projectParam } }, async ({ project }) => serverTools.serverList(project));
 server.registerTool("ingenium_server_add", {

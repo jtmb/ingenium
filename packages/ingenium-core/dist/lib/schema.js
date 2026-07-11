@@ -140,6 +140,14 @@ export const AgentSchema = z.object({
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
 });
+export const ConfigSchema = z.object({
+    id: z.string(),
+    project_id: z.string(),
+    type: z.enum(["project", "global"]),
+    content: z.string(),
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+});
 export const PipelineEventSchema = z.object({
     id: z.number(),
     project_id: z.string(),
