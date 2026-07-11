@@ -2,7 +2,7 @@
 
 ## Overview
 
-The self-learning pipeline is the modern way to teach your AI agent about your preferences, workflows, and patterns. The extraction engine (Phase 0) reads your OpenCode messages and automatically extracts behavior rules using the synthesis LLM. Manual `ingenium_observe()` calls are for exceptional cases only. The system automatically processes observations into personality traits and skill updates.
+The self-learning pipeline teaches your AI agent about your preferences, workflows, and patterns. The **extraction engine** (Phase 0) is the primary observation source — it reads your OpenCode messages server-side and uses the synthesis LLM to extract durable behavior rules automatically. Manual `ingenium_observe()` calls exist only for edge cases.
 
 ## Architecture
 
@@ -11,17 +11,17 @@ OpenCode Messages → Extraction Engine (server-side, Phase 0)
   → regex pre-filter → LLM batch extraction → Observations (pending)
   → consolidateTraits() (Phase 1) → CONFIRM/CREATE/IGNORE → Traits
   → LLM Skill Synthesis (Phase 2) → Skills (writeSkillToDisk)
-  → Scheduler runs all phases every 15 min
+  → Scheduler runs extraction → synthesis → skill-sync every 15 min
 ```
 
 ## Observation Types
 
-Use these 10 observation types when calling `ingenium_observe`. The email client (Gmail/Outlook OAuth2 + IMAP) is also an important source of observations:
+The 10 observation types classify user behavior signals:
 
 | Type | When to use | Example |
 |------|-------------|---------|
 | `correction` | User corrects agent behavior | "User prefers snake_case over camelCase" |
-| `preference` | User expresses a preference | "User wants 2-space indentation" or "Prefers Gmail over Outlook for OAuth2 setup" |
+| `preference` | User expresses a preference | "User wants 2-space indentation" |
 | `pattern` | Recurring behavior observed | "User always adds JSDoc comments" |
 | `insight` | Novel discovery | "Container PTY works with glibc" |
 | `feedback` | Implicit accept/reject | "User accepted the refactored code" |
@@ -31,46 +31,66 @@ Use these 10 observation types when calling `ingenium_observe`. The email client
 | `error` | User encountered error | "User hit TypeScript strict mode error" |
 | `goal` | Stated or implied goal | "User wants to improve test coverage" |
 
-## How to Use
+## How Observations Are Created
 
-### For Agents (during workflow)
+### Primary: Extraction Engine (automatic)
 
-Use `ingenium_observe` naturally during your workflow — just like you use `read`, `grep`, or `edit`. The email client is also a rich source of observations:
+The **server-side extraction engine** (`packages/ingenium-core/lib/tools/extraction.ts`) reads your OpenCode message history every 15 minutes (via the scheduler) or on demand (`POST /api/v1/extraction/run`). It uses:
 
-```typescript
-// Store an observation during your work
-ingenium_observe(
-  observation_type: "preference",
-  content: "User prefers concise error messages with action items",
-  importance: 7
-)
+1. **Watermark + dedup** — Per-project watermark and content-hash dedup prevent re-processing the same messages.
+2. **Regex pre-filter** — Cheap candidate selection identifies messages that MAY contain user behavior (NOT final extraction).
+3. **LLM batch extraction** — Candidate messages are batched (up to 15) and sent to the synthesis LLM, which extracts durable user behavior rules as JSON. Only LLM output becomes observations — raw message snippets never enter the DB.
+4. **No-LLM = no observations** — If no synthesis LLM is configured, extraction creates zero observations.
 
-// Email-specific examples (after OAuth2 setup or email workflow discovery)
-ingenium_observe({
-  observation_type: "insight",
-  content: "Email composition works seamlessly through nodemailer — no additional configuration needed after OAuth2 setup",
-  importance: 8
-})
+### Secondary: Manual `ingenium_observe()` (exceptional cases only)
 
-ingenium_observe({
-  observation_type: "pattern", 
-  content: "User searches emails by combining subject keywords with date ranges (e.g., 'invoice AND month:june')",
-  importance: 6
-})
+For edge cases the extraction engine cannot catch, use the MCP tool directly:
+
+```
+ingenium_observe(observation_type: "preference", content: "...", importance: 7)
 ```
 
-The observation is stored in the DB with status "pending". The synthesis pipeline will process it later.
+The observation is stored with status "pending" and processed by the next synthesis cycle.
 
-### For the Orchestrator
+## How Synthesis Works
 
-Run `/synthesize` to trigger the synthesis pipeline, or wait for the background observer plugin to auto-trigger on session events.
+### Automation
 
-## Personality Traits
+The **scheduler** (`services/ingenium-api/lib/scheduler.ts`) runs every 15 minutes for all active projects. It executes three phases in sequence:
 
-The synthesis pipeline creates personality traits from observations. Each observation type maps to specific trait types:
+1. **Extraction** — Reads new OpenCode messages, creates observations via LLM.
+2. **Synthesis** — Processes pending observations into traits (Phase 1), then optionally creates skills (Phase 2).
+3. **Skill sync** — Bidirectional disk↔DB sync for all skills.
 
-| Trait Type | Generated from | Description |
-|------------|---------------|-------------|
+You can also trigger synthesis manually with `/synthesize` (or `ingenium_synthesis_run`).
+
+### Phase 1: Trait Consolidation
+
+`consolidateTraits()` (`packages/ingenium-core/lib/tools/synthesis-llm.ts`) sends each observation to the LLM. The LLM returns one of three decisions:
+
+- **CONFIRM** — Link to an existing trait (increases confidence by +0.15).
+- **CREATE** — Generate a new normalized trait statement (e.g., "User prefers to rebuild and test after every change.").
+- **IGNORE** — Noise, skip.
+
+Semantic merge prevents near-duplicate traits. If the LLM is unavailable, observations stay PENDING — no garbage heuristic fallback.
+
+### Confidence Model
+
+- Traits start at **0.10–0.15** confidence.
+- Each confirmation adds **+0.15**, capped at **0.95**.
+- Display threshold is **≥0.30** — freshly extracted traits are hidden until confirmed via 2+ observations.
+- 7-day inactivity **decay** drops confidence by -0.05.
+
+### Phase 2: Skill Synthesis
+
+If an LLM is configured, groups of 3+ related observations are sent with existing skills and traits as context. The LLM returns skills to create or update. Created skills use the `llm-synthesized` prefix and the split-skill format (SKILL.md + metadata.json + references/).
+
+### Personality Trait Types (illustrative)
+
+The LLM decides trait types during consolidation. This table shows the 10 trait types and the observation types that typically generate them — it is **illustrative, not deterministic**:
+
+| Trait Type | Typically generated from | Description |
+|------------|--------------------------|-------------|
 | `communication_style` | correction, preference | How the agent should communicate |
 | `code_preference` | preference, correction | Code style and formatting preferences |
 | `workflow_pattern` | pattern, workflow | User's development workflow patterns |
@@ -84,11 +104,11 @@ The synthesis pipeline creates personality traits from observations. Each observ
 
 ## MCP Tools
 
-### Core Observation & Personality Tools
+### Observation & Personality Tools
 
 | Tool | Purpose |
 |------|---------|
-| `ingenium_observe` | Store an observation (10 types available) |
+| `ingenium_observe` | Manually store an observation (exceptional cases only) |
 | `ingenium_observation_search` | FTS5 search across observations with ranking |
 | `ingenium_observation_list` | List observations with filters (type, status, importance) |
 | `ingenium_observation_stats` | Get pipeline statistics (pending/processed counts) |
@@ -97,74 +117,50 @@ The synthesis pipeline creates personality traits from observations. Each observ
 | `ingenium_extraction_run` | Trigger server-side extraction from OpenCode messages |
 | `ingenium_synthesis_run` | Trigger synthesis pipeline manually |
 | `ingenium_synthesis_status` | Check pipeline status and stats |
-
-### Email Client Tools (OAuth2 + IMAP/SMTP)
-
-The email client registers these tools for direct MCP access:
-
-| Tool | Purpose | Parameters | Returns |
-|------|---------|------------|---------|
-| `ingenium_email_accounts` | List all configured OAuth2 accounts | — | Array of `{ id, provider, emailAddress }` objects (Gmail/Outlook) |
-| `ingenium_email_send` | Compose and send new email via SMTP | `{ accountId: string, to: string[], subject: string, body: string, attachments?: File[] }` | Message ID or error message |
-| `ingenium_email_search` | Search emails across all accounts with FTS5 ranking | `{ query: string, limit?: number, accountId?: string }` | Array of matching email summaries with highlighted text |
-
-**Example usage in OpenCode:**
-```typescript
-// List configured OAuth2 accounts  
-const accounts = await ingenium_email_accounts();
-console.log("Configured:", accounts); // [{ id: "1", provider: "gmail", emailAddress: "user@gmail.com" }]
-
-// Search inbox for invoice-related emails with FTS5 ranking
-const results = await ingenium_email_search({ query: "invoice 2026", limit: 5 });
-results.forEach(msg => { console.log(`${msg.subject} from ${msg.sender}`); })
-
-// Compose and send message via SMTP (nodemailer)
-await ingenium_email_send({ 
-  accountId: accounts[0].id,
-  to: ["recipient@example.com"],
-  subject: "Project Update",
-  body: `Here's the latest status report...`
-});
-```
+| `ingenium_synthesis_cross_project` | Trigger cross-project synthesis across all projects |
 
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/api/v1/extraction/run` | POST | Trigger server-side extraction from OpenCode messages |
 | `/api/v1/observations` | GET | List observations with filters |
+| `/api/v1/observations` | DELETE | Delete all observations for a source (`?source=X` required) |
+| `/api/v1/observations/:id` | DELETE | Delete a single observation by ID |
 | `/api/v1/observations/search` | GET | FTS5 search across observations |
 | `/api/v1/observations/stats` | GET | Pipeline statistics |
 | `/api/v1/personality` | GET | Full personality profile |
+| `/api/v1/personality` | DELETE | Delete all personality traits for the project |
+| `/api/v1/personality/:id` | DELETE | Delete a single trait by ID |
 | `/api/v1/personality/traits` | GET | List personality traits |
 | `/api/v1/synthesis/run` | POST | Trigger synthesis pipeline |
+| `/api/v1/synthesis/cross-project` | POST | Trigger cross-project synthesis |
 | `/api/v1/synthesis/status` | GET | Check pipeline status |
-
-## Deprecation Notice
-
-The old `ingenium_learning_log` MCP tool is **deprecated** but still functional. It forwards to both the old `learnings` table and the new `observations` table for backward compatibility.
-
-**Migration path:**
-- Observations are now primarily created by the server-side extraction engine (Phase 0) which reads OpenCode messages
-- Manual `ingenium_observe()` calls are for exceptional cases only
-- The `/process-learnings` command and `detectSkillGap` system have been fully replaced by the LLM-driven synthesis pipeline; use `/synthesize` instead
 
 ## Dashboard Pages
 
 The Ingenium Dashboard provides visual management for the self-learning system:
 
-- **Observations Page** — View, search, and filter observations
-- **Personality Page** — View your agent's learned personality profile
-- **Learnings Page** — Deprecated, redirects to Observations page
+- **Observations** (`/observations`) — View, search, and filter observations with FTS5 search + type/status filters.
+- **Personality** (`/personality`) — View your agent's learned personality profile with confidence bars. Traits below the 0.30 display threshold can be toggled via the "N hidden" link.
+- **Pipeline** (`/pipeline`) — Git-workflow-style timeline of pipeline events (3s poll, filter pills, +N collapse).
+- **Learnings** (`/learnings`) — Deprecated; redirects to `/observations`.
 
 ## Code Location
 
 | Component | Path |
 |-----------|------|
-| Core tools | `packages/ingenium-core/lib/tools/observations.ts`, `personality.ts`, `synthesis.ts` |
-| API routes | `services/ingenium-api/lib/routes/observations.ts`, `personality.ts`, `synthesis.ts` |
-| MCP server | `services/ingenium-server/scripts/mcp-server.ts` (tools registered) |
-| Plugin | `.opencode/plugins/observer.ts`, `observer-core.ts` |
-| Dashboard pages | `services/ingenium-dashboard/src/app/observations/page.tsx`, `personality/page.tsx` |
+| Extraction engine | `packages/ingenium-core/lib/tools/extraction.ts` |
+| Synthesis LLM + trait consolidation | `packages/ingenium-core/lib/tools/synthesis-llm.ts` |
+| Core tools (observations, personality, synthesis) | `packages/ingenium-core/lib/tools/observations.ts`, `personality.ts`, `synthesis.ts` |
+| Scheduler (extraction → synthesis → skill-sync) | `services/ingenium-api/lib/scheduler.ts` |
+| API routes | `services/ingenium-api/lib/routes/extraction.ts`, `observations.ts`, `personality.ts`, `synthesis.ts` |
+| MCP server tools | `services/ingenium-server/lib/tools/extraction.ts` (extraction tool) |
+| Observer plugin | `packages/ingenium-extension/observer.ts` |
+| Auto-observer plugin (thin trigger) | `packages/ingenium-extension/auto-observer.ts` |
+| Skill-sync plugin | `packages/ingenium-extension/skill-sync.ts` |
+| DB migrations (pipeline events, FK) | `packages/ingenium-core/data/migrations/018_extraction_pipeline_events.sql`, `019_trait_exemplar_fk_setnull.sql` |
+| Dashboard pages | `services/ingenium-dashboard/src/app/observations/page.tsx`, `personality/page.tsx`, `pipeline/page.tsx` |
 
 ## Self-Improvement Commands
 
@@ -186,6 +182,6 @@ ingenium_observation_search("keyword")
 
 ## Related Documentation
 
-- `.opencode/skills/self-learning/SKILL.md` — Complete skill documentation
 - [docs/self-learning-pipeline.md](../self-learning-pipeline.md) — Complete pipeline reference (extraction engine, trait consolidation, skill synthesis)
-- .opencode/skills/skill-maintenance/SKILL.md — Skill lifecycle management
+- `.opencode/skills/self-learning/SKILL.md` — Complete skill documentation
+- `.opencode/skills/skill-maintenance/SKILL.md` — Skill lifecycle management
