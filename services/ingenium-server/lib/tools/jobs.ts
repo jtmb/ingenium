@@ -58,12 +58,12 @@ export async function jobRuns(project: string, jobId: string) {
 export async function jobRunLogs(project: string, runId: string, after?: number) {
   const params: Record<string, string> = { project };
   if (after !== undefined) params.after = String(after);
-  const res = await api.get(`/runs/${runId}/logs`, params);
+  const res = await api.get(`/jobs/runs/${runId}/logs`, params);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
 /** Cancel a running job. */
 export async function jobRunCancel(project: string, runId: string) {
-  const res = await api.post(`/runs/${runId}/cancel`, {}, { project });
+  const res = await api.post(`/jobs/runs/${runId}/cancel`, {}, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
