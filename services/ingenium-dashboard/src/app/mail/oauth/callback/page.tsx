@@ -27,8 +27,8 @@ function OAuthCallbackInner() {
       return;
     }
 
-    // Determine provider from state (or try each)
-    const provider = state || "gmail";
+    // Determine provider from localStorage (set before OAuth redirect)
+    const provider = localStorage.getItem("oauth_provider") || "gmail";
 
     const exchangeCode = async () => {
       try {
@@ -38,6 +38,7 @@ function OAuthCallbackInner() {
           body: JSON.stringify({
             provider,
             code,
+            state,
             redirectUri: window.location.origin + "/mail/oauth/callback",
           }),
         });
