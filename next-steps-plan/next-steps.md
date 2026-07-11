@@ -1,15 +1,11 @@
+# RULES:
+ - Please use @ingenium-software-engineer-premium for any explore tasks.
+ - You are in Plan mode. You do not edit, you spawn @ingenium-software-engineer-premium for any actions write/edit/explore actions.
+ - Your job is to be the brain of the operation.
+ - Map Out documentation and testing at every phase.
+# REQUEST/DIRECTIVE:
+One-shot every bug and feature listed in next-steps-plan/next-steps.md. Fix all 14 bugs across /projects, /skills, /logs, /mail, /mcp-servers, /observations, /personality, and the OpenCode client plugin error. Implement the full kanban board overhaul on /tasks with all 13 specified features and build the new /jobs page. No prioritization, no scoping down — everything in one pass a true one shot. You will Architect the entire plan and split it into phases for me to hand off to my orchestrator. The orchestrator is deepseek v4 pro, you are fable 5. The orchestrator is going to be significantly worse than you at problem solving so make sure you think throug those isses and map out a solid guided plan for the bellow:
 
-### DOCUMENTATION REFERENCES:
-
-MCP Tools : `docs/HOW-TO/mcp-tools.md`
-ARCHITECTURE: `docs/ARCHITECTURE.md`
-Synthesis: `docs/HOW-TO/synthesis.md`
-Personality: `docs/HOW-TO/personality.md`
-Conventions: `docs/CONVENTIONS.md`
-README: `README.md`
-EMAIL: `docs/HOW-TO/email.md`
-SELF LEARNING PIPELINE: `docs/self-learning-pipeline.md`
----
 
 ## Bugs:
 
@@ -141,3 +137,15 @@ SELF LEARNING PIPELINE: `docs/self-learning-pipeline.md`
 3. All mcp tools available for use. Agents can be configured as jobs that run on cron or based on triggered event. 
 4. Please include a log output screen of the job like jenkins does. We need to see what the agents are doing during the jobs.
 
+### Documentation References
+
+| Resource | Path |
+|----------|------|
+| MCP Tools | [`docs/HOW-TO/mcp-tools.md`](docs/HOW-TO/mcp-tools.md) |
+| Architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Synthesis | [`docs/HOW-TO/synthesis.md`](docs/HOW-TO/synthesis.md) |
+| Personality | [`docs/HOW-TO/personality.md`](docs/HOW-TO/personality.md) |
+| Conventions | [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) |
+| README | [`README.md`](README.md) |
+| Email | [`docs/HOW-TO/email.md`](docs/HOW-TO/email.md) |
+| Self-Learning Pipeline | [`docs/self-learning-pipeline.md`](docs/self-learning-pipeline.md) |
