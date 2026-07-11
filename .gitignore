@@ -44,9 +44,12 @@ build/
 temp
 
 # ── SQLite runtime files ──────────────────────────────────
-data*
+/data*
 *.db-shm
 *.db-wal
+
+# ── Migration files are tracked — counteracts /data* ─────
+!/packages/ingenium-core/data/migrations/
 
 # ── OpenCode session logs ─────────────────────────────────
 session-*.md

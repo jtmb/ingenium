@@ -188,7 +188,8 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
   if (synthesisLlm.isLLMSynthesisConfigured(projectId)) {
     try {
       const config = synthesisLlm.getLLMSynthesisConfig(projectId);
-      const endpointSetting = getSetting(projectId, "synthesis_endpoint");
+      const gid = projects.getGlobalProject()?.id;
+      const endpointSetting = gid ? getSetting(gid, "synthesis_endpoint") : undefined;
       if (config && endpointSetting) {
         const existingTraits = personality.getTraits(projectId);
         const existingSkillsList = skills.listSkills(projectId);
