@@ -116,7 +116,7 @@ export default function SkillsPage() {
       {/* Search + Upload */}
       <div className="flex gap-2 items-center">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border p-2 rounded flex-1" />
-        <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white text-gray-600">
+        <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white text-gray-600 hover:bg-gray-50 cursor-pointer">
           <option value="alpha">Alphabetical</option>
           <option value="newest">Newest first</option>
         </select>

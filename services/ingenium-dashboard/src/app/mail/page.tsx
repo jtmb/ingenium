@@ -6,6 +6,7 @@ import FolderSidebar from "./components/FolderSidebar";
 import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
 import EmptyState from "./components/EmptyState";
+import AccountSetup from "./components/AccountSetup";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 const PROJECT = "gh-llm-bootstrap";
@@ -152,7 +153,31 @@ export default function MailPage() {
         <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
         <EmptyState
           message="No email accounts configured"
-          action={{ label: "Add Account", onClick: () => router.push("/mail/compose") }}
+          action={{ label: "Add Account", onClick: () => setShowAccountSetup(true) }}
+        />
+      </div>
+    );
+  }
+
+  if (showAccountSetup) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
+        <AccountSetup
+          onComplete={async () => {
+            setShowAccountSetup(false);
+            try {
+              const res = await fetch(`${API_BASE}/emails/accounts?project=${PROJECT}`);
+              if (res.ok) {
+                const data = await res.json();
+                setAccounts(data.data || []);
+                if (data.data?.length > 0) {
+                  setSelectedAccount(data.data[0].id);
+                }
+              }
+            } catch {}
+          }}
+          onCancel={() => setShowAccountSetup(false)}
         />
       </div>
     );

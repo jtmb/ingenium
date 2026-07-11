@@ -196,6 +196,29 @@ Forms with multiple fields (Server Add, Learnings Log, Settings) use a stacked c
 
 ---
 
+## Select / Dropdown Styling
+
+All `<select>` elements must include a hover state consistent with the universal card styling.
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Frame | 1px light gray border, white background, rounded | `border border-gray-200 rounded bg-white` |
+| Padding | 8px horizontal, 6px vertical | `px-3 py-1.5` or `p-2` |
+| Text | 14px | `text-sm` |
+| Hover Background | Light gray | `hover:bg-gray-50` |
+| Cursor | Pointer | `cursor-pointer` |
+
+> 🔴 **Rule**: Every `<select>` element MUST have `hover:bg-gray-50 cursor-pointer`. No exceptions. This applies to sort dropdowns, filter selects, provider/model pickers, and any other select across all pages.
+
+**Minimum required classes:**
+```
+border border-gray-200 rounded text-sm bg-white hover:bg-gray-50 cursor-pointer
+```
+
+**Pages with selects:** MCP (category filter), Observations (status + type filters), Personality (sort), Skills (sort), Agents (category + mode), Settings (provider + model + interval + backup), Mail (composer + sidebar).
+
+---
+
 ## Grid Exceptions
 
 The general grid rule (Rule #1) sets `md:grid-cols-3` for card grids. Three pages deviate:

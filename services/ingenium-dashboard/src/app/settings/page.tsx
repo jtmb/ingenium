@@ -263,7 +263,7 @@ export default function SettingsPage() {
               setEndpoint((firstModel?.[1] as any)?.api?.url || "");
               setSelectedModel(firstModel?.[0] || "");
             }
-          }} className="border p-2 rounded w-full text-sm">
+          }} className="border p-2 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
             <option value="">— No LLM (heuristics only) —</option>
             <option value="__custom__">— Custom Provider —</option>
             {(() => {
@@ -298,7 +298,7 @@ export default function SettingsPage() {
         {!isCustom && providerId && providerModels.length > 0 && (
           <div>
             <label className="block text-sm font-medium">Model</label>
-            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm">
+            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
               {providerModels.map(([key, val]) => (
                 <option key={key} value={key}>{key} {(val as any)?.id ? `(${(val as any).id})` : ""}</option>
               ))}
@@ -334,7 +334,7 @@ export default function SettingsPage() {
 
         <div>
           <label className="block text-sm font-medium mb-1">Run every</label>
-          <select value={String(intervalMin)} onChange={(e) => { setIntervalMin(Number(e.target.value)); handleIntervalSave(Number(e.target.value)); }} className="border p-2 rounded w-48 text-sm">
+          <select value={String(intervalMin)} onChange={(e) => { setIntervalMin(Number(e.target.value)); handleIntervalSave(Number(e.target.value)); }} className="border p-2 rounded w-48 text-sm hover:bg-gray-50 cursor-pointer">
             <option value="5">5 minutes</option>
             <option value="15">15 minutes</option>
             <option value="30">30 minutes</option>
@@ -367,7 +367,7 @@ export default function SettingsPage() {
                   } else {
                     setBackupSelectedModel("");
                   }
-                }} className="border p-2 rounded w-full text-sm">
+                }} className="border p-2 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
                   <option value="">— None —</option>
                   <option value="__custom__">— Custom Provider —</option>
                   {(() => {
@@ -399,7 +399,7 @@ export default function SettingsPage() {
               {backupProviderId && backupModels.length > 0 && (
                 <div>
                   <label className="block text-sm font-medium">Model</label>
-                  <select value={backupSelectedModel} onChange={(e) => setBackupSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm">
+                  <select value={backupSelectedModel} onChange={(e) => setBackupSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm hover:bg-gray-50 cursor-pointer">
                     {backupModels.map(([key, val]) => (
                       <option key={key} value={key}>{key} {(val as any)?.id ? `(${(val as any).id})` : ""}</option>
                     ))}
