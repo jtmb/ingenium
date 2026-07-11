@@ -17,5 +17,6 @@ export * as pipelineEvents from "./tools/pipeline-events.js";
 export * as commands from "./tools/commands.js";
 export * as configs from "./tools/configs.js";
 export * as extraction from "./tools/extraction.js";
+export * as jobs from "./tools/jobs.js";
 export * as mcpToolStates from "./tools/mcp-tool-states.js";
 //# sourceMappingURL=index.d.ts.map

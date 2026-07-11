@@ -24,6 +24,7 @@ import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
 import { logsRouter } from "../lib/routes/logs.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
 import { extractionRouter } from "../lib/routes/extraction.js";
+import { jobsRouter } from "../lib/routes/jobs.js";
 import { startScheduler } from "../lib/scheduler.js";
 
 const app = express();
@@ -58,6 +59,7 @@ app.use("/api/v1/mcp-tools", mcpToolsRouter);
 app.use("/api/v1/logs", logsRouter);
 app.use("/api/v1/opencode", opencodeRouter);
 app.use("/api/v1/extraction", extractionRouter);
+app.use("/api/v1/jobs", jobsRouter);
 
 // Error handler
 app.use(errorHandler);

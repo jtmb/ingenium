@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-      for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql"]) {
+      for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -245,6 +245,16 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "020_kanban_board.sql"), "utf-8");
       db.exec(sql);
       logger.info("db", "Applied migration 020_kanban_board.sql");
+    }
+
+    // Check if jobs table exists (migration 021)
+    const jobsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='jobs'"
+    ).get() as { count: number };
+    if (jobsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "021_jobs.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 021_jobs.sql");
     }
   }
 }

@@ -290,6 +290,99 @@ export declare const BoardConfigSchema: z.ZodObject<{
     custom_field_defs?: string | undefined;
 }>;
 export type BoardConfig = z.infer<typeof BoardConfigSchema>;
+export declare const JobSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    name: z.ZodString;
+    description: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    agent: z.ZodString;
+    prompt_template: z.ZodString;
+    schedule_cron: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    trigger_event: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    timeout_minutes: z.ZodDefault<z.ZodNumber>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    name: string;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    enabled: boolean;
+    agent: string;
+    prompt_template: string;
+    timeout_minutes: number;
+    description?: string | null | undefined;
+    schedule_cron?: string | null | undefined;
+    trigger_event?: string | null | undefined;
+}, {
+    id: string;
+    name: string;
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    agent: string;
+    prompt_template: string;
+    description?: string | null | undefined;
+    enabled?: boolean | undefined;
+    schedule_cron?: string | null | undefined;
+    trigger_event?: string | null | undefined;
+    timeout_minutes?: number | undefined;
+}>;
+export type Job = z.infer<typeof JobSchema>;
+export declare const JobRunSchema: z.ZodObject<{
+    id: z.ZodString;
+    job_id: z.ZodString;
+    status: z.ZodDefault<z.ZodEnum<["queued", "running", "success", "failed", "timeout", "cancelled"]>>;
+    trigger: z.ZodEnum<["manual", "cron", "event"]>;
+    started_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    finished_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    exit_code: z.ZodNullable<z.ZodOptional<z.ZodNumber>>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    status: "failed" | "queued" | "running" | "success" | "timeout" | "cancelled";
+    job_id: string;
+    trigger: "manual" | "cron" | "event";
+    started_at?: string | null | undefined;
+    finished_at?: string | null | undefined;
+    exit_code?: number | null | undefined;
+}, {
+    id: string;
+    created_at: string;
+    job_id: string;
+    trigger: "manual" | "cron" | "event";
+    status?: "failed" | "queued" | "running" | "success" | "timeout" | "cancelled" | undefined;
+    started_at?: string | null | undefined;
+    finished_at?: string | null | undefined;
+    exit_code?: number | null | undefined;
+}>;
+export type JobRun = z.infer<typeof JobRunSchema>;
+export declare const JobRunLogSchema: z.ZodObject<{
+    id: z.ZodNumber;
+    run_id: z.ZodString;
+    seq: z.ZodNumber;
+    stream: z.ZodEnum<["stdout", "stderr"]>;
+    line: z.ZodString;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: number;
+    created_at: string;
+    run_id: string;
+    seq: number;
+    stream: "stdout" | "stderr";
+    line: string;
+}, {
+    id: number;
+    created_at: string;
+    run_id: string;
+    seq: number;
+    stream: "stdout" | "stderr";
+    line: string;
+}>;
+export type JobRunLog = z.infer<typeof JobRunLogSchema>;
 export declare const ContextSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
@@ -334,8 +427,8 @@ export declare const ServerSchema: z.ZodObject<{
     created_at: string;
     project_id: string;
     enabled: boolean;
-    command: string;
     running: boolean;
+    command: string;
     args?: string | undefined;
     env?: string | undefined;
 }, {
@@ -346,9 +439,9 @@ export declare const ServerSchema: z.ZodObject<{
     command: string;
     source?: "opencode" | "ingenium" | undefined;
     enabled?: boolean | undefined;
+    running?: boolean | undefined;
     args?: string | undefined;
     env?: string | undefined;
-    running?: boolean | undefined;
 }>;
 export type Server = z.infer<typeof ServerSchema>;
 export declare const ObservationSchema: z.ZodObject<{
@@ -364,7 +457,7 @@ export declare const ObservationSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    source: "auto-observer" | "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual";
+    source: "auto-observer" | "agent" | "manual" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import";
     id: number;
     created_at: string;
     updated_at: string;
@@ -382,7 +475,7 @@ export declare const ObservationSchema: z.ZodObject<{
     project_id: string;
     content: string;
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
-    source?: "auto-observer" | "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | undefined;
+    source?: "auto-observer" | "agent" | "manual" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | undefined;
     status?: "pending" | "processed" | "failed" | "skipped" | undefined;
     session_id?: string | undefined;
     importance?: number | undefined;

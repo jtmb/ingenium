@@ -99,6 +99,38 @@ export const BoardConfigSchema = z.object({
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
 });
+export const JobSchema = z.object({
+    id: z.string(),
+    project_id: z.string(),
+    name: z.string().min(1).max(128),
+    description: z.string().optional().nullable(),
+    agent: z.string().min(1),
+    prompt_template: z.string().min(1),
+    schedule_cron: z.string().optional().nullable(),
+    trigger_event: z.string().optional().nullable(),
+    enabled: z.coerce.boolean().default(true),
+    timeout_minutes: z.number().int().min(1).default(30),
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+});
+export const JobRunSchema = z.object({
+    id: z.string(),
+    job_id: z.string(),
+    status: z.enum(["queued", "running", "success", "failed", "timeout", "cancelled"]).default("queued"),
+    trigger: z.enum(["manual", "cron", "event"]),
+    started_at: z.string().datetime().optional().nullable(),
+    finished_at: z.string().datetime().optional().nullable(),
+    exit_code: z.number().int().optional().nullable(),
+    created_at: z.string().datetime(),
+});
+export const JobRunLogSchema = z.object({
+    id: z.number(),
+    run_id: z.string(),
+    seq: z.number(),
+    stream: z.enum(["stdout", "stderr"]),
+    line: z.string(),
+    created_at: z.string().datetime(),
+});
 export const ContextSchema = z.object({
     id: z.number(),
     project_id: z.string(),

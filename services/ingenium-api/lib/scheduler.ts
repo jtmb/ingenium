@@ -1,4 +1,5 @@
-import { settings, projects, logger, extraction, synthesis } from "ingenium-core";
+import { settings, projects, logger, extraction, synthesis, jobs } from "ingenium-core";
+import { executeJobRun } from "./job-runner.js";
 
 const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
 
@@ -95,6 +96,107 @@ function scheduleNext(port: number) {
   }
 }
 
+// ============================================================================
+// Job cron scheduler — runs every 60 seconds on a separate cycle
+// ============================================================================
+
+// Minimal 5-field cron matcher.
+// Format: minute hour day-of-month month day-of-week
+// Supports: *, N, step (slash N), N-M (range), N,M (list)
+function matchesCron(cron: string, date: Date): boolean {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+
+  const [min, hour, dom, month, dow] = parts;
+  if (!min || !hour || !dom || !month || !dow) return false;
+
+  return matchField(min, date.getMinutes(), 0, 59)
+    && matchField(hour, date.getHours(), 0, 23)
+    && matchField(dom, date.getDate(), 1, 31)
+    && matchField(month, date.getMonth() + 1, 1, 12)
+    && matchField(dow, date.getDay(), 0, 6);
+}
+
+function matchField(pattern: string, value: number, _min: number, _max: number): boolean {
+  if (pattern === "*") return true;
+
+  // Handle comma-separated lists: 1,2,3
+  if (pattern.includes(",")) {
+    return pattern.split(",").some(p => matchField(p.trim(), value, _min, _max));
+  }
+
+  // Handle step: */5
+  if (pattern.startsWith("*/")) {
+    const step = parseInt(pattern.slice(2), 10);
+    if (isNaN(step) || step <= 0) return false;
+    return value % step === 0;
+  }
+
+  // Handle range: 1-5
+  if (pattern.includes("-")) {
+    const [start, end] = pattern.split("-").map(Number);
+    if (start === undefined || end === undefined || isNaN(start) || isNaN(end)) return false;
+    return value >= start && value <= end;
+  }
+
+  // Exact number
+  const n = parseInt(pattern, 10);
+  if (isNaN(n)) return false;
+  return value === n;
+}
+
+function runJobScheduler(): void {
+  try {
+    const allProjects = projects.listProjects();
+    const activeProjects = allProjects.filter(p => !p.archived_at);
+    const now = new Date();
+
+    for (const p of activeProjects) {
+      const projectJobs = jobs.listJobs(p.id);
+
+      for (const job of projectJobs) {
+        // Skip disabled jobs
+        if (!job.enabled) continue;
+
+        // Skip jobs without a cron schedule
+        if (!job.schedule_cron || job.schedule_cron.trim() === "") continue;
+
+        // Check if this job is due to run now (current minute matches)
+        if (!matchesCron(job.schedule_cron, now)) continue;
+
+        // Start the run
+        const result = jobs.startJobRun(p.id, job.id, "cron");
+
+        if ("reason" in result) {
+          // Already running or disabled — log and skip
+          logger.debug("job-scheduler", `Job "${job.name}" skipped: ${result.reason}`);
+          continue;
+        }
+
+        logger.info("job-scheduler", `Triggered cron run ${result.id} for job "${job.name}"`);
+
+        // Fire-and-forget the execution
+        executeJobRun(result.id, job, job.prompt_template).catch((err: Error) => {
+          logger.error("job-scheduler", `Fire-and-forget executeJobRun failed: ${err.message}`);
+        });
+      }
+    }
+  } catch (err: any) {
+    logger.warn("job-scheduler", `Job scheduler tick failed: ${err.message}`);
+  }
+
+  // Schedule next tick
+  scheduleJobTick();
+}
+
+function scheduleJobTick(): void {
+  setTimeout(runJobScheduler, 60_000);
+}
+
+// ============================================================================
+// Main scheduler entry point
+// ============================================================================
+
 export function startScheduler(port: number) {
   logger.info(
     "scheduler",
@@ -102,4 +204,8 @@ export function startScheduler(port: number) {
   );
   setTimeout(() => triggerSynthesisForAllProjects(port), 30000);
   setTimeout(() => scheduleNext(port), 30000);
+
+  // Start the job cron scheduler on a separate 60s cycle
+  logger.info("scheduler", "Job cron scheduler started (60s cycle)");
+  setTimeout(scheduleJobTick, 10_000); // Start after a short initial delay
 }
