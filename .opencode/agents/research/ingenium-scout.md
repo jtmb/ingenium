@@ -2,7 +2,7 @@
 name: ingenium-scout
 description: "RAG-aware research agent with persistent memory via Thread MCP and web search capability. Searches past context, retrieves decisions, fetches external docs and current information from the web, saves findings to Thread for cross-session continuity."
 mode: subagent
-model: deepseek/deepseek-v4-flash
+model: deepseek-v4-flash-free
 # model: lmstudio/qwen/qwen3.5-9b  # looping issues — switched to Zen free tier
 permission:
   read: allow
