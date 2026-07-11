@@ -66,41 +66,69 @@ async function detectPatterns(dbPath: string): Promise<Array<{ type: string; con
     const Database = (await import("better-sqlite3")).default;
     const db = new Database(dbPath, { readonly: true });
 
-    // Get recent user messages (last 50)
-    const messages = db.prepare(
-      "SELECT data FROM message ORDER BY time_created DESC LIMIT 50"
-    ).all() as Array<{ data: string }>;
+    // Get recent user messages — try multiple tables
+    let userTexts: string[] = [];
+
+    // 1. Check session_input.prompt (primary — contains actual user text)
+    try {
+      const inputs = db.prepare(
+        "SELECT prompt FROM session_input WHERE prompt IS NOT NULL AND prompt != '' ORDER BY time_created DESC LIMIT 30"
+      ).all() as Array<{ prompt: string }>;
+      for (const r of inputs) {
+        if (r.prompt && r.prompt.length > 10) userTexts.push(r.prompt);
+      }
+    } catch { /* table may not exist */ }
+
+    // 2. Check part.data for user text
+    if (userTexts.length === 0) {
+      try {
+        const parts = db.prepare(
+          "SELECT data FROM part ORDER BY time_created DESC LIMIT 100"
+        ).all() as Array<{ data: string }>;
+        for (const r of parts) {
+          try {
+            const d = JSON.parse(r.data);
+            if (d.type === "text" && d.text && d.text.length > 10) {
+              userTexts.push(d.text);
+            }
+          } catch {}
+        }
+      } catch { /* table may not exist */ }
+    }
+
+    // 3. Fallback: check message.data for user content
+    if (userTexts.length === 0) {
+      try {
+        const messages = db.prepare(
+          "SELECT data FROM message ORDER BY time_created DESC LIMIT 100"
+        ).all() as Array<{ data: string }>;
+        for (const row of messages) {
+          try {
+            const parsed = JSON.parse(row.data);
+            if (parsed.role === "user" && parsed.content && parsed.content.length > 10) {
+              userTexts.push(parsed.content);
+            }
+          } catch {}
+        }
+      } catch { /* table or column may not exist */ }
+    }
 
     db.close();
 
+    // Run pattern detection on collected texts
     const seen = new Set<string>();
-
-    for (const row of messages) {
-      let parsed: any;
-      try {
-        parsed = JSON.parse(row.data);
-      } catch {
-        continue;
-      }
-
-      // Only process user messages with text content
-      const role = parsed.role;
-      const content = typeof parsed.content === "string" ? parsed.content : "";
-      if (role !== "user" || !content || content.length < 10) continue;
-
-      // Check against each pattern type
+    for (const text of userTexts) {
       for (const [type, regexps] of Object.entries(PATTERNS)) {
         for (const regex of regexps) {
-          const match = content.match(regex);
+          const match = text.match(regex);
           if (match) {
-            // Build a short, meaningful observation
-            const snippet = content.length > 200 ? content.substring(0, 200) : content;
+            const snippet = text.length > 200 ? text.substring(0, 200) : text;
             const key = `${type}:${snippet.substring(0, 60)}`;
             if (!seen.has(key)) {
               seen.add(key);
               results.push({ type, content: snippet });
             }
-            break; // one match per type per message
+            break;
           }
         }
       }
