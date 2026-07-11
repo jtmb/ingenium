@@ -10,6 +10,10 @@ export default function SettingsPage() {
   const [retentionDays, setRetentionDays] = useState(7);
   const [saved, setSaved] = useState(false);
 
+  // Synthesis interval state
+  const [intervalMin, setIntervalMin] = useState(15);
+  const [intervalSaved, setIntervalSaved] = useState(false);
+
   // Synthesis LLM state
   const [providers, setProviders] = useState<any[]>([]);
   const [providerId, setProviderId] = useState("");
@@ -73,6 +77,20 @@ export default function SettingsPage() {
       }
     }).catch(() => {});
   }, []);
+
+  // Fetch saved synthesis interval
+  useEffect(() => {
+    api.settings.get("synthesis_interval_ms", "global-default").then((r) => {
+      const ms = parseInt(r.data.value, 10);
+      if (!isNaN(ms) && ms >= 0) setIntervalMin(ms / 60000);
+    }).catch(() => {});
+  }, []);
+
+  const handleIntervalSave = async (min: number) => {
+    await api.settings.set("synthesis_interval_ms", String(min * 60000), "global-default");
+    setIntervalSaved(true);
+    setTimeout(() => setIntervalSaved(false), 2000);
+  };
 
   const saveLlmConfig = async () => {
     setSavingLlm(true);
@@ -245,6 +263,19 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Run every</label>
+          <select value={String(intervalMin)} onChange={(e) => { setIntervalMin(Number(e.target.value)); handleIntervalSave(Number(e.target.value)); }} className="border p-2 rounded w-48 text-sm">
+            <option value="5">5 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="240">4 hours</option>
+            <option value="0">Disabled</option>
+          </select>
+          {intervalSaved && <span className="text-sm text-green-600 ml-2">Saved!</span>}
+        </div>
 
         <div className="flex gap-2 items-center">
           <button onClick={saveLlmConfig} disabled={savingLlm} className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 text-sm">
