@@ -422,7 +422,7 @@ export default function SettingsPage() {
         )}
         {!isCustom && selectedProvider && (
           <div className="text-xs text-gray-400">
-            Using <strong>{Object.keys(selectedProvider.models || {})[0]}</strong> from {selectedProvider.name} via {endpoint}
+            Using <strong>{selectedModel || Object.keys(selectedProvider.models || {})[0]}</strong> from {selectedProvider.name} via {endpoint}
           </div>
         )}
         {providerId && (
