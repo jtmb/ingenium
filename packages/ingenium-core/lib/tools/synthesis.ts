@@ -4,6 +4,7 @@ import * as personality from "./personality.js";
 import * as skills from "./skills.js";
 import * as projects from "./projects.js";
 import * as synthesisLlm from "./synthesis-llm.js";
+import type { SynthesisLLMResult } from "./synthesis-llm.js";
 import { getSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
 
@@ -198,18 +199,49 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
         const existingTraits = personality.getTraits(projectId);
         const existingSkillsList = skills.listSkills(projectId);
 
-        const llmResult = await synthesisLlm.callSynthesisLLM(
-          batch, // the observations that were just processed
-          existingSkillsList.map(s => ({ name: s.name, description: s.description })),
-          existingTraits.map(t => ({
-            trait_type: t.trait_type,
-            trait_value: t.trait_value,
-            confidence: t.confidence
-          })),
-          endpointSetting,
-          config.model,
-          config.apiKey,
-        );
+        let llmResult: SynthesisLLMResult;
+        try {
+          llmResult = await synthesisLlm.callSynthesisLLM(
+            batch, // the observations that were just processed
+            existingSkillsList.map(s => ({ name: s.name, description: s.description })),
+            existingTraits.map(t => ({
+              trait_type: t.trait_type,
+              trait_value: t.trait_value,
+              confidence: t.confidence
+            })),
+            endpointSetting,
+            config.model,
+            config.apiKey,
+          );
+        } catch (primaryErr: any) {
+          // Try backup provider if primary fails
+          const backupModel = gid ? getSetting(gid, "synthesis_backup_model") : undefined;
+          const backupEndpoint = gid ? getSetting(gid, "synthesis_backup_endpoint") : undefined;
+          const backupApiKey = gid ? getSetting(gid, "synthesis_backup_api_key") : undefined;
+
+          if (backupModel && backupEndpoint) {
+            try {
+              llmResult = await synthesisLlm.callSynthesisLLM(
+                batch,
+                existingSkillsList.map(s => ({ name: s.name, description: s.description })),
+                existingTraits.map(t => ({
+                  trait_type: t.trait_type,
+                  trait_value: t.trait_value,
+                  confidence: t.confidence
+                })),
+                backupEndpoint,
+                backupModel,
+                backupApiKey || undefined,
+              );
+            } catch (backupErr: any) {
+              // Both primary and backup failed
+              throw new Error(`Synthesis LLM failed (primary: ${primaryErr.message}, backup: ${backupErr.message})`);
+            }
+          } else {
+            // No backup configured — re-throw primary error
+            throw primaryErr;
+          }
+        }
 
         // Execute skill create operations
         for (const skillToCreate of llmResult.skills_to_create) {
