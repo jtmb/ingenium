@@ -10,6 +10,7 @@ import { setSetting } from "../lib/tools/settings.js";
 
 let tempDir: string;
 let projectId: string;
+let globalProjectId: string;
 let mockServer: Server;
 let mockPort: number;
 let mockResponsePayload: any;
@@ -47,6 +48,8 @@ beforeAll(async () => {
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
   const project = createProject("test-project");
   projectId = project.id;
+  const globalProject = createProject("global-default", true);
+  globalProjectId = globalProject.id;
 
   // Spin up a mock HTTP server that returns controlled LLM responses.
   await new Promise<void>((resolve) => {
@@ -379,33 +382,31 @@ describe("synthesis LLM", () => {
 
 describe("LLM synthesis configuration", () => {
   it("reports not configured when no settings exist", () => {
-    expect(isLLMSynthesisConfigured(projectId)).toBe(false);
+    expect(isLLMSynthesisConfigured("unused-project-id")).toBe(false);
   });
 
   it("getLLMSynthesisConfig returns null when not configured", () => {
-    expect(getLLMSynthesisConfig(projectId)).toBeNull();
+    expect(getLLMSynthesisConfig("unused-project-id")).toBeNull();
   });
 
-  it("reports configured when both settings exist", () => {
-    setSetting(projectId, "synthesis_model", "test-model");
-    setSetting(projectId, "synthesis_api_key", "test-key");
-    expect(isLLMSynthesisConfigured(projectId)).toBe(true);
+  it("reports configured when both settings exist on global project", () => {
+    setSetting(globalProjectId, "synthesis_model", "test-model");
+    setSetting(globalProjectId, "synthesis_api_key", "test-key");
+    expect(isLLMSynthesisConfigured("unused-project-id")).toBe(true);
   });
 
-  it("getLLMSynthesisConfig returns config when configured", () => {
-    setSetting(projectId, "synthesis_model", "gpt-4o");
-    setSetting(projectId, "synthesis_api_key", "sk-test");
-    const config = getLLMSynthesisConfig(projectId);
+  it("getLLMSynthesisConfig returns config when configured on global project", () => {
+    setSetting(globalProjectId, "synthesis_model", "gpt-4o");
+    setSetting(globalProjectId, "synthesis_api_key", "sk-test");
+    const config = getLLMSynthesisConfig("unused-project-id");
     expect(config).not.toBeNull();
     expect(config!.model).toBe("gpt-4o");
     expect(config!.apiKey).toBe("sk-test");
   });
 
-  it("reports not configured when only model is set", () => {
-    setSetting(projectId, "synthesis_model", "test-model");
-    // Remove the apiKey setting by setting projectId again with only model
-    // isLLMSynthesisConfigured checks both model AND apiKey
-    expect(isLLMSynthesisConfigured("non-existent-project")).toBe(false);
+  it("reports configured with only model set on global project (apiKey optional)", () => {
+    setSetting(globalProjectId, "synthesis_model", "test-model");
+    expect(isLLMSynthesisConfigured("unused-project-id")).toBe(true);
   });
 });
 

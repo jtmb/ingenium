@@ -1,5 +1,6 @@
 import { Observation, PersonalityTrait, Skill } from "../schema.js";
 import { getSetting } from "./settings.js";
+import { getGlobalProject } from "./projects.js";
 import { logger } from "../logger.js";
 
 /**
@@ -298,18 +299,21 @@ function tryParseJSON(text: string): any {
 }
 
 /**
- * Check if LLM synthesis is configured for a project.
+ * Check if LLM synthesis is configured for the global project.
  */
-export function isLLMSynthesisConfigured(projectId: string): boolean {
-  const model = getSetting(projectId, "synthesis_model");
-  return !!model;
+export function isLLMSynthesisConfigured(_projectId: string): boolean {
+  const gid = getGlobalProject()?.id;
+  return gid ? !!getSetting(gid, "synthesis_model") : false;
 }
 
 /**
- * Get the configured LLM synthesis settings.
+ * Get the configured LLM synthesis settings from the global project.
  */
-export function getLLMSynthesisConfig(projectId: string): { model: string; apiKey?: string } | null {
-  const model = getSetting(projectId, "synthesis_model");
+export function getLLMSynthesisConfig(_projectId: string): { model: string; apiKey?: string } | null {
+  const gid = getGlobalProject()?.id;
+  if (!gid) return null;
+  const model = getSetting(gid, "synthesis_model");
+  const apiKey = getSetting(gid, "synthesis_api_key");
   if (!model) return null;
-  return { model, apiKey: getSetting(projectId, "synthesis_api_key") };
+  return { model, apiKey: apiKey || undefined };
 }

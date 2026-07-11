@@ -1,14 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useProject } from "../../lib/ProjectContext";
 import { api } from "../../lib/api";
 
 /**
  * Settings page — user-configurable preferences for the Ingenium dashboard.
- * Settings are stored per-project in the settings table (key-value).
+ * Settings are stored globally (global-default project) in the settings table (key-value).
  */
 export default function SettingsPage() {
-  const project = useProject();
   const [retentionDays, setRetentionDays] = useState(7);
   const [saved, setSaved] = useState(false);
 
@@ -26,15 +24,15 @@ export default function SettingsPage() {
   const selectedProvider = providers.find(p => p.id === providerId);
 
   useEffect(() => {
-    api.settings.get("archive_retention_days", project).then((r) => {
+    api.settings.get("archive_retention_days", "global-default").then((r) => {
       const val = parseInt(r.data.value, 10);
       if (!isNaN(val)) setRetentionDays(val);
     }).catch(() => {});
-  }, [project]);
+  }, []);
 
   const save = async (days: number) => {
     setRetentionDays(days);
-    await api.settings.set("archive_retention_days", String(days), project);
+    await api.settings.set("archive_retention_days", String(days), "global-default");
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -49,12 +47,11 @@ export default function SettingsPage() {
 
   // Fetch saved synthesis config
   useEffect(() => {
-    if (!project) return;
     Promise.all([
-      api.settings.get("synthesis_provider", project),
-      api.settings.get("synthesis_api_key", project),
-      api.settings.get("synthesis_endpoint", project),
-      api.settings.get("synthesis_model", project),
+      api.settings.get("synthesis_provider", "global-default"),
+      api.settings.get("synthesis_api_key", "global-default"),
+      api.settings.get("synthesis_endpoint", "global-default"),
+      api.settings.get("synthesis_model", "global-default"),
     ]).then(([p, k, e, m]) => {
       const pid = p.data?.value || "";
       setProviderId(pid);
@@ -63,7 +60,7 @@ export default function SettingsPage() {
       if (e.data?.value) setEndpoint(e.data.value);
       if (pid === "__custom__" && m.data?.value) setCustomModel(m.data.value);
     }).catch(() => {});
-  }, [project]);
+  }, []);
 
   const saveLlmConfig = async () => {
     setSavingLlm(true);
@@ -81,10 +78,10 @@ export default function SettingsPage() {
         ep = firstModel ? (firstModel as any).api?.url || "" : "";
       }
 
-      await api.settings.set("synthesis_model", modelId, project);
-      await api.settings.set("synthesis_provider", providerId, project);
-      if (apiKeyState) await api.settings.set("synthesis_api_key", apiKeyState, project);
-      await api.settings.set("synthesis_endpoint", ep, project);
+      await api.settings.set("synthesis_model", modelId, "global-default");
+      await api.settings.set("synthesis_provider", providerId, "global-default");
+      if (apiKeyState) await api.settings.set("synthesis_api_key", apiKeyState, "global-default");
+      await api.settings.set("synthesis_endpoint", ep, "global-default");
       setEndpoint(ep);
       setLlmStatus("✅ Configuration saved");
     } catch (err: any) {
