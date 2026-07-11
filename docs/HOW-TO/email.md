@@ -19,43 +19,69 @@ Before using the email client:
    - Gmail redirect URI: `http://localhost:3000/mail/oauth/callback`
    - Outlook (Azure) same callback URI
 
-2. **Environment Variables** — Add to `.env`:
+2. **Environment Variables** — Define these before starting the Docker container:
 ```bash
-# Required for email client operation
-GOOGLE_OAUTH_CLIENT_ID=your-google-oauth-client-id
-GOOGLE_OAUTH_CLIENT_SECRET=your-google-oauth-secret
-MS_OAUTH_CLIENT_ID=your-azure-ad-app-id  
-MS_OAUTH_CLIENT_SECRET=your-azure-ad-app-secret
-
-# Encryption key (32 bytes = 64 hex chars) — generate per project!
-INGENIUM_EMAIL_ENCRYPTION_KEY=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0
-
-# Optional: custom OAuth redirect URI if not using localhost
-OAUTH_REDIRECT_URI=http://localhost:3000/mail/oauth/callback
+export GOOGLE_OAUTH_CLIENT_ID=your-google-oauth-client-id
+export GOOGLE_OAUTH_CLIENT_SECRET=your-google-oauth-secret
+export MS_OAUTH_CLIENT_ID=your-azure-ad-app-id  
+export MS_OAUTH_CLIENT_SECRET=your-azure-ad-app-secret
+export INGENIUM_EMAIL_ENCRYPTION_KEY=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0
+export OAUTH_REDIRECT_URI=http://localhost:3000/mail/oauth/callback
 ```
+These are passed through to `docker compose` via the `${VAR:-}` expansion in `docker-compose.yml`. See the OAuth2 Credential Setup section below for obtaining the client ID/secrets.
 
-> 🔴 **Security**: Never commit these variables. Use `.env.local` and ensure they're in your `.gitignore`. The encryption key is project-scoped — generate a new one for each Ingenium project.
+> 🔴 **Security**: Never commit these values. The encryption key must be exactly 32 bytes (64 hex chars). Generate a unique key per project — do not reuse across deployments.
+
+## OAuth2 Credential Setup
+
+### Google Cloud Console (Gmail)
+
+1. Go to https://console.cloud.google.com/apis/credentials
+2. If prompted, create a project or select an existing one
+3. **Configure OAuth consent screen** (required before creating credentials):
+   - User Type: **External** (or Internal if using Google Workspace)
+   - Required fields: App name, User support email, Developer contact email
+   - Scopes: Add `https://mail.google.com/` (sensitive scope — Google will require verification for production use)
+   - Test users: Add your email address during development
+4. **Create OAuth client ID** under "Credentials" → "+ Create Credentials" → "OAuth client ID":
+   - Application type: **Web application**
+   - Name: "Ingenium Email Client"
+   - Authorized redirect URIs: Click "+ Add URI" → `http://localhost:3000/mail/oauth/callback`
+   - Click "Create"
+5. Copy the **Client ID** and **Client Secret** from the popup — set them as:
+   ```
+   GOOGLE_OAUTH_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
+   GOOGLE_OAUTH_CLIENT_SECRET=<your-client-secret>
+   ```
+
+> **Note:** The Gmail API must be enabled for your project. Go to "Enabled APIs & Services" → "+ Enable APIs and Services" → search "Gmail API" → Enable.
+
+### Azure AD (Outlook / Microsoft 365)
+
+1. Go to https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
+2. Click "+ New registration":
+   - Name: "Ingenium Email Client"
+   - Supported account types: **Accounts in any organizational directory and personal Microsoft accounts** (covers @outlook.com, @hotmail.com, and work/school accounts)
+   - Redirect URI: Select **Web** → `http://localhost:3000/mail/oauth/callback`
+   - Click "Register"
+3. Copy the **Application (client) ID** → set as `MS_OAUTH_CLIENT_ID`
+4. Under "Certificates & secrets" → "+ New client secret":
+   - Description: "Ingenium email client"
+   - Expires: 24 months (or as needed)
+   - Click "Add"
+   - Copy the **Secret Value** immediately (it only shows once) → set as `MS_OAUTH_CLIENT_SECRET`
+5. Under "API permissions" → "+ Add a permission" → "Microsoft Graph" → "Delegated permissions":
+   - Add `IMAP.AccessAsUser.All`
+   - Add `SMTP.Send`
+   - Add `offline_access`
+   - Click "Grant admin consent" if using a tenant with admin rights
 
 ## Account Setup (OAuth2 Flow)
 
-### Step 1: Configure OAuth2 Apps
+Once you have obtained OAuth2 credentials (see section above), add an account:
 
-**For Gmail:**
-1. Go to https://console.cloud.google.com/apis/credentials
-2. Create "New Client ID" → OAuth client
-3. Authorized redirect URIs: `http://localhost:3000/mail/oauth/callback`
-4. Copy Client ID and Secret to `.env` as `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`
-
-**For Outlook (Azure AD):**
-1. Go to https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
-2. New registration → App name: "Ingenium Email Client"
-3. Redirect URI: Web → add `http://localhost:3000/mail/oauth/callback`
-4. Copy Application (client) ID and Directory (client) secret to `.env` as MS_ variables
-
-### Step 2: Add Account via Dashboard
-
-1. Open http://localhost:3000/mail or use OpenCode at `http://localhost:4098/mail`
-2. Click "Add Email Account" button
+1. Open http://localhost:3000/mail
+2. Click **"Add Email Account"**
 3. Select provider (Gmail / Outlook)
 4. Complete OAuth2 flow:
    - Browser redirects to Google/Outlook login page
@@ -63,7 +89,7 @@ OAUTH_REDIRECT_URI=http://localhost:3000/mail/oauth/callback
    - Grant Ingenium permission to access emails
    - Redirects back to callback URL automatically
 
-### Step 3: Verify Account Setup
+### Verify Account Setup
 
 After successful authentication, you should see:
 - Your email address listed under "My Accounts"
