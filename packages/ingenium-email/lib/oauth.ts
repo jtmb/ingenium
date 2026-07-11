@@ -5,6 +5,32 @@ import type { OAuthToken } from "./types.js";
 import type { EmailProvider } from "./types.js";
 import { settings, getDb } from "ingenium-core";
 
+// ── OAuth credential resolution ──────────────────────────────────────────
+
+/** Resolve OAuth client ID/secret: check settings table first, fall back to env vars. */
+function getOAuthCreds(
+  provider: Extract<EmailProvider, "gmail" | "outlook">,
+  projectId?: string,
+): { clientId: string; clientSecret: string } {
+  if (provider === "gmail") {
+    const clientId = projectId
+      ? (settings.getSetting(projectId, "oauth_gmail_client_id") || process.env.GOOGLE_OAUTH_CLIENT_ID || "")
+      : (process.env.GOOGLE_OAUTH_CLIENT_ID ?? "");
+    const clientSecret = projectId
+      ? (settings.getSetting(projectId, "oauth_gmail_client_secret") || process.env.GOOGLE_OAUTH_CLIENT_SECRET || "")
+      : (process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "");
+    return { clientId, clientSecret };
+  }
+  // outlook
+  const clientId = projectId
+    ? (settings.getSetting(projectId, "oauth_outlook_client_id") || process.env.MS_OAUTH_CLIENT_ID || "")
+    : (process.env.MS_OAUTH_CLIENT_ID ?? "");
+  const clientSecret = projectId
+    ? (settings.getSetting(projectId, "oauth_outlook_client_secret") || process.env.MS_OAUTH_CLIENT_SECRET || "")
+    : (process.env.MS_OAUTH_CLIENT_SECRET ?? "");
+  return { clientId, clientSecret };
+}
+
 // ── Encryption helpers ────────────────────────────────────────────────────
 
 function getEncryptionKey(): Buffer {
@@ -111,7 +137,7 @@ export async function getValidTokens(
   const now = Date.now();
   if (tokens.expiryDate && tokens.expiryDate < now + 60_000) {
     // Auto-refresh
-    const refreshed = await refreshAccessToken(provider, tokens.refreshToken);
+    const refreshed = await refreshAccessToken(provider, tokens.refreshToken, projectId);
     storeTokens(projectId, accountId, refreshed);
     return refreshed;
   }
@@ -127,32 +153,52 @@ function getRedirectUri(): string {
 
 let _googleOAuthClient: Awaited<ReturnType<typeof cachedGoogleClient>>["client"] | undefined;
 
-async function cachedGoogleClient(): Promise<{ client: import("google-auth-library").OAuth2Client }> {
-  if (!_googleOAuthClient) {
-    const mod = await import("google-auth-library");
-    const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID ?? "";
-    const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET ?? "";
-    _googleOAuthClient = new mod.OAuth2Client(clientId, clientSecret, getRedirectUri());
+async function cachedGoogleClient(projectId?: string): Promise<{ client: import("google-auth-library").OAuth2Client }> {
+  const { clientId, clientSecret } = getOAuthCreds("gmail", projectId);
+
+  // Use cache only for the env-based default path (no projectId override)
+  if (!projectId && _googleOAuthClient) {
+    return { client: _googleOAuthClient };
   }
-  return { client: _googleOAuthClient };
+
+  const mod = await import("google-auth-library");
+  const client = new mod.OAuth2Client(clientId, clientSecret, getRedirectUri());
+
+  // Cache only the env-default client; project-specific clients are ephemeral
+  if (!projectId) {
+    _googleOAuthClient = client;
+  }
+
+  return { client };
 }
 
 // ── Microsoft OAuth2 ──────────────────────────────────────────────────────
 
 let _msalApp: import("@azure/msal-node").ConfidentialClientApplication | undefined;
 
-async function getMsalApp(): Promise<import("@azure/msal-node").ConfidentialClientApplication> {
-  if (!_msalApp) {
-    const msal = await import("@azure/msal-node");
-    _msalApp = new msal.ConfidentialClientApplication({
-      auth: {
-        clientId: process.env.MS_OAUTH_CLIENT_ID ?? "",
-        clientSecret: process.env.MS_OAUTH_CLIENT_SECRET ?? "",
-        authority: "https://login.microsoftonline.com/common",
-      },
-    });
+async function getMsalApp(projectId?: string): Promise<import("@azure/msal-node").ConfidentialClientApplication> {
+  const { clientId, clientSecret } = getOAuthCreds("outlook", projectId);
+
+  // Use cache only for the env-based default path (no projectId override)
+  if (!projectId && _msalApp) {
+    return _msalApp;
   }
-  return _msalApp;
+
+  const msal = await import("@azure/msal-node");
+  const app = new msal.ConfidentialClientApplication({
+    auth: {
+      clientId,
+      clientSecret,
+      authority: "https://login.microsoftonline.com/common",
+    },
+  });
+
+  // Cache only the env-default client; project-specific clients are ephemeral
+  if (!projectId) {
+    _msalApp = app;
+  }
+
+  return app;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -169,7 +215,7 @@ export async function getOAuthUrl(
   settings.setSetting(pid, `oauth_state_${provider}`, state);
 
   if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient();
+    const { client: gClient } = await cachedGoogleClient(projectId);
     const url = gClient.generateAuthUrl({
       access_type: "offline",
       scope: "https://mail.google.com/",
@@ -180,7 +226,7 @@ export async function getOAuthUrl(
   }
 
   if (provider === "outlook") {
-    const msalApp = await getMsalApp();
+    const msalApp = await getMsalApp(projectId);
     const url = await msalApp.getAuthCodeUrl({
       scopes: [
         "https://outlook.office.com/IMAP.AccessAsUser.All",
@@ -219,7 +265,7 @@ export async function exchangeCode(
   const redirectUri = _redirectUri ?? getRedirectUri();
 
   if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient();
+    const { client: gClient } = await cachedGoogleClient(projectId);
     const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
     return {
       accessToken: tokens.access_token ?? "",
@@ -230,7 +276,7 @@ export async function exchangeCode(
   }
 
   if (provider === "outlook") {
-    const msalApp = await getMsalApp();
+    const msalApp = await getMsalApp(projectId);
     const result = await msalApp.acquireTokenByCode({
       code,
       scopes: [
@@ -255,9 +301,10 @@ export async function exchangeCode(
 export async function refreshAccessToken(
   provider: EmailProvider,
   refreshToken: string,
+  projectId?: string,
 ): Promise<OAuthToken> {
   if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient();
+    const { client: gClient } = await cachedGoogleClient(projectId);
     gClient.setCredentials({ refresh_token: refreshToken });
     const { credentials } = await gClient.refreshAccessToken();
     return {
@@ -269,7 +316,7 @@ export async function refreshAccessToken(
   }
 
   if (provider === "outlook") {
-    const msalApp = await getMsalApp();
+    const msalApp = await getMsalApp(projectId);
     const result = await msalApp.acquireTokenByRefreshToken({
       refreshToken,
       scopes: [

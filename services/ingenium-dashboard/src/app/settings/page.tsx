@@ -36,6 +36,15 @@ export default function SettingsPage() {
   const [backupCustomEndpoint, setBackupCustomEndpoint] = useState("");
   const [backupCustomModel, setBackupCustomModel] = useState("");
   const backupProvider = providers.find(p => p.id === backupProviderId);
+
+  // Email OAuth state
+  const PROJECT = "gh-llm-bootstrap";
+  const [gmailClientId, setGmailClientId] = useState("");
+  const [gmailClientSecret, setGmailClientSecret] = useState("");
+  const [outlookClientId, setOutlookClientId] = useState("");
+  const [outlookClientSecret, setOutlookClientSecret] = useState("");
+  const [savingOauth, setSavingOauth] = useState(false);
+  const [oauthSaved, setOauthSaved] = useState(false);
   const backupModels = backupProvider ? Object.entries(backupProvider.models || {}) as [string, any][] : [];
   const selectedProvider = providers.find(p => p.id === providerId);
   const providerModels = selectedProvider ? Object.entries(selectedProvider.models || {}) as [string, any][] : [];
@@ -126,6 +135,36 @@ export default function SettingsPage() {
     await api.settings.set("synthesis_interval_ms", String(min * 60000), "global-default");
     setIntervalSaved(true);
     setTimeout(() => setIntervalSaved(false), 2000);
+  };
+
+  // Load Email OAuth settings
+  useEffect(() => {
+    Promise.all([
+      api.settings.get("oauth_gmail_client_id", PROJECT),
+      api.settings.get("oauth_gmail_client_secret", PROJECT),
+      api.settings.get("oauth_outlook_client_id", PROJECT),
+      api.settings.get("oauth_outlook_client_secret", PROJECT),
+    ]).then(([gid, gs, oid, os]) => {
+      if (gid.data?.value) setGmailClientId(gid.data.value);
+      if (gs.data?.value) setGmailClientSecret(gs.data.value);
+      if (oid.data?.value) setOutlookClientId(oid.data.value);
+      if (os.data?.value) setOutlookClientSecret(os.data.value);
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveOauth = async () => {
+    setSavingOauth(true);
+    try {
+      await api.settings.set("oauth_gmail_client_id", gmailClientId, PROJECT);
+      await api.settings.set("oauth_gmail_client_secret", gmailClientSecret, PROJECT);
+      await api.settings.set("oauth_outlook_client_id", outlookClientId, PROJECT);
+      await api.settings.set("oauth_outlook_client_secret", outlookClientSecret, PROJECT);
+      setOauthSaved(true);
+      setTimeout(() => setOauthSaved(false), 2000);
+    } catch (err: any) {
+      alert("Failed to save OAuth settings: " + err.message);
+    }
+    setSavingOauth(false);
   };
 
   const saveLlmConfig = async () => {
@@ -448,6 +487,54 @@ export default function SettingsPage() {
             Current mode: <strong>Heuristic trait-only synthesis</strong>. Observations still processed into personality traits.
           </div>
         )}
+      </div>
+
+      {/* ── Email OAuth ── */}
+      <div className="bg-white p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
+        <h2 className="font-semibold text-lg">Email OAuth</h2>
+        <p className="text-sm text-gray-500">Google and Microsoft OAuth 2.0 credentials for connecting email accounts.</p>
+
+        {/* Google */}
+        <div>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Google (Gmail)</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium">Client ID</label>
+              <input type="text" value={gmailClientId} onChange={(e) => setGmailClientId(e.target.value)}
+                placeholder="Google Cloud OAuth client ID" className="border p-2 rounded w-full text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">Client Secret</label>
+              <input type="password" value={gmailClientSecret} onChange={(e) => setGmailClientSecret(e.target.value)}
+                placeholder="Google Cloud OAuth client secret" className="border p-2 rounded w-full text-sm" />
+            </div>
+          </div>
+        </div>
+
+        {/* Microsoft */}
+        <div className="border-t pt-3">
+          <h3 className="text-sm font-medium text-gray-700 mb-2">Microsoft (Outlook)</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium">Client ID</label>
+              <input type="text" value={outlookClientId} onChange={(e) => setOutlookClientId(e.target.value)}
+                placeholder="Azure AD application client ID" className="border p-2 rounded w-full text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium">Client Secret</label>
+              <input type="password" value={outlookClientSecret} onChange={(e) => setOutlookClientSecret(e.target.value)}
+                placeholder="Azure AD application client secret" className="border p-2 rounded w-full text-sm" />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 items-center">
+          <button onClick={saveOauth} disabled={savingOauth}
+            className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 text-sm">
+            {savingOauth ? "Saving..." : "Save"}
+          </button>
+          {oauthSaved && <span className="text-sm text-green-600">Saved!</span>}
+        </div>
       </div>
     </div>
   );
