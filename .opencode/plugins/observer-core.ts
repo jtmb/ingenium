@@ -127,7 +127,7 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
 /**
  * Trigger the synthesis pipeline for this project.
  */
-export async function triggerSynthesis(worktree: string): Promise<{ triggered: boolean; message: string }> {
+export async function triggerSynthesis(worktree: string, sessionId?: string): Promise<{ triggered: boolean; message: string }> {
   try {
     // Log pipeline event before triggering synthesis
     await logPipelineEvent(
@@ -138,7 +138,9 @@ export async function triggerSynthesis(worktree: string): Promise<{ triggered: b
       {},
     );
 
-    const result = await apiFetch(`/synthesis/run?project=${DEFAULT_PROJECT}`, {
+    const params = new URLSearchParams({ project: DEFAULT_PROJECT });
+    if (sessionId) params.set("session_id", sessionId);
+    const result = await apiFetch(`/synthesis/run?${params}`, {
       method: "POST",
     });
     return { triggered: true, message: JSON.stringify(result.data) };
