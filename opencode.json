@@ -33,8 +33,9 @@
     "ingenium": {
       "type": "local",
       "command": [
-        "node",
-        "services/ingenium-server/dist/scripts/mcp-server.js"
+        "npx",
+        "-y",
+        "@ingenium/extension"
       ],
       "enabled": true,
       "environment": {

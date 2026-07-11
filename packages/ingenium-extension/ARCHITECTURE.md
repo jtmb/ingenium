@@ -7,7 +7,7 @@ OpenCode runs here. These are client-side processes:
 
 | Process | Type | What it does |
 |---------|------|-------------|
-| MCP: ingenium | stdio child process | Thin HTTP wrapper — exposes `ingenium_*` tools. ZERO database access. All data flows through API calls. |
+| MCP: ingenium | stdio child process | Thin HTTP wrapper — exposes `ingenium_*` tools. ZERO database access. All data flows through API calls. **Part of @ingenium/extension package** (`dist/mcp-server.js`). |
 | Plugin: observer.ts | OpenCode plugin | Hooks `session.created` and `session.idle`. Imports observations from file fallback, triggers synthesis pipeline. Writes `observations.md` to `.opencode/skills/`. |
 | Plugin: skill-sync.ts | OpenCode plugin | Hooks `session.created` and `session.idle`. Fetches skills from API, writes missing ones to `.opencode/skills/<name>/` (SKILL.md + metadata.json + references/). |
 | .opencode/ directory | Local filesystem | Skills, plugins, commands — written by client-side plugins. Read by OpenCode. |

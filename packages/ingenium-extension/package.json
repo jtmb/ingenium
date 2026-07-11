@@ -1,10 +1,16 @@
 {
   "name": "@ingenium/extension",
   "version": "1.0.0",
-  "description": "OpenCode client-side plugins for the Ingenium self-learning pipeline — observer (session hooks, observations, synthesis triggers) and skill-sync (pulls skills from API to local .opencode/skills/)",
+  "description": "OpenCode client-side package — MCP server, observer plugin, skill-sync plugin. Everything needed to connect OpenCode to an Ingenium API. Install with: npx -y @ingenium/extension",
   "type": "module",
   "main": "index.js",
-  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js"],
+  "bin": {
+    "@ingenium/extension": "dist/mcp-server.js"
+  },
+  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js", "dist/mcp-server.js"],
+  "scripts": {
+    "build": "cp ../ingenium-server/dist/scripts/mcp-server.js dist/mcp-server.js"
+  },
   "dependencies": {
     "@opencode-ai/plugin": "*"
   }
