@@ -51,7 +51,8 @@ docker compose up --build
   "mcp": {
     "servers": {
       "ingenium": {
-        "command": ["node", "/path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js"],
+        "type": "local",
+        "command": ["npx", "-y", "@ingenium/extension"],
         "disabled": false,
         "env": {
           "INGENIUM_API_URL": "http://localhost:4097/api/v1",
@@ -64,7 +65,17 @@ docker compose up --build
 }
 ```
 
-**Other MCP clients** — Point your client's `command` to `node /path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js`. The server speaks stdio MCP with **74 tools**. No HTTP port, no network config.
+Plugins ship inside the `@ingenium/extension` package. Reference them from your OpenCode config:
+```jsonc
+{
+  "plugin": [
+    "packages/ingenium-extension/observer.ts",
+    "packages/ingenium-extension/skill-sync.ts"
+  ]
+}
+```
+
+**Other MCP clients** — Point your client's `command` to `npx -y @ingenium/extension`. The server speaks stdio MCP with **74 tools**. No HTTP port, no network config.
 
 **Docker Deployment** — Single-container deployment via `docker compose up --build` manages three processes: API (`:4097`), Dashboard (`:3000`), and opencode-server (`:4096`) via supervisord. Build-time UID matching ensures write access to workspace. Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
