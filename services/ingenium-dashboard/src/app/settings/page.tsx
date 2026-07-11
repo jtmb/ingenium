@@ -162,8 +162,8 @@ export default function SettingsPage() {
             <option value="__custom__">— Custom Provider —</option>
             {(() => {
               const pinned: [string, number][] = [
-                ["opencode", 0], ["go", 1], ["opencode zen", 2],
-                ["opencode pro", 3], ["zen", 4], ["deepseek", 5],
+                ["opencode zen", 0], ["opencode pro", 1], ["opencode", 2],
+                ["go", 3], ["deepseek", 4], ["zen", 5],
               ];
               const rank = (p: any): number => {
                 const name = (p.name || "").toLowerCase();
@@ -179,9 +179,12 @@ export default function SettingsPage() {
                   if (ar !== br) return ar - br;
                   return a.name.localeCompare(b.name);
                 });
-              return sorted.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ));
+               return sorted.map(p => {
+                  const isFree = p.id === "opencode";
+                  return (
+                    <option key={p.id} value={p.id}>{p.name}{isFree ? " (Free)" : ""}</option>
+                  );
+                });
             })()}
           </select>
         </div>
@@ -206,7 +209,7 @@ export default function SettingsPage() {
         {!isCustom && providerId && (
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium">API Key</label>
+              <label className="block text-sm font-medium">API Key {providerId === "opencode" ? <span className="text-gray-400 font-normal">(optional for free tier)</span> : ""}</label>
               <input type="password" value={apiKeyState} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="border p-2 rounded w-full text-sm" />
             </div>
           </div>
