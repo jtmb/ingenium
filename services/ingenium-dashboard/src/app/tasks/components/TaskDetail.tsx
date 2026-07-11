@@ -177,6 +177,10 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
   const [customFields, setCustomFields] = useState<Record<string, any>>(task.custom_fields ?? {});
 
+  // --- Dispatch as Job state ---
+  const [dispatching, setDispatching] = useState(false);
+  const [dispatchMsg, setDispatchMsg] = useState("");
+
   // Sync state when task changes
   useEffect(() => {
     setTitle(task.title);
@@ -316,6 +320,27 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
       setDeleting(false);
     }
   }, [task.id, project, onClose]);
+
+  // --- Dispatch as Job ---
+  const handleDispatchAsJob = useCallback(async () => {
+    if (!task.assigned_to || !task.title) return;
+    setDispatching(true);
+    setDispatchMsg("");
+    try {
+      const job = await api.jobs.create({
+        name: `[Task] ${task.title}`,
+        description: task.description ?? undefined,
+        agent: task.assigned_to,
+        prompt_template: task.description ?? task.title,
+      }, project);
+      await api.jobs.run(job.data.id, project);
+      setDispatchMsg(`Job created and queued: ${job.data.name}`);
+    } catch (err: any) {
+      setDispatchMsg(err?.message ?? "Failed to dispatch job");
+    } finally {
+      setDispatching(false);
+    }
+  }, [task.title, task.description, task.assigned_to, project]);
 
   // --- Comments ---
   const handleAddComment = useCallback(async () => {
@@ -651,15 +676,23 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
           </div>
 
           {/* Actions */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <button onClick={handleSave} disabled={saving}
               className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
               {saving ? "Saving..." : "Save Changes"}
             </button>
+            {task.assigned_to && (
+              <button onClick={handleDispatchAsJob} disabled={dispatching}
+                className="bg-green-600 text-white py-2 px-4 rounded text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={`Run as job using agent: ${task.assigned_to}`}>
+                {dispatching ? "Dispatching..." : "▶ Dispatch as Job"}
+              </button>
+            )}
             <button onClick={handleDelete} disabled={deleting}
               className="bg-red-600 text-white py-2 px-4 rounded text-sm hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed">
               {deleting ? "Deleting..." : "Delete Task"}
             </button>
+            {dispatchMsg && <span className="text-sm text-green-600 self-center">{dispatchMsg}</span>}
           </div>
 
           {/* Dependencies */}

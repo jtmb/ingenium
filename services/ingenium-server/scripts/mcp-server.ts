@@ -39,6 +39,7 @@ import { extractionRun } from "../lib/tools/extraction.js";
 import * as emailTools from "../lib/tools/emails.js";
 import * as configTools from "../lib/tools/configs.js";
 import * as logTools from "../lib/tools/logs.js";
+import * as jobTools from "../lib/tools/jobs.js";
 
 // ── Tool State Check Wrapper ──────────────────────────────
 const API_CLIENT = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
@@ -868,6 +869,80 @@ server.registerTool(
     inputSchema: { project: projectParam, account: z.string() },
   },
   wrapHandler("ingenium_email_watch_status", async ({ project, account }) => emailTools.emailWatchStatus(project, account)),
+);
+
+// ── Jobs ──────────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_job_list",
+  { description: "List all jobs for a project.", inputSchema: { project: projectParam } },
+  wrapHandler("ingenium_job_list", async ({ project }) => jobTools.jobList(project)),
+);
+
+server.registerTool(
+  "ingenium_job_create",
+  {
+    description: "Create a new job with optional schedule, trigger event, and timeout.",
+    inputSchema: {
+      project: projectParam,
+      name: z.string(),
+      description: z.string().optional(),
+      agent: z.string(),
+      prompt_template: z.string(),
+      schedule_cron: z.string().optional(),
+      trigger_event: z.string().optional(),
+      timeout_minutes: z.number().optional(),
+    },
+  },
+    wrapHandler("ingenium_job_create", async ({ project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes }) =>
+    jobTools.jobCreate(project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes)),
+);
+
+server.registerTool(
+  "ingenium_job_update",
+  {
+    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes).",
+    inputSchema: {
+      project: projectParam,
+      job_id: z.string(),
+      fields: z.record(z.unknown()),
+    },
+  },
+  wrapHandler("ingenium_job_update", async ({ project, job_id, fields }) =>
+    jobTools.jobUpdate(project, job_id, fields)),
+);
+
+server.registerTool(
+  "ingenium_job_delete",
+  { description: "Delete a job by ID.", inputSchema: { project: projectParam, job_id: z.string() } },
+  wrapHandler("ingenium_job_delete", async ({ project, job_id }) => jobTools.jobDelete(project, job_id)),
+);
+
+server.registerTool(
+  "ingenium_job_run",
+  { description: "Manually trigger a job run.", inputSchema: { project: projectParam, job_id: z.string() } },
+  wrapHandler("ingenium_job_run", async ({ project, job_id }) => jobTools.jobRun(project, job_id)),
+);
+
+server.registerTool(
+  "ingenium_job_runs",
+  { description: "List all runs for a job.", inputSchema: { project: projectParam, job_id: z.string() } },
+  wrapHandler("ingenium_job_runs", async ({ project, job_id }) => jobTools.jobRuns(project, job_id)),
+);
+
+server.registerTool(
+  "ingenium_job_run_logs",
+  {
+    description: "Get log entries for a specific run, optionally after a sequence number for tail polling.",
+    inputSchema: { project: projectParam, run_id: z.string(), after: z.number().optional() },
+  },
+  wrapHandler("ingenium_job_run_logs", async ({ project, run_id, after }) => jobTools.jobRunLogs(project, run_id, after)),
+);
+
+server.registerTool(
+  "ingenium_job_run_cancel",
+  { description: "Cancel a running job.", inputSchema: { project: projectParam, run_id: z.string() } },
+  wrapHandler("ingenium_job_run_cancel", async ({ project, run_id }) => jobTools.jobRunCancel(project, run_id)),
 );
 
 // ── Start ───────────────────────────────────────────────
