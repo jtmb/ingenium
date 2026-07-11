@@ -275,8 +275,8 @@ export async function callSynthesisLLM(
     if (err.name === "AbortError") {
       return { skills_to_create: [], skills_to_update: [], insights: [], summary: "LLM synthesis was cancelled." };
     }
-    logger.error({ err: err.message }, "LLM synthesis call failed");
-    return { skills_to_create: [], skills_to_update: [], insights: [`LLM error: ${err.message}`], summary: "LLM synthesis failed" };
+    logger.error({ err: String(err?.message || err) }, "LLM synthesis call failed");
+    return { skills_to_create: [], skills_to_update: [], insights: [`LLM error: ${String(err?.message || err)}`], summary: "LLM synthesis failed" };
   }
 }
 
@@ -316,4 +316,216 @@ export function getLLMSynthesisConfig(_projectId: string): { model: string; apiK
   const apiKey = getSetting(gid, "synthesis_api_key");
   if (!model) return null;
   return { model, apiKey: apiKey || undefined };
+}
+
+export interface EnrichedObservation {
+  type: string;
+  content: string;           // original raw content
+  enriched_content?: string; // LLM-enriched version — the extracted rule/preference
+  context?: string;          // conversation context window
+  skip?: boolean;            // if LLM says it's noise/unactionable
+}
+
+/**
+ * Build the enrichment prompt — extracts specific user behavior rules from raw snippets + conversation context.
+ */
+function buildEnrichmentPrompt(
+  observations: Array<{ type: string; content: string; context?: string }>,
+): string {
+  const obsText = observations.map((o, i) => {
+    return `[${i}] type:${o.type}\n  snippet: "${o.content.substring(0, 300)}"\n  context: "${(o.context || '(none)').substring(0, 500)}"`;
+  }).join("\n\n");
+
+  return `You are a behavior pattern extractor for the Ingenium self-learning system.
+
+You analyze raw conversation snippets and extract the underlying user behavior rule or preference.
+
+## Raw Observations
+${obsText}
+
+## Your Task
+
+For each observation above (indexed [0], [1], etc.), determine:
+
+1. **enriched_content** — A clear, actionable, specific statement of the user's behavior, preference, or rule derived from the snippet + conversation context. NOT just a rephrasing of the snippet — extract the *underlying rule* the snippet implies.
+
+   Examples of GOOD enriched_content:
+   - "User prefers 2-space indentation and will explicitly correct any 4-space indentation the agent produces"
+   - "User wants all commit messages to follow conventional commits format (type: description)"
+   - "User always runs lint before committing and gets frustrated when the agent commits without linting"
+
+   Examples of BAD enriched_content (just rephrasing):
+   - "User said to use 2 spaces"
+   - "User mentioned conventional commits"
+   - "User told agent to run lint"
+
+2. **skip** — Set to true if the observation is noise: profanity without substance, off-topic, uncategorized, or genuinely not a behavior pattern (e.g., "this is fucked" with no specificity).
+
+3. **content** — Leave as the original snippet (we keep it for audit trail).
+
+## Response Format
+
+Respond with ONLY a valid JSON array (no markdown, no code blocks):
+
+[
+  {
+    "index": 0,
+    "content": "original snippet here",
+    "enriched_content": "User prefers...",
+    "skip": false
+  },
+  {
+    "index": 1,
+    "content": "original snippet here",
+    "enriched_content": null,
+    "skip": true
+  }
+]
+
+IMPORTANT:
+- Keep enriched_content specific and actionable (1-3 sentences)
+- If unsure, set skip to false and provide your best interpretation
+- Return exactly one entry per input observation (same order)
+- Only set skip:true for clear noise`;
+}
+
+/**
+ * Extract structured enrichment results from LLM JSON response.
+ */
+function parseEnrichmentResponse(
+  raw: any,
+  count: number,
+): Array<{ skip: boolean; enriched_content?: string }> {
+  const results: Array<{ skip: boolean; enriched_content?: string }> = [];
+  
+  if (!Array.isArray(raw)) {
+    // Non-array response — return all unenriched
+    for (let i = 0; i < count; i++) {
+      results.push({ skip: false });
+    }
+    return results;
+  }
+
+  for (let i = 0; i < count; i++) {
+    const entry = raw.find((e: any) => e?.index === i);
+    if (entry) {
+      results.push({
+        skip: entry.skip === true,
+        enriched_content: typeof entry.enriched_content === 'string' && entry.enriched_content.length > 10
+          ? entry.enriched_content
+          : undefined,
+      });
+    } else {
+      results.push({ skip: false });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Enrich auto-observer observations using the configured LLM.
+ * Falls back to original content on any error.
+ *
+ * @param observations - Raw observations from the auto-observer with optional conversation context
+ * @param endpoint - OpenAI-compatible API endpoint URL
+ * @param model - Model name
+ * @param apiKey - API key
+ * @param signal - Optional AbortSignal
+ * @returns Enriched observations (falls back to originals on error)
+ */
+export async function enrichObservations(
+  observations: Array<{ type: string; content: string; context?: string }>,
+  endpoint: string,
+  model: string,
+  apiKey?: string,
+  signal?: AbortSignal,
+): Promise<EnrichedObservation[]> {
+  if (observations.length === 0) return [];
+  if (!endpoint || !model) {
+    // No LLM configured — return originals as-is
+    return observations.map(o => ({ ...o, skip: false }));
+  }
+
+  const prompt = buildEnrichmentPrompt(observations);
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+  const baseEndpoint = endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
+  const maxRetries = 1;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: "You are a behavior pattern extractor that outputs only valid JSON arrays." },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.2,
+          max_tokens: 2048,
+          response_format: attempt === 0 ? { type: "json_object" } : undefined,
+        }),
+        signal,
+      });
+
+      if (!response.ok) {
+        if (attempt < maxRetries) continue;
+        logger.warn({ status: response.status }, "LLM enrichment returned error, falling back to raw observations");
+        return observations.map(o => ({ ...o, skip: false }));
+      }
+
+      const json = await response.json();
+      const content = json.choices?.[0]?.message?.content || "{}";
+      const parsed = tryParseJSON(content);
+      
+      if (!parsed) {
+        if (attempt < maxRetries) continue;
+        return observations.map(o => ({ ...o, skip: false }));
+      }
+
+      // Handle json_object response wrapping — the model may return {"observations": [...]} or just [...]
+      const rawArray = Array.isArray(parsed) ? parsed : (parsed.observations || parsed.enriched || []);
+
+      const enrichmentResults = parseEnrichmentResponse(rawArray, observations.length);
+
+      return observations.map((obs, i) => {
+        const enriched = enrichmentResults[i] || { skip: false };
+        return {
+          type: obs.type,
+          content: obs.content,
+          context: obs.context,
+          enriched_content: enriched.enriched_content,
+          skip: enriched.skip,
+        };
+      });
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        return observations.map(o => ({ ...o, skip: false }));
+      }
+      if (attempt < maxRetries) continue;
+      logger.error({ err: String(err?.message || err) }, "LLM enrichment call failed, falling back to raw observations");
+      return observations.map(o => ({ ...o, skip: false }));
+    }
+  }
+
+  return observations.map(o => ({ ...o, skip: false }));
+}
+
+/**
+ * Get the full LLM synthesis config including endpoint.
+ * Extends getLLMSynthesisConfig to include endpoint.
+ */
+export function getFullLLMSynthesisConfig(): { model: string; apiKey?: string; endpoint?: string } | null {
+  const gid = getGlobalProject()?.id;
+  if (!gid) return null;
+  const model = getSetting(gid, "synthesis_model");
+  const apiKey = getSetting(gid, "synthesis_api_key");
+  const endpoint = getSetting(gid, "synthesis_endpoint");
+  if (!model || !endpoint) return null;
+  return { model, apiKey: apiKey || undefined, endpoint };
 }

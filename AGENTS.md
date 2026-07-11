@@ -354,6 +354,21 @@ The **Auto-Observer** (`packages/ingenium-extension/auto-observer.ts`) is a thir
 
 > 🔴 **Note**: The Auto-Observer replaces manual `ingenium_observe` calls in agent code. All 9 agent files had their "🔴 Observation — Log User Interactions" sections removed since observation is now automatic.
 
+#### LLM Enrichment Pipeline
+
+Auto-observer observations can be enriched by the configured synthesis LLM to extract **actionable user behavior rules** from raw conversation snippets rather than storing verbatim text:
+
+1. **Detect** — `detectPatterns()` reads OpenCode message history and matches regex patterns (correction, preference, terminology, workflow)
+2. **Enrich** — Detected observations are sent to `POST /api/v1/observations/enrich` with optional conversation context
+3. **Extract** — The LLM analyzes each snippet + context and returns:
+   - **`enriched_content`** — Specific, actionable rule (e.g. `"User prefers 2-space indentation and will explicitly correct 4-space indentation"`)
+   - **`skip`** — Boolean flag to discard noise (profanity without substance, off-topic, unactionable)
+4. **Store** — `createObservations()` filters out `skip:true` entries, posts `enriched_content || raw_content` to the API
+
+**Fault tolerance**: Three-layer fallback ensures observations are never lost — the plugin client, API route, and core enrichment function all return original content on failure. The enrichment call includes a single retry with `json_object` format fallback for providers that don't support structured output mode.
+
+**Implementation**: `enrichObservations()` in `packages/ingenium-core/lib/tools/synthesis-llm.ts`, `POST /enrich` route in `services/ingenium-api/lib/routes/observations.ts`, client call in `packages/ingenium-extension/auto-observer.ts`.
+
 ### LLM Skill Synthesis (Phase 2)
 
 When configured in **Settings → Synthesis LLM**, the pipeline runs a second phase after heuristic trait generation:

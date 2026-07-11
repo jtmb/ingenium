@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { observations } from "ingenium-core";
+import { observations, synthesisLlm, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 export const observationsRouter = Router();
@@ -74,4 +74,49 @@ observationsRouter.get("/stats", (req, res) => {
   const pending = observations.countUnprocessed(projectId);
   const all = observations.getObservations(projectId);
   res.json({ data: { total: all.length, pending } });
+});
+
+// POST /enrich — enrich raw auto-observer observations via LLM
+observationsRouter.post("/enrich", async (req, res, next) => {
+  try {
+    const projectId = requireProject(req, res);
+    if (!projectId) return;
+    
+    const { observations: rawObservations } = req.body;
+    if (!Array.isArray(rawObservations) || rawObservations.length === 0) {
+      res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "observations array is required" } });
+      return;
+    }
+
+    // Validate and normalize observations — filter out empty/short content
+    const obs = rawObservations
+      .filter((o: any) => o.content && String(o.content).trim().length >= 3)
+      .map((o: any) => ({
+        type: String(o.type || "observation"),
+        content: String(o.content || ""),
+        context: o.context ? String(o.context) : undefined,
+      }));
+
+    if (obs.length === 0) {
+      res.json({ data: [] });
+      return;
+    }
+
+    // Read LLM config from settings
+    const config = synthesisLlm.getFullLLMSynthesisConfig();
+    
+    if (!config || !config.endpoint) {
+      // No LLM configured — return originals with skip:false
+      res.json({
+        data: obs.map((o: any) => ({ ...o, enriched_content: undefined, skip: false })),
+      });
+      return;
+    }
+
+    const enriched = await synthesisLlm.enrichObservations(obs, config.endpoint, config.model, config.apiKey);
+    res.json({ data: enriched });
+  } catch (err: any) {
+    logger.error({ err: String(err?.message || err) }, "Observation enrichment failed");
+    next(err);
+  }
 });
