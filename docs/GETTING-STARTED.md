@@ -90,7 +90,7 @@ To make Ingenium available in **all** your OpenCode projects, add the same entry
 
 Add the `ingenium` entry under the `mcp.servers` section, using the same JSON structure from Step 3. The global config uses JSONC format (supports comments), so you can add explanatory notes.
 
-Once added, every OpenCode project on your machine will have access to Ingenium's 74 MCP tools.
+Once added, every OpenCode project on your machine will have access to Ingenium's 73 MCP tools.
 
 ---
 
@@ -104,7 +104,7 @@ docker compose up --build
 
 This starts all services in a single container:
   - **API** on http://localhost:4097 — REST API gateway, sole database authority  
-  - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend (15 pages)  
+  - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend (16 pages; `/learnings` redirects to `/observations`)  
   - **opencode-server** on stdio (port :4096) — Auth-enabled OpenCode web server
   - **opencode-iframe** on port :4098 — No-auth iframe for embedded dashboard use
 
@@ -128,7 +128,7 @@ This starts services locally and will:
 ### Docker Quick Start
 
 ```bash
-# Single-container deployment with all 3 services
+# Single-container deployment with all 4 processes
 docker compose up --build
 
 # This starts API (:4097), Dashboard (:3000), and opencode-server (:4096)
@@ -157,6 +157,7 @@ Navigate to [http://localhost:3000](http://localhost:3000). You should see these
 - **Personality** — personality traits with confidence bars
 - **Pipeline** — real-time pipeline event timeline
 - **Settings** — application settings + Synthesis LLM configuration
+- **Logs** — structured logging and event viewer
 
 ### 2. Check the API Health
 
@@ -233,7 +234,7 @@ Set how often the synthesis pipeline runs:
 
 Once everything is running:
 
-- **Explore the dashboard** — open [http://localhost:3000](http://localhost:3000) and click through all 15 pages
+- **Explore the dashboard** — open [http://localhost:3000](http://localhost:3000) and click through all 16 pages
 - **Read feature guides** — see `docs/HOW-TO/` for per-feature instructions (projects, skills, synthesis, personality, tasks, plugins, servers, settings)
 - **Initialize a project** — use `/init-project` command or `ingenium_project_init` MCP tool
 - **Understand the architecture** — read `docs/ARCHITECTURE.md` for the full system design, data flow, and component responsibilities

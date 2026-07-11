@@ -2,7 +2,7 @@
 
 ## Overview
 
-Eleven agents total: 1 primary, 10 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Ten specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, plan management, and security.
+Nine agents total: 1 primary, 8 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Eight specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, and security.
 
 ```mermaid
 flowchart TB
@@ -32,8 +32,8 @@ flowchart TB
         AUDITOR --> MERGE
         MERGE --> VERIFY["✅ Verify · tests · type-check"]
         VERIFY --> DOC["🔴 Spawn @ingenium-docs after EVERY change"]
-        DOC --> LEARN["📋 Log via ingenium_learning_log"]
-        LEARN --> COMMIT["git add/commit/push"]
+        DOC --> OBSERVE["📋 Observations (auto-extracted)"]
+        OBSERVE --> COMMIT["git add/commit/push"]
     end
 
     COMMIT --> DONE["✅ Done"]
@@ -45,14 +45,13 @@ flowchart TB
 |-------|------|-------|----------|--------|---------|
 | **ingenium-orchestrator** | Primary | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Full R/W | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
 | **ingenium-prompt-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
-| **ingenium-plan-file** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (plan.md only) | Single-purpose — manages `plan.md` at project root. Created/updated/deleted by orchestrator instruction |
 | **ingenium-explore** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
 | **ingenium-software-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
 | **ingenium-software-engineer-fast** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes, performance-critical code |
 | **ingenium-qa** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit (`edit: allow`) | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code |
-| **ingenium-docs** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates + `ingenium_learning_log` entries |
+| **ingenium-docs** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates — observations are auto-extracted by the server-side engine |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | Security audit + git-history leak scanning |
 
 ---
@@ -74,9 +73,9 @@ The 13 email MCP tools (`ingenium_email_list` through `ingenium_email_watch_stat
 | 5 | **Code writing** | Implementation needed | Orchestrator → **Software-Engineer** | Implements code, self-verifies (tests/type-check), returns results |
 | 6 | **Review + test** | Code written | Orchestrator → **QA** | Reviews quality, writes tests, returns findings |
 | 7 | **Security audit** | Sensitive changes | Orchestrator → **Security-Auditor** | Scans for secrets, auth issues, CI vulnerabilities |
-| 8 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/, logs via `ingenium_learning_log` — mandatory, never skipped |
+| 8 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/ — observations automatically captured by server-side extraction engine |
 | 9 | **Commit** | All subagents done | Orchestrator (bash) | `git add/commit/push` — the ONLY bash the orchestrator runs |
-| 10 | **Learnings** | After commit | Orchestrator → **Docs** | Captures hash, logs via `ingenium_learning_log` |
+| 10 | **Observations** | After commit | Extraction engine | Observations automatically captured by server-side extraction engine scanning OpenCode messages |
 
 ---
 
@@ -146,7 +145,7 @@ flowchart LR
 | **Access** | Full R/W |
 | **Invoked by** | User (Tab key) |
 | **Triggers** | User: "Execute", "Go ahead", "Implement", or provides a plan |
-| **Can spawn** | ALL 10 subagents (ingenium-prompt-engineer, explore, scout, security-auditor, software-engineer, software-engineer-fast, software-engineer-premium, qa, docs, plan-file) plus the Multi-Model software engineer variants (fast, premium) |
+| **Can spawn** | ALL 8 subagents (ingenium-prompt-engineer, explore, scout, security-auditor, software-engineer, software-engineer-fast, software-engineer-premium, qa, docs) plus the Multi-Model software engineer variants (fast, premium) |
 | **Direct bash** | ONLY: `git add/commit/push`, `git rev-parse`, test/build verification |
 
 | Phase | Action | Delegates to |
@@ -158,8 +157,8 @@ flowchart LR
 | 5. QA gate | QA passes → call `ingenium_task_complete <id>`; QA fails → re-delegate | qa |
 | 6. Verify | Run tests and type-checks via bash | — |
 | 7. Document | 🔴 Mandatory: spawn docs after every change | docs |
-| 8. Learnings | Log via `ingenium_learning_log` with commit hash | docs |
-| 9. Board closure | List remaining tasks, clear `plan.md` | plan-file |
+| 8. Observations | Observations auto-extracted by server-side extraction engine | extraction engine |
+| 9. Board closure | List remaining tasks, clear plan from context | — |
 | 10. Commit | git add/commit/push | — |
 
 **Orchestrator Controls (6-layer enforcement):**
@@ -170,7 +169,7 @@ flowchart LR
 | 2. ⚡ Pre-Action Gate | "Should a subagent do this?" check before ANY tool use | Every tool call |
 | 3. 🔴 Anti-Patterns table | 7 common violations with before/after examples | Read at session start |
 | 4. 🔴 Periodic Self-Audit | "Am I following delegation rules?" — includes task board check | Every 5 tool calls |
-| 5. Post-tool-use hook | "📋 Call `ingenium_learning_log`" reminder | Every 5 calls |
+| 5. Post-tool-use hook | "📋 Task board check — review current task state" reminder | Every 5 calls |
 | 6. 🔴 Task Board | Board-based work tracking — `ingenium_task_next` → `ingenium_task_move` → `ingenium_task_complete` | Every work unit |
 
 ### @ingenium-explore — Codebase Search
@@ -282,7 +281,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 | 2. Map changes | Use trigger table from generic-conventions to determine affected docs | `read` |
 | 3. Update docs | Targeted updates — never regenerate entire docs | `write`, `edit` |
 | 4. Run skill workflows | `update-skills`, `update-skill-index`, `audit-skills` | `read` + `write` |
-| 5. Write learnings | Log via `ingenium_learning_log` MCP tool with commit hash | `ingenium_learning_log` |
+| 5. Observations | Observations automatically captured by server-side extraction engine | extraction engine |
 | 6. Report | Tell orchestrator what was updated | — |
 
 **Trigger Table:**
@@ -295,7 +294,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 | `README.md`, `USAGE.md`, `AGENTS.md` | `docs/README.md` |
 | `.opencode/agents/*.md` | `docs/agents.md`, `docs/ARCHITECTURE.md` |
 | `.opencode/skills/*/` | `SKILL-INDEX.md`, `AGENTS.md` skill table |
-| Any significant change | Log via `ingenium_learning_log` MCP tool |
+| Any significant change | Observations auto-extracted; agents may use `ingenium_observe()` for exceptional manual cases |
 
 ### @ingenium-security-auditor — Security Audit
 
@@ -346,8 +345,8 @@ flowchart LR
     MERGE --> KREV["📋 Move to review<br/>ingenium_task_move <id> review"]
     KREV --> DOC["🔴 @docs"]
     DOC --> KCOMPLETE["📋 Complete task<br/>ingenium_task_complete"]
-    KCOMPLETE --> LEARN["ingenium_learning_log"]
-    LEARN --> COMMIT["git commit"]
+    KCOMPLETE --> OBSERVE["Observations (auto-extracted)"]
+    OBSERVE --> COMMIT["git commit"]
 ```
 
 ---
@@ -357,7 +356,7 @@ flowchart LR
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
 | DeepSeek V4 Pro (API) | \`ingenium-software-engineer-premium\` | 1 | Paid |
-| qwen3.5-9b (LM Studio) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor`, `ingenium-prompt-engineer`, `ingenium-scout`, `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-plan-file` | 10 | Local |
+| qwen3.5-9b (LM Studio) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor`, `ingenium-prompt-engineer`, `ingenium-scout`, `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs` | 9 | Local |
 
 **Model configuration**: Model assignments are defined per-agent in their `.md` agent profile files (stored in `.opencode/agents/` and the DB `agents` table). Each agent's frontmatter includes a `model:` field. Agent definitions can be managed via the Ingenium Dashboard at `/agents` or via the `ingenium_agent_*` MCP tools.
 
@@ -376,7 +375,6 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |
 | ingenium-qa | `@ingenium-qa` | Edit (`edit: allow`) | orchestrator only |
 | ingenium-docs | `@ingenium-docs` | Edit + Write (`edit: allow, write: allow, bash: deny`) | orchestrator only |
-| ingenium-plan-file | \`@ingenium-plan-file\` | Read/Write (plan.md only) | orchestrator only |
 
 ## How to Use the Pipeline
 
@@ -405,7 +403,7 @@ Use **Plan mode** (OpenCode built-in) to generate a plan, then **Tab** to the or
      • @ingenium-software-engineer — writes production code
      • @ingenium-qa                — reviews code + writes tests
      • @ingenium-security-auditor  — audits for secrets/vulnerabilities
-     • @ingenium-docs              — updates docs + logs via `ingenium_learning_log` (mandatory after every change)
+      • @ingenium-docs              — updates docs (mandatory after every change); observations auto-extracted
      • git commit                  — the ONLY bash the orchestrator runs directly
 ```
 

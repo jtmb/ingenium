@@ -5,6 +5,7 @@ model: deepseek/deepseek-v4-pro
 steps: 100
 permission:
   read: allow
+  edit: allow
   write: allow
   bash: allow
   task:

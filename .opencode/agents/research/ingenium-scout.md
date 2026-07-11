@@ -6,6 +6,7 @@ model: deepseek/deepseek-v4-flash
 # model: opencode/deepseek-v4-flash-free  # only if Zen free tier available
 permission:
   read: allow
+  edit: deny
   write: deny
   bash: deny
   playwright_*: deny

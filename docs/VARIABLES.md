@@ -12,6 +12,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_HOME` | `~/.ingenium` | `tools/projects.ts` | Base directory for project data storage |
 | `LOG_LEVEL` | `info` | `logger.ts` | Pino log level (`debug`, `info`, `warn`, `error`) |
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
+| `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | `tools/paths.ts` | Global config path for skills/plugins/commands; overridable to custom directory |
 
 ## API (`services/ingenium-api`)
 
@@ -22,6 +23,8 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_API_TOKEN` | _(none)_ | `lib/middleware/auth.ts` | Optional bearer token for API authentication |
 | `CORS_ORIGIN` | `*` | `config/index.ts` | Allowed CORS origin for browser requests |
 | `INGENIUM_CORE_DB_PATH` | _(uses core default)_ | all route handlers | Path to the SQLite database |
+| `SYNTHESIS_INTERVAL_MS` | `900000` | `scheduler.ts` | Scheduled synthesis + extraction interval (15 min), 0 = disabled |
+| `INGENIUM_OPENCODE_DB_PATH` | `/var/opencode/opencode.db` | extraction engine | OpenCode SQLite DB path for the server-side extraction engine. Mounted read-write in Docker. |
 
 ## MCP Server (`services/ingenium-server`)
 
@@ -30,6 +33,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_API_URL` | `http://localhost:4097/api/v1` | `config/index.ts`, `lib/client.ts` | URL of the API server to call |
 | `INGENIUM_API_TIMEOUT` | `10000` | `config/index.ts` | HTTP request timeout in milliseconds |
 | `LOG_LEVEL` | `info` | `lib/logger.ts` | Log level for the MCP server |
+| `OBSERVER_CHECK_INTERVAL` | `0` | observer plugin | Session idle check interval in ms, 0 = disabled |
 
 ## Dashboard (`services/ingenium-dashboard`)
 
@@ -49,6 +53,8 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `OAUTH_REDIRECT_URI` | `http://localhost:3000/mail/oauth/callback` | `oauth.ts` | OAuth2 callback URL for Gmail/Outlook |
 
 ## Docker / opencode-server
+
+Inside the container, **supervisord** manages four processes: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098).
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|

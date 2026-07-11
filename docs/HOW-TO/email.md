@@ -125,23 +125,23 @@ The email client registers these tools with the Ingenium MCP server:
 
 | Tool | Description | Parameters | Returns |
 |------|-------------|------------|---------|
-| `email_account_list` | List all configured accounts | — | Array of `{ id, provider, emailAddress }` objects |
-| `email_compose_message` | Compose and send new email | `{ accountId: string, to: string[], subject: string, body: string, attachments?: File[] }` | Message ID or error message |
-| `email_search_inbox` | Search emails across all accounts | `{ query: string, limit?: number, accountId?: string }` | Array of matching email summaries with highlights |
-| `email_fetch_messages` | Fetch full messages by IDs | `{ ids: string[], includeHeaders?: boolean }` | Full message objects with MIME parsing results |
+| `ingenium_email_accounts` | List all configured accounts | — | Array of `{ id, provider, emailAddress }` objects |
+| `ingenium_email_send` | Compose and send new email | `{ accountId: string, to: string[], subject: string, body: string, attachments?: File[] }` | Message ID or error message |
+| `ingenium_email_search` | Search emails across all accounts | `{ query: string, limit?: number, accountId?: string }` | Array of matching email summaries with highlights |
+| `ingenium_email_read` | Fetch full messages by IDs | `{ ids: string[], includeHeaders?: boolean }` | Full message objects with MIME parsing results |
 
 **Example usage in OpenCode:**
 ```typescript
 // List accounts
-const accounts = await ingenium_email_account_list();
+const accounts = await ingenium_email_accounts();
 console.log("Configured:", accounts); // [{ id: "1", provider: "gmail", emailAddress: "user@gmail.com" }]
 
 // Search inbox for invoice-related emails  
-const results = await ingenium_email_search_inbox({ query: "invoice 2026", limit: 5 });
+const results = await ingenium_email_search({ query: "invoice 2026", limit: 5 });
 results.forEach(msg => { console.log(`${msg.subject} from ${msg.sender}`); })
 
 // Compose and send message
-await ingenium_email_compose_message({ 
+await ingenium_email_send({ 
   accountId: accounts[0].id,
   to: ["recipient@example.com"],
   subject: "Project Update",

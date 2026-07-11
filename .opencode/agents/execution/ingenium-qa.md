@@ -9,7 +9,7 @@ permission:
   bash: allow
   glob: allow
   grep: allow
-  edit: deny
+  edit: allow
   write: allow
   playwright_*: allow
   skill:

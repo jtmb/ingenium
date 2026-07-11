@@ -23,9 +23,11 @@ The guide is generated from a live screenshot using the vision API and updated w
 
 ## Self-Learning Pipeline — Observations (Preferred)
 
-The self-learning pipeline uses **observations** instead of the deprecated `ingenium_learning_log` tool. Every change that modifies skills, agents, hooks, plugins, config, or architecture should be logged via `ingenium_observe`.
+Observations are primarily created by the server-side extraction engine (Phase 0), which reads OpenCode messages and uses the synthesis LLM to extract behavior rules. Manual `ingenium_observe()` calls are for exceptional cases only.
 
-Observations are **DB-primary** with a **file fallback**: if the API is down, observations append to `.opencode/skills/learnings.md`. On the next session start, `importLearningsFromFile()` in the observer plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
+The self-learning pipeline uses **observations** instead of the deprecated `ingenium_learning_log` tool.
+
+Observations are **DB-primary** with a **file fallback**: if the API is down, observations append to `.opencode/skills/observations.md`. On the next session start, `importObservationsFromFile()` in the observer plugin syncs file entries into the DB. The MCP tool is the primary source of truth; the file is a resilience layer.
 
 **Observation types** (Zod schema, `packages/ingenium-core/lib/schema.ts`):
 
@@ -67,23 +69,6 @@ Every plugin lifecycle operation (create, enable, disable, delete, seed, update)
 - `removePluginFromConfig()` removes it.
 - All path resolution uses `getProjectRoot()` which resolves from `INGENIUM_CORE_DB_PATH` (`../../`) — never `process.cwd()`.
 - This prevents the "disconnected config" bug where the DB shows a plugin as enabled but OpenCode can't load it because the file or config entry is missing.
-
-## Learning→Skill Auto-Detection
-
-Every `POST /learnings` with `entry_type ≠ "skill"` and `priority ≥ 5` triggers fire-and-forget detection. The pipeline:
-
-1. **`extractKeywords()`** — Split content on `/[^a-z0-9]+/`, filter stopwords (80+ common words), compute frequency, return top 10.
-2. **`detectSkillGap()`** — FTS5 OR-search on skills (top 5 keywords), then check exact word overlap: skill name+description must contain ≥2 of the top 5 keywords (word-split, not substring). If no coverage, proceed.
-3. **`createSkillGapTask()`** — Dedup check against existing open tasks, then create a context-rich task assigned to `@ingenium-software-engineer-fast`.
-
-Key rules:
-- `entry_type="skill"` is never detected (loop guard, prevents infinite feedback).
-- Priority < 5 is never detected (low-signal filter).
-- Word-split matching prevents false substring matches: "conventions" ≠ "convention", "gitignore" ≠ "git".
-- Hyphenated names like "idempotent-seeding" correctly split to ["idempotent", "seeding"].
-- Dedup checks that no similar-title task already exists in `todo` or `in_progress` columns.
-- Manual batch scanning via `ingenium_skill_from_learnings` MCP tool processes the last 20 learnings.
-- The orchestrator's step 4a 🔴 HARD RULE runs both automated detection and manual LLM eye review after every batch of task completions.
 
 ## Skill file_tree Convention
 

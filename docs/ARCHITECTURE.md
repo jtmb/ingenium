@@ -40,30 +40,19 @@ Plugins are stored in the `plugins` SQLite table and synced to disk as `.ts` fil
 - **Seeding**: `seedPlugins()` writes `.ts` files to `.opencode/plugins/`, inserts into the `plugins` table with `enabled = 1`, and syncs `opencode.json`. Uses `INSERT OR IGNORE` for idempotency.
 - **MCP tools**: `ingenium_plugin_list`, `ingenium_plugin_get`, `ingenium_plugin_enable`, `ingenium_plugin_disable`, `ingenium_plugin_create`, `ingenium_plugin_delete`, `ingenium_plugin_update`.
 
-## Learning System
+## Self-Learning Pipeline
 
-Learning entries provide cross-session persistent memory. Each entry records a pattern, decision, bug, preference, or other discovery for future retrieval by AI agents.
+The self-learning pipeline enables agents to learn from user interactions through three phases:
 
-- **Storage**: SQLite with FTS5 full-text search for BM25-ranked queries
-- **Zod schema**: `LearningSchema` with `entry_type: z.enum(["decision", "bug", "pattern", "preference", "research", "skill", "agent", "config", "hook", "plugin", "architecture"])` — expanded from 5 to 11 types to cover all skill system evolution categories
-- **MCP tools**: `ingenium_learning_log` (create), `ingenium_learning_search` (FTS5 query), `ingenium_learning_list` (list recent), `ingenium_skill_from_learnings` (manual batch scan)
-- **Logging requirement**: Every change must be logged via the `ingenium_learning_log` MCP tool (searchable database). Enforced by 🔴 HARD RULEs in `generic-conventions` and `orchestrator-primer`.
-- **File fallback**: If the API is down, agents append to `.opencode/skills/learnings.md`. On the next session start, `importLearningsFromFile()` syncs file entries into the DB, marking them as processed.
-- **Auto-detection pipeline**: After every `POST /learnings`, the system fire-and-forgets `detectSkillGap()` which:
-  1. Extracts top 10 keywords (stopword filter + frequency)
-  2. FTS5 OR-searches existing skills
-  3. Checks exact word overlap in skill name+description (≥2 keywords = covered, using word-split to prevent substring false matches)
-  4. If uncovered and priority ≥ 5 and not `entry_type="skill"` (loop guard), creates a task for `@ingenium-software-engineer-fast`
-- **Manual batch scan**: `ingenium_skill_from_learnings` MCP tool scans the last 20 learnings and returns `{ scanned, tasks_created, task_ids }`.
-- **entry_type reference**:
+- **Phase 0 — Extraction Engine**: Server-side extraction reads OpenCode messages via the mounted DB (`/var/opencode/opencode.db`), with watermark-gated deduplication. A regex pre-filter selects candidate messages, and the synthesis LLM extracts durable user behavior rules as observations. Runs in the 15-minute scheduler BEFORE synthesis.
 
-## Orchestrator Protocol — Step 4a
+- **Phase 1 — Trait Consolidation**: `consolidateTraits()` sends observations + existing traits to the LLM, which returns CONFIRM/CREATE/IGNORE decisions. Traits are normalized statements (not verbatim copies). Confidence model: start 0.10–0.15, +0.15 per confirmation, cap 0.95, display threshold ≥0.30.
 
-The orchestrator agent (`.opencode/agents/primary/ingenium-orchestrator.md`) includes a 🔴 HARD RULE step 4a: Skill-from-Learning Check. After every batch of task completions (at minimum every 3), it runs:
-1. **Automated**: Call `ingenium_skill_from_learnings(project="ingenium")` — the FTS5-based detection engine scans for keyword-level gaps.
-2. **Manual (LLM eye)**: Review recent learnings for `pattern`, `architecture`, or `decision` entries describing reusable conventions, then `ingenium_skill_search` to check coverage.
+- **Phase 2 — LLM Skill Synthesis**: Groups 3+ related observations and sends them to the LLM with existing skills/traits as context. Creates/updates skills via `writeSkillToDisk()` with the `llm-synthesized` prefix. A backup provider provides fallback if the primary LLM fails.
 
-Both paths ensure skill coverage stays in sync with learnings. See `.opencode/agents/primary/ingenium-orchestrator.md` lines 137-148 for the full protocol.
+- **Auto-Observer Plugin**: Thin trigger (~62 lines) that POSTs `/api/v1/extraction/run` on `session.idle`. The 15-minute scheduler covers extraction if the plugin fails to load.
+
+See [docs/self-learning-pipeline.md](self-learning-pipeline.md) for full detail.
 
 ## Config Management Architecture
 
@@ -191,7 +180,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
-| `/servers` | MCP servers list with add/edit/delete |
+| `/mcp-servers` | MCP servers + Tool Manager (Servers/Tools tabs, per-tool enable/disable toggles) |
 | `/mail` | Mail (inbox, compose, reader, auto-responses) — email client interface |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
@@ -265,7 +254,7 @@ services:
       - "3000:3000"   # Dashboard
       - "4096:4096"   # opencode-server (managed by supervisord)
     volumes:
-      - ingenium_data:/app/.ingenium/data
+      - ingenium-data:/app/.ingenium
 ```
 
 Inside the container, **supervisord** manages four processes:
