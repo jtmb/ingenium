@@ -212,7 +212,7 @@ export declare const ObservationSchema: z.ZodObject<{
     observation_type: z.ZodEnum<["correction", "preference", "pattern", "insight", "feedback", "behavior", "terminology", "workflow", "error", "goal"]>;
     content: z.ZodString;
     importance: z.ZodDefault<z.ZodNumber>;
-    source: z.ZodDefault<z.ZodEnum<["agent", "email", "chat", "document", "calendar", "synthesis", "import", "manual"]>>;
+    source: z.ZodDefault<z.ZodEnum<["agent", "email", "chat", "document", "calendar", "synthesis", "import", "manual", "auto-observer"]>>;
     context: z.ZodOptional<z.ZodString>;
     status: z.ZodDefault<z.ZodEnum<["pending", "processed", "skipped", "failed"]>>;
     session_id: z.ZodOptional<z.ZodString>;
@@ -225,7 +225,7 @@ export declare const ObservationSchema: z.ZodObject<{
     status: "pending" | "processed" | "failed" | "skipped";
     project_id: string;
     content: string;
-    source: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual";
+    source: "auto-observer" | "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual";
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
     importance: number;
     session_id?: string | undefined;
@@ -239,7 +239,7 @@ export declare const ObservationSchema: z.ZodObject<{
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
     status?: "pending" | "processed" | "failed" | "skipped" | undefined;
     session_id?: string | undefined;
-    source?: "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | undefined;
+    source?: "auto-observer" | "agent" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | "manual" | undefined;
     importance?: number | undefined;
     context?: string | undefined;
 }>;
@@ -317,6 +317,29 @@ export declare const PluginSchema: z.ZodObject<{
     source_content?: string | undefined;
 }>;
 export type Plugin = z.infer<typeof PluginSchema>;
+export declare const MCPToolStateSchema: z.ZodObject<{
+    id: z.ZodOptional<z.ZodNumber>;
+    project_id: z.ZodString;
+    tool_name: z.ZodString;
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    enabled: boolean;
+    tool_name: string;
+    id?: number | undefined;
+}, {
+    created_at: string;
+    updated_at: string;
+    project_id: string;
+    tool_name: string;
+    id?: number | undefined;
+    enabled?: boolean | undefined;
+}>;
+export type MCPToolState = z.infer<typeof MCPToolStateSchema>;
 export declare const CommandSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;

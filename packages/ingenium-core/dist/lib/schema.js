@@ -79,7 +79,7 @@ export const ObservationSchema = z.object({
     ]),
     content: z.string().min(1),
     importance: z.number().min(1).max(10).default(5),
-    source: z.enum(["agent", "email", "chat", "document", "calendar", "synthesis", "import", "manual"]).default("agent"),
+    source: z.enum(["agent", "email", "chat", "document", "calendar", "synthesis", "import", "manual", "auto-observer"]).default("agent"),
     context: z.string().optional(),
     status: z.enum(["pending", "processed", "skipped", "failed"]).default("pending"),
     session_id: z.string().optional(),
@@ -112,6 +112,14 @@ export const PluginSchema = z.object({
     file_path: z.string(),
     enabled: z.coerce.boolean().default(true),
     source_content: z.string().optional(),
+    created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
+});
+export const MCPToolStateSchema = z.object({
+    id: z.number().optional(),
+    project_id: z.string(),
+    tool_name: z.string(),
+    enabled: z.coerce.boolean().default(true),
     created_at: z.string().datetime(),
     updated_at: z.string().datetime(),
 });

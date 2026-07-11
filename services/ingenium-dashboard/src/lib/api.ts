@@ -418,4 +418,12 @@ export const api = {
     sync: (type: string = "project", project = DEFAULT_PROJECT) =>
       request<{ data: { id: string; content: string } | null }>(`/config/sync?project=${encodeURIComponent(project)}&type=${encodeURIComponent(type)}`, { method: "POST" }),
   },
+  mcpTools: {
+    list: (project = DEFAULT_PROJECT) =>
+      request<{ data: Array<{ tool_name: string; enabled: boolean }>; total: number }>(`/mcp-tools?project=${encodeURIComponent(project)}`),
+    toggle: (name: string, enabled: boolean, project = DEFAULT_PROJECT) =>
+      request<{ data: any }>(`/mcp-tools/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, {
+        method: "PUT", body: JSON.stringify({ enabled }),
+      }),
+  },
 };
