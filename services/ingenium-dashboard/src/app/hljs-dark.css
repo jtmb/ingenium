@@ -1,7 +1,6 @@
 /* Light theme overrides for highlight.js — let container handle backgrounds */
 .hljs {
   background: transparent !important;
-  color: inherit;
 }
 
 /* Dark mode overrides for highlight.js github theme */
