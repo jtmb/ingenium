@@ -319,6 +319,128 @@ server.registerTool(
   wrapHandler("ingenium_task_next", async ({ project }) => taskTools.taskNext(project)),
 );
 
+server.registerTool(
+  "ingenium_task_update",
+  {
+    description: "Update task fields (title, description, assigned_to, priority, etc.).",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      fields: z.record(z.unknown()),
+    },
+  },
+  wrapHandler("ingenium_task_update", async ({ project, task_id, fields }) =>
+    taskTools.taskUpdate(project, task_id, fields)),
+);
+
+server.registerTool(
+  "ingenium_task_delete",
+  { description: "Delete a task by ID.", inputSchema: { project: projectParam, task_id: z.string() } },
+  wrapHandler("ingenium_task_delete", async ({ project, task_id }) => taskTools.taskDelete(project, task_id)),
+);
+
+server.registerTool(
+  "ingenium_task_search",
+  {
+    description: "Full-text search across tasks.",
+    inputSchema: { project: projectParam, query: z.string(), limit: z.number().optional() },
+  },
+  wrapHandler("ingenium_task_search", async ({ project, query, limit }) => taskTools.taskSearch(project, query, limit)),
+);
+
+server.registerTool(
+  "ingenium_task_comment",
+  {
+    description: "Add a comment to a task, optionally threaded under a parent comment.",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      author: z.string(),
+      body: z.string(),
+      parent_comment_id: z.string().optional(),
+    },
+  },
+  wrapHandler("ingenium_task_comment", async ({ project, task_id, author, body, parent_comment_id }) =>
+    taskTools.taskComment(project, task_id, author, body, parent_comment_id)),
+);
+
+server.registerTool(
+  "ingenium_task_activity",
+  {
+    description: "Get activity feed for a task.",
+    inputSchema: { project: projectParam, task_id: z.string(), limit: z.number().optional() },
+  },
+  wrapHandler("ingenium_task_activity", async ({ project, task_id, limit }) => taskTools.taskActivity(project, task_id, limit)),
+);
+
+server.registerTool(
+  "ingenium_task_link",
+  {
+    description: "Link two tasks together (blocks, relates_to, duplicates).",
+    inputSchema: {
+      project: projectParam,
+      task_id: z.string(),
+      linked_task_id: z.string(),
+      link_type: z.string(),
+    },
+  },
+  wrapHandler("ingenium_task_link", async ({ project, task_id, linked_task_id, link_type }) =>
+    taskTools.taskLink(project, task_id, linked_task_id, link_type)),
+);
+
+server.registerTool(
+  "ingenium_task_board_config_get",
+  {
+    description: "Get board configuration (columns and custom field definitions).",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler("ingenium_task_board_config_get", async ({ project }) => taskTools.taskBoardConfigGet(project)),
+);
+
+server.registerTool(
+  "ingenium_task_board_config_set",
+  {
+    description: "Set board configuration (columns and/or custom field definitions).",
+    inputSchema: {
+      project: projectParam,
+      columns: z.array(z.unknown()).optional(),
+      custom_field_defs: z.array(z.unknown()).optional(),
+    },
+  },
+  wrapHandler("ingenium_task_board_config_set", async ({ project, columns, custom_field_defs }) =>
+    taskTools.taskBoardConfigSet(project, columns, custom_field_defs)),
+);
+
+server.registerTool(
+  "ingenium_task_subtask_create",
+  {
+    description: "Create a subtask under an existing parent task.",
+    inputSchema: {
+      project: projectParam,
+      parent_id: z.string(),
+      title: z.string(),
+      description: z.string().optional(),
+      assigned_to: z.string().optional(),
+    },
+  },
+  wrapHandler("ingenium_task_subtask_create", async ({ project, parent_id, title, description, assigned_to }) =>
+    taskTools.taskSubtaskCreate(project, parent_id, title, description, assigned_to)),
+);
+
+server.registerTool(
+  "ingenium_task_notifications",
+  {
+    description: "List task notifications for a recipient, optionally filtered by unread status.",
+    inputSchema: {
+      project: projectParam,
+      recipient: z.string(),
+      unread: z.boolean().optional(),
+    },
+  },
+  wrapHandler("ingenium_task_notifications", async ({ project, recipient, unread }) =>
+    taskTools.taskNotifications(project, recipient, unread)),
+);
+
 // ── Plans ─────────────────────────────────────────────
 
 server.registerTool(
