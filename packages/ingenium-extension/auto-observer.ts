@@ -1,12 +1,11 @@
 import { tool } from "@opencode-ai/plugin";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { execSync } from "node:child_process";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 const PROJECT = "gh-llm-bootstrap";
 
-// Track last run time for dedup — skip messages older than this
+// Track last run timestamp for dedup — only process messages newer than this
 let lastRunAt = Date.now();
 
 /**
@@ -19,7 +18,7 @@ const PATTERNS: Record<string, RegExp[]> = {
     /(?:change|replace|swap|switch) .* (?:to|with|instead)/i,
     /(?:should be|could be|would be|needs to be) .* (?:instead|rather)/i,
     /that.?s (?:wrong|incorrect|not what|not right)/i,
-    /(?:actually|correction|typo|fix|wrong)/i,
+    /(?:actually|correction|typo|fix|wrong|retard|dumb|idiot|ape|fuck)/i,
   ],
   preference: [
     /(?:prefer|rather|like|want|choose) .*(?:instead|over|more|less)/i,
@@ -34,9 +33,10 @@ const PATTERNS: Record<string, RegExp[]> = {
     /(?:not |rather than|instead of) .*(?:it.?s |just )/i,
   ],
   workflow: [
-    /(?:run|execute|start) .*(?:test|build|lint|check|validate)/i,
+    /(?:run|execute|start|check) .*(?:test|build|lint|check|validate|git)/i,
     /(?:commit|push|git) .*(?:first|before|after|always)/i,
     /(?:ci|cd|deploy|release|publish) .*(?:pipeline|step|flow|process)/i,
+    /(?:troubleshoot|debug|fix|repair) .*(?:not working|broken|fail|error|issue)/i,
   ],
 };
 
@@ -56,37 +56,90 @@ function getDbPath(): string {
 }
 
 /**
- * Read recent user messages from the OpenCode DB and detect behavior patterns.
- * Returns observations to create. Uses dynamic import for better-sqlite3 to avoid
- * crashing if the module is unavailable.
+ * Open the OpenCode DB using better-sqlite3.
+ * Tries direct require first, falls back to createRequire from worktree.
  */
-async function detectPatterns(dbPath: string, worktree?: string): Promise<Array<{ type: string; content: string }>> {
+function openDb(dbPath: string, worktree?: string): any {
+  try {
+    // Direct require — works in OpenCode's CommonJS plugin runtime
+    return (require as any)("better-sqlite3")(dbPath, { readonly: true });
+  } catch {
+    try {
+      // Fallback: resolve from worktree using createRequire
+      const { createRequire } = require("node:module");
+      const req = createRequire(resolve(worktree || process.cwd(), "noop.js"));
+      return req("better-sqlite3")(dbPath, { readonly: true });
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * Read recent user messages from the OpenCode DB and detect behavior patterns.
+ * Returns observations to create.
+ */
+async function detectPatterns(
+  dbPath: string,
+  worktree?: string,
+): Promise<Array<{ type: string; content: string }>> {
   const results: Array<{ type: string; content: string }> = [];
 
   try {
     if (!existsSync(dbPath)) return results;
 
+    const db = openDb(dbPath, worktree);
+    if (!db) return results;
+
     let userTexts: string[] = [];
 
+    // Try session_input.prompt first (primary — contains actual user text)
     try {
-      const script = `
-        const D = require('better-sqlite3');
-        const db = new D('${dbPath.replace(/'/g, "'\\''")}', { readonly: true });
-        const texts = [];
-        try { const inputs = db.prepare("SELECT prompt FROM session_input WHERE prompt IS NOT NULL AND prompt != '' ORDER BY time_created DESC LIMIT 30").all(); for (const r of inputs) { if (r.prompt && r.prompt.length > 10) texts.push(r.prompt); } } catch(e) {}
-        if (texts.length === 0) {
-          try { const parts = db.prepare("SELECT data FROM part ORDER BY time_created DESC LIMIT 100").all(); for (const r of parts) { try { const d = JSON.parse(r.data); if (d.type === 'text' && d.text && d.text.length > 10) texts.push(d.text); } catch(e) {} } } catch(e) {}
-        }
-        db.close();
-        process.stdout.write(JSON.stringify(texts));
-      `;
-      const output = execSync(`node -e "${script.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, {
-        encoding: 'utf-8', timeout: 10000, windowsHide: true,
-      });
-      userTexts = JSON.parse(output.trim() || '[]');
+      const inputs = db
+        .prepare(
+          "SELECT prompt FROM session_input WHERE prompt IS NOT NULL AND prompt != '' ORDER BY time_created DESC LIMIT 30",
+        )
+        .all() as Array<{ prompt: string }>;
+      for (const r of inputs) {
+        if (r.prompt && r.prompt.length > 10) userTexts.push(r.prompt);
+      }
     } catch {
-      return results;
+      /* table may not exist */
     }
+
+    // Fall back to part.data — uses LIMIT 2000 because agent reasoning/tool-call
+    // entries vastly outnumber user text entries (ratio typically 30:1 or higher).
+    if (userTexts.length === 0) {
+      try {
+        const parts = db
+          .prepare(
+            "SELECT data, time_created FROM part ORDER BY time_created DESC LIMIT 2000",
+          )
+          .all() as Array<{ data: string; time_created: number }>;
+        for (const r of parts) {
+          try {
+            const d = JSON.parse(r.data);
+            if (
+              d.type === "text" &&
+              d.text &&
+              d.text.length > 10 &&
+              r.time_created > lastRunAt
+            ) {
+              userTexts.push(d.text);
+            }
+          } catch {
+            /* skip unparseable */
+          }
+        }
+      } catch {
+        /* table may not exist */
+      }
+    }
+
+    db.close();
+
+    // Update dedup timestamp
+    lastRunAt = Date.now();
 
     // Run pattern detection on collected texts
     const seen = new Set<string>();
@@ -165,7 +218,7 @@ async function logPipelineEvent(project: string, title: string, data: any) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        event_type: "observation_imported",
+        event_type: "observation_created",
         event_source: "plugin",
         title,
         description: JSON.stringify(data),
@@ -197,6 +250,12 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
               `Auto-observer: ${observations.length} detected, ${created} created`,
               { detected: observations.length, created, dbfound: true },
             );
+          } else {
+            // Even when nothing found, log so we know the plugin is alive
+            await logPipelineEvent(PROJECT, "Auto-observer: scanned — no patterns found", {
+              dbfound: true,
+              scanned: true,
+            });
           }
         } catch (err: any) {
           await logPipelineEvent(PROJECT, "Auto-observer: failed", {
