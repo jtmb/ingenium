@@ -11,6 +11,40 @@ docker compose up --build
 
 Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes **74 tools** accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
 
+### Connecting an MCP Client
+
+Point your MCP client to the `@ingenium/extension` package:
+
+```jsonc
+{
+  "mcp": {
+    "servers": {
+      "ingenium": {
+        "type": "local",
+        "command": ["npx", "-y", "@ingenium/extension"],
+        "disabled": false,
+        "env": {
+          "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+          "INGENIUM_API_TIMEOUT": "10000",
+          "LOG_LEVEL": "info"
+        }
+      }
+    }
+  }
+}
+```
+
+The extension package also ships two OpenCode plugins — `observer.ts` (automatic observation capture) and `skill-sync.ts` (bidirectional skill sync). Reference them in your OpenCode config:
+
+```jsonc
+{
+  "plugin": [
+    "packages/ingenium-extension/observer.ts",
+    "packages/ingenium-extension/skill-sync.ts"
+  ]
+}
+```
+
 ## Projects
 
 **What it does**: Browse and manage project configurations. Each project has its own context, skills, and learnings isolated in per-project SQLite databases. Dashboard provides Active/Archived tab views with inline rename, archive/unarchive, and purge actions.

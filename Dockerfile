@@ -54,6 +54,7 @@ COPY --from=builder --chown=appuser:appuser /app/services/ingenium-server/dist .
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-server/package.json ./services/ingenium-server/
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/.next/standalone ./
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/.next/static ./services/ingenium-dashboard/.next/static
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ ./packages/ingenium-extension/
 
 # Copy process management config
 COPY --chown=appuser:appuser supervisord.conf ./supervisord.conf
@@ -69,7 +70,7 @@ RUN mkdir -p /app/config /app/.ingenium /app/.opencode/skills && chown appuser:a
 # Pre-create appuser home for OpenCode config persistence
 RUN mkdir -p /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log && chown -R appuser:appuser /home/appuser
 # Pre-create both the container default and the fallback opencode.json
-RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@latest","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/services/ingenium-server/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data"}}},"plugin":[]}' > /app/config/opencode.container.json && \
+RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@latest","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["npx","-y","@ingenium/extension"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data"}}},"plugin":[]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 
