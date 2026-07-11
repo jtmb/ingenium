@@ -5,6 +5,7 @@ mode: subagent
 model: deepseek/deepseek-v4-flash
 permission:
   read: allow
+  edit: allow
   bash: allow
   glob: allow
   grep: allow

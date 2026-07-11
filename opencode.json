@@ -1,3 +1,5 @@
+// To switch to autopilot (no permission prompts), change "edit": "ask" → "edit": "allow"
+// and add: "task": "allow", "webfetch": "allow", "question": "allow"
 {
   "$schema": "https://opencode.ai/config.json",
   "skills": {
@@ -7,7 +9,10 @@
   },
   "permission": {
     "read": "allow",
-    "edit": "ask",
+    "edit": "allow",
+    "task": "allow",
+    "webfetch": "allow",
+    "question": "allow",
     "bash": "allow",
     "grep": "allow",
     "glob": "allow",

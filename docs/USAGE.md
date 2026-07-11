@@ -48,7 +48,7 @@ The extension package ships three OpenCode plugins — `observer.ts` (session ev
 
 ## Projects
 
-**What it does**: Browse and manage project configurations. Each project has its own context, skills, and learnings isolated in per-project SQLite databases. Dashboard provides rich cards with statistics, expandable detail panels, and Active/Archived tab views.
+**What it does**: Browse and manage project configurations. Each project has its own context, skills, and observations isolated in per-project SQLite databases. Dashboard provides rich cards with statistics, expandable detail panels, and Active/Archived tab views.
 
 **How to use**:
 - View active projects as rich cards showing skills count, observations count, pipeline event count, and last synthesis timestamp
@@ -91,20 +91,11 @@ The extension package ships three OpenCode plugins — `observer.ts` (session ev
 
 **Docs**: docs/HOW-TO/skills.md
 
-## Learnings
+## Learnings (Deprecated)
 
-**What it does**: Log, search, and discover patterns in your learnings. Uses FTS5 full-text search with type/tag categorization. The self-improving knowledge base.
+The `/learnings` page has been deprecated and redirects to `/observations`. See the [Observations](#observations) section for the current self-learning system.
 
-**How to use**:
-- View recent learnings in the Learnings tab
-- Search with FTS5 queries (prefix*, phrase "search", -negation)
-- Filter by type (skill, agent, hook, plugin, config, architecture, bug, pattern)
-
-**API**: GET /api/v1/learnings, POST /api/v1/learnings, SEARCH /api/v1/learnings/search?q=...
-
-**Code**: services/ingenium-dashboard/src/app/learnings/page.tsx → services/ingenium-api/routes/learnings.ts → packages/ingenium-core/lib/tools/learnings.ts
-
-**Docs**: docs/HOW-TO/learnings.md
+**Docs**: docs/self-learning-pipeline.md
 
 ## Mail (Email Client)
 
@@ -144,7 +135,7 @@ The extension package ships three OpenCode plugins — `observer.ts` (session ev
 
 **Migration**: `010_commands.sql` creates the commands table with project_id and name (unique) columns.
 
-**Self-Learning**: Email interactions (account setup, OAuth2 flows, message composition patterns) trigger observations logged by the Observer plugin during session events. Use `ingenium_observe(observation_type="preference", content="<email workflow observation>", importance=5)` after configuring email accounts or discovering useful workflows. See docs/HOW-TO/email.md for complete HOW-TO guide covering account setup, inbox management, compose flow, search patterns, MCP tools reference, and self-learning integration with the Ingenium pipeline.
+**Self-Learning**: Email interactions (account setup, OAuth2 flows, message composition patterns) are detected by the server-side extraction engine (Phase 0) which reads OpenCode messages. Manual `ingenium_observe()` calls are for exceptional cases only. See docs/HOW-TO/email.md for complete HOW-TO guide covering account setup, inbox management, compose flow, search patterns, MCP tools reference, and self-learning integration with the Ingenium pipeline.
 
 **Code**: packages/ingenium-email/src (IMAP client: imapflow, SMTP server: nodemailer, MIME parser: mailparser), services/ingenium-api/routes/email.ts → services/ingenium-dashboard/src/app/mail/page.tsx
 

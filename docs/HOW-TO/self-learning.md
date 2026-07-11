@@ -2,25 +2,16 @@
 
 ## Overview
 
-The self-learning pipeline is the modern way to teach your AI agent about your preferences, workflows, and patterns. Instead of manually logging learnings, you simply use `ingenium_observe` during your workflow, and the system automatically processes observations into personality traits and skill updates.
+The self-learning pipeline is the modern way to teach your AI agent about your preferences, workflows, and patterns. The extraction engine (Phase 0) reads your OpenCode messages and automatically extracts behavior rules using the synthesis LLM. Manual `ingenium_observe()` calls are for exceptional cases only. The system automatically processes observations into personality traits and skill updates.
 
 ## Architecture
 
 ```
-User OpenCode Session (:4098)
-  │
-  ├─ Agent uses ingenium_observe() during workflow
-  │   → observation stored in DB (pending)
-  │
-  ├─ Observer Plugin (session.idle / session.created)
-  │   → imports local file fallbacks
-  │   → triggers synthesis
-  │
-  └─ Synthesis Pipeline (triggered by /synthesize or plugin)
-      → classifies observations
-      → updates personality_traits
-      → marks observations as processed
-      → updates skills
+OpenCode Messages → Extraction Engine (server-side, Phase 0)
+  → regex pre-filter → LLM batch extraction → Observations (pending)
+  → consolidateTraits() (Phase 1) → CONFIRM/CREATE/IGNORE → Traits
+  → LLM Skill Synthesis (Phase 2) → Skills (writeSkillToDisk)
+  → Scheduler runs all phases every 15 min
 ```
 
 ## Observation Types
@@ -103,6 +94,7 @@ The synthesis pipeline creates personality traits from observations. Each observ
 | `ingenium_observation_stats` | Get pipeline statistics (pending/processed counts) |
 | `ingenium_personality` | Get full personality profile from all traits |
 | `ingenium_personality_traits` | List personality traits with filtering |
+| `ingenium_extraction_run` | Trigger server-side extraction from OpenCode messages |
 | `ingenium_synthesis_run` | Trigger synthesis pipeline manually |
 | `ingenium_synthesis_status` | Check pipeline status and stats |
 
@@ -112,22 +104,22 @@ The email client registers these tools for direct MCP access:
 
 | Tool | Purpose | Parameters | Returns |
 |------|---------|------------|---------|
-| `email_account_list` | List all configured OAuth2 accounts | — | Array of `{ id, provider, emailAddress }` objects (Gmail/Outlook) |
-| `email_compose_message` | Compose and send new email via SMTP | `{ accountId: string, to: string[], subject: string, body: string, attachments?: File[] }` | Message ID or error message |
-| `email_search_inbox` | Search emails across all accounts with FTS5 ranking | `{ query: string, limit?: number, accountId?: string }` | Array of matching email summaries with highlighted text |
+| `ingenium_email_accounts` | List all configured OAuth2 accounts | — | Array of `{ id, provider, emailAddress }` objects (Gmail/Outlook) |
+| `ingenium_email_send` | Compose and send new email via SMTP | `{ accountId: string, to: string[], subject: string, body: string, attachments?: File[] }` | Message ID or error message |
+| `ingenium_email_search` | Search emails across all accounts with FTS5 ranking | `{ query: string, limit?: number, accountId?: string }` | Array of matching email summaries with highlighted text |
 
 **Example usage in OpenCode:**
 ```typescript
 // List configured OAuth2 accounts  
-const accounts = await ingenium_email_account_list();
+const accounts = await ingenium_email_accounts();
 console.log("Configured:", accounts); // [{ id: "1", provider: "gmail", emailAddress: "user@gmail.com" }]
 
 // Search inbox for invoice-related emails with FTS5 ranking
-const results = await ingenium_email_search_inbox({ query: "invoice 2026", limit: 5 });
+const results = await ingenium_email_search({ query: "invoice 2026", limit: 5 });
 results.forEach(msg => { console.log(`${msg.subject} from ${msg.sender}`); })
 
 // Compose and send message via SMTP (nodemailer)
-await ingenium_email_compose_message({ 
+await ingenium_email_send({ 
   accountId: accounts[0].id,
   to: ["recipient@example.com"],
   subject: "Project Update",
@@ -152,9 +144,9 @@ await ingenium_email_compose_message({
 The old `ingenium_learning_log` MCP tool is **deprecated** but still functional. It forwards to both the old `learnings` table and the new `observations` table for backward compatibility.
 
 **Migration path:**
-- New code should use `ingenium_observe` instead of `ingenium_learning_log`
-- Existing learnings entries will be processed by the synthesis pipeline
-- The `/process-learnings` command is deprecated; use `/synthesize` instead
+- Observations are now primarily created by the server-side extraction engine (Phase 0) which reads OpenCode messages
+- Manual `ingenium_observe()` calls are for exceptional cases only
+- The `/process-learnings` command and `detectSkillGap` system have been fully replaced by the LLM-driven synthesis pipeline; use `/synthesize` instead
 
 ## Dashboard Pages
 
@@ -195,5 +187,5 @@ ingenium_observation_search("keyword")
 ## Related Documentation
 
 - `.opencode/skills/self-learning/SKILL.md` — Complete skill documentation
-- [docs/HOW-TO/learnings.md](./learnings.md) — Old learnings documentation (deprecated, kept for reference)
+- [docs/self-learning-pipeline.md](../self-learning-pipeline.md) — Complete pipeline reference (extraction engine, trait consolidation, skill synthesis)
 - .opencode/skills/skill-maintenance/SKILL.md — Skill lifecycle management
