@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { skills } from "ingenium-core";
+import { skills, synthesis } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import fs from "fs";
 import path from "path";
@@ -135,4 +135,16 @@ skillsRouter.post("/sync-all", (req, res) => {
   }
 
   res.json({ data: { synced_to_db: fromDisk, written_to_disk: toDisk, errors } });
+});
+
+// POST /consolidate — LLM-driven skill audit to merge redundant skills, targeting ≤20
+skillsRouter.post("/consolidate", async (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const result = await synthesis.consolidateSkills(projectId);
+    res.json({ data: result });
+  } catch (err: any) {
+    res.status(500).json({ error: { code: "CONSOLIDATION_ERROR", message: err.message } });
+  }
 });

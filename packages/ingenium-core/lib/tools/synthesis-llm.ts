@@ -703,3 +703,116 @@ export function getFullLLMSynthesisConfig(): { model: string; apiKey?: string; e
   if (!model || !endpoint) return null;
   return { model, apiKey: apiKey || undefined, endpoint };
 }
+
+// ── Skill Consolidation ──────────────────────────────────────
+
+/**
+ * Result from the skill consolidation LLM call.
+ * The LLM proposes merges (combine two overlapping skills) and deletes (remove redundant skills).
+ */
+export interface ConsolidationSkillResult {
+  merges: Array<{ source: string; target: string; reason: string }>;
+  delete: string[];
+}
+
+/**
+ * Build the prompt for the skill consolidation audit.
+ * The LLM receives the full skill catalog and proposes merges/deletes to reach ≤20 skills.
+ */
+export function buildConsolidationPrompt(
+  skills: Array<{ name: string; description: string; tags: string; content_preview: string }>,
+  total: number,
+): string {
+  const skillsText = skills.map(s =>
+    `- **${s.name}**: ${s.description} [tags: ${s.tags}] — ${s.content_preview}...`
+  ).join("\n");
+
+  return `You are auditing a set of ${total} skills for a developer workspace project. Target: reduce to ≤20 skills.
+
+Below is the full catalog. Many skills overlap in topic. Your job:
+1. Propose MERGES: for each pair of skills covering the SAME or VERY SIMILAR topics, choose one as the target and one as the source. The source's content and references will be merged into the target. Include a brief reason.
+2. Propose DELETES: skills that are redundant, trivial, or whose content is fully absorbed by another skill.
+
+CRITICAL: only propose merges/deletes where the skills genuinely overlap in subject matter. Do NOT merge unrelated skills just to hit the target number.
+
+Return STRICT JSON: {"merges":[{"source":"skill-name","target":"skill-name","reason":"both cover X topic"}],"delete":["redundant-skill-name"]}
+
+SKILL CATALOG:
+${skillsText}`;
+}
+
+/**
+ * Call the LLM to audit all skills and propose merges/deletes.
+ *
+ * @param projectId - Project to act on
+ * @param prompt - The consolidation prompt built by buildConsolidationPrompt
+ * @returns Structured merge/delete proposals
+ */
+export async function callConsolidationLLM(
+  projectId: string,
+  prompt: string,
+): Promise<ConsolidationSkillResult> {
+  const config = getLLMSynthesisConfig(projectId);
+  if (!config) return { merges: [], delete: [] };
+
+  const gid = getGlobalProject()?.id;
+  const endpointRaw = gid ? getSetting(gid, "synthesis_endpoint") : undefined;
+  if (!endpointRaw) return { merges: [], delete: [] };
+
+  const endpoint = endpointRaw.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
+
+  try {
+    const response = await fetch(`${endpoint}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: config.model,
+        messages: [
+          { role: "system", content: "You are a skill catalog auditor that outputs only valid JSON." },
+          { role: "user", content: prompt },
+        ],
+        max_tokens: 8192,
+        response_format: { type: "json_object" },
+        temperature: 0.3,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "unknown error");
+      logger.warn("synthesis-llm", "Consolidation LLM API returned error", { status: response.status, error: errText.substring(0, 200) });
+      return { merges: [], delete: [] };
+    }
+
+    const data = await response.json();
+    const content = data?.choices?.[0]?.message?.content || "{}";
+
+    // Parse defensively — handle both raw JSON and markdown-wrapped JSON
+    let parsed: any;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      const match = content.match(/```json\n?([\s\S]*?)\n?```/);
+      parsed = match ? tryParseJSON(match[1]) : null;
+      if (!parsed) {
+        logger.warn("synthesis-llm", "Consolidation LLM returned unparseable response", { content_preview: content.substring(0, 200) });
+        return { merges: [], delete: [] };
+      }
+    }
+
+    return {
+      merges: Array.isArray(parsed.merges)
+        ? parsed.merges.filter((m: any) => m.source && m.target && typeof m.source === "string" && typeof m.target === "string")
+            .map((m: any) => ({ source: m.source, target: m.target, reason: String(m.reason || "").slice(0, 200) }))
+        : [],
+      delete: Array.isArray(parsed.delete)
+        ? parsed.delete.filter((d: any) => typeof d === "string" && d.length > 0).map(String)
+        : [],
+    };
+  } catch (err: any) {
+    logger.warn("synthesis-llm", `Consolidation LLM fetch failed: ${err?.message}`, { error: err?.message, name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
+    return { merges: [], delete: [] };
+  }
+}

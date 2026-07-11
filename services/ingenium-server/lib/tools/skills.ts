@@ -61,3 +61,9 @@ export async function skillSync(project: string, name: string) {
   const res = await api.post(`/skills/${encodeURIComponent(name)}/sync?project=${project}`);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** Trigger LLM-driven skill audit — merges redundant skills to ≤20 total. */
+export async function skillConsolidate(project: string) {
+  const res = await api.post("/skills/consolidate", {}, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

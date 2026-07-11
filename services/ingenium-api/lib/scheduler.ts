@@ -45,6 +45,16 @@ async function triggerSynthesisForAllProjects(port: number) {
       logger.warn("scheduler", `Synthesis for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
     }
 
+    // Skill consolidation (LLM audit: merge redundant skills to maintain ≤20)
+    try {
+      const consolidationResult = await synthesis.consolidateSkills(p.id);
+      if (consolidationResult.merged > 0 || consolidationResult.deleted > 0) {
+        logger.info("scheduler", `Skill consolidation for "${p.name}": ${consolidationResult.summary}`);
+      }
+    } catch (err: any) {
+      logger.warn("scheduler", `Skill consolidation for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+    }
+
     // Force WAL checkpoint after synthesis (no readers active)
     checkpointAfterWrite();
 
