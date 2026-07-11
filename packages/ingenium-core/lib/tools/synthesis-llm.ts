@@ -236,7 +236,7 @@ export async function callSynthesisLLM(
           { role: "user", content: prompt },
         ],
         temperature: 0.3,
-        max_tokens: 4096,
+        max_tokens: 8192,
         response_format: { type: "json_object" },
       }),
       signal,
@@ -256,7 +256,7 @@ export async function callSynthesisLLM(
             { role: "user", content: prompt },
           ],
           temperature: 0.3,
-          max_tokens: 4096,
+          max_tokens: 8192,
         }),
         signal,
       });
@@ -419,7 +419,7 @@ For each new observation, decide ONE of:
           { role: "user", content: prompt },
         ],
         temperature: 0.2,
-        max_tokens: 2048,
+        max_tokens: 8192,
         response_format: { type: "json_object" },
       }),
     });
@@ -430,8 +430,17 @@ For each new observation, decide ONE of:
     }
 
     const json = await response.json();
-    const content = json.choices?.[0]?.message?.content || "{}";
-    const parsed = tryParseJSON(content);
+    const finishReason = json.choices?.[0]?.finish_reason;
+    const content = json.choices?.[0]?.message?.content;
+
+    // Guard: if the LLM truncated due to token limit and produced no content,
+    // return null so observations stay pending (not silently skipped).
+    if (finishReason === "length" && (!content || content.trim().length === 0)) {
+      logger.warn("synthesis-llm", "consolidateTraits truncated by token limit — leaving observations pending");
+      return null;
+    }
+
+    const parsed = tryParseJSON(content || "{}");
 
     if (!parsed) return null;
 
