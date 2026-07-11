@@ -53,7 +53,7 @@ function mapObservationToTraitType(
  *
  * Future phases will replace these heuristics with LLM-based analysis.
  */
-export async function runSynthesis(projectId: string): Promise<SynthesisResult> {
+export async function runSynthesis(projectId: string, sessionId?: string): Promise<SynthesisResult> {
   const result: SynthesisResult = {
     observations_processed: 0,
     traits_created: 0,
@@ -64,12 +64,19 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
     summary: "",
   };
 
+  // Read synthesis config once for event enrichment
+  const gid = projects.getGlobalProject()?.id;
+  const synthModel = gid ? getSetting(gid, "synthesis_model") : undefined;
+  const synthEndpoint = gid ? getSetting(gid, "synthesis_endpoint") : undefined;
+  const synthProvider = gid ? getSetting(gid, "synthesis_provider") : undefined;
+  const projectName = projects.getProject(projectId)?.name || "unknown";
+
   const batch = observations.getUnprocessedBatch(projectId, 50);
   if (batch.length === 0) {
     result.summary = "No pending observations to process.";
     // Log completion event so the pipeline timeline shows activity
     try {
-      logEvent(projectId, "synthesis_completed", "synthesis", "No pending observations.", result.summary, { observations_processed: 0 });
+      logEvent(projectId, "synthesis_completed", "synthesis", "No pending observations.", result.summary, { observations_processed: 0, model: synthModel, endpoint: synthEndpoint, provider: synthProvider }, undefined, sessionId);
     } catch (_) { /* non-fatal */ }
     return result;
   }
@@ -86,7 +93,9 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
       "synthesis",
       `Synthesis started — ${batch.length} observation(s) to process`,
       `${batch.length} pending observations across ${new Set(batch.map(o => o.observation_type)).size} type(s)`,
-      { batch_size: batch.length, types: [...new Set(batch.map(o => o.observation_type))] },
+      { batch_size: batch.length, types: [...new Set(batch.map(o => o.observation_type))], observation_ids: batch.map(o => o.id), model: synthModel, endpoint: synthEndpoint },
+      undefined,
+      sessionId,
     );
     synthesisEventId = evt.id;
   } catch (_) { /* non-fatal */ }
@@ -190,6 +199,7 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
   // ── Phase 2: LLM Skill Synthesis ────────────────────────
   // If user has configured an LLM for skill synthesis, use it
   // to analyze observations and create/update skills.
+  let llmInsights: string[] = [];
   if (synthesisLlm.isLLMSynthesisConfigured(projectId)) {
     try {
       const config = synthesisLlm.getLLMSynthesisConfig(projectId);
@@ -213,6 +223,7 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
             config.model,
             config.apiKey,
           );
+          llmInsights = llmResult.insights || [];
         } catch (primaryErr: any) {
           // Try backup provider if primary fails
           const backupModel = gid ? getSetting(gid, "synthesis_backup_model") : undefined;
@@ -233,6 +244,7 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
                 backupModel,
                 backupApiKey || undefined,
               );
+              llmInsights = llmResult.insights || [];
             } catch (backupErr: any) {
               // Both primary and backup failed
               throw new Error(`Synthesis LLM failed (primary: ${primaryErr.message}, backup: ${backupErr.message})`);
@@ -265,8 +277,9 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
               projectId, "trait_created", "synthesis",
               `Skill created: ${skillToCreate.name}`,
               skillToCreate.description.substring(0, 200),
-              { skill_name: skillToCreate.name, via_llm: true },
+              { skill_name: skillToCreate.name, via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
               synthesisEventId,
+              sessionId,
             );
           } catch (err: any) {
             result.errors.push(`Skill create "${skillToCreate.name}": ${err.message}`);
@@ -284,8 +297,9 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
                 projectId, "trait_updated", "synthesis",
                 `Skill updated: ${skillToUpdate.name}`,
                 `Patch type: ${skillToUpdate.patch_type}`,
-                { skill_name: skillToUpdate.name, patch_type: skillToUpdate.patch_type, via_llm: true },
+                { skill_name: skillToUpdate.name, patch_type: skillToUpdate.patch_type, via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
                 synthesisEventId,
+                sessionId,
               );
             } else {
               result.errors.push(`Skill update "${skillToUpdate.name}": not found`);
@@ -316,8 +330,9 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
         `Trait: ${t.trait_type} → ${t.trait_value.substring(0, 60)}`,
         `Confidence: ${t.confidence?.toFixed(2) ?? "N/A"}`,
         { trait_type: t.trait_type, trait_value: t.trait_value,
-          confidence: t.confidence, id: t.id },
+          confidence: t.confidence, id: t.id, observation_ids: batch.map(o => o.id), project_name: projectName, model: synthModel },
         synthesisEventId,
+        sessionId,
       );
     }
   } catch (_) { /* non-fatal */ }
@@ -330,8 +345,9 @@ export async function runSynthesis(projectId: string): Promise<SynthesisResult> 
       "synthesis",
       `Synthesis completed — ${result.observations_processed} processed`,
       result.summary,
-      { ...result },
+      { ...result, model: synthModel, endpoint: synthEndpoint, provider: synthProvider, insights: llmInsights },
       synthesisEventId,
+      sessionId,
     );
   } catch (_) { /* non-fatal */ }
 

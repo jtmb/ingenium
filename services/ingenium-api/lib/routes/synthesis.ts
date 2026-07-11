@@ -8,10 +8,11 @@ export const synthesisRouter = Router();
 synthesisRouter.post("/run", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  const sessionId = (req.query.session_id as string) || undefined;
   // Fire-and-forget with immediate status return
   setImmediate(async () => {
     try {
-      const result = await synthesis.runSynthesis(projectId);
+      const result = await synthesis.runSynthesis(projectId, sessionId);
       console.log(`[synthesis] Completed: ${JSON.stringify(result)}`);
     } catch (err: any) {
       console.error("[synthesis] Pipeline failed:", err.message);

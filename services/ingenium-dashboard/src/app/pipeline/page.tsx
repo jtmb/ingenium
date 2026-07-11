@@ -546,7 +546,11 @@ export default function PipelinePage() {
               </div>
               <div>
                 <span className="font-semibold">Session:</span>{" "}
-                <span className="text-gray-600 font-mono text-xs">{selected.session_id?.slice(0, 12) ?? "\u2014"}</span>
+                <span className="text-gray-600 font-mono text-xs">
+                  {selected.event_source === "synthesis" && !selected.session_id
+                    ? "Scheduled"
+                    : selected.session_id?.slice(0, 12) ?? "\u2014"}
+                </span>
               </div>
               <div className="col-span-2">
                 <span className="font-semibold">Created:</span>{" "}
@@ -571,10 +575,137 @@ export default function PipelinePage() {
             )}
             {selected.data != null && (
               <div>
-                <h3 className="font-semibold mb-1">Raw JSON Data</h3>
-                <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap">
-                  {JSON.stringify(parseData(selected.data), null, 2)}
-                </pre>
+                {/* synthesis_completed — rich structured view */}
+                {selected.event_type === "synthesis_completed" && (
+                  <div className="space-y-3">
+                    {(() => {
+                      const d = parseData(selected.data);
+                      return (
+                        <>
+                          {d?.model && (
+                            <div className="text-sm text-gray-600">
+                              <span className="font-semibold">Model:</span> {d.model}
+                              {d?.endpoint && <span className="text-gray-400"> @ {d.endpoint}</span>}
+                            </div>
+                          )}
+                          {d?.insights?.length > 0 && (
+                            <div>
+                              <h3 className="font-semibold text-sm mb-1">LLM Insights:</h3>
+                              <ul className="text-sm text-gray-600 space-y-1 border-l-2 border-blue-200 pl-3">
+                                {d.insights.map((i: string, idx: number) => (
+                                  <li key={idx}>&bull; {i}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          {d?.skills_created > 0 && (
+                            <p className="text-sm text-gray-600">
+                              <span className="font-semibold">Skills created:</span> {d.skills_created}
+                            </p>
+                          )}
+                          {d?.traits_created > 0 && (
+                            <p className="text-sm text-gray-600">
+                              <span className="font-semibold">Traits created:</span> {d.traits_created}
+                            </p>
+                          )}
+                          {d?.observation_ids?.length > 0 && (
+                            <p className="text-sm">
+                              <span className="font-semibold text-gray-600">Referenced:</span>{" "}
+                              <a
+                                href={`/observations?project=${d.project_name || project}`}
+                                className="text-blue-600 underline text-sm"
+                              >
+                                View Observations
+                              </a>
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* trait_created with skill_name */}
+                {selected.event_type === "trait_created" && (() => {
+                  const d = parseData(selected.data);
+                  return d?.skill_name ? (
+                    <div className="space-y-2">
+                      <div className="text-sm text-gray-600">
+                        <span className="font-semibold">Skill:</span>{" "}
+                        <a
+                          href={`/skills?project=${d.project_name || project}`}
+                          className="text-blue-600 underline font-medium"
+                        >
+                          {d.skill_name}
+                        </a>
+                        {d?.via_llm && <span className="text-xs text-gray-400 ml-1">via LLM</span>}
+                      </div>
+                      {d?.model && <p className="text-xs text-gray-400">Model: {d.model}</p>}
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* trait_created with trait_type (not skill) */}
+                {selected.event_type === "trait_created" && (() => {
+                  const d = parseData(selected.data);
+                  return d?.trait_type && !d?.skill_name ? (
+                    <div className="space-y-2">
+                      <div className="text-sm text-gray-600">
+                        <span className="font-semibold">Trait:</span>{" "}
+                        <a
+                          href={`/personality?project=${d.project_name || project}`}
+                          className="text-blue-600 underline font-medium"
+                        >
+                          {d.trait_type} &rarr; {d.trait_value?.slice(0, 60)}
+                        </a>
+                        {d?.confidence != null && (
+                          <span className="ml-2 text-xs text-gray-400">
+                            confidence: {(d.confidence * 100).toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* trait_updated — same structured view as trait_created */}
+                {selected.event_type === "trait_updated" && (() => {
+                  const d = parseData(selected.data);
+                  return d?.trait_type ? (
+                    <div className="space-y-2">
+                      <div className="text-sm text-gray-600">
+                        <span className="font-semibold">Trait:</span>{" "}
+                        <a
+                          href={`/personality?project=${d.project_name || project}`}
+                          className="text-blue-600 underline font-medium"
+                        >
+                          {d.trait_type} &rarr; {d.trait_value?.slice(0, 60)}
+                        </a>
+                        {d?.confidence != null && (
+                          <span className="ml-2 text-xs text-gray-400">
+                            confidence: {(d.confidence * 100).toFixed(0)}%
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Fallback — raw JSON for unknown or empty data shapes */}
+                {selected.event_type !== "synthesis_completed" &&
+                  selected.event_type !== "trait_created" &&
+                  selected.event_type !== "trait_updated" &&
+                  (() => {
+                    const d = parseData(selected.data);
+                    return d != null && Object.keys(d).length > 0 ? (
+                      <div>
+                        <h3 className="font-semibold mb-1">Raw JSON Data</h3>
+                        <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap">
+                          {JSON.stringify(d, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null;
+                  })()}
               </div>
             )}
           </div>

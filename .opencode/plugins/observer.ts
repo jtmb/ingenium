@@ -19,6 +19,9 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
 
   return {
     event: async ({ event }: { event: any }) => {
+      // Extract session ID for pipeline event threading
+      const sessionId = (event as any).session?.id || undefined;
+
       if (event.type === "session.created") {
         // Log session created for dashboard observability
         logPipelineEvent(
@@ -42,7 +45,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
         }
 
         // Step 2: Trigger initial synthesis
-        const synthResult = await triggerSynthesis(worktree)
+        const synthResult = await triggerSynthesis(worktree, sessionId)
         if (synthResult.triggered) {
           await ctx.client.app.log({
             body: {
@@ -68,7 +71,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
         if (now - lastCheckTime < 30000) return
         lastCheckTime = now
 
-        const synthResult = await triggerSynthesis(worktree)
+        const synthResult = await triggerSynthesis(worktree, sessionId)
         if (synthResult.triggered) {
           await ctx.client.app.log({
             body: {
