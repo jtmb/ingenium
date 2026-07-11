@@ -226,43 +226,41 @@ export default function LogsPage() {
   return (
     <div className="space-y-4">
       {/* ── Status Header ──────────────────────────────────────────────── */}
-      <div className="bg-white border rounded p-4 hover:shadow-md transition-shadow">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="text-3xl font-bold">System Logs</h1>
-            <p className="text-sm text-gray-400 mt-1">
-              Live log stream from the Ingenium server
-            </p>
-          </div>
-          <div className="flex items-center gap-4 text-sm text-gray-600">
-            <span>
-              Total: <strong>{total}</strong>
-            </span>
-            <span>
-              Sources:{" "}
-              <strong className="text-blue-600">{activeSourcesCount}</strong>
-            </span>
-            <span>
-              Displayed:{" "}
-              <strong className="text-emerald-600">
-                {filteredEntries.length}
-              </strong>
-            </span>
-            <span className="text-gray-400">
-              {lastUpdate ? `Updated ${fmtTime(lastUpdate)}` : "—"}
-            </span>
-            <button
-              onClick={() => setPaused((p) => !p)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                paused
-                  ? "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
-                  : "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
-              }`}
-            >
-              {paused ? "▶ Resume" : "⏸ Paused"} —{" "}
-              {paused ? "PAUSED" : "LIVE"}
-            </button>
-          </div>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-3xl font-bold">System Logs</h1>
+          <p className="text-sm text-gray-400 mt-1">
+            Live log stream from the Ingenium server
+          </p>
+        </div>
+        <div className="flex items-center gap-4 text-sm text-gray-600">
+          <span>
+            Total: <strong>{total}</strong>
+          </span>
+          <span>
+            Sources:{" "}
+            <strong className="text-blue-600">{activeSourcesCount}</strong>
+          </span>
+          <span>
+            Displayed:{" "}
+            <strong className="text-emerald-600">
+              {filteredEntries.length}
+            </strong>
+          </span>
+          <span className="text-gray-400">
+            {lastUpdate ? `Updated ${fmtTime(lastUpdate)}` : "—"}
+          </span>
+          <button
+            onClick={() => setPaused((p) => !p)}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+              paused
+                ? "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+                : "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
+            }`}
+          >
+            {paused ? "▶ Resume" : "⏸ Paused"} —{" "}
+            {paused ? "PAUSED" : "LIVE"}
+          </button>
         </div>
       </div>
 
