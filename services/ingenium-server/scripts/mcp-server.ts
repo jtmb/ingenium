@@ -37,6 +37,7 @@ import {
 } from "../lib/tools/synthesis.js";
 import * as emailTools from "../lib/tools/emails.js";
 import * as configTools from "../lib/tools/configs.js";
+import * as logTools from "../lib/tools/logs.js";
 
 // ── Tool State Check Wrapper ──────────────────────────────
 const API_CLIENT = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
@@ -578,6 +579,34 @@ server.registerTool(
   "ingenium_agent_sync",
   { description: "Sync an agent from its .md file on disk to the DB — edits made directly to the file are persisted.", inputSchema: { project: projectParam, name: z.string() } },
   wrapHandler("ingenium_agent_sync", async ({ project, name }) => agentTools.agentSync(project, name)),
+);
+
+// ── Logs ──────────────────────────────────────────────
+
+server.registerTool(
+  "ingenium_logs_list",
+  {
+    description: "List recent system log entries from the unified logger. Filter by source, level, or time.",
+    inputSchema: {
+      project: projectParam,
+      source: z.string().optional(),
+      level: z.string().optional(),
+      since: z.string().optional(),
+      limit: z.number().optional(),
+    },
+  },
+  wrapHandler("ingenium_logs_list", async ({ project, source, level, since, limit }) =>
+    logTools.logsList(project, source, level, since, limit)),
+);
+
+server.registerTool(
+  "ingenium_logs_sources",
+  {
+    description: "List active log sources (e.g., scheduler, api, auto-observer).",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler("ingenium_logs_sources", async ({ project }) =>
+    logTools.logsSources(project)),
 );
 
 // ── Email ──────────────────────────────────────────────

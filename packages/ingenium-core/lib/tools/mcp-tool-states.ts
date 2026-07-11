@@ -45,6 +45,7 @@ const ALL_TOOLS = [
   "ingenium_plan_list", "ingenium_plan_save", "ingenium_plan_search",
   "ingenium_email_list", "ingenium_email_search", "ingenium_email_read", "ingenium_email_send", "ingenium_email_draft", "ingenium_email_draft_response", "ingenium_email_folders", "ingenium_email_accounts", "ingenium_email_triage", "ingenium_email_suggest", "ingenium_email_patterns", "ingenium_email_watch_start", "ingenium_email_watch_status",
   "ingenium_observe",
+  "ingenium_logs_list", "ingenium_logs_sources",
 ];
 
 export function getAllToolNames(): string[] {
@@ -76,6 +77,7 @@ const CATEGORY_PREFIX: Record<string, string> = {
   plan: "Plans",
   email: "Email",
   observe: "Observe",
+  logs: "Logs",
 };
 
 export function getCategory(toolName: string): string {
