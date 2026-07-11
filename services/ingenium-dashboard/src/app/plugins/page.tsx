@@ -1,10 +1,11 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Plugin } from "../../lib/api";
 import Overlay from "../components/Overlay";
-import MarkdownViewer from "../components/MarkdownViewer";
+import PageHeader from "../components/PageHeader";
+import EmptyState from "../components/EmptyState";
 
 /**
  * Plugin management page.
@@ -97,10 +98,12 @@ export default function PluginsPage() {
     }
   };
 
+  const enabledCount = useMemo(() => plugins.filter(p => p.enabled).length, [plugins]);
+
   if (loading) {
     return (
       <div className="space-y-8">
-        <h1 className="text-3xl font-bold">Plugins</h1>
+        <PageHeader title="Plugins" subtitle="Manage OpenCode plugin extensions" />
         <p className="text-gray-500">Loading plugins...</p>
       </div>
     );
@@ -109,7 +112,7 @@ export default function PluginsPage() {
   if (error) {
     return (
       <div className="space-y-8">
-        <h1 className="text-3xl font-bold">Plugins</h1>
+        <PageHeader title="Plugins" subtitle="Manage OpenCode plugin extensions" />
         <p className="text-red-500">{error}</p>
         <button onClick={loadPlugins} className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition-colors">
           Retry
@@ -120,15 +123,21 @@ export default function PluginsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Plugins</h1>
+      <PageHeader
+        title="Plugins"
+        subtitle="Manage OpenCode plugin extensions"
+        stats={[
+          { label: "Total", value: plugins.length },
+          { label: "Enabled", value: enabledCount, color: "green" },
+        ]}
+      >
         <button
           onClick={() => setShowCreate(!showCreate)}
           className="bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition-colors"
         >
           {showCreate ? "Cancel" : "Add Plugin"}
         </button>
-      </div>
+      </PageHeader>
 
       {showCreate && (
         <div className="bg-white p-4 rounded border hover:shadow-md transition-shadow">
@@ -173,9 +182,11 @@ export default function PluginsPage() {
       )}
 
       {plugins.length === 0 ? (
-        <p className="text-gray-500">
-          No plugins registered. Click &quot;Add Plugin&quot; to upload one.
-        </p>
+        <EmptyState
+          message="No plugins registered"
+          subtitle="Upload a .ts plugin file to get started."
+          action={{ label: "Add Plugin", onClick: () => setShowCreate(true) }}
+        />
       ) : (
         <div className="space-y-3">
           {plugins.map((p) =>
