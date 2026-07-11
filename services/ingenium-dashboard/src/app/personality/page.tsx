@@ -78,7 +78,7 @@ export default function PersonalityPage() {
       </div>
 
       {sortMode === "newest" && (
-        <div className="bg-white rounded border divide-y">
+        <div className="bg-white rounded border divide-y hover:shadow-md transition-shadow">
           {[...traits]
             .filter(t => showHidden || (t.confidence || 0) >= 0.3)
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -113,7 +113,7 @@ export default function PersonalityPage() {
         const visibleTraits = (typeTraits as PersonalityTrait[]).filter(t => showHidden || (t.confidence || 0) >= 0.3);
         if (visibleTraits.length === 0) return null;
         return (
-        <div key={type} className="bg-white rounded border overflow-hidden">
+        <div key={type} className="bg-white rounded border overflow-hidden hover:shadow-md transition-shadow">
           <div className="bg-gray-50 px-4 py-2 border-b font-semibold text-sm flex items-center gap-2">
             <span>{TYPE_ICONS[type] || "📌"}</span>
             <span className="capitalize">{type.replace(/_/g, " ")}</span>

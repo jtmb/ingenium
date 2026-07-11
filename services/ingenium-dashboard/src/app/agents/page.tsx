@@ -131,7 +131,7 @@ export default function AgentsPage() {
       )}
 
       {showCreate && (
-        <div className="bg-white p-4 rounded border space-y-4">
+        <div className="bg-white p-4 rounded border space-y-4 hover:shadow-md transition-shadow">
           <h2 className="text-xl font-semibold">Create New Agent</h2>
           <input
             className="border p-2 rounded w-full"

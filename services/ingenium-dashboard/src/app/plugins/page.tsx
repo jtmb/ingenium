@@ -131,7 +131,7 @@ export default function PluginsPage() {
       </div>
 
       {showCreate && (
-        <div className="bg-white p-4 rounded border">
+        <div className="bg-white p-4 rounded border hover:shadow-md transition-shadow">
           <div className="flex flex-row gap-2 items-end flex-wrap">
             <div className="flex flex-col">
               <label className="text-xs text-gray-500 mb-1">Name</label>
@@ -180,7 +180,7 @@ export default function PluginsPage() {
         <div className="space-y-3">
           {plugins.map((p) =>
             editingId === p.id ? (
-              <div key={p.id} className="bg-white p-4 rounded border space-y-3">
+              <div key={p.id} className="bg-white p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
                 <input
                   value={editPath}
                   onChange={(e) => setEditPath(e.target.value)}
