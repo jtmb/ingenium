@@ -61,6 +61,15 @@ projectsRouter.post("/purge", (req, res) => {
   res.json({ data: { purged_count: purged } });
 });
 
+projectsRouter.get("/:name/detail", (req, res) => {
+  const detail = projects.getProjectDetail(req.params.name!);
+  if (!detail) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+    return;
+  }
+  res.json({ data: detail });
+});
+
 projectsRouter.patch("/:name/global", (req, res) => {
   const { is_global } = req.body;
   if (is_global === undefined || typeof is_global !== "boolean") {
