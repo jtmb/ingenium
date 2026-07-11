@@ -186,6 +186,7 @@ export const api = {
     update: (currentName: string, newName: string) =>
       request<{ data: Project }>(`/projects/${encodeURIComponent(currentName)}`, { method: "PATCH", body: JSON.stringify({ name: newName }) }),
     detail: (name: string) => request<{ data: any }>(`/projects/${encodeURIComponent(name)}/detail`),
+    purgeOne: (name: string) => request<null>(`/projects/${encodeURIComponent(name)}/purge`, { method: "DELETE" }),
   },
   skills: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Skill[] }>(`/skills?project=${project}`),
