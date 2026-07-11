@@ -99,6 +99,8 @@ async function detectPatterns(): Promise<Array<{ type: string; content: string; 
     /^I need to (?:research|understand|check)/i,  // research instructions
     /^Find this text:/i,  // edit instruction
     /^Replace the ENTIRE/i,  // edit instruction
+    /^want you to (?:plan|search|build|make|create|write|edit|update|delete|rename|copy|move|add|remove|run|execute|trigger|start|stop|fix|debug|test|deploy|check|review|audit|investigate|research|find|list|read|implement)\s/i,  // "want you to plan a skill" = task instruction
+    /\/home\/brajam\//i,  // contains a filesystem path = task context
   ];
 
   const seen = new Set<string>();
@@ -128,15 +130,18 @@ async function detectPatterns(): Promise<Array<{ type: string; content: string; 
           const snippet = match[1] || match[0] || text.substring(0, 200);
 
           // Filter 2: Minimum quality filter
-          // Require at least 15 chars OR at least 3 words — skip 1-2 word matches
-          const words = snippet.split(/\s+/).filter(w => w.length > 0);
-          const isTooShort = snippet.length < 15 && words.length < 3;
+          // Require at least 20 chars AND at least 4 words — skip fragments
+          const words = snippet.split(/\s+/).filter((w: string) => w.length > 0);
+          const isFragment = snippet.length < 20 || words.length < 4;
 
           // Skip long messages (>500 chars, likely task descriptions) where
           // the match is just a single common word
-          const isLongMsgShortMatch = text.length > 500 && snippet.length < 15;
+          const isLongMsgShortMatch = text.length > 500 && snippet.length < 20;
 
-          if (isTooShort || isLongMsgShortMatch) {
+          // Skip snippets ending mid-word (truncated) or with pipe separators (table text)
+          const isTruncated = /[a-z]\.\.\.$/.test(snippet) || /[a-z]\|$/.test(snippet.trim());
+
+          if (isFragment || isLongMsgShortMatch || isTruncated) {
             filteredCount++;
             continue; // Try next pattern in this category (not break — this match was garbage)
           }
