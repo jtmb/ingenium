@@ -98,14 +98,15 @@ async function detectPatterns(): Promise<Array<{ type: string; content: string; 
     // Only scan messages after lastRunAt to avoid rescanning.
     // LIMIT 2000 because agent reasoning/tool-call entries vastly outnumber user text entries
     // (ratio typically 30:1 or higher).
+    // message.data is a JSON blob with {role, model, agent, time, summary}
+    // part.data is a JSON blob with {type, text} — use json_extract for both
     const rows = db.query(`
       SELECT
         json_extract(p.data, '$.text') as text,
-        p.time_created,
-        m.role
+        p.time_created
       FROM part p
       JOIN message m ON p.message_id = m.id
-      WHERE m.role = 'user'
+      WHERE json_extract(m.data, '$.role') = 'user'
         AND json_extract(p.data, '$.type') = 'text'
         AND length(json_extract(p.data, '$.text')) > 10
         AND p.time_created > ?
