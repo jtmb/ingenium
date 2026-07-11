@@ -111,12 +111,13 @@ CREATE TABLE IF NOT EXISTS servers (
 CREATE TABLE IF NOT EXISTS plugins (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id),
-    name TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
     file_path TEXT NOT NULL,
     enabled INTEGER DEFAULT 1,
     source_content TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    UNIQUE(project_id, name)
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);

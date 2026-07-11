@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams, usePathname, useRouter } from "next/navigation";
 import { api } from "../../lib/api";
-import { useProject } from "../../lib/ProjectContext";
+import { useProject, persistProject } from "../../lib/ProjectContext";
 
 export default function ProjectSelector() {
   const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
@@ -21,6 +21,7 @@ export default function ProjectSelector() {
 
   const selectProject = (name: string) => {
     setOpen(false);
+    persistProject(name);
     const params = new URLSearchParams(searchParams.toString());
     params.set("project", name);
     router.push(`${pathname}?${params.toString()}`);
