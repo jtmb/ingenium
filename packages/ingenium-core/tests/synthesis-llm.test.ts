@@ -242,7 +242,7 @@ describe("synthesis LLM", () => {
     expect(result.skills_to_create[1].name).toBe("llm-synthesized-uppercase-name-here");
   });
 
-  it("clamps trait confidence to [0, 1] range", async () => {
+  it("clamps trait confidence to [0, 0.95] range", async () => {
     const traits = {
       personality_traits: [
         { trait_type: "code_preference", trait_value: "high", confidence: 1.5 },
@@ -255,7 +255,7 @@ describe("synthesis LLM", () => {
       [makeObs(1)], [], [], endpoint(), "model", "key",
     );
     expect(result.personality_traits).toHaveLength(3);
-    expect(result.personality_traits![0].confidence).toBe(1.0);
+    expect(result.personality_traits![0].confidence).toBe(0.95);
     expect(result.personality_traits![1].confidence).toBe(0.0);
     expect(result.personality_traits![2].confidence).toBe(0.7);
   });

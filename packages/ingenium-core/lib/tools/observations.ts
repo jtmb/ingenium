@@ -142,3 +142,27 @@ export function getUnprocessedBatch(projectId: string, limit = 50): Observation[
      LIMIT ?`
   ).all(projectId, limit) as Observation[];
 }
+
+export function deleteObservation(projectId: string, id: number): boolean {
+  const ok = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+    const result = db.prepare(
+      "DELETE FROM observations WHERE project_id = ? AND id = ?"
+    ).run(projectId, id);
+    return result.changes > 0;
+  });
+  checkpointAfterWrite();
+  return ok;
+}
+
+export function deleteObservationsBySource(projectId: string, source: string): number {
+  const result = execTransaction(() => {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+    const deleteResult = db.prepare(
+      "DELETE FROM observations WHERE project_id = ? AND source = ?"
+    ).run(projectId, source);
+    return deleteResult.changes;
+  });
+  checkpointAfterWrite();
+  return result;
+}

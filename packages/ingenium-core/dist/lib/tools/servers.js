@@ -5,8 +5,12 @@ export function listServers(projectId) {
     return db.prepare("SELECT * FROM servers WHERE project_id = ?").all(projectId);
 }
 export function registerServer(projectId, name, command, args, env, source) {
+    // Idempotent: return existing server on container restart
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const existing = db.prepare("SELECT * FROM servers WHERE project_id = ? AND name = ?").get(projectId, name);
+    if (existing)
+        return existing;
     return execTransaction(() => {
-        const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
         const now = new Date().toISOString();
         const id = randomUUID();
         db.prepare(`INSERT INTO servers (id, project_id, name, command, args, env, source, created_at)

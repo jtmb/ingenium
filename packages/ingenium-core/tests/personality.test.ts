@@ -12,6 +12,8 @@ import {
   updateConfidence,
   setActive,
   listTraits,
+  deleteTrait,
+  deleteAllTraits,
 } from "../lib/tools/personality.js";
 
 let tempDir: string;
@@ -65,6 +67,38 @@ describe("personality traits", () => {
     expect(profile.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("getProfile filters traits below 0.30 by default", () => {
+    // Create a low-confidence trait
+    const obs = storeObservation(projectId, "preference", "User might prefer 4-space indentation");
+    upsertTrait(projectId, "code_preference", "low-conf-trait", "Low confidence trait", 0.12, obs.id);
+
+    const profile = getProfile(projectId);
+    // The low-confidence trait (0.12) should NOT appear in the profile
+    // Parse the traits JSON string to check
+    let foundLow = false;
+    for (const row of profile) {
+      const traits = JSON.parse(row.traits);
+      if (traits.some((t: any) => t.trait_value === "low-conf-trait")) {
+        foundLow = true;
+      }
+    }
+    expect(foundLow).toBe(false);
+  });
+
+  it("getProfile with includeHidden shows all active traits", () => {
+    const profile = getProfile(projectId, { includeHidden: true });
+    expect(Array.isArray(profile)).toBe(true);
+    // Should include the low-confidence trait now
+    let foundLow = false;
+    for (const row of profile) {
+      const traits = JSON.parse(row.traits);
+      if (traits.some((t: any) => t.trait_value === "low-conf-trait")) {
+        foundLow = true;
+      }
+    }
+    expect(foundLow).toBe(true);
+  });
+
   it("disables a trait", () => {
     const obs = storeObservation(projectId, "pattern", "User stopped using X pattern");
     const trait = upsertTrait(projectId, "workflow_pattern", "X-pattern", "Old X pattern", 0.3, obs.id);
@@ -79,10 +113,10 @@ describe("personality traits", () => {
     expect(updated.confidence).toBeCloseTo(0.7, 1);
   });
 
-  it("clamps confidence to [0.0, 1.0]", () => {
+  it("clamps confidence to [0.0, 0.95]", () => {
     const trait = upsertTrait(projectId, "personality_trait", "test-clamp", "Test clamping", 0.9);
     const above = updateConfidence(projectId, "personality_trait", "test-clamp", 0.5);
-    expect(above.confidence).toBeCloseTo(1.0, 1);
+    expect(above.confidence).toBeCloseTo(0.95, 1);
     const below = updateConfidence(projectId, "personality_trait", "test-clamp", -2.0);
     expect(below.confidence).toBeCloseTo(0.0, 1);
   });
@@ -129,5 +163,33 @@ describe("personality traits", () => {
     // The includeInactive list should contain previously dismissed trait
     expect(all.some(t => t.trait_value === "ts-strict-mode")).toBe(true);
     expect(all.some(t => t.trait_value === "explicit-returns")).toBe(true);
+  });
+
+  it("deletes a single trait by id scoped to project", () => {
+    const obs = storeObservation(projectId, "preference", "User prefers tabs over spaces");
+    const trait = upsertTrait(projectId, "code_preference", "tabs-over-spaces", "Prefers tabs", 0.5, obs.id);
+    const deleted = deleteTrait(projectId, trait.id);
+    expect(deleted).toBe(true);
+    const allTraits = listTraits(projectId, true);
+    expect(allTraits.find(t => t.id === trait.id)).toBeUndefined();
+  });
+
+  it("returns false when deleting non-existent trait", () => {
+    const deleted = deleteTrait(projectId, 99999);
+    expect(deleted).toBe(false);
+  });
+
+  it("deletes all traits for a project", () => {
+    // Create a few traits
+    const obs1 = storeObservation(projectId, "preference", "User likes async/await");
+    const obs2 = storeObservation(projectId, "correction", "User prefers early returns");
+    upsertTrait(projectId, "code_preference", "async-await", "Uses async/await", 0.6, obs1.id);
+    upsertTrait(projectId, "feedback_style", "early-returns", "Prefers early returns", 0.4, obs2.id);
+
+    const count = deleteAllTraits(projectId);
+    expect(count).toBeGreaterThanOrEqual(2);
+
+    const remaining = listTraits(projectId, true);
+    expect(remaining.length).toBe(0);
   });
 });

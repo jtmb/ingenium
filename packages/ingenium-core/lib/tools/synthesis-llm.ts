@@ -68,7 +68,7 @@ ${obsText}
 
 Analyze these observations and respond with ONLY valid JSON (no markdown, no code blocks).
 
-1. If observations reveal a pattern NOT covered by existing skills → add to skills_to_create
+1. Only propose a NEW skill when you see 3+ related observations forming a durable pattern. Prefer UPDATING an existing skill over creating one. Return empty skills_to_create if nothing meets the bar.
 2. If observations reinforce or extend an existing skill → add to skills_to_update
 3. If observations reveal new personality traits → include in personality_traits
 4. If nothing is actionable → return empty arrays
@@ -122,6 +122,8 @@ Example:
 \`\`\`
 
 IMPORTANT: Group related concepts. If you identify 3 patterns about shell commands, create ONE \`llm-synthesized-shell-patterns\` skill with 3 reference files, NOT 3 separate skills.
+
+CAPS: Max 5 skills_to_create, max 5 skills_to_update. Do NOT create a skill unless 3+ observations support it.
 
 ### Skill Content Guidelines
 - Use 🔴 HARD RULE blocks for mandatory constraints
@@ -181,7 +183,7 @@ function validateResponse(raw: any): SynthesisLLMResult {
     result.personality_traits = raw.personality_traits.slice(0, 3).map((t: any) => ({
       trait_type: t.trait_type as any,
       trait_value: String(t.trait_value || "").slice(0, 200),
-      confidence: Math.min(1, Math.max(0, Number(t.confidence) || 0.3)),
+      confidence: Math.min(0.95, Math.max(0, Number(t.confidence) || 0.3)),
     })).filter((t: { trait_type: string; trait_value: string }) => t.trait_type && t.trait_value);
   }
 
@@ -317,6 +319,149 @@ export function getLLMSynthesisConfig(_projectId: string): { model: string; apiK
   if (!model) return null;
   return { model, apiKey: apiKey || undefined };
 }
+
+/**
+ * Result from the trait consolidation LLM call.
+ */
+export interface ConsolidationResult {
+  create: Array<{
+    trait_type: PersonalityTrait["trait_type"];
+    trait_value: string;
+    confidence_hint: number;
+    observation_ids: number[];
+  }>;
+  confirm: Array<{
+    trait_id: number;
+    observation_id: number;
+  }>;
+  ignore: number;
+}
+
+/**
+ * Consolidate raw observations into normalized personality traits via LLM.
+ * Returns null if LLM is not configured, signaling the caller to skip trait
+ * creation and leave observations pending for a future cycle.
+ */
+export async function consolidateTraits(
+  projectId: string,
+  observations: Array<{ id: number; observation_type: string; content: string }>,
+  existingTraits: Array<{ id: number; trait_type: string; trait_value: string; confidence: number }>,
+): Promise<ConsolidationResult | null> {
+  if (!isLLMSynthesisConfigured(projectId)) return null;
+
+  const gid = getGlobalProject()?.id;
+  if (!gid) return null;
+
+  const model = getSetting(gid, "synthesis_model");
+  const apiKey = getSetting(gid, "synthesis_api_key") || undefined;
+  const endpoint = getSetting(gid, "synthesis_endpoint");
+  if (!model || !endpoint) return null;
+
+  // Build prompt
+  const obsText = observations.map(o =>
+    `  [id:${o.id}] type:${o.observation_type} "${o.content.substring(0, 200)}"`
+  ).join("\n");
+
+  const traitsText = existingTraits.length > 0
+    ? existingTraits.map(t => `  [id:${t.id}] ${t.trait_type}: ${t.trait_value} (conf: ${Math.round(t.confidence * 100)}%)`).join("\n")
+    : "  (none)";
+
+  const prompt = `You maintain a user personality model for the Ingenium self-learning pipeline.
+
+## Existing Active Traits
+${traitsText}
+
+## New Observations
+${obsText}
+
+## Your Task
+
+For each new observation, decide ONE of:
+- **CONFIRM** — It supports an existing trait. Return that trait's id.
+- **CREATE** — It reveals a new durable trait. Produce a clean, generalizable statement (e.g., "User prefers 2-space indentation", NOT "User said to use 2 spaces").
+- **IGNORE** — It's noise, a one-off, or unactionable. Skip it.
+
+### Rules
+- Merge semantically-equivalent observations into ONE trait — do not create near-duplicates.
+- Normalize wording: traits should be crisp, reusable, third-person statements about the user.
+- Assign trait_type from this list: communication_style, code_preference, workflow_pattern, terminology, priority_signal, feedback_style, interaction_pattern, domain_knowledge, learned_skill, personality_trait.
+- confidence_hint: 0.10-0.15 for a single observation, 0.20-0.30 if supported by 2+ observations in this batch.
+
+### Response Format (STRICT JSON only, no markdown):
+{
+  "create": [
+    {
+      "trait_type": "code_preference",
+      "trait_value": "User prefers 2-space indentation and corrects 4-space",
+      "confidence_hint": 0.12,
+      "observation_ids": [1, 3]
+    }
+  ],
+  "confirm": [
+    { "trait_id": 42, "observation_id": 2 }
+  ],
+  "ignore_count": 1
+}`;
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+
+  const baseEndpoint = endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
+
+  try {
+    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: "You are a personality model consolidator that outputs only valid JSON." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 2048,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!response.ok) {
+      logger.warn("synthesis-llm", "consolidateTraits API returned error", { status: response.status });
+      return null;
+    }
+
+    const json = await response.json();
+    const content = json.choices?.[0]?.message?.content || "{}";
+    const parsed = tryParseJSON(content);
+
+    if (!parsed) return null;
+
+    // Parse defensively
+    const create = (Array.isArray(parsed.create) ? parsed.create : []).slice(0, 20).map((c: any) => ({
+      trait_type: validTraitTypes.includes(c.trait_type) ? c.trait_type : "code_preference",
+      trait_value: String(c.trait_value || "").slice(0, 200).trim(),
+      confidence_hint: Math.min(0.30, Math.max(0.05, Number(c.confidence_hint) || 0.10)),
+      observation_ids: (Array.isArray(c.observation_ids) ? c.observation_ids : []).map(Number).filter((n: number) => n > 0),
+    })).filter((c: { trait_value: string }) => c.trait_value.length > 0);
+
+    const confirm = (Array.isArray(parsed.confirm) ? parsed.confirm : []).slice(0, 50).map((c: any) => ({
+      trait_id: Number(c.trait_id) || 0,
+      observation_id: Number(c.observation_id) || 0,
+    })).filter((c: { trait_id: number; observation_id: number }) => c.trait_id > 0 && c.observation_id > 0);
+
+    const ignore = Number.isFinite(parsed.ignore_count) ? Math.abs(Math.round(parsed.ignore_count)) : 0;
+
+    return { create, confirm, ignore };
+  } catch (err: any) {
+    logger.warn("synthesis-llm", "consolidateTraits fetch failed", { err: String(err?.message || err) });
+    return null;
+  }
+}
+
+const validTraitTypes: string[] = [
+  "communication_style", "code_preference", "workflow_pattern",
+  "terminology", "priority_signal", "feedback_style",
+  "interaction_pattern", "domain_knowledge", "learned_skill", "personality_trait",
+];
 
 export interface EnrichedObservation {
   type: string;

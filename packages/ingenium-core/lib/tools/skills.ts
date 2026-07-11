@@ -28,7 +28,7 @@ export function searchSkills(projectId: string, query: string): Skill[] {
   ).all(projectId, query) as Skill[];
 }
 
-function writeSkillToDisk(skill: Skill): void {
+export function writeSkillToDisk(skill: Skill): void {
   const projectId = skill.project_id;
   const skillsBase = getSkillsBase(projectId);
   const dir = resolve(skillsBase, skill.name);

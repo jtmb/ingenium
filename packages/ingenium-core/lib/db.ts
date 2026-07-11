@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-    for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql"]) {
+      for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -210,6 +210,16 @@ function runMigrations(db: Database.Database): void {
       db.exec(sql);
       db.pragma("foreign_keys = ON");
       logger.info("db", "Applied migration 017_fix_trait_fk.sql");
+    }
+
+    // Check if pipeline_events CHECK constraint includes extraction event types (migration 018)
+    const pipelineCreateSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='pipeline_events'"
+    ).get() as { sql: string } | undefined;
+    if (pipelineCreateSql && !pipelineCreateSql.sql.includes("extraction_completed")) {
+      const sql = readFileSync(resolve(migrationsDir, "018_extraction_pipeline_events.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 018_extraction_pipeline_events.sql");
     }
   }
 }
