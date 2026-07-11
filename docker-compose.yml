@@ -8,6 +8,7 @@ services:
       - "4098:4098"   # OpenCode iframe (no auth)
     environment:
       - OPENCODE_SERVER_PASSWORD=test
+      - INGENIUM_CORE_DB_PATH=/app/.ingenium/data.db
       - INGENIUM_GLOBAL_CONFIG_PATH=/home/appuser/.config/opencode
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}

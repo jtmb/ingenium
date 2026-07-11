@@ -1,4 +1,4 @@
-import { settings, projects, logger, extraction, synthesis, jobs } from "ingenium-core";
+import { settings, projects, logger, extraction, synthesis, jobs, checkpointAfterWrite } from "ingenium-core";
 import { executeJobRun } from "./job-runner.js";
 
 const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
@@ -47,6 +47,9 @@ async function triggerSynthesisForAllProjects(port: number) {
         `Synthesis for "${p.name}" failed: ${err.message}`,
       );
     }
+
+    // Force WAL checkpoint after synthesis (no readers active)
+    checkpointAfterWrite();
 
     try {
       const syncRes = await fetch(
