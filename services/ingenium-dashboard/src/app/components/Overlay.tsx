@@ -7,10 +7,11 @@ type OverlayProps = {
   onClose: () => void;
   title: string;
   subtitle?: string;
+  fullScreen?: boolean;
   children: React.ReactNode;
 };
 
-export default function Overlay({ isOpen, onClose, title, subtitle, children }: OverlayProps) {
+export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, children }: OverlayProps) {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === "Escape") onClose();
   }, [onClose]);
@@ -34,7 +35,11 @@ export default function Overlay({ isOpen, onClose, title, subtitle, children }: 
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       
       {/* Panel */}
-      <div className="relative mt-8 mb-8 w-11/12 max-w-5xl bg-white rounded-lg shadow-2xl flex flex-col max-h-[90vh]">
+      <div className={`relative bg-white rounded-lg shadow-2xl flex flex-col ${
+        fullScreen
+          ? "w-[calc(100%-32px)] h-[calc(100%-32px)] m-4 max-w-none"
+          : "mt-8 mb-8 w-11/12 max-w-5xl max-h-[90vh]"
+      }`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
           <div className="min-w-0">

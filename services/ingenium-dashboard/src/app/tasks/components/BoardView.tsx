@@ -36,6 +36,13 @@ const PRIORITY_WEIGHT: Record<string, number> = {
   low: 1,
 };
 
+const PRIORITY_OPTIONS = [
+  { id: "critical", label: "Critical" },
+  { id: "high", label: "High" },
+  { id: "medium", label: "Medium" },
+  { id: "low", label: "Low" },
+];
+
 const PRIORITY_COLORS: Record<string, string> = {
   critical: "bg-red-600 text-white",
   high: "bg-orange-500 text-white",
@@ -134,10 +141,16 @@ function SortableCard({
   task,
   compact,
   onClick,
+  bulkMode,
+  isSelected,
+  onToggleSelect,
 }: {
   task: Task;
   compact: boolean;
   onClick: (t: Task) => void;
+  bulkMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }) {
   const {
     attributes,
@@ -162,20 +175,32 @@ function SortableCard({
   if (compact) {
     return (
       <div ref={setNodeRef} style={style} {...attributes} {...listeners}
-        className={`${baseCard} p-1.5 text-xs`}
+        className={`${baseCard} p-1.5 text-xs relative`}
         onClick={() => onClick(task)}
       >
-        <div className="font-medium truncate">{task.title}</div>
+        {bulkMode && (
+          <input type="checkbox" checked={isSelected ?? false}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => onToggleSelect?.(task.id)}
+            className="absolute top-1 left-1 rounded" />
+        )}
+        <div className={`font-medium truncate ${bulkMode ? "pl-4" : ""}`}>{task.title}</div>
       </div>
     );
   }
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}
-      className={`${baseCard} p-3 text-sm space-y-1.5`}
+      className={`${baseCard} p-3 text-sm space-y-1.5 relative`}
       onClick={() => onClick(task)}
     >
-      <div className="font-semibold text-gray-900 truncate">{task.title}</div>
+      {bulkMode && (
+        <input type="checkbox" checked={isSelected ?? false}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleSelect?.(task.id)}
+          className="absolute top-2 left-2 rounded z-10" />
+      )}
+      <div className={`font-semibold text-gray-900 truncate ${bulkMode ? "pl-5" : ""}`}>{task.title}</div>
       <div className="flex items-center gap-2 flex-wrap">
         {task.priority && (
           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] || "bg-gray-200 text-gray-600"}`}>
@@ -217,12 +242,18 @@ function ColumnDroppable({
   compact,
   wipLimit,
   onTaskClick,
+  bulkMode,
+  selectedIds,
+  onToggleSelect,
 }: {
   column: BoardColumn;
   tasks: Task[];
   compact: boolean;
   wipLimit?: number;
   onTaskClick: (t: Task) => void;
+  bulkMode?: boolean;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `col-${column.id}`,
@@ -257,7 +288,8 @@ function ColumnDroppable({
       <div className="p-2 space-y-1.5 flex-1">
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((t) => (
-            <SortableCard key={t.id} task={t} compact={compact} onClick={onTaskClick} />
+            <SortableCard key={t.id} task={t} compact={compact} onClick={onTaskClick}
+              bulkMode={bulkMode} isSelected={selectedIds?.has(t.id)} onToggleSelect={onToggleSelect} />
           ))}
         </SortableContext>
         {tasks.length === 0 && (
@@ -344,6 +376,13 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [error, setError] = useState("");
+
+  // Bulk edit state
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkColumn, setBulkColumn] = useState("");
+  const [bulkAssignee, setBulkAssignee] = useState("");
+  const [bulkPriority, setBulkPriority] = useState("");
 
   // Fetch board config from API
   useEffect(() => {
@@ -453,6 +492,42 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     [tasks, onTasksChange]
   );
 
+  // Open a different task in the detail overlay (for dependency navigation)
+  const handleOpenTask = useCallback((t: Task) => {
+    setSelectedTask(t);
+  }, []);
+
+  // Bulk edit toggle card selection
+  const handleToggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Bulk apply
+  const handleBulkApply = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    const taskIds = Array.from(selectedIds);
+    try {
+      setError("");
+      await api.tasks.bulkUpdate({
+        task_ids: taskIds,
+        column_id: bulkColumn || undefined,
+        assigned_to: bulkAssignee || undefined,
+        priority: bulkPriority || undefined,
+      }, project);
+      // Refresh from server
+      const res = await api.tasks.list(project);
+      onTasksChange(res.data ?? []);
+      setSelectedIds(new Set());
+    } catch {
+      setError("Bulk update failed. Please try again.");
+    }
+  }, [selectedIds, bulkColumn, bulkAssignee, bulkPriority, project, onTasksChange]);
+
   // Build column display order
   const columnWipMap = useMemo(() => {
     const map: Record<string, number | undefined> = {};
@@ -477,15 +552,50 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
             ))}
           </select>
         </div>
-        <button
-          onClick={toggleDensity}
-          className="text-sm px-3 py-1.5 border border-gray-200 rounded bg-white hover:bg-gray-50 cursor-pointer"
-        >
-          {compact ? "Rich" : "Compact"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()); }}
+            className={`text-sm px-3 py-1.5 border rounded cursor-pointer ${
+              bulkMode
+                ? "bg-blue-600 text-white border-blue-600"
+                : "bg-white border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            {bulkMode ? "Bulk Edit ✓" : "Bulk Edit"}
+          </button>
+          <button
+            onClick={toggleDensity}
+            className="text-sm px-3 py-1.5 border border-gray-200 rounded bg-white hover:bg-gray-50 cursor-pointer"
+          >
+            {compact ? "Rich" : "Compact"}
+          </button>
+        </div>
       </div>
 
       {error && <div className="text-red-600 text-sm">{error}</div>}
+
+      {/* Bulk edit floating action bar */}
+      {bulkMode && selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 bg-white border border-blue-200 rounded p-3 shadow-lg sticky bottom-0 z-10 flex-wrap">
+          <span className="text-sm font-medium text-gray-700">{selectedIds.size} selected</span>
+          <select value={bulkColumn} onChange={(e) => setBulkColumn(e.target.value)}
+            className="border border-gray-200 rounded text-sm bg-white px-2 py-1 hover:bg-gray-50 cursor-pointer">
+            <option value="">Move to...</option>
+            {columns.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+          </select>
+          <input value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}
+            placeholder="Assign to..." className="border border-gray-200 rounded px-2 py-1 text-sm w-32" />
+          <select value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}
+            className="border border-gray-200 rounded text-sm bg-white px-2 py-1 hover:bg-gray-50 cursor-pointer">
+            <option value="">Set Priority...</option>
+            {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
+          </select>
+          <button onClick={handleBulkApply}
+            className="bg-blue-600 text-white py-1.5 px-4 rounded text-sm hover:bg-blue-700">Apply</button>
+          <button onClick={() => setSelectedIds(new Set())}
+            className="text-gray-500 hover:text-gray-700 text-sm">Clear</button>
+        </div>
+      )}
 
       {/* Board */}
       <DndContext
@@ -508,6 +618,9 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
                   compact={compact}
                   wipLimit={columnWipMap[col.id]}
                   onTaskClick={setSelectedTask}
+                  bulkMode={bulkMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={handleToggleSelect}
                 />
               ))}
             </div>
@@ -541,6 +654,9 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
                             compact={compact}
                             wipLimit={columnWipMap[col.id]}
                             onTaskClick={setSelectedTask}
+                            bulkMode={bulkMode}
+                            selectedIds={selectedIds}
+                            onToggleSelect={handleToggleSelect}
                           />
                         );
                       })}
@@ -564,6 +680,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
           project={project}
           onClose={() => setSelectedTask(null)}
           onTaskUpdated={handleTaskUpdated}
+          onTaskClick={handleOpenTask}
         />
       )}
     </div>

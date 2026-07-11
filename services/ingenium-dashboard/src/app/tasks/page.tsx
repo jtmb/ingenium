@@ -9,6 +9,9 @@ import { api, Task } from "../../lib/api";
 import BoardView from "./components/BoardView";
 import ListView from "./components/ListView";
 import TimelineView from "./components/TimelineView";
+import SpotlightSearch from "./components/SpotlightSearch";
+import NotificationBell from "./components/NotificationBell";
+import TaskDetail from "./components/TaskDetail";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -44,6 +47,9 @@ export default function TasksPage() {
   const [title, setTitle] = useState("");
   const [error, setError] = useState("");
 
+  // Spotlight / detail overlay state
+  const [detailTask, setDetailTask] = useState<Task | null>(null);
+
   // Fetch tasks
   useEffect(() => {
     api.tasks.list(project).then((r) => setTasks(r.data ?? [])).catch(() => {});
@@ -73,11 +79,32 @@ export default function TasksPage() {
     }
   };
 
+  // Handle task selection from spotlight search
+  const handleSpotlightSelect = useCallback((task: Task) => {
+    setDetailTask(task);
+  }, []);
+
+  // Handle notification click (find task and open detail)
+  const handleNotificationClick = useCallback((taskId: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (task) setDetailTask(task);
+  }, [tasks]);
+
+  // Handle task update from detail overlay
+  const handleTaskUpdated = useCallback((updated: Task) => {
+    setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Header + create form */}
       <div className="space-y-4">
-        <h1 className="text-3xl font-bold">Tasks</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">Tasks</h1>
+          <div className="flex items-center gap-2">
+            <NotificationBell project={project} onTaskClick={handleNotificationClick} />
+          </div>
+        </div>
 
         {/* Create task inline row */}
         <div className="flex gap-2">
@@ -85,7 +112,7 @@ export default function TasksPage() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && create()}
-            placeholder="Task title"
+            placeholder="Task title (Ctrl+K to search)"
             className="border border-gray-200 rounded px-3 py-2 flex-1 text-sm"
           />
           <button
@@ -135,6 +162,20 @@ export default function TasksPage() {
           project={project}
           tasks={tasks}
           onTasksChange={setTasks}
+        />
+      )}
+
+      {/* Spotlight search (Ctrl+K) */}
+      <SpotlightSearch project={project} onTaskSelect={handleSpotlightSelect} />
+
+      {/* Task detail overlay (from spotlight or notification) */}
+      {detailTask && (
+        <TaskDetail
+          task={detailTask}
+          project={project}
+          onClose={() => setDetailTask(null)}
+          onTaskUpdated={handleTaskUpdated}
+          onTaskClick={setDetailTask}
         />
       )}
     </div>

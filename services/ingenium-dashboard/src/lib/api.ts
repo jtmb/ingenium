@@ -40,7 +40,11 @@ export type Task = {
   issue_type?: string;
   estimated_hours?: number;
   spent_hours?: number;
+  estimate_minutes?: number;
+  spent_minutes?: number;
+  remaining_minutes?: number;
   sort_order?: number;
+  custom_fields?: Record<string, any>;
   created_at: string;
   completed_at?: string;
 };
@@ -48,11 +52,28 @@ export type Task = {
 /** A single board column definition. */
 export type BoardColumn = { id: string; name: string; wip_limit?: number; order: number };
 
-/** Board configuration with columns. */
-export type BoardConfig = { columns: BoardColumn[] };
+/** A custom field definition for the board. */
+export type CustomFieldDef = {
+  name: string;
+  type: "text" | "paragraph" | "number" | "date" | "datetime" | "single_select" | "multi_select" | "checkboxes" | "radio" | "url";
+  options?: string[];
+  formula?: string;
+};
+
+/** Board configuration with columns and custom field definitions. */
+export type BoardConfig = { columns: BoardColumn[]; custom_field_defs?: CustomFieldDef[] };
 
 /** A comment on a task. */
-export type TaskComment = { id: string; task_id: string; body: string; author?: string; created_at: string };
+export type TaskComment = {
+  id: string;
+  task_id: string;
+  body: string;
+  author?: string;
+  parent_comment_id?: string;
+  edited_at?: string;
+  reactions?: Record<string, number>;
+  created_at: string;
+};
 
 /** An activity log entry for a task. */
 export type TaskActivity = { id: string; task_id: string; action: string; field?: string; old_value?: string; new_value?: string; actor?: string; created_at: string };
@@ -264,23 +285,32 @@ export const api = {
       request<{ data: Task[] }>(`/tasks/search?project=${project}&q=${encodeURIComponent(query)}`),
     comments: (taskId: string, project = DEFAULT_PROJECT) =>
       request<{ data: TaskComment[] }>(`/tasks/${taskId}/comments?project=${project}`),
-    addComment: (taskId: string, body: string, project = DEFAULT_PROJECT) =>
-      request<{ data: TaskComment }>(`/tasks/${taskId}/comments?project=${project}`, { method: "POST", body: JSON.stringify({ body }) }),
+    addComment: (taskId: string, body: string, parentCommentId?: string, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskComment }>(`/tasks/${taskId}/comments?project=${project}`, { method: "POST", body: JSON.stringify({ body, parent_comment_id: parentCommentId }) }),
+    reactToComment: (taskId: string, commentId: string, reaction: string, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskComment }>(`/tasks/${taskId}/comments/${commentId}/react?project=${project}`, { method: "POST", body: JSON.stringify({ reaction }) }),
     boardConfig: (project = DEFAULT_PROJECT) =>
       request<{ data: BoardConfig }>(`/tasks/board-config?project=${project}`),
     updateBoardConfig: (data: BoardConfig, project = DEFAULT_PROJECT) =>
       request<{ data: BoardConfig }>(`/tasks/board-config?project=${project}`, { method: "PUT", body: JSON.stringify(data) }),
-    notifications: (recipient?: string, project = DEFAULT_PROJECT) => {
+    notifications: (recipient?: string, unread?: boolean, project = DEFAULT_PROJECT) => {
       const params = new URLSearchParams({ project });
       if (recipient) params.set("recipient", recipient);
+      if (unread) params.set("unread", "1");
       return request<{ data: TaskNotification[] }>(`/tasks/notifications?${params}`);
     },
+    readNotification: (notificationId: string, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskNotification }>(`/tasks/notifications/${notificationId}/read?project=${project}`, { method: "POST" }),
     activity: (taskId: string, project = DEFAULT_PROJECT) =>
       request<{ data: TaskActivity[] }>(`/tasks/${taskId}/activity?project=${project}`),
     links: (taskId: string, project = DEFAULT_PROJECT) =>
       request<{ data: TaskLink[] }>(`/tasks/${taskId}/links?project=${project}`),
     addLink: (taskId: string, data: { target_task_id: string; link_type: string }, project = DEFAULT_PROJECT) =>
       request<{ data: TaskLink }>(`/tasks/${taskId}/links?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
+    removeLink: (taskId: string, linkId: string, project = DEFAULT_PROJECT) =>
+      request(`/tasks/${taskId}/links/${linkId}?project=${project}`, { method: "DELETE" }),
+    bulkUpdate: (data: { task_ids: string[]; column_id?: string; assigned_to?: string; priority?: string }, project = DEFAULT_PROJECT) =>
+      request<{ data: { updated: number } }>(`/tasks/bulk?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
   },
   plugins: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Plugin[] }>(`/plugins?project=${project}`),
