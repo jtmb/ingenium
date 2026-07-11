@@ -272,6 +272,8 @@ export const api = {
       if (type) params.set("type", type);
       return request<{ data: Observation[]; total: number }>(`/observations?${params}`);
     },
+    get: (id: number, project = DEFAULT_PROJECT) =>
+      request<{ data: Observation }>(`/observations/${id}?project=${project}`),
     create: (observationType: string, content: string, importance?: number, source?: string, project = DEFAULT_PROJECT) =>
       request<{ data: Observation }>(`/observations?project=${project}`, { method: "POST", body: JSON.stringify({ observation_type: observationType, content, importance, source }) }),
     stats: (project = DEFAULT_PROJECT) =>

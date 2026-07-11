@@ -46,6 +46,23 @@ observationsRouter.post("/", (req, res) => {
   res.status(201).json({ data: entry });
 });
 
+// GET /:id — fetch a single observation
+observationsRouter.get("/:id", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: { code: "INVALID_ID", message: "Observation ID must be a number" } });
+    return;
+  }
+  const entry = observations.getObservation(id);
+  if (!entry) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Observation not found" } });
+    return;
+  }
+  res.json({ data: entry });
+});
+
 // PATCH /:id — update observation (e.g., mark processed)
 observationsRouter.patch("/:id", (req, res) => {
   const projectId = requireProject(req, res);

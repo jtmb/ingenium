@@ -80,8 +80,30 @@ async function detectPatterns(): Promise<Array<{ type: string; content: string; 
     return [];
   }
 
+  // 🔴 Task instruction patterns — messages matching these are orchestrator/subagent
+  // instructions, NOT user behavior. Skip them entirely.
+  const TASK_INSTRUCTION_PATTERNS: RegExp[] = [
+    /^(Run|Execute|Start|Trigger|Call|Invoke)\s/,     // "Run npm test", "Execute this command"
+    /^(Check|Verify|Ensure|Validate|Audit|Review)\s/,  // "Check the latest", "Review the changes"
+    /^(Edit|Update|Modify|Replace|Change|Fix|Remove|Delete|Create|Write|Add|Insert)\s/,  // "Edit the file", "Fix the bug"
+    /^(Read|Search|Find|List|Fetch|Look|Grep|Glob)\s/,  // "Read the file", "Search for"
+    /^(Implement|Build|Test|Deploy|Commit|Push|Sync|Resolve)\s/,  // "Implement feature", "Build the app"
+    /^(Analyze|Inspect|Examine|Investigate)\s/,  // task instruction
+    /^Upload the full/i,  // "Upload the full conversation context..."
+    /^Operation:\s*(save|update)/i,  // plan.md operations
+    /^EXECUTION task/i,   // task headers
+    /^## Context to Capture/i,  // thread export sections
+    /^\*\*Can spawn\*\*/i,  // agent docs
+    /^\*\*Change \w\*\*/i,  // edit instructions
+    /^Review \d+ agent/i,  // QA review instructions
+    /^I need to (?:research|understand|check)/i,  // research instructions
+    /^Find this text:/i,  // edit instruction
+    /^Replace the ENTIRE/i,  // edit instruction
+  ];
+
   const seen = new Set<string>();
   const observations: Array<{ type: string; content: string; context?: string }> = [];
+  let filteredCount = 0;
 
   for (const msg of messages) {
     const text = String(msg.text || "").trim();
@@ -92,11 +114,33 @@ async function detectPatterns(): Promise<Array<{ type: string; content: string; 
       lastRunAt = msg.time_created;
     }
 
+    // Filter 1: Skip entire messages that look like task instructions
+    // (orchestrator → subagent directives, not user behavior)
+    if (TASK_INSTRUCTION_PATTERNS.some(p => p.test(text))) {
+      filteredCount++;
+      continue;
+    }
+
     for (const [obsType, patterns] of PATTERNS) {
       for (const pattern of patterns) {
         const match = text.match(pattern);
         if (match) {
           const snippet = match[1] || match[0] || text.substring(0, 200);
+
+          // Filter 2: Minimum quality filter
+          // Require at least 15 chars OR at least 3 words — skip 1-2 word matches
+          const words = snippet.split(/\s+/).filter(w => w.length > 0);
+          const isTooShort = snippet.length < 15 && words.length < 3;
+
+          // Skip long messages (>500 chars, likely task descriptions) where
+          // the match is just a single common word
+          const isLongMsgShortMatch = text.length > 500 && snippet.length < 15;
+
+          if (isTooShort || isLongMsgShortMatch) {
+            filteredCount++;
+            continue; // Try next pattern in this category (not break — this match was garbage)
+          }
+
           const key = `${obsType}:${snippet.substring(0, 60)}`;
           if (!seen.has(key)) {
             seen.add(key);
@@ -112,6 +156,9 @@ async function detectPatterns(): Promise<Array<{ type: string; content: string; 
     }
   }
 
+  if (filteredCount > 0) {
+    console.log(`[auto-observer] Filtered out ${filteredCount} task instruction / low-quality patterns`);
+  }
   console.log(`[auto-observer] Pattern detection complete: ${observations.length} patterns found across ${PATTERNS.size} categories`);
   return observations;
 }
