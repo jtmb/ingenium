@@ -83,8 +83,12 @@ Plugins ship inside the `@ingenium/extension` package. Reference them from your 
 
 ## Features
 
+### 📦 Extension Package (`@ingenium/extension`)
+Installable npm package that bundles everything needed to connect OpenCode to an Ingenium API. Ships the MCP stdio server, `observer.ts` plugin (session event handling + synthesis triggering), `skill-sync.ts` plugin (bidirectional disk↔DB sync), and `auto-observer.ts` plugin (automatic behavior pattern detection from OpenCode message history). Install with `npx -y @ingenium/extension`.
+→ [packages/ingenium-extension/ARCHITECTURE.md](packages/ingenium-extension/ARCHITECTURE.md)
+
 ### 📁 Projects
-Multi-project configuration with name→UUID resolution and per-project SQLite databases. Manage project identities with Active/Archived tab views, inline rename, archive/unarchive, and purge expired projects. Keep knowledge isolated per project. Dashboard provides a toggle between active and archived tabs.
+Multi-project configuration with name→UUID resolution and per-project SQLite databases. Rich card view with skills count, observations, pipeline events, and last synthesis timestamp. Expandable detail panel showing recent skills, recent observations, and pipeline activity. Active/Archived tab views with inline rename, archive/unarchive, delete with confirmation dialog, and purge expired projects. Card hover shadow effect matching the skills page design. Keep knowledge isolated per project.
 → [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md)
 
 ### 📚 Skills
@@ -92,7 +96,7 @@ AI agent conventions engine — 17 skills covering debugging, testing, security,
 → [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md)
 
 ### 🧠 Self-Learning Pipeline
-Self-improving knowledge base with observation collection, synthesis processing, and personality trait aggregation. Every decision, pattern discovery, and bug fix is automatically logged via `ingenium_observe`. An automated pipeline (Observer plugin at `.opencode/plugins/observer.ts`) processes observations into personality traits and skill updates. The system uses 10 observation types and creates 10 personality trait types for comprehensive agent learning.
+Self-improving knowledge base with observation collection, synthesis processing, and personality trait aggregation. Three plugins in the `@ingenium/extension` package handle the pipeline: **observer.ts** (session events, observation import, synthesis trigger), **skill-sync.ts** (bidirectional disk↔DB skill sync), and **auto-observer.ts** (automatic behavior pattern detection from OpenCode message history — no manual `ingenium_observe` calls needed). The system uses 10 observation types, 6 developer-specific personality trait dimensions with a confidence model (display threshold ≥0.30, time decay, dismiss support), and optional LLM-driven Phase 2 skill synthesis with backup provider fallback.
 → [docs/HOW-TO/self-learning.md](docs/HOW-TO/self-learning.md)
 
 > 🔴 **Note:** The old `ingenium_learning_log` is deprecated. Use `ingenium_observe` instead.
@@ -145,7 +149,8 @@ Project archiving and lifecycle management — view archived projects, restore t
 ingenium/
 ├── packages/
 │   ├── ingenium-core/        # Shared library: SQLite WAL + FTS5, 16 tool modules, Zod schemas, pipeline events
-│   └── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser) with OAuth2 for Gmail/Outlook
+│   ├── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser) with OAuth2 for Gmail/Outlook
+│   └── ingenium-extension/   # Client-side OpenCode package (MCP server, observer + skill-sync + auto-observer plugins, ARCHITECTURE.md). Installable via `npx -y @ingenium/extension`
 ├── services/
 │   ├── ingenium-api/          # Express REST gateway on port 4097. Sole database authority.
 │   ├── ingenium-server/       # MCP stdio server with 74 tools. Calls API via HTTP. Zero DB access.

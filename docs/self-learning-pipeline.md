@@ -80,7 +80,8 @@ flowchart TB
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  PHASE 1: OBSERVATION                                       │
-│  - Agents call ingenium_observe() during workflow          │
+│  - Auto-Observer plugin detects behavior from OpenCode DB   │
+│  - Legacy: Agents call ingenium_observe()                   │
 │  - Observations stored in DB with type, importance, source  │
 └─────────────────────────────────────────────────────────────┘
                           ↓
@@ -88,15 +89,18 @@ flowchart TB
 │  PHASE 2: SYNTHESIS                                         │
 │  - Observer plugin triggers pipeline on session events      │
 │  - Reads pending observations (ordered by importance)       │
-│  - Classifies each observation by type                      │
-│  - Upserts personality traits with confidence tracking      │
+│  - Phase 2a (heuristic): Classifies, upserts traits         │
+│    → pattern + insight observations are SKIPPED             │
+│  - Phase 2b (LLM, optional): Creates/updates skills         │
+│    → Falls back to backup provider if primary fails         │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  PHASE 3: PERSONALITY                                       │
+│  PHASE 3: PERSONALITY + CROSS-PROJECT                       │
 │  - Aggregated trait profile available via API/MCP tools     │
-│  - Confidence scores decay over time                        │
+│  - Confidence scores decay over time (-0.05 after 7 days)   │
 │  - Traits inform agent behavior adjustments                 │
+│  - Cross-project: skills in 2+ projects promoted to global  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,13 +111,24 @@ flowchart TB
 ```
 User interacts with OpenCode (:4098)
   │
-  ├─ Agent uses ingenium_observe() during workflow
+  ├─ Agent uses ingenium_observe() during workflow (legacy — use auto-observer)
   │   → POST /api/v1/observations → stored in DB (status: pending)
   │
-  ├─ Observer Plugin (session.created / session.idle)
+  ├─ Auto-Observer Plugin (auto-observer.ts)
+  │   → on session.created and every 5th session.idle
+  │   → reads OpenCode DB at ~/.local/share/opencode/opencode.db
+  │   → detects behavior patterns via regex (correction, preference, terminology, workflow)
+  │   → POSTs observations to API automatically
+  │   → logs pipeline events for observability
+  │
+  ├─ Observer Plugin (observer.ts, session.created / session.idle)
   │   → imports local file fallbacks if API was down
   │   → triggers POST /api/v1/synthesis/run
   │   → fires pipeline events for dashboard observability
+  │
+  ├─ Skill Sync Plugin (skill-sync.ts, session.created / session.idle)
+  │   → fetches skills from API
+  │   → writes missing skills to .opencode/skills/<name>/ (SKILL.md + metadata.json + references/)
   │
   ├─ Scheduled Scheduler (every 15 min in API server)
   │   → POST /api/v1/synthesis/run for ALL active projects
@@ -131,20 +146,83 @@ User interacts with OpenCode (:4098)
       → sends to LLM with existing skills + traits as context
       → creates/updates skills based on LLM analysis
       → logs errors but doesn't block Phase 1 results
+
+      Phase 3 (cross-project, manual/scheduled): Cross-Project Synthesis
+      → evaluates skills across all non-global, non-archived projects
+      → promotes skills present in 2+ projects to global-default
+      → logs cross-project skill events to pipeline timeline
 ```
 
 ### Key Components
 
 | Component | Responsibility |
 |-----------|----------------|
-| **Agent** | Calls `ingenium_observe()` during workflow to record user interactions |
-| **Observer Plugin** | Monitors session events, imports file fallbacks, triggers synthesis |
-| **Synthesis Pipeline** | Processes observations, generates/upserts personality traits (Phase 1 heuristic), optionally runs LLM skill synthesis (Phase 2) |
+| **Agent** | Calls `ingenium_observe()` during workflow to record user interactions (legacy — Auto-Observer replaces manual calls) |
+| **Observer Plugin** (observer.ts) | Monitors session events, imports file fallbacks, triggers synthesis |
+| **Auto-Observer Plugin** (auto-observer.ts) | Reads OpenCode message history DB, detects behavior patterns via regex (correction, preference, terminology, workflow), auto-creates observations without agent involvement |
+| **Skill Sync Plugin** (skill-sync.ts) | Fetches skills from API on session events, writes missing skills to `.opencode/skills/<name>/` |
+| **Synthesis Pipeline** | Processes observations, generates/upserts personality traits (Phase 1 heuristic), optionally runs LLM skill synthesis (Phase 2 with backup provider fallback), and cross-project skill promotion (Phase 3) |
 | **API Layer** | REST endpoints for all operations (sole DB authority) |
 | **MCP Server** | Tool handlers that forward to API layer |
 | **Dashboard** | UI for viewing and managing observations/personality/pipeline events |
 | **Database** | SQLite with three core tables (`observations` with FTS5, `personality_traits` with confidence tracking, `pipeline_events` with parent-child nesting) plus `personality_profile` aggregated view |
-| **LLM Provider** | (Optional) OpenAI-compatible API for Phase 2 skill synthesis, configured via Settings → Synthesis LLM with model dropdown, API key, and endpoint URL |
+| **LLM Provider** | (Optional) OpenAI-compatible API for Phase 2 skill synthesis, configured via Settings → Synthesis LLM with model dropdown, API key, endpoint URL, and backup provider |
+
+---
+
+## 2.5 Auto-Observer Plugin
+
+The **Auto-Observer** (`packages/ingenium-extension/auto-observer.ts`) is an OpenCode plugin that automatically detects user behavior patterns by reading the OpenCode message history database. It replaces the need for manual `ingenium_observe()` calls in agent code.
+
+### Architecture
+
+```
+Auto-Observer Plugin (auto-observer.ts)
+  │
+  ├─ Hook: session.created
+  │   → Opens OpenCode DB at ~/.local/share/opencode/opencode.db
+  │   → Reads recent user messages from session_input, part, message tables
+  │   → Runs regex pattern matching (4 categories)
+  │   → POSTs observations to POST /api/v1/observations?project=...
+  │   → Logs pipeline event for dashboard observability
+  │
+  ├─ Hook: session.idle (every 5th idle event)
+  │   → Same flow as session.created
+  │   → Dedup via lastRunAt timestamp per session
+  │
+  └─ MCP Tool: auto_observe_now
+      → Manual trigger for immediate pattern detection
+      → Returns JSON with { detected, created, observations }
+```
+
+### Pattern Detection Categories
+
+| Category | Regex Patterns | Example Match |
+|----------|---------------|---------------|
+| **correction** | `no, use...`, `change X to Y`, `that's wrong`, `should be...instead` | "no, use 2-space indentation" |
+| **preference** | `I prefer...`, `I always use...`, `don't like...`, convention/style keywords | "I prefer snake_case" |
+| **terminology** | `call it...`, `known as...`, `renamed to...`, `refers to...` | "call it deploy not release" |
+| **workflow** | `run...test/build/lint`, `commit...before/after`, CI/CD pipeline | "run tests before commit" |
+
+### Database Queries
+
+The plugin tries three tables in order of specificity:
+
+1. **`session_input.prompt`** — Primary source for actual user text (most reliable)
+2. **`part.data`** — Parsed JSON with `type: "text"` entries (fallback)
+3. **`message.data`** — Raw message data with `role: "user"` (last resort)
+
+### Deduplication
+
+- Tracks `lastRunAt` to skip messages older than the current session
+- Uses a `Set<string>` keyed by `type:snippet_prefix(60)` to avoid duplicate observations for the same pattern within one scan
+- Each idle check runs at most every 5th idle event
+
+### Error Handling
+
+- Non-fatal: if `better-sqlite3` is not available in the runtime, the plugin silently returns no results
+- Individual observation POST failures don't block the batch
+- Pipeline event logging is best-effort (non-blocking)
 
 ---
 
@@ -262,8 +340,8 @@ GROUP BY project_id, trait_type;
 |------|-------------|-----------------|------------------|
 | `correction` | User corrects agent behavior or output | "User prefers snake_case over camelCase for variable names" | 7-10 |
 | `preference` | User expresses a preference about code style, format, or approach | "User wants 2-space indentation instead of 4" | 5-8 |
-| `pattern` | Recurring behavior observed in user workflow | "User always adds JSDoc comments before running tests" | 6-9 |
-| `insight` | Novel discovery about the system or environment | "Container PTY works with glibc, enabling better terminal emulation" | 8-10 |
+| `pattern` | Recurring implementation pattern observed in code changes. **Does NOT create personality traits** — used only for LLM skill synthesis context | "Docker health checks use --retries consistently across all services" | 6-9 |
+| `insight` | Novel discovery about the system or environment. **Does NOT create personality traits** — provides context for LLM skill synthesis | "Container PTY works with glibc, enabling better terminal emulation" | 8-10 |
 | `feedback` | Implicit accept/reject of agent output | "User accepted the refactored code without changes" | 4-7 |
 | `behavior` | User behavior signal that indicates intent or habit | "User runs tests before committing to git" | 5-8 |
 | `terminology` | Preferred language or naming convention | "User calls it 'deploy' not 'release'" | 6-9 |
@@ -338,6 +416,8 @@ Observations must describe **user behavior**, not implementation activity:
 - "Fixed plugins table UNIQUE constraint"
 
 Implementation activity belongs in pipeline events, git commits, and the `/pipeline` timeline — not in observations. The synthesis pipeline only processes behavior-focused observations into personality traits.
+
+> 🔴 **The Auto-Observer plugin handles observation automatically** by scanning OpenCode message history for behavior patterns. Manual `ingenium_observe()` calls in agent code are no longer needed. All 9 agent files had their "🔴 Observation — Log User Interactions" sections removed.
 
 ---
 
@@ -485,22 +565,25 @@ curl http://localhost:4097/api/v1/personality/profile
 
 Every step of the self-learning pipeline is tracked as `pipeline_events` and displayed in a **visual Git-workflow-style timeline** at **`/pipeline`** in the dashboard. This replaces `console.log()` debugging with a structured, filterable, live-updating view.
 
-### Event Types (12)
+### Event Types (13)
 
 | Event | Source | Meaning |
 |-------|--------|---------|
-| `session_created` | plugin | OpenCode session started |
+| `session_created` | plugin | OpenCode session started; "Scheduled" for timer triggers, session ID for manual |
 | `session_idle` | plugin | Session went idle |
-| `observation_created` | agent | Agent called `ingenium_observe` |
+| `observation_created` | agent | Agent called `ingenium_observe` (legacy) or auto-observer detected pattern |
 | `observation_imported` | plugin | File fallback imported into DB |
+| `observation_detected` | auto-observer | Auto-observer detected behavior patterns from OpenCode message history |
 | `synthesis_triggered` | plugin | Observer triggered synthesis |
-| `synthesis_started` | synthesis | Pipeline began processing |
-| `synthesis_completed` | synthesis | Pipeline finished successfully |
+| `synthesis_started` | synthesis | Pipeline began processing; includes batch size, observation IDs, model info |
+| `synthesis_completed` | synthesis | Pipeline finished successfully; enriched with `model`, `endpoint`, `provider`, `insights`, observation counts, and trait statistics |
 | `synthesis_failed` | synthesis | Pipeline errored out |
-| `trait_created` | synthesis | New personality trait generated |
+| `trait_created` | synthesis | New personality trait generated; includes `trait_type`, `trait_value`, `confidence`, `observation_ids`, `skill_links`, and `model` info |
 | `trait_updated` | synthesis | Existing trait confidence adjusted |
-| `plugin_initialized` | plugin | Observer plugin loaded |
+| `plugin_initialized` | plugin | Observer/skill-sync/auto-observer plugin loaded |
 | `plugin_error` | plugin | Plugin encountered an error |
+
+**Enriched event data**: `synthesis_completed` events carry full pipeline metadata (model name, endpoint URL, provider ID, LLM-generated insights). `trait_created` events link back to parent observations (`observation_ids`) and include model attribution and skill references. Pipeline stats now include a skills count alongside observation and trait counts.
 
 ### Timeline Visual
 
@@ -545,10 +628,12 @@ The `/pipeline` dashboard page displays events as a connected vertical timeline:
 | Where | Event(s) emitted |
 |-------|-----------------|
 | `observations.ts` — `storeObservation()` | `observation_created` |
-| `synthesis.ts` — `runSynthesis()` | `synthesis_started`, `trait_created`, `trait_updated`, `synthesis_completed`, `synthesis_failed` |
-| `observer.ts` — `session.created` handler | `session_created` |
+| `synthesis.ts` — `runSynthesis()` | `synthesis_started`, `trait_created`, `trait_updated`, `synthesis_completed`, `synthesis_failed` (enriched with model/endpoint/insights) |
+| `observer.ts` — `session.created` handler | `session_created` (includes "Scheduled" or session ID) |
 | `observer-core.ts` — `importObservationsFromFile()` | `observation_imported` |
 | `observer-core.ts` — `triggerSynthesis()` | `synthesis_triggered` |
+| `auto-observer.ts` — `detectPatterns()` | `observation_detected` (auto-detected behavior patterns) |
+| `skill-sync.ts` — `syncSkillsFromApi()` | `plugin_initialized` (skill sync completed) |
 | **API Server** (scheduled) | Auto-triggers synthesis + skill sync every 15 minutes for ALL active projects |
 
 ### Scheduled Synthesis
@@ -826,11 +911,15 @@ Two utility functions control Phase 2 execution:
 3. Fetch Pending: SELECT * FROM observations WHERE status = 'pending' ORDER BY importance DESC
 4. Process Each Observation:
     a. Classify by observation_type
-    b. Determine target trait_type using mapping rules
-    c. Calculate confidence score
-    d. Upsert personality_trait record
+    b. If pattern or insight → SKIP trait creation (implementation notes)
+    c. Determine target trait_type using mapping rules
+    d. Calculate confidence score
+    e. Upsert personality_trait record
 5. Mark Processed: UPDATE observations SET status = 'processed' WHERE id IN (...)
 6. Update Profile: Refresh personality_profile view
+7. Phase 2 (optional): Send processed batch to LLM for skill synthesis
+    a. Try primary provider → if fails, try backup provider
+    b. Validate response, create/update skills, log pipeline events
 ```
 
 ### Trait Mapping Rules
@@ -839,14 +928,16 @@ Two utility functions control Phase 2 execution:
 |------------------|-------------------|-----------------|-------|
 | `correction` | `feedback_style` | 0.5 | Adjusts with delta from previous value |
 | `preference` | `code_preference` | 0.5 | +0.1 on re-observation, max 1.0 |
-| `pattern` | `workflow_pattern` | 0.4 | +0.1 per repeat observation |
-| `insight` | `domain_knowledge` | 0.5 | High confidence for novel discoveries |
+| `pattern` | _(none — skipped)_ | — | **Implementation notes — do NOT create traits.** Sent to LLM Phase 2 for skill synthesis only |
+| `insight` | _(none — skipped)_ | — | **Implementation notes — do NOT create traits.** Used only for LLM skill synthesis context |
 | `feedback` | `feedback_style` | 0.5 | Boosts confidence on matching traits |
 | `behavior` | `interaction_pattern` | 0.4 | Behavioral inference |
 | `terminology` | `terminology` | 0.5 | +0.1 per confirmation |
 | `workflow` | `workflow_pattern` | 0.4 | Multi-step process recognition |
 | `error` | `priority_signal` | 0.3 | Lower base, contextual |
 | `goal` | `priority_signal` | 0.3 | Stated goals have lower confidence |
+
+> 🔴 **Pattern and insight observations are implementation notes** — they track code/architecture changes, not user behavior. They are skipped during Phase 1 trait synthesis but are still sent to Phase 2 LLM skill synthesis as context. Use them for tracking discovery patterns and system architecture insights.
 
 ### Confidence Calculation Formula
 
@@ -934,8 +1025,13 @@ function applyTimeDecay(trait: Trait): number {
 
 | File | Purpose | Location |
 |------|---------|----------|
-| `.opencode/plugins/observer.ts` | OpenCode observer plugin: session events, `synthesize_observations` tool registration | `.opencode/plugins/` |
-| `.opencode/plugins/observer-core.ts` | Plugin core: `importObservationsFromFile()`, `triggerSynthesis()`, `logPipelineEvent()` | `.opencode/plugins/` |
+| `observer.ts` | OpenCode observer plugin: session events, `synthesize_observations` tool registration | `packages/ingenium-extension/` |
+| `observer-core.ts` | Plugin core: `importObservationsFromFile()`, `triggerSynthesis()`, `logPipelineEvent()` | `packages/ingenium-extension/` |
+| `skill-sync.ts` | Plugin: fetches skills from API, writes missing skills to `.opencode/skills/<name>/` on session events | `packages/ingenium-extension/` |
+| `auto-observer.ts` | Plugin: reads OpenCode DB, detects behavior patterns via regex (4 categories), auto-creates observations | `packages/ingenium-extension/` |
+| `index.ts` | Package exports: `ObserverPlugin`, `SkillSyncPlugin`, `AutoObserverPlugin` | `packages/ingenium-extension/` |
+| `package.json` | `@ingenium/extension` npm package with `bin` field for `npx -y` installation | `packages/ingenium-extension/` |
+| `ARCHITECTURE.md` | Definitive client/server split, data flow, process ownership reference | `packages/ingenium-extension/` |
 
 ### Command Files
 
@@ -1237,7 +1333,8 @@ curl -X POST http://localhost:4097/api/v1/skills/sync-all?project=gh-llm-bootstr
 | 2.1.0 | 2026-07-10 | Added LLM-driven skill synthesis configurable in Settings |
 | 2.2.0 | 2026-07-10 | Added `/sync-skills` command, `self-learning` skill, `docs/HOW-TO/self-learning.md`, expanded LLM synthesis docs (`SynthesisLLMResult`, retry logic, `tryParseJSON`, validation), scheduled skill sync in API server, comprehensive Files Reference |
 | 2.3.0 | 2026-07-10 | Removed deprecated `/learnings` page and `ingenium_learning_log` tools. Added local-persistence skill for DB→disk sync. `docs/self-learning-pipeline.md` moved from root. |
+| 3.0.0 | 2026-07-11 | **Auto-Observer**: New `auto-observer.ts` plugin reads OpenCode DB, detects behavior patterns via regex (4 categories), auto-creates observations. **Pattern/insight skip**: `pattern` and `insight` observation types no longer create personality traits. **Confidence overhaul**: Starting confidence reduced to 0.05–0.15, requires 2+ confirmations to reach display threshold (0.30), capped at 0.95, decays -0.05 after 7 days. **Pipeline enrichment**: `synthesis_completed` includes model/endpoint/insights, `trait_created` includes observation_ids/skill_links/model. **Cross-project synthesis (Phase 3)**: Skills used in 2+ projects promoted to global-default. **Backup LLM provider**: Automatic fallback if primary provider fails. **@ingenium/extension package**: New npm package bundling MCP server + 3 plugins. **Global config path resolution**: Global projects write to `~/.config/opencode/` via shared `paths.ts` module. **Projects page overhaul**: Rich cards with detail panel, expandable views, delete confirmation. **Config tracking**: DB-backed `configs` table with `/config` dashboard page. |
 
 ---
 
-*Last updated: July 10, 2026 (v2.3.0 — removed `/learnings` and deprecated tools, updated docs references)*
+*Last updated: July 11, 2026 (v3.0.0 — auto-observer, pattern/insight skip, confidence overhaul, cross-project, backup provider, extension package)*

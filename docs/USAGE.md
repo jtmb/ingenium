@@ -34,28 +34,33 @@ Point your MCP client to the `@ingenium/extension` package:
 }
 ```
 
-The extension package also ships two OpenCode plugins — `observer.ts` (automatic observation capture) and `skill-sync.ts` (bidirectional skill sync). Reference them in your OpenCode config:
+The extension package ships three OpenCode plugins — `observer.ts` (session event handling + synthesis triggering), `skill-sync.ts` (bidirectional skill sync), and `auto-observer.ts` (automatic behavior pattern detection from OpenCode message history). Reference them in your OpenCode config:
 
 ```jsonc
 {
   "plugin": [
     "packages/ingenium-extension/observer.ts",
-    "packages/ingenium-extension/skill-sync.ts"
+    "packages/ingenium-extension/skill-sync.ts",
+    "packages/ingenium-extension/auto-observer.ts"
   ]
 }
 ```
 
 ## Projects
 
-**What it does**: Browse and manage project configurations. Each project has its own context, skills, and learnings isolated in per-project SQLite databases. Dashboard provides Active/Archived tab views with inline rename, archive/unarchive, and purge actions.
+**What it does**: Browse and manage project configurations. Each project has its own context, skills, and learnings isolated in per-project SQLite databases. Dashboard provides rich cards with statistics, expandable detail panels, and Active/Archived tab views.
 
 **How to use**:
-- View active projects or toggle to the "Archived" tab for archived projects
+- View active projects as rich cards showing skills count, observations count, pipeline event count, and last synthesis timestamp
+- Toggle to the "Archived" tab for archived projects
 - Create a new project with a name (auto-resolved to UUID)
 - Rename a project inline (PATCH /projects/:name)
 - Archive a project (soft-deletes with timestamp; appears in Archived tab)
 - Restore an archived project from the Archived tab
 - Purge expired projects (configurable retention period in Settings)
+- Click a project card to expand a detail panel showing recent skills, recent observations, and recent pipeline activity
+- Delete a project with confirmation dialog (cannot be undone)
+- Card hover shadow effect matches the skills page design
 
 **API**: GET /api/v1/projects, POST /api/v1/projects, PATCH /api/v1/projects/:name, DELETE /api/v1/projects/:name, GET /api/v1/projects/archive, POST /api/v1/projects/:name/restore, POST /api/v1/projects/purge
 
@@ -275,15 +280,25 @@ These 14 skills provide guidance for specific contexts but are not required for 
 
 ## Synthesis & Cross-Project Features
 
-**What it does**: The synthesis pipeline processes observations into personality traits and skills. When configured with an LLM (Phase 2), the pipeline creates skills in standard split-skill format (SKILL.md + metadata.json + references/). Cross-project synthesis evaluates patterns across multiple projects, creating global skills available to every project.
+**What it does**: The synthesis pipeline processes observations into personality traits and skills. When configured with an LLM (Phase 2), the pipeline creates skills in standard split-skill format (SKILL.md + metadata.json + references/). Cross-project synthesis (Phase 3) evaluates patterns across multiple projects, promoting skills used in 2+ projects to global skills available to every project via the `global-default` project.
 
 **How to use**:
 - Observations are automatically processed via the scheduled synthesis pipeline (every 15 minutes)
 - Trigger manual synthesis via `ingenium_synthesis_run` for the current project
 - Use `ingenium_synthesis_cross_project` to evaluate observations and skills across all active projects
 - Global skills are created in the `global-default` project and shared across all projects
+- New projects automatically load global skills from the `global-default` project
+- Configure a **backup LLM provider** (Settings → Synthesis LLM) — if the primary provider fails, the pipeline automatically falls back to the backup. Both providers can be tested independently via Test Connection.
 
 **Split-skill output (LLM Phase 2):** When the LLM creates skills, it groups related concepts into one skill with multiple reference files rather than creating many small single-concept skills. All synthesized skill names use the `llm-synthesized` prefix (e.g., `llm-synthesized-email-workflows`).
+
+**Backup Provider Settings**:
+| Setting Key | Description |
+|------------|-------------|
+| `synthesis_backup_provider` | Backup provider ID (e.g., `deepseek`, or `__custom__`) |
+| `synthesis_backup_model` | Backup model ID |
+| `synthesis_backup_endpoint` | Backup OpenAI-compatible API URL |
+| `synthesis_backup_api_key` | Backup API key |
 
 **MCP Tools**:
 | Tool | Purpose |
@@ -302,11 +317,13 @@ These 14 skills provide guidance for specific contexts but are not required for 
 
 **How to use**:
 - Navigate to `/personality` in the dashboard
-- View active traits with confidence bars (0.0–1.0)
-- Traits start at low confidence (0.05–0.15) and require 2+ confirming observations to reach display threshold
+- View active traits grouped by type with confidence bars (0.0–1.0)
+- Toggle sort between "Grouped by type" and "Newest first"
+- Traits start at low confidence (0.05–0.15) and require 2+ confirming observations to reach display threshold (0.30)
 - Confidence is capped at 0.95; unused traits lose 0.05 after 7+ days (decay)
-- Click the **×** button on any trait card to dismiss it
-- Hidden traits (below 0.30) can be toggled via the "N hidden" link at the bottom of the profile
+- Click the **×** button on any trait card to dismiss it (marks `is_active = 0`)
+- Hidden traits (confidence below 0.30) can be toggled via the "N hidden" link at the bottom of the profile
+- Click any trait for a detail overlay showing exemplar observations, metadata, and confidence breakdown
 - The 6 trait dimensions tracked:
   - **communication_style** — How the user prefers to communicate (direct, detailed, concise)
   - **code_preference** — Code style, formatting, and language preferences
@@ -344,38 +361,6 @@ These 14 skills provide guidance for specific contexts but are not required for 
 
 ---
 
-## Personality
-
-**What it does**: View and manage the system's learned understanding of the user. The personality system tracks 6 developer-specific trait dimensions with confidence scores, surfacing only display-worthy traits (confidence ≥ 0.30) by default.
-
-**How to use**:
-- Navigate to `/personality` in the dashboard
-- View active traits grouped by type with confidence bars (0.0–1.0)
-- Toggle sort between "Grouped by type" and "Newest first"
-- Traits start at low confidence (0.05–0.15) and require 2+ confirming observations to reach display threshold
-- Confidence is capped at 0.95; unused traits lose 0.05 after 7+ days (decay)
-- Click the **×** button on any trait card to dismiss it
-- Hidden traits (below 0.30) can be toggled via the "N hidden" link at the bottom
-- Click any trait for a detail overlay showing exemplar observations
-
-**The 6 trait dimensions**:
-- **communication_style** — How the user prefers to communicate (direct, detailed, concise)
-- **code_preference** — Code style, formatting, and language preferences
-- **workflow_pattern** — Recurring workflows and multi-step processes
-- **feedback_style** — How the user gives feedback (corrective, confirmatory)
-- **interaction_pattern** — How the user interacts with agents (frequent checks, batch operations)
-- **priority_signal** — What the user prioritizes (performance, correctness, speed)
-
-**API**: GET /api/v1/personality, GET /api/v1/personality/profile, POST /api/v1/personality/:id/disable, POST /api/v1/personality/:id/enable
-
-**MCP Tools**: `ingenium_personality`, `ingenium_personality_traits`
-
-**Code**: services/ingenium-dashboard/src/app/personality/page.tsx → services/ingenium-api/routes/personality.ts → packages/ingenium-core/lib/tools/personality.ts
-
-**Docs**: docs/self-learning-pipeline.md, docs/HOW-TO/personality.md
-
----
-
 ## Pipeline
 
 **What it does**: A real-time Git-workflow-style timeline of all self-learning pipeline events. Every observation, synthesis run, trait creation, and plugin event is displayed in a connected vertical timeline with color-coded nodes.
@@ -388,7 +373,9 @@ These 14 skills provide guidance for specific contexts but are not required for 
 - Click any event card for a **detail overlay** with raw JSON data
 - Each event is color-coded by source: orange (agent), blue (plugin), green (synthesis), purple (trait)
 
-**12 event types**: `session_created`, `session_idle`, `observation_created`, `observation_imported`, `synthesis_triggered`, `synthesis_started`, `synthesis_completed`, `synthesis_failed`, `trait_created`, `trait_updated`, `plugin_initialized`, `plugin_error`
+**13 event types**: `session_created`, `session_idle`, `observation_created`, `observation_imported`, `synthesis_triggered`, `synthesis_started`, `synthesis_completed`, `synthesis_failed`, `trait_created`, `trait_updated`, `plugin_initialized`, `plugin_error`, `observation_detected` (from auto-observer)
+
+**Enriched event data**: `synthesis_completed` events carry full pipeline metadata (model name, endpoint URL, provider ID, LLM-generated insights). `trait_created` events link back to parent observations (`observation_ids`) and include model attribution and skill references. Pipeline stats include a skills count alongside observation and trait counts.
 
 **API**: GET /api/v1/pipeline/events, GET /api/v1/pipeline/timeline, POST /api/v1/pipeline/events
 

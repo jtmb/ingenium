@@ -22,7 +22,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <a href="/opencode" className="text-sm text-gray-600 hover:text-gray-900">OpenCode</a>
           <span className="text-gray-300">|</span>
           <a href="/projects" className="text-sm text-gray-600 hover:text-gray-900">Projects</a>
-          <a href="/archive" className="text-sm text-gray-600 hover:text-gray-900">Archive</a>
           <a href="/skills" className="text-sm text-gray-600 hover:text-gray-900">Skills</a>
           <a href="/tasks" className="text-sm text-gray-600 hover:text-gray-900">Tasks</a>
           <a href="/plugins" className="text-sm text-gray-600 hover:text-gray-900">Plugins</a>
