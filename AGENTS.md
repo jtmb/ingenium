@@ -109,6 +109,40 @@ grep -r "better-sqlite3\|\.db\|sqlite" services/ingenium-dashboard/  # must retu
 
 Move any DB logic to the API layer immediately.
 
+### Database Migrations
+
+Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` files. They are applied conditionally by `runMigrations()` in `db.ts` — each checks for an existing table/column/signature before running.
+
+**Critical migration sequence (015 → 017):**
+
+| Migration | Purpose | Risk |
+|-----------|---------|------|
+| `015_auto_observer_source.sql` | Rebuilds `observations` table to add `'auto-observer'` to the source CHECK constraint. Uses RENAME → DROP FTS → RECREATE → RESTORE pattern. | Partially failing leaves `observations_old` with dangling FTS triggers, causing "FOREIGN KEY constraint failed" during synthesis |
+| `017_fix_trait_fk.sql` | Rebuilds `personality_traits` to refresh the FK reference to the current `observations` table after 015's rename cycle. Comment marker `-- 017_rebuilt` in the CREATE TABLE prevents re-application. | Runs inside `PRAGMA foreign_keys = OFF/ON` to prevent cascading FTS trigger errors |
+
+**Anti-corruption guard (db.ts lines 183–213):**
+1. After migration 015 runs, `observationsCreateSql` is **re-read** so migration 017's condition (`observationsCreateSql.sql.includes("auto-observer")`) triggers correctly
+2. Migration 017 is wrapped in `PRAGMA foreign_keys = OFF/ON` to prevent cascading FTS errors
+3. Manual DB repair: drop `observations_old`, recreate `observations_fts` + triggers, rebuild `personality_traits` FK
+
+### 🔴 WAL Safety — checkpointAfterWrite Outside Transaction
+
+`checkpointAfterWrite()` (triggers a passive WAL checkpoint every 50 writes) must never be called **inside** `execTransaction()`. Calling checkpoint inside a transaction causes `SQLITE_LOCKED` because WAL checkpoint acquires a read lock on all pages while the transaction holds a write lock.
+
+**Pattern** (used in `personality.ts`, `observations.ts`, and all tool modules):
+
+```typescript
+const result = execTransaction(() => {
+  // All DB writes inside the transaction
+  db.prepare("UPDATE ...").run(...);
+  return value;
+});
+checkpointAfterWrite();  // ← ALWAYS outside, after the transaction commits
+return result;
+```
+
+> 🔴 **Violation detection**: If you see `SQLITE_LOCKED` errors, the first thing to check is whether `checkpointAfterWrite()` is being called inside an `execTransaction()` callback. It must always follow the transaction, never be inside it.
+
 ---
 
 ## Docker Deployment
@@ -290,9 +324,12 @@ The `@ingenium/extension` package (`packages/ingenium-extension/`) is a client-s
 ```jsonc
 "plugin": [
   "packages/ingenium-extension/observer.ts",
+  "packages/ingenium-extension/auto-observer.ts",
   "packages/ingenium-extension/skill-sync.ts"
 ]
 ```
+
+> 🔴 **Auto-observer auto-registration**: The auto-observer plugin must be registered in both the DB plugins table and both opencode configs (project `opencode.json` + global `opencode.jsonc`). When adding it to one, always sync to all three to prevent "disconnected config" bugs.
 
 > 📖 **Architecture reference**: See [`packages/ingenium-extension/ARCHITECTURE.md`](./packages/ingenium-extension/ARCHITECTURE.md) for the definitive client/server split, data flow, and process ownership.
 
