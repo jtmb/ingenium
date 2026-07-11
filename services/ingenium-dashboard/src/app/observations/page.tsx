@@ -1,6 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Observation } from "../../lib/api";
 import Overlay from "../components/Overlay";
@@ -25,7 +26,17 @@ const STATUS_COLORS: Record<string, string> = {
   failed: "bg-red-100 text-red-700",
 };
 
+function safeParseJson(raw: string | undefined | null): object | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export default function ObservationsPage() {
+  const router = useRouter();
   const project = useProject();
   const [observations, setObservations] = useState<Observation[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
@@ -78,7 +89,11 @@ export default function ObservationsPage() {
           </div>
         )}
         {observations.map((o: Observation) => (
-          <div key={o.id} className="bg-white p-4 rounded border cursor-pointer hover:shadow-md transition-shadow" onClick={() => setSelected(o)}>
+          <div
+            key={o.id}
+            className="bg-white p-4 rounded border cursor-pointer hover:shadow-md transition-shadow group"
+            onClick={() => setSelected(o)}
+          >
             <div className="flex gap-2 items-center mb-1 flex-wrap">
               <span className={`text-xs px-2 py-0.5 rounded ${TYPE_COLORS[o.observation_type] || "bg-gray-100 text-gray-700"}`}>
                 {o.observation_type}
@@ -86,6 +101,18 @@ export default function ObservationsPage() {
               <span className={`text-xs px-2 py-0.5 rounded ${STATUS_COLORS[o.status] || ""}`}>{o.status}</span>
               <span className="text-xs text-gray-400">{new Date(o.created_at).toLocaleString()}</span>
               {o.importance && <span className="text-xs text-gray-400">Importance: {o.importance}/10</span>}
+              <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(`/observations/${o.id}`);
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 underline"
+                  title="View full details"
+                >
+                  Open
+                </button>
+              </span>
             </div>
             <p className="text-sm">{o.content}</p>
             {o.context && <pre className="text-xs text-gray-400 mt-1 truncate">{o.context}</pre>}
@@ -110,8 +137,15 @@ export default function ObservationsPage() {
             </div>
             {selected.context && (
               <div>
-                <h3 className="font-semibold mb-1">Context (JSON)</h3>
-                <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-xs font-mono">{JSON.stringify(JSON.parse(selected.context), null, 2)}</pre>
+                <h3 className="font-semibold mb-1">Context</h3>
+                {(() => {
+                  const parsed = safeParseJson(selected.context);
+                  return parsed ? (
+                    <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-xs font-mono">{JSON.stringify(parsed, null, 2)}</pre>
+                  ) : (
+                    <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap text-gray-600">{selected.context}</pre>
+                  );
+                })()}
               </div>
             )}
           </div>

@@ -12,6 +12,10 @@ export function listProjects(): Project[] {
 }
 
 export function createProject(name: string, isGlobal = false): Project {
+  // Idempotent: return existing project on container restart
+  const existing = getProject(name);
+  if (existing) return existing;
+
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();

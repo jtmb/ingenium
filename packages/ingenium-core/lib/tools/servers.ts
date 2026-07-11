@@ -8,8 +8,12 @@ export function listServers(projectId: string): Server[] {
 }
 
 export function registerServer(projectId: string, name: string, command: string, args?: string, env?: string, source?: string): Server {
+  // Idempotent: return existing server on container restart
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const existing = db.prepare("SELECT * FROM servers WHERE project_id = ? AND name = ?").get(projectId, name) as Server | undefined;
+  if (existing) return existing;
+
   return execTransaction(() => {
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
     const id = randomUUID();
     db.prepare(
