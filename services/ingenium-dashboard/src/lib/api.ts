@@ -26,7 +26,42 @@ export type Skill = { id: string; name: string; description: string; content: st
 export type Learning = { id: number; entry_type: string; content: string; tags?: string; priority: number; created_at: string };
 
 /** A Kaban-board-style task with column tracking. */
-export type Task = { id: string; title: string; description?: string; column_id: string; assigned_to?: string; created_at: string; completed_at?: string };
+export type Task = {
+  id: string;
+  title: string;
+  description?: string;
+  column_id: string;
+  assigned_to?: string;
+  priority?: string;
+  due_date?: string;
+  start_date?: string;
+  epic_id?: string;
+  story_id?: string;
+  issue_type?: string;
+  estimated_hours?: number;
+  spent_hours?: number;
+  sort_order?: number;
+  created_at: string;
+  completed_at?: string;
+};
+
+/** A single board column definition. */
+export type BoardColumn = { id: string; name: string; wip_limit?: number; order: number };
+
+/** Board configuration with columns. */
+export type BoardConfig = { columns: BoardColumn[] };
+
+/** A comment on a task. */
+export type TaskComment = { id: string; task_id: string; body: string; author?: string; created_at: string };
+
+/** An activity log entry for a task. */
+export type TaskActivity = { id: string; task_id: string; action: string; field?: string; old_value?: string; new_value?: string; actor?: string; created_at: string };
+
+/** A link between tasks. */
+export type TaskLink = { id: string; source_task_id: string; target_task_id: string; link_type: string; created_at: string };
+
+/** A task notification. */
+export type TaskNotification = { id: string; task_id: string; recipient: string; type: string; message: string; read: boolean; created_at: string };
 
 /** An MCP plugin registered in the system. */
 export type Plugin = { id: string; name: string; file_path: string; enabled: boolean; source_content?: string };
@@ -219,8 +254,33 @@ export const api = {
       request<{ data: Task }>(`/tasks?project=${project}`, { method: "POST", body: JSON.stringify({ title }) }),
     move: (id: string, column_id: string, project = DEFAULT_PROJECT) =>
       request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: JSON.stringify({ column_id }) }),
+    update: (id: string, fields: Partial<Task>, project = DEFAULT_PROJECT) =>
+      request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: JSON.stringify(fields) }),
+    delete: (id: string, project = DEFAULT_PROJECT) =>
+      request(`/tasks/${id}?project=${project}`, { method: "DELETE" }),
     complete: (id: string, project = DEFAULT_PROJECT) =>
       request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: "{}" }),
+    search: (query: string, project = DEFAULT_PROJECT) =>
+      request<{ data: Task[] }>(`/tasks/search?project=${project}&q=${encodeURIComponent(query)}`),
+    comments: (taskId: string, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskComment[] }>(`/tasks/${taskId}/comments?project=${project}`),
+    addComment: (taskId: string, body: string, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskComment }>(`/tasks/${taskId}/comments?project=${project}`, { method: "POST", body: JSON.stringify({ body }) }),
+    boardConfig: (project = DEFAULT_PROJECT) =>
+      request<{ data: BoardConfig }>(`/tasks/board-config?project=${project}`),
+    updateBoardConfig: (data: BoardConfig, project = DEFAULT_PROJECT) =>
+      request<{ data: BoardConfig }>(`/tasks/board-config?project=${project}`, { method: "PUT", body: JSON.stringify(data) }),
+    notifications: (recipient?: string, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project });
+      if (recipient) params.set("recipient", recipient);
+      return request<{ data: TaskNotification[] }>(`/tasks/notifications?${params}`);
+    },
+    activity: (taskId: string, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskActivity[] }>(`/tasks/${taskId}/activity?project=${project}`),
+    links: (taskId: string, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskLink[] }>(`/tasks/${taskId}/links?project=${project}`),
+    addLink: (taskId: string, data: { target_task_id: string; link_type: string }, project = DEFAULT_PROJECT) =>
+      request<{ data: TaskLink }>(`/tasks/${taskId}/links?project=${project}`, { method: "POST", body: JSON.stringify(data) }),
   },
   plugins: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Plugin[] }>(`/plugins?project=${project}`),
