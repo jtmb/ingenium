@@ -22,6 +22,7 @@ export default function SkillsPage() {
   const [editText, setEditText] = useState("");
   const [saving, setSaving] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [sortMode, setSortMode] = useState<"alpha" | "newest">("alpha");
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { api.skills.list(project).then((r) => setSkills(r.data)).catch(() => {}); }, [project]);
@@ -73,9 +74,12 @@ export default function SkillsPage() {
     setSaving(false);
   };
 
-  const filtered = search
-    ? skills.filter((s) => s.name.includes(search) || s.description.includes(search))
-    : skills;
+  const filtered = [...skills]
+    .sort((a, b) => {
+      if (sortMode === "newest") return new Date(b.created_at || "").getTime() - new Date(a.created_at || "").getTime();
+      return a.name.localeCompare(b.name);
+    })
+    .filter((s) => !search || s.name.includes(search) || s.description.includes(search));
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -112,6 +116,10 @@ export default function SkillsPage() {
       {/* Search + Upload */}
       <div className="flex gap-2 items-center">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border p-2 rounded flex-1" />
+        <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white text-gray-600">
+          <option value="alpha">Alphabetical</option>
+          <option value="newest">Newest first</option>
+        </select>
         <input ref={fileRef} type="file" accept=".md" onChange={handleUpload} className="hidden" />
         <button onClick={() => fileRef.current?.click()} disabled={uploadStatus === "uploading"}
                 className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50">

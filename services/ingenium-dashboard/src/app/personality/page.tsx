@@ -23,6 +23,18 @@ export default function PersonalityPage() {
   const [traits, setTraits] = useState<PersonalityTrait[]>([]);
   const [profile, setProfile] = useState<any>(null);
   const [selectedTrait, setSelectedTrait] = useState<any>(null);
+  const [sortMode, setSortMode] = useState<"grouped" | "newest">("grouped");
+
+  function formatRelative(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const sec = Math.abs(Math.floor(diff / 1000));
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hrs = Math.floor(min / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  }
 
   useEffect(() => {
     api.personality.list(project).then((r) => setTraits(r.data || [])).catch(() => {});
@@ -38,16 +50,45 @@ export default function PersonalityPage() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Personality Profile</h1>
-        <span className="text-sm text-gray-500">{traits.length} trait(s)</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-400">Sort:</span>
+          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white text-gray-600">
+            <option value="grouped">Grouped by type</option>
+            <option value="newest">Newest first</option>
+          </select>
+          <span className="text-sm text-gray-500">{traits.length} trait(s)</span>
+        </div>
       </div>
 
-      {Object.entries(grouped).length === 0 && (
+      {sortMode === "newest" && (
+        <div className="bg-white rounded border divide-y">
+          {[...traits].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).map((t) => (
+            <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50 flex justify-between items-center" onClick={() => setSelectedTrait(t)}>
+              <div className="flex items-center gap-3">
+                <span>{TYPE_ICONS[t.trait_type] || "📌"}</span>
+                <div>
+                  <span className="font-medium">{t.display_label || t.trait_value}</span>
+                  <span className="text-xs text-gray-400 ml-2 capitalize">{t.trait_type?.replace(/_/g, " ")}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400">{formatRelative(t.created_at)}</span>
+                <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {sortMode === "grouped" && Object.entries(grouped).length === 0 && (
         <div className="bg-gray-50 p-8 rounded border text-center text-gray-400">
           No personality traits learned yet. Traits are generated automatically from observations via the synthesis pipeline.
         </div>
       )}
 
-      {Object.entries(grouped).map(([type, typeTraits]) => (
+      {sortMode === "grouped" && Object.entries(grouped).map(([type, typeTraits]) => (
         <div key={type} className="bg-white rounded border overflow-hidden">
           <div className="bg-gray-50 px-4 py-2 border-b font-semibold text-sm flex items-center gap-2">
             <span>{TYPE_ICONS[type] || "📌"}</span>
