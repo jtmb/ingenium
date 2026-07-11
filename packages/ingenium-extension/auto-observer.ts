@@ -7,8 +7,9 @@ const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL 
 // Currently kept for backward compatibility — overridable via INGENIUM_PROJECT env var.
 const PROJECT = process.env.INGENIUM_PROJECT || "gh-llm-bootstrap";
 
-// Track last run timestamp for dedup — only process messages newer than this
-let lastRunAt = Date.now();
+// Track last run timestamp for dedup — only process messages newer than this.
+// Start at epoch so the first run scans ALL messages; subsequent runs are incremental.
+let lastRunAt = 0;
 
 /**
  * Patterns to detect in user messages.
