@@ -99,14 +99,14 @@ export default function MCPServersPage() {
       {/* ── SERVERS TAB ── */}
       {tab === "servers" && (
         <div className="space-y-8">
-          <div className="bg-[var(--color-surface)] p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
+          <div className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] space-y-3 hover:shadow-md transition-shadow">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Server name" className="border p-2 rounded w-full text-sm" />
             <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. kaban mcp)" className="border p-2 rounded w-full text-sm" />
             <button onClick={createServer} className="bg-blue-600 text-white p-2 rounded text-sm hover:bg-blue-700">Add Server</button>
           </div>
           <div className="space-y-2">
             {servers.map((s) => (
-              <div key={s.id} className="bg-[var(--color-surface)] p-4 rounded border flex items-center justify-between hover:shadow-md transition-shadow">
+              <div key={s.id} className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] flex items-center justify-between hover:shadow-md transition-shadow">
                 <div>
                   <span className="font-medium text-sm">{s.name}</span>
                   <span className="text-xs text-[var(--color-text-muted)] ml-2">{s.command}</span>
@@ -149,7 +149,7 @@ export default function MCPServersPage() {
               const allEnabled = cat.enabled_count === cat.total_count;
               const noneEnabled = cat.enabled_count === 0;
               return (
-                <div key={cat.category} className="bg-[var(--color-surface)] rounded border overflow-hidden hover:shadow-md transition-shadow">
+                <div key={cat.category} className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] overflow-hidden hover:shadow-md transition-shadow">
                   {/* Category header */}
                   <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--color-surface-muted)] border-b">
                     <span className="font-semibold text-sm text-[var(--color-text-primary)]">{cat.category}</span>
@@ -180,7 +180,7 @@ export default function MCPServersPage() {
               );
             })}
             {filteredCategories.length === 0 && (
-              <div className="bg-[var(--color-surface)] rounded border p-8 text-center text-[var(--color-text-muted)]">No tools match your filters.</div>
+              <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-8 text-center text-[var(--color-text-muted)]">No tools match your filters.</div>
             )}
           </div>
         </div>

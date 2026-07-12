@@ -89,7 +89,7 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
       {/* Bell button */}
       <div className="relative" ref={panelRef}>
         <button onClick={() => setPanelOpen(!panelOpen)}
-          className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-full"
+          className="relative p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] rounded-full"
           title="Notifications">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -104,25 +104,25 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
 
         {/* Dropdown panel */}
         {panelOpen && (
-          <div className="absolute right-0 top-full mt-1 w-80 bg-white border border-gray-200 rounded-lg shadow-xl z-50 max-h-96 overflow-y-auto">
-            <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
-              <span className="text-sm font-semibold text-gray-700">Notifications</span>
+          <div className="absolute right-0 top-full mt-1 w-80 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-xl z-50 max-h-96 overflow-y-auto">
+            <div className="px-3 py-2 border-b border-[var(--color-border-muted)] flex items-center justify-between">
+              <span className="text-sm font-semibold text-[var(--color-text-primary)]">Notifications</span>
               {unreadCount > 0 && (
                 <button onClick={() => notifications.forEach((n) => !n.read && markRead(n.id))}
-                  className="text-xs text-blue-600 hover:underline">Mark all read</button>
+                  className="text-xs text-[var(--color-text-link)] hover:underline">Mark all read</button>
               )}
             </div>
             {notifications.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-gray-400 text-center">No notifications</div>
+              <div className="px-3 py-4 text-sm text-[var(--color-text-muted)] text-center">No notifications</div>
             ) : (
               notifications.map((n) => (
-                <div key={n.id} className={`px-3 py-2 border-b border-gray-50 flex items-start gap-2 hover:bg-gray-50 text-sm ${!n.read ? "bg-blue-50/50" : ""}`}>
+                <div key={n.id} className={`px-3 py-2 border-b border-[var(--color-border-muted)] flex items-start gap-2 hover:bg-[var(--color-surface-hover)] text-sm ${!n.read ? "bg-[var(--color-surface-selected)]" : ""}`}>
                   <span className="shrink-0 mt-0.5">{notificationIcon(n.type)}</span>
                   <div className="min-w-0 flex-1">
                     <button onClick={() => onTaskClick?.(n.task_id)}
-                      className="text-gray-700 font-medium hover:text-blue-600 text-left break-words">{n.message}</button>
+                      className="text-[var(--color-text-primary)] font-medium hover:text-[var(--color-text-link)] text-left break-words">{n.message}</button>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs text-gray-400">{relativeTime(n.created_at)}</span>
+                      <span className="text-xs text-[var(--color-text-muted)]">{relativeTime(n.created_at)}</span>
                       {!n.read && (
                         <button onClick={() => markRead(n.id)}
                           className="text-xs text-blue-500 hover:underline">Mark read</button>
@@ -143,7 +143,7 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
             <span>{notificationIcon(toast.type)}</span>
             <div>
               <p className="font-medium">{toast.message}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{relativeTime(toast.created_at)}</p>
+              <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{relativeTime(toast.created_at)}</p>
             </div>
           </div>
         </div>

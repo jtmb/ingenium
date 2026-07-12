@@ -132,7 +132,7 @@ export default function SkillsPage() {
       {/* Card grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {filtered.map((s) => (
-          <div key={s.id} onClick={() => fetchSkill(s.name)} className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow cursor-pointer">
+          <div key={s.id} onClick={() => fetchSkill(s.name)} className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow cursor-pointer">
             <h3 className="font-medium">{s.name}</h3>
             <p className="text-sm text-[var(--color-text-muted)] truncate">{s.description}</p>
             {s.tags && <p className="text-xs text-blue-500 mt-1">{s.tags}</p>}

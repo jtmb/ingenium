@@ -131,7 +131,7 @@ export default function PluginsPage() {
       </div>
 
       {showCreate && (
-        <div         className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow">
+        <div         className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow">
           <div className="flex flex-row gap-2 items-end flex-wrap">
             <div className="flex flex-col">
               <label className="text-xs text-[var(--color-text-muted)] mb-1">Name</label>
@@ -180,7 +180,7 @@ export default function PluginsPage() {
         <div className="space-y-3">
           {plugins.map((p) =>
             editingId === p.id ? (
-              <div key={p.id} className="bg-[var(--color-surface)] p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
+              <div key={p.id} className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] space-y-3 hover:shadow-md transition-shadow">
                 <input
                   value={editPath}
                   onChange={(e) => setEditPath(e.target.value)}
@@ -211,7 +211,7 @@ export default function PluginsPage() {
             ) : (
               <div
                 key={p.id}
-                className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow flex flex-col gap-2 cursor-pointer"
+                className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow flex flex-col gap-2 cursor-pointer"
                 onClick={() => setSelectedPlugin(p)}
               >
                 <div className="flex items-center justify-between">
@@ -288,7 +288,7 @@ export default function PluginsPage() {
                   <span className="px-3 py-1 text-sm rounded bg-blue-600 text-white">Source</span>
                   <span className="text-xs text-[var(--color-text-muted)] ml-auto">Source code — not markdown</span>
                 </div>
-                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-sm font-mono whitespace-pre-wrap">
                   {selectedPlugin.source_content}
                 </pre>
               </div>

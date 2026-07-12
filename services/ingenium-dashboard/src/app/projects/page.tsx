@@ -102,7 +102,7 @@ export default function ProjectsPage() {
           const synthCount = synth ? formatRelative(synth) : "—";
 
           return (
-            <div key={p.id} onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="bg-[var(--color-surface)] rounded border overflow-hidden hover:shadow-md transition-shadow cursor-pointer">
+            <div key={p.id} onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] overflow-hidden hover:shadow-md transition-shadow cursor-pointer">
               {/* Card header */}
               <div className="px-5 py-4 border-b border-[var(--color-border-muted)] flex items-center justify-between">
                 <div>

@@ -168,7 +168,7 @@ export default function AccountSetup({
   // Provider selection grid
   if (mode === "select") {
     return (
-      <div className="bg-[var(--color-surface)] p-6 rounded-lg border space-y-6 max-w-xl mx-auto">
+      <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-6 max-w-xl mx-auto">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Add Email Account</h2>
 
         {/* OAuth not configured warning */}
@@ -195,7 +195,7 @@ export default function AccountSetup({
           {/* Gmail */}
           <button
             onClick={() => handleOAuthRedirect("gmail")}
-            className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow text-left"
+            className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow text-left"
           >
             <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Gmail</h3>
             <p className="text-sm text-[var(--color-text-secondary)] mt-1">Connect with Google</p>
@@ -204,7 +204,7 @@ export default function AccountSetup({
           {/* Outlook */}
           <button
             onClick={() => handleOAuthRedirect("outlook")}
-            className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow text-left"
+            className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow text-left"
           >
             <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Outlook</h3>
             <p className="text-sm text-[var(--color-text-secondary)] mt-1">Connect with Microsoft</p>
@@ -213,7 +213,7 @@ export default function AccountSetup({
           {/* Custom / Manual */}
           <button
             onClick={() => setMode("manual")}
-            className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow text-left"
+            className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow text-left"
           >
             <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Custom</h3>
             <p className="text-sm text-[var(--color-text-secondary)] mt-1">Set up manually</p>
@@ -240,7 +240,7 @@ export default function AccountSetup({
 
   // Manual / app password form
   return (
-    <div className="bg-[var(--color-surface)] p-6 rounded-lg border space-y-4 max-w-xl mx-auto">
+    <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-4 max-w-xl mx-auto">
       <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Manual Setup</h2>
 
       <div>

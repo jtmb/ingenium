@@ -54,7 +54,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 const COLUMN_COLORS: Record<string, string> = {
-  todo: "bg-gray-100 text-gray-600",
+  todo: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]",
   in_progress: "bg-blue-100 text-blue-700",
   review: "bg-amber-100 text-amber-700",
   done: "bg-green-100 text-green-700",
@@ -173,7 +173,7 @@ function SortableCard({
   const overdue = isOverdue(task.due_date);
 
   const baseCard =
-    "bg-white border rounded hover:shadow-md transition-shadow cursor-pointer";
+    "bg-[var(--color-surface)] border border-[var(--color-border)] rounded hover:shadow-md transition-shadow cursor-pointer";
 
   if (compact) {
     return (
@@ -203,18 +203,18 @@ function SortableCard({
           onChange={() => onToggleSelect?.(task.id)}
           className="absolute top-2 left-2 rounded z-10" />
       )}
-      <div className={`font-semibold text-gray-900 truncate ${bulkMode ? "pl-5" : ""}`}>{task.title}</div>
+      <div className={`font-semibold text-[var(--color-text-primary)] truncate ${bulkMode ? "pl-5" : ""}`}>{task.title}</div>
       <div className="flex items-center gap-2 flex-wrap">
         {task.priority && (
-          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] || "bg-gray-200 text-gray-600"}`}>
+          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] || "bg-gray-200 text-[var(--color-text-secondary)]"}`}>
             {task.priority}
           </span>
         )}
         {task.issue_type && (
-          <span className="text-xs text-gray-500">{task.issue_type}</span>
+          <span className="text-xs text-[var(--color-text-muted)]">{task.issue_type}</span>
         )}
       </div>
-      <div className="flex items-center gap-2 flex-wrap text-xs text-gray-500">
+      <div className="flex items-center gap-2 flex-wrap text-xs text-[var(--color-text-muted)]">
         {task.assigned_to && (
           <span
             className="flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white shrink-0"
@@ -268,12 +268,12 @@ function ColumnDroppable({
   return (
     <div
       ref={setNodeRef}
-      className={`bg-gray-100 rounded min-h-[160px] flex flex-col transition-colors ${isOver ? "bg-blue-50 ring-2 ring-blue-300" : ""}`}
+      className={`bg-[var(--color-surface-muted)] rounded min-h-[160px] flex flex-col transition-colors ${isOver ? "bg-[var(--color-surface-selected)] ring-2 ring-blue-300" : ""}`}
     >
       {/* Column header */}
       <div
-        className={`px-3 py-2 border-b border-gray-200 font-medium text-sm uppercase flex items-center justify-between ${
-          threshold ? "bg-red-100 text-red-800" : "text-gray-600"
+        className={`px-3 py-2 border-b border-[var(--color-border)] font-medium text-sm uppercase flex items-center justify-between ${
+          threshold ? "bg-red-100 text-red-800" : "text-[var(--color-text-secondary)]"
         }`}
       >
         <span className="truncate">{column.name}</span>
@@ -296,7 +296,7 @@ function ColumnDroppable({
           ))}
         </SortableContext>
         {tasks.length === 0 && (
-          <p className="text-xs text-gray-400 italic p-2">No tasks</p>
+          <p className="text-xs text-[var(--color-text-muted)] italic p-2">No tasks</p>
         )}
       </div>
     </div>
@@ -309,10 +309,10 @@ function ColumnDroppable({
 
 function DragCard({ task }: { task: Task }) {
   return (
-    <div className="bg-white border rounded p-3 text-sm shadow-lg w-56">
-      <div className="font-semibold text-gray-900 truncate">{task.title}</div>
+    <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 text-sm shadow-lg w-56">
+      <div className="font-semibold text-[var(--color-text-primary)] truncate">{task.title}</div>
       {task.priority && (
-        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] || "bg-gray-200 text-gray-600"}`}>
+        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] || "bg-gray-200 text-[var(--color-text-secondary)]"}`}>
           {task.priority}
         </span>
       )}
@@ -552,7 +552,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
           <select
             value={swimlane}
             onChange={(e) => setSwimlane(e.target.value as SwimlaneMode)}
-            className="border border-gray-200 rounded text-sm bg-white px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
+            className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-3 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer"
           >
             {(["none", "assignee", "epic", "priority"] as const).map((m) => (
               <option key={m} value={m}>
@@ -564,17 +564,17 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
         <div className="flex items-center gap-2">
           <button
             onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()); }}
-            className={`text-sm px-3 py-1.5 border rounded cursor-pointer ${
+            className={`text-sm px-3 py-1.5 border border-[var(--color-border)] rounded cursor-pointer ${
               bulkMode
                 ? "bg-blue-600 text-white border-blue-600"
-                : "bg-white border-gray-200 hover:bg-gray-50"
+                : "bg-[var(--color-surface)] border-[var(--color-border)] hover:bg-[var(--color-surface-hover)]"
             }`}
           >
             {bulkMode ? "Bulk Edit ✓" : "Bulk Edit"}
           </button>
           <button
             onClick={toggleDensity}
-            className="text-sm px-3 py-1.5 border border-gray-200 rounded bg-white hover:bg-gray-50 cursor-pointer"
+            className="text-sm px-3 py-1.5 border border-[var(--color-border)] rounded bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
           >
             {compact ? "Rich" : "Compact"}
           </button>
@@ -585,24 +585,24 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
 
       {/* Bulk edit floating action bar */}
       {bulkMode && selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 bg-white border border-blue-200 rounded p-3 shadow-lg sticky bottom-0 z-10 flex-wrap">
-          <span className="text-sm font-medium text-gray-700">{selectedIds.size} selected</span>
+        <div className="flex items-center gap-3 bg-[var(--color-surface)] border border-blue-200 rounded p-3 shadow-lg sticky bottom-0 z-10 flex-wrap">
+          <span className="text-sm font-medium text-[var(--color-text-primary)]">{selectedIds.size} selected</span>
           <select value={bulkColumn} onChange={(e) => setBulkColumn(e.target.value)}
-            className="border border-gray-200 rounded text-sm bg-white px-2 py-1 hover:bg-gray-50 cursor-pointer">
+            className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="">Move to...</option>
             {columns.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
           </select>
           <input value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}
-            placeholder="Assign to..." className="border border-gray-200 rounded px-2 py-1 text-sm w-32" />
+            placeholder="Assign to..." className="border border-[var(--color-border)] rounded px-2 py-1 text-sm w-32" />
           <select value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}
-            className="border border-gray-200 rounded text-sm bg-white px-2 py-1 hover:bg-gray-50 cursor-pointer">
+            className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="">Set Priority...</option>
             {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
           </select>
           <button onClick={handleBulkApply}
             className="bg-blue-600 text-white py-1.5 px-4 rounded text-sm hover:bg-blue-700">Apply</button>
           <button onClick={() => setSelectedIds(new Set())}
-            className="text-gray-500 hover:text-gray-700 text-sm">Clear</button>
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] text-sm">Clear</button>
         </div>
       )}
 
@@ -642,9 +642,9 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
                 if (groupTasks.length === 0) return null; // collapse empty
                 return (
                   <div key={swimKey}>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2 px-1">
+                    <h4 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2 px-1">
                       {swimKey}
-                      <span className="text-xs text-gray-400 ml-1 font-normal">
+                      <span className="text-xs text-[var(--color-text-muted)] ml-1 font-normal">
                         ({groupTasks.length})
                       </span>
                     </h4>

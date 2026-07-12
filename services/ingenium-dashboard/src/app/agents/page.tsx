@@ -131,7 +131,7 @@ export default function AgentsPage() {
       )}
 
       {showCreate && (
-        <div className="bg-[var(--color-surface)] p-4 rounded border space-y-4 hover:shadow-md transition-shadow">
+        <div className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] space-y-4 hover:shadow-md transition-shadow">
           <h2 className="text-xl font-semibold">Create New Agent</h2>
           <input
             className="border p-2 rounded w-full"
@@ -193,7 +193,7 @@ export default function AgentsPage() {
           <h2 className="text-2xl font-semibold capitalize mb-4">{group.category}</h2>
           <div className="space-y-4">
             {group.items.map(agent => (
-              <div key={agent.id} className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelectedAgent(agent)}>
+              <div key={agent.id} className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelectedAgent(agent)}>
                 {editingId === agent.id ? (
                   <div className="space-y-4">
                     <input

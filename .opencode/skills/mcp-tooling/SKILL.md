@@ -93,6 +93,7 @@ When the session ends (user says "thanks", "done", "that's all"), you MUST:
 | [`references/thread/lifecycle.md`](references/thread/lifecycle.md) | Thread session lifecycle — start/during/end protocols, mandatory export |
 | [`references/thread/doc-upload.md`](references/thread/doc-upload.md) | Documentation website upload — site discovery, content fetch, bulk import |
 | [`references/thread/conventions.md`](references/thread/conventions.md) | Thread conventions — priority guidelines, tag naming, never rules |
+| [`references/dev-browser/setup.md`](references/dev-browser/setup.md) | Dev Browser CLI — real Chrome automation for agents via bash (headless + connect modes, WSL support, sandboxed Playwright API, CUA tools) |
 
 ## Email Tools (13 tools)
 
