@@ -113,7 +113,7 @@ export default function TasksPage() {
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && create()}
             placeholder="Task title (Ctrl+K to search)"
-            className="border border-gray-200 rounded px-3 py-2 flex-1 text-sm"
+            className="border border-[var(--color-border)] rounded px-3 py-2 flex-1 text-sm"
           />
           <button
             onClick={create}
@@ -122,19 +122,19 @@ export default function TasksPage() {
             Add
           </button>
         </div>
-        {error && <div className="text-red-600 text-sm">{error}</div>}
+        {error && <div className="text-[var(--color-error-text)] text-sm">{error}</div>}
       </div>
 
       {/* View switcher */}
-      <div className="flex gap-1 border-b border-gray-200">
+      <div className="flex gap-1 border-b border-[var(--color-border)]">
         {VIEW_OPTIONS.map(({ mode, label }) => (
           <button
             key={mode}
             onClick={() => switchView(mode)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
               view === mode
-                ? "border-blue-600 text-blue-600"
-                : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                ? "border-blue-600 text-[var(--color-text-link)]"
+                : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:border-gray-300"
             }`}
           >
             {label}

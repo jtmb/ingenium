@@ -115,8 +115,8 @@ export default function SkillsPage() {
       
       {/* Search + Upload */}
       <div className="flex gap-2 items-stretch">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border border-gray-200 p-2 rounded text-sm flex-1 h-10" />
-        <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded p-2 text-sm bg-white text-gray-600 hover:bg-gray-50 cursor-pointer h-10">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border border-[var(--color-border)] p-2 rounded text-sm flex-1 h-10" />
+        <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-[var(--color-border)] rounded p-2 text-sm bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer h-10">
           <option value="alpha">Alphabetical</option>
           <option value="newest">Newest first</option>
         </select>
@@ -125,16 +125,16 @@ export default function SkillsPage() {
                 className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 h-10">
           {uploadStatus === "uploading" ? "Uploading..." : "Upload Skill"}
         </button>
-        {uploadStatus === "success" && <span className="text-sm text-green-600">Uploaded!</span>}
-        {uploadStatus === "error" && <span className="text-sm text-red-600">Invalid file. Use a .md with name: and description: frontmatter.</span>}
+        {uploadStatus === "success" && <span className="text-sm text-[var(--color-success-text)]">Uploaded!</span>}
+        {uploadStatus === "error" && <span className="text-sm text-[var(--color-error-text)]">Invalid file. Use a .md with name: and description: frontmatter.</span>}
       </div>
 
       {/* Card grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {filtered.map((s) => (
-          <div key={s.id} onClick={() => fetchSkill(s.name)} className="bg-white p-4 rounded border hover:shadow-md transition-shadow cursor-pointer">
+          <div key={s.id} onClick={() => fetchSkill(s.name)} className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow cursor-pointer">
             <h3 className="font-medium">{s.name}</h3>
-            <p className="text-sm text-gray-500 truncate">{s.description}</p>
+            <p className="text-sm text-[var(--color-text-muted)] truncate">{s.description}</p>
             {s.tags && <p className="text-xs text-blue-500 mt-1">{s.tags}</p>}
           </div>
         ))}
@@ -144,14 +144,14 @@ export default function SkillsPage() {
       {selectedSkill && (
         <div className="fixed inset-0 z-50 flex items-start justify-center">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedSkill(null)} />
-          <div className="relative mt-8 mb-8 w-11/12 max-w-7xl bg-white rounded-lg shadow-2xl flex flex-col max-h-[90vh]">
+          <div className="relative mt-8 mb-8 w-11/12 max-w-7xl bg-[var(--color-surface)] rounded-lg shadow-2xl flex flex-col max-h-[90vh]">
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
               <div>
                 <h2 className="text-xl font-bold">{selectedSkill.name}</h2>
-                <p className="text-sm text-gray-500">{selectedSkill.description}</p>
+                <p className="text-sm text-[var(--color-text-muted)]">{selectedSkill.description}</p>
               </div>
-              <button onClick={() => setSelectedSkill(null)} className="p-2 text-gray-400 hover:text-gray-600 rounded-full">✕</button>
+              <button onClick={() => setSelectedSkill(null)} className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] rounded-full">✕</button>
             </div>
 
             {/* Body: split layout */}
@@ -170,14 +170,14 @@ export default function SkillsPage() {
               {/* Content viewer + editor */}
               <div className="flex-1 overflow-y-auto p-4">
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm text-gray-500 font-mono">{selectedFile}</span>
+                  <span className="text-sm text-[var(--color-text-muted)] font-mono">{selectedFile}</span>
                   <div className="flex gap-2">
                     {!editMode && (
-                      <button onClick={handleEdit} className="text-xs px-3 py-1 border rounded hover:bg-gray-100">Edit</button>
+                      <button onClick={handleEdit} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Edit</button>
                     )}
                     {editMode && (
                       <>
-                        <button onClick={() => { setEditMode(false); setEditText(fileContent); }} className="text-xs px-3 py-1 border rounded hover:bg-gray-100">Cancel</button>
+                        <button onClick={() => { setEditMode(false); setEditText(fileContent); }} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Cancel</button>
                         <button onClick={handleSave} disabled={saving} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
                       </>
                     )}

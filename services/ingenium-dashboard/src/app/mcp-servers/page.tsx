@@ -83,38 +83,38 @@ export default function MCPServersPage() {
   return (
     <div className="space-y-6">
       {/* Tab bar */}
-      <div className="flex items-center gap-1 border-b border-gray-200">
+      <div className="flex items-center gap-1 border-b border-[var(--color-border)]">
         <h1 className="text-2xl font-bold mr-6">MCP</h1>
         <button onClick={() => setTab("servers")} className={`px-4 py-2.5 text-sm font-medium rounded-t transition-colors ${
-          tab === "servers" ? "bg-white text-blue-700 border border-b-white border-gray-200 -mb-px" : "text-gray-500 hover:text-gray-700"
+          tab === "servers" ? "bg-[var(--color-surface)] text-blue-700 border border-b-white border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
         }`}>Servers</button>
         <button onClick={() => setTab("tools")} className={`px-4 py-2.5 text-sm font-medium rounded-t transition-colors ${
-          tab === "tools" ? "bg-white text-blue-700 border border-b-white border-gray-200 -mb-px" : "text-gray-500 hover:text-gray-700"
+          tab === "tools" ? "bg-[var(--color-surface)] text-blue-700 border border-b-white border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
         }`}>
           Tools
-          <span className="ml-1.5 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">{totalTools}</span>
+          <span className="ml-1.5 text-xs bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] px-1.5 py-0.5 rounded">{totalTools}</span>
         </button>
       </div>
 
       {/* ── SERVERS TAB ── */}
       {tab === "servers" && (
         <div className="space-y-8">
-          <div className="bg-white p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
+          <div className="bg-[var(--color-surface)] p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Server name" className="border p-2 rounded w-full text-sm" />
             <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. kaban mcp)" className="border p-2 rounded w-full text-sm" />
             <button onClick={createServer} className="bg-blue-600 text-white p-2 rounded text-sm hover:bg-blue-700">Add Server</button>
           </div>
           <div className="space-y-2">
             {servers.map((s) => (
-              <div key={s.id} className="bg-white p-4 rounded border flex items-center justify-between hover:shadow-md transition-shadow">
+              <div key={s.id} className="bg-[var(--color-surface)] p-4 rounded border flex items-center justify-between hover:shadow-md transition-shadow">
                 <div>
                   <span className="font-medium text-sm">{s.name}</span>
-                  <span className="text-xs text-gray-500 ml-2">{s.command}</span>
+                  <span className="text-xs text-[var(--color-text-muted)] ml-2">{s.command}</span>
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded ${
                   s.source === "ingenium"
-                    ? (s.running ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500")
-                    : isGlobal ? (s.enabled ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500") : "bg-blue-100 text-blue-700"
+                    ? (s.running ? "bg-[var(--color-success-bg)] text-green-700" : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]")
+                    : isGlobal ? (s.enabled ? "bg-[var(--color-success-bg)] text-green-700" : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]") : "bg-blue-100 text-blue-700"
                 }`}>
                   {s.source === "ingenium" ? (s.running ? "Running" : "Stopped") : isGlobal ? (s.enabled ? "Enabled" : "Disabled") : "External"}
                 </span>
@@ -130,15 +130,15 @@ export default function MCPServersPage() {
           {/* Stats bar */}
           <div className="flex items-center justify-between">
             <div className="flex gap-3 items-center">
-              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tools..." className="border border-gray-200 rounded px-3 py-1.5 text-sm w-56" />
-              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white hover:bg-gray-50 cursor-pointer">
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tools..." className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm w-56" />
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="All">All categories</option>
                 {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-            <div className="text-sm text-gray-500 space-x-3">
-              <span><strong className="text-green-600">{enabledTools}</strong> enabled</span>
-              <span><strong className="text-red-600">{totalTools - enabledTools}</strong> disabled</span>
+            <div className="text-sm text-[var(--color-text-muted)] space-x-3">
+              <span><strong className="text-[var(--color-success-text)]">{enabledTools}</strong> enabled</span>
+              <span><strong className="text-[var(--color-error-text)]">{totalTools - enabledTools}</strong> disabled</span>
               <span><strong>{totalTools}</strong> total</span>
             </div>
           </div>
@@ -149,13 +149,13 @@ export default function MCPServersPage() {
               const allEnabled = cat.enabled_count === cat.total_count;
               const noneEnabled = cat.enabled_count === 0;
               return (
-                <div key={cat.category} className="bg-white rounded border overflow-hidden hover:shadow-md transition-shadow">
+                <div key={cat.category} className="bg-[var(--color-surface)] rounded border overflow-hidden hover:shadow-md transition-shadow">
                   {/* Category header */}
-                  <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b">
-                    <span className="font-semibold text-sm text-gray-800">{cat.category}</span>
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-[var(--color-surface-muted)] border-b">
+                    <span className="font-semibold text-sm text-[var(--color-text-primary)]">{cat.category}</span>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs text-gray-400">{cat.enabled_count}/{cat.total_count} enabled</span>
-                      <button onClick={() => toggleCategory(cat.category, !allEnabled)} className="text-xs px-2.5 py-1 border border-gray-200 rounded hover:bg-white transition-colors">
+                      <span className="text-xs text-[var(--color-text-muted)]">{cat.enabled_count}/{cat.total_count} enabled</span>
+                      <button onClick={() => toggleCategory(cat.category, !allEnabled)} className="text-xs px-2.5 py-1 border border-[var(--color-border)] rounded hover:bg-[var(--color-surface)] transition-colors">
                         {noneEnabled ? "Enable All" : "Disable All"}
                       </button>
                     </div>
@@ -163,15 +163,15 @@ export default function MCPServersPage() {
                   {/* Tools */}
                   <div className="divide-y">
                     {cat.tools.map(t => (
-                      <div key={t.tool_name} className="flex items-center justify-between px-4 py-2 hover:bg-gray-50">
+                      <div key={t.tool_name} className="flex items-center justify-between px-4 py-2 hover:bg-[var(--color-surface-hover)]">
                         <div className="flex items-center gap-3">
                           <button onClick={() => toggleTool(t.tool_name, t.enabled)} className={`relative inline-flex h-4.5 w-8 items-center rounded-full transition-colors shrink-0 ${t.enabled ? "bg-green-400" : "bg-gray-300"}`}>
-                            <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${t.enabled ? "translate-x-[18px]" : "translate-x-1"}`} />
+                            <span className={`inline-block h-3 w-3 transform rounded-full bg-[var(--color-surface)] transition-transform ${t.enabled ? "translate-x-[18px]" : "translate-x-1"}`} />
                           </button>
-                          <span className={`font-mono text-xs ${t.enabled ? "text-gray-800" : "text-gray-400"}`}>{t.tool_name}</span>
+                          <span className={`font-mono text-xs ${t.enabled ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-muted)]"}`}>{t.tool_name}</span>
                         </div>
                         <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                          t.enabled ? "bg-green-50 text-green-600" : "bg-gray-100 text-gray-500"
+                          t.enabled ? "bg-[var(--color-success-bg)] text-[var(--color-success-text)]" : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]"
                         }`}>{t.enabled ? "Enabled" : "Disabled"}</span>
                       </div>
                     ))}
@@ -180,7 +180,7 @@ export default function MCPServersPage() {
               );
             })}
             {filteredCategories.length === 0 && (
-              <div className="bg-white rounded border p-8 text-center text-gray-400">No tools match your filters.</div>
+              <div className="bg-[var(--color-surface)] rounded border p-8 text-center text-[var(--color-text-muted)]">No tools match your filters.</div>
             )}
           </div>
         </div>

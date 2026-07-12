@@ -168,17 +168,17 @@ export default function AccountSetup({
   // Provider selection grid
   if (mode === "select") {
     return (
-      <div className="bg-white p-6 rounded-lg border space-y-6 max-w-xl mx-auto">
-        <h2 className="text-lg font-semibold text-gray-900">Add Email Account</h2>
+      <div className="bg-[var(--color-surface)] p-6 rounded-lg border space-y-6 max-w-xl mx-auto">
+        <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Add Email Account</h2>
 
         {/* OAuth not configured warning */}
         {credsConfigured === false && (
-          <div className="bg-amber-50 border border-amber-200 rounded p-4 text-center">
-            <p className="text-amber-800 font-medium">OAuth not configured</p>
-            <p className="text-amber-600 text-sm mt-1">
+          <div className="bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)] rounded p-4 text-center">
+            <p className="text-[var(--color-warning-text)] font-medium">OAuth not configured</p>
+            <p className="text-[var(--color-warning-text)] text-sm mt-1">
               Enter your Google or Microsoft OAuth credentials in Settings before adding an account.
             </p>
-            <a href="/settings" className="inline-block mt-3 text-sm text-blue-600 hover:underline">
+            <a href="/settings" className="inline-block mt-3 text-sm text-[var(--color-text-link)] hover:underline">
               Go to Settings →
             </a>
           </div>
@@ -186,8 +186,8 @@ export default function AccountSetup({
 
         {/* OAuth fetch error */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded p-3 text-center">
-            <p className="text-red-700 text-sm">{error}</p>
+          <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3 text-center">
+            <p className="text-[var(--color-error-text)] text-sm">{error}</p>
           </div>
         )}
 
@@ -195,41 +195,41 @@ export default function AccountSetup({
           {/* Gmail */}
           <button
             onClick={() => handleOAuthRedirect("gmail")}
-            className="bg-white p-4 rounded border hover:shadow-md transition-shadow text-left"
+            className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow text-left"
           >
-            <h3 className="text-lg font-semibold text-gray-900">Gmail</h3>
-            <p className="text-sm text-gray-600 mt-1">Connect with Google</p>
+            <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Gmail</h3>
+            <p className="text-sm text-[var(--color-text-secondary)] mt-1">Connect with Google</p>
           </button>
 
           {/* Outlook */}
           <button
             onClick={() => handleOAuthRedirect("outlook")}
-            className="bg-white p-4 rounded border hover:shadow-md transition-shadow text-left"
+            className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow text-left"
           >
-            <h3 className="text-lg font-semibold text-gray-900">Outlook</h3>
-            <p className="text-sm text-gray-600 mt-1">Connect with Microsoft</p>
+            <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Outlook</h3>
+            <p className="text-sm text-[var(--color-text-secondary)] mt-1">Connect with Microsoft</p>
           </button>
 
           {/* Custom / Manual */}
           <button
             onClick={() => setMode("manual")}
-            className="bg-white p-4 rounded border hover:shadow-md transition-shadow text-left"
+            className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow text-left"
           >
-            <h3 className="text-lg font-semibold text-gray-900">Custom</h3>
-            <p className="text-sm text-gray-600 mt-1">Set up manually</p>
+            <h3 className="text-lg font-semibold text-[var(--color-text-primary)]">Custom</h3>
+            <p className="text-sm text-[var(--color-text-secondary)] mt-1">Set up manually</p>
           </button>
         </div>
         <div className="flex justify-between items-center">
           <button
             onClick={loadDemoAccount}
-            className="text-xs text-gray-400 hover:text-gray-600 underline"
+            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline"
             title="Create a demo account for UI testing"
           >
             Load demo account for UI testing
           </button>
           <button
             onClick={onCancel}
-            className="text-gray-600 hover:text-gray-900 py-2 px-4 rounded text-sm font-medium"
+            className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] py-2 px-4 rounded text-sm font-medium"
           >
             Cancel
           </button>
@@ -240,79 +240,79 @@ export default function AccountSetup({
 
   // Manual / app password form
   return (
-    <div className="bg-white p-6 rounded-lg border space-y-4 max-w-xl mx-auto">
-      <h2 className="text-lg font-semibold text-gray-900">Manual Setup</h2>
+    <div className="bg-[var(--color-surface)] p-6 rounded-lg border space-y-4 max-w-xl mx-auto">
+      <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Manual Setup</h2>
 
       <div>
-        <label className="block text-sm font-medium text-gray-900 mb-1">Email</label>
+        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">Email</label>
         <input
           type="email"
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
+          className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">IMAP Host</label>
+          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">IMAP Host</label>
           <input
             type="text"
             placeholder="imap.example.com"
             value={imapHost}
             onChange={(e) => setImapHost(e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">IMAP Port</label>
+          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">IMAP Port</label>
           <input
             type="number"
             placeholder="993"
             value={imapPort}
             onChange={(e) => setImapPort(e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
           />
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">SMTP Host</label>
+          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">SMTP Host</label>
           <input
             type="text"
             placeholder="smtp.example.com"
             value={smtpHost}
             onChange={(e) => setSmtpHost(e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-1">SMTP Port</label>
+          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">SMTP Port</label>
           <input
             type="number"
             placeholder="465"
             value={smtpPort}
             onChange={(e) => setSmtpPort(e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
           />
         </div>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-900 mb-1">App Password</label>
+        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">App Password</label>
         <input
           type="password"
           placeholder="App password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full border border-gray-200 rounded px-3 py-2 text-sm text-gray-900 placeholder:text-gray-500"
+          className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
         />
       </div>
 
       {testResult && (
-        <div className="text-sm px-3 py-2 rounded border border-gray-200 bg-gray-50 text-gray-600">
+        <div className="text-sm px-3 py-2 rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]">
           {testResult}
         </div>
       )}
@@ -334,7 +334,7 @@ export default function AccountSetup({
         </button>
         <button
           onClick={() => setMode("select")}
-          className="text-gray-600 hover:text-gray-900 py-2 px-4 rounded text-sm font-medium ml-auto"
+          className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] py-2 px-4 rounded text-sm font-medium ml-auto"
         >
           Back
         </button>

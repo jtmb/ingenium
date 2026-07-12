@@ -53,34 +53,34 @@ export default function SmartSuggest({
   if (!emailUid) return null;
   if (loading) {
     return (
-      <div className="bg-white border border-gray-200 rounded p-4 animate-pulse">
-        <div className="h-4 bg-gray-100 rounded w-1/3 mb-2" />
-        <div className="h-3 bg-gray-100 rounded w-2/3" />
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4 animate-pulse">
+        <div className="h-4 bg-[var(--color-surface-muted)] rounded w-1/3 mb-2" />
+        <div className="h-3 bg-[var(--color-surface-muted)] rounded w-2/3" />
       </div>
     );
   }
   if (error) {
     return (
-      <div className="bg-white border border-gray-200 rounded p-4">
-        <p className="text-sm text-gray-500">Suggestion unavailable</p>
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4">
+        <p className="text-sm text-[var(--color-text-muted)]">Suggestion unavailable</p>
       </div>
     );
   }
   if (!suggestion) return null;
 
   return (
-    <div className="bg-white border border-gray-200 rounded p-4 space-y-2">
+    <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4 space-y-2">
       <div className="flex items-center justify-between">
-        <h4 className="text-sm font-semibold text-gray-900">Smart Reply</h4>
-        <span className="text-xs text-gray-500">
+        <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Smart Reply</h4>
+        <span className="text-xs text-[var(--color-text-muted)]">
           {(suggestion.confidence * 100).toFixed(0)}% match
         </span>
       </div>
-      <p className="text-sm text-gray-700 line-clamp-3">
+      <p className="text-sm text-[var(--color-text-primary)] line-clamp-3">
         {suggestion.body}
       </p>
       {suggestion.matchedSkill && (
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-[var(--color-text-muted)]">
           Matched skill: {suggestion.matchedSkill}
         </p>
       )}

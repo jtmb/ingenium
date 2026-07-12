@@ -70,15 +70,15 @@ function OAuthCallbackInner() {
 
   return (
     <div className="max-w-lg mx-auto mt-12">
-      <div className="bg-white p-6 rounded-lg border text-center space-y-4">
-        <h1 className="text-2xl font-bold text-gray-900">Email Account Setup</h1>
+      <div className="bg-[var(--color-surface)] p-6 rounded-lg border text-center space-y-4">
+        <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Email Account Setup</h1>
 
         {status === "loading" && (
           <div className="space-y-3">
             <div className="animate-pulse flex justify-center">
-              <div className="w-8 h-8 bg-gray-100 rounded-full" />
+              <div className="w-8 h-8 bg-[var(--color-surface-muted)] rounded-full" />
             </div>
-            <p className="text-gray-600 text-sm">
+            <p className="text-[var(--color-text-secondary)] text-sm">
               Exchanging authorization code with provider...
             </p>
           </div>
@@ -86,10 +86,10 @@ function OAuthCallbackInner() {
 
         {status === "success" && (
           <div className="space-y-4">
-            <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto text-xl">
+            <div className="w-12 h-12 bg-[var(--color-success-bg)] text-[var(--color-success-text)] rounded-full flex items-center justify-center mx-auto text-xl">
               ✓
             </div>
-            <p className="text-gray-900 font-medium">
+            <p className="text-[var(--color-text-primary)] font-medium">
               Account connected successfully!
             </p>
             <Link
@@ -103,10 +103,10 @@ function OAuthCallbackInner() {
 
         {status === "error" && (
           <div className="space-y-4">
-            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto text-xl">
+            <div className="w-12 h-12 bg-red-100 text-[var(--color-error-text)] rounded-full flex items-center justify-center mx-auto text-xl">
               ✕
             </div>
-            <p className="text-red-600 text-sm">{errorMsg}</p>
+            <p className="text-[var(--color-error-text)] text-sm">{errorMsg}</p>
             <div className="flex gap-2 justify-center">
               <button
                 onClick={() => router.push("/mail")}
@@ -116,7 +116,7 @@ function OAuthCallbackInner() {
               </button>
               <button
                 onClick={() => router.refresh()}
-                className="text-gray-600 hover:text-gray-900 py-2 px-4 rounded text-sm font-medium"
+                className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] py-2 px-4 rounded text-sm font-medium"
               >
                 Retry
               </button>
@@ -136,9 +136,9 @@ export default function OAuthCallbackPage() {
     <Suspense
       fallback={
         <div className="max-w-lg mx-auto mt-12">
-          <div className="bg-white p-6 rounded-lg border text-center space-y-3 animate-pulse">
-            <div className="w-8 h-8 bg-gray-100 rounded-full mx-auto" />
-            <div className="h-4 bg-gray-100 rounded w-2/3 mx-auto" />
+          <div className="bg-[var(--color-surface)] p-6 rounded-lg border text-center space-y-3 animate-pulse">
+            <div className="w-8 h-8 bg-[var(--color-surface-muted)] rounded-full mx-auto" />
+            <div className="h-4 bg-[var(--color-surface-muted)] rounded w-2/3 mx-auto" />
           </div>
         </div>
       }

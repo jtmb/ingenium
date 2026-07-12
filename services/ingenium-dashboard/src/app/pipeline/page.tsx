@@ -22,10 +22,10 @@ const SOURCE_LINE: Record<string, string> = {
 };
 
 const SOURCE_BADGE: Record<string, string> = {
-  agent: "bg-amber-50 text-amber-700 border-amber-200",
-  plugin: "bg-blue-50 text-blue-700 border-blue-200",
+  agent: "bg-[var(--color-warning-bg)] text-amber-700 border-[var(--color-warning-border)]",
+  plugin: "bg-[var(--color-surface-selected)] text-blue-700 border-blue-200",
   synthesis: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  system: "bg-gray-50 text-gray-600 border-gray-200",
+  system: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]",
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -283,15 +283,15 @@ export default function PipelinePage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Pipeline Activity</h1>
-          <p className="text-sm text-gray-400 mt-1">{nextRun}</p>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">{nextRun}</p>
         </div>
-        <div className="text-sm text-gray-500 space-x-4">
+        <div className="text-sm text-[var(--color-text-muted)] space-x-4">
           <span>
             Total: <strong>{stats.total}</strong>
           </span>
           <span>
             Observations:{" "}
-            <strong className="text-amber-600">{stats.observations}</strong>
+            <strong className="text-[var(--color-warning-text)]">{stats.observations}</strong>
           </span>
           <span>
             Syntheses:{" "}
@@ -299,7 +299,7 @@ export default function PipelinePage() {
           </span>
           <span>
             Traits:{" "}
-            <strong className="text-blue-600">{stats.traits}</strong>
+            <strong className="text-[var(--color-text-link)]">{stats.traits}</strong>
           </span>
           <span>
             Skills:{" "}
@@ -317,7 +317,7 @@ export default function PipelinePage() {
             className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
               filterMode === f.mode
                 ? "bg-gray-800 text-white shadow-sm"
-                : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
+                : "bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
             }`}
           >
             {f.label}
@@ -328,8 +328,8 @@ export default function PipelinePage() {
           onClick={() => setPaused((p) => !p)}
           className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
             paused
-              ? "bg-green-50 border-green-300 text-green-700 hover:bg-green-100"
-              : "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+              ? "bg-[var(--color-success-bg)] border-green-300 text-green-700 hover:bg-[var(--color-success-bg)]"
+              : "bg-[var(--color-warning-bg)] border-amber-300 text-amber-700 hover:bg-amber-100"
           }`}
         >
           {paused ? "\u25B6 Resume" : "\u275A\u275A Pause"}
@@ -338,7 +338,7 @@ export default function PipelinePage() {
 
       {/* ── Timeline ─────────────────────────────────────────────────── */}
       {events.length === 0 && (
-        <div className="bg-gray-50 p-8 rounded border text-center text-gray-400">
+        <div className="bg-[var(--color-surface-muted)] p-8 rounded border text-center text-[var(--color-text-muted)]">
           No pipeline events yet. Events are logged automatically during agent interactions.
         </div>
       )}
@@ -382,21 +382,21 @@ export default function PipelinePage() {
                           {group.events.map((obs) => (
                             <div
                               key={obs.id}
-                              className="bg-white border rounded p-3 cursor-pointer hover:shadow-md transition-shadow"
+                              className="bg-[var(--color-surface)] border rounded p-3 cursor-pointer hover:shadow-md transition-shadow"
                               onClick={() => setSelected(obs)}
                             >
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                <span className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[obs.event_source] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
+                                <span className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[obs.event_source] ?? "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]"}`}>
                                   {SOURCE_LABEL[obs.event_source] ?? obs.event_source}
                                 </span>
-                                <span className="text-xs text-gray-500">{formatRelative(obs.created_at)}</span>
+                                <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(obs.created_at)}</span>
                                 {obs.importance != null && (
-                                  <span className="text-xs text-gray-400">imp: {obs.importance}</span>
+                                  <span className="text-xs text-[var(--color-text-muted)]">imp: {obs.importance}</span>
                                 )}
                               </div>
-                              <p className="text-sm text-gray-700">{obs.title}</p>
+                              <p className="text-sm text-[var(--color-text-primary)]">{obs.title}</p>
                               {obs.description && (
-                                <p className="text-xs text-gray-400 mt-0.5">{obs.description}</p>
+                                <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{obs.description}</p>
                               )}
                             </div>
                           ))}
@@ -501,27 +501,27 @@ export default function PipelinePage() {
       >
         {selected && selected.kind === "batch" && (
           <div className="space-y-3">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-[var(--color-text-muted)]">
               Batch of {selected.events.length} observations from {selected.events[0]?.event_source ?? "unknown"}.
             </p>
             {selected.events.map((obs: PipelineEvent) => (
-              <div key={obs.id} className="border rounded p-3 bg-gray-50">
+              <div key={obs.id} className="border rounded p-3 bg-[var(--color-surface-muted)]">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[obs.event_source] ?? ""}`}>
                     {obs.event_source}
                   </span>
-                  <span className="text-xs text-gray-400">{fmtAbs(obs.created_at)}</span>
+                  <span className="text-xs text-[var(--color-text-muted)]">{fmtAbs(obs.created_at)}</span>
                 </div>
                 <p className="text-sm font-medium">{obs.title}</p>
-                {obs.description && <p className="text-xs text-gray-500 mt-0.5">{obs.description}</p>}
-                <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-gray-500">
+                {obs.description && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{obs.description}</p>}
+                <div className="grid grid-cols-2 gap-2 mt-2 text-xs text-[var(--color-text-muted)]">
                   <div>Importance: {obs.importance ?? 5}/10</div>
                   <div>Session: {obs.session_id?.slice(0, 8) ?? "\u2014"}</div>
                 </div>
                 {obs.data != null && (
                   <div className="mt-2">
                     <h3 className="text-xs font-semibold mb-1">Raw JSON Data</h3>
-                    <pre className="bg-gray-100 p-3 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap">
+                    <pre className="bg-[var(--color-surface-muted)] p-3 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap">
                       {JSON.stringify(parseData(obs.data), null, 2)}
                     </pre>
                   </div>
@@ -536,7 +536,7 @@ export default function PipelinePage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="font-semibold">Type:</span>{" "}
-                <span className="text-gray-600">{selected.event_type}</span>
+                <span className="text-[var(--color-text-secondary)]">{selected.event_type}</span>
               </div>
               <div>
                 <span className="font-semibold">Source:</span>{" "}
@@ -548,11 +548,11 @@ export default function PipelinePage() {
               </div>
               <div>
                 <span className="font-semibold">Importance:</span>{" "}
-                <span className="text-gray-600">{selected.importance ?? 5}/10</span>
+                <span className="text-[var(--color-text-secondary)]">{selected.importance ?? 5}/10</span>
               </div>
               <div>
                 <span className="font-semibold">Session:</span>{" "}
-                <span className="text-gray-600 font-mono text-xs">
+                <span className="text-[var(--color-text-secondary)] font-mono text-xs">
                   {selected.event_source === "synthesis" && !selected.session_id
                     ? "Scheduled"
                     : selected.session_id?.slice(0, 12) ?? "\u2014"}
@@ -560,23 +560,23 @@ export default function PipelinePage() {
               </div>
               <div className="col-span-2">
                 <span className="font-semibold">Created:</span>{" "}
-                <span className="text-gray-600">{fmtAbs(selected.created_at)}</span>
+                <span className="text-[var(--color-text-secondary)]">{fmtAbs(selected.created_at)}</span>
               </div>
               {selected.parent_event_id != null && (
                 <div className="col-span-2">
                   <span className="font-semibold">Parent Event ID:</span>{" "}
-                  <span className="text-gray-600 font-mono">{selected.parent_event_id}</span>
+                  <span className="text-[var(--color-text-secondary)] font-mono">{selected.parent_event_id}</span>
                 </div>
               )}
             </div>
             <div>
               <h3 className="font-semibold mb-1">Title</h3>
-              <p className="text-sm text-gray-700">{selected.title}</p>
+              <p className="text-sm text-[var(--color-text-primary)]">{selected.title}</p>
             </div>
             {selected.description && (
               <div>
                 <h3 className="font-semibold mb-1">Description</h3>
-                <p className="text-sm text-gray-600">{selected.description}</p>
+                <p className="text-sm text-[var(--color-text-secondary)]">{selected.description}</p>
               </div>
             )}
             {selected.data != null && (
@@ -589,15 +589,15 @@ export default function PipelinePage() {
                       return (
                         <>
                           {d?.model && (
-                            <div className="text-sm text-gray-600">
+                            <div className="text-sm text-[var(--color-text-secondary)]">
                               <span className="font-semibold">Model:</span> {d.model}
-                              {d?.endpoint && <span className="text-gray-400"> @ {d.endpoint}</span>}
+                              {d?.endpoint && <span className="text-[var(--color-text-muted)]"> @ {d.endpoint}</span>}
                             </div>
                           )}
                           {d?.insights?.length > 0 && (
                             <div>
                               <h3 className="font-semibold text-sm mb-1">LLM Insights:</h3>
-                              <ul className="text-sm text-gray-600 space-y-1 border-l-2 border-blue-200 pl-3">
+                              <ul className="text-sm text-[var(--color-text-secondary)] space-y-1 border-l-2 border-blue-200 pl-3">
                                 {d.insights.map((i: string, idx: number) => (
                                   <li key={idx}>&bull; {i}</li>
                                 ))}
@@ -605,21 +605,21 @@ export default function PipelinePage() {
                             </div>
                           )}
                           {d?.skills_created > 0 && (
-                            <p className="text-sm text-gray-600">
+                            <p className="text-sm text-[var(--color-text-secondary)]">
                               <span className="font-semibold">Skills created:</span> {d.skills_created}
                             </p>
                           )}
                           {d?.traits_created > 0 && (
-                            <p className="text-sm text-gray-600">
+                            <p className="text-sm text-[var(--color-text-secondary)]">
                               <span className="font-semibold">Traits created:</span> {d.traits_created}
                             </p>
                           )}
                           {d?.observation_ids?.length > 0 && (
                             <p className="text-sm">
-                              <span className="font-semibold text-gray-600">Referenced:</span>{" "}
+                              <span className="font-semibold text-[var(--color-text-secondary)]">Referenced:</span>{" "}
                               <a
                                 href={`/observations?project=${d.project_name || project}`}
-                                className="text-blue-600 underline text-sm"
+                                className="text-[var(--color-text-link)] underline text-sm"
                               >
                                 View Observations
                               </a>
@@ -636,17 +636,17 @@ export default function PipelinePage() {
                   const d = parseData(selected.data);
                   return d?.skill_name ? (
                     <div className="space-y-2">
-                      <div className="text-sm text-gray-600">
+                      <div className="text-sm text-[var(--color-text-secondary)]">
                         <span className="font-semibold">Skill:</span>{" "}
                         <a
                           href={`/skills?project=${d.project_name || project}`}
-                          className="text-blue-600 underline font-medium"
+                          className="text-[var(--color-text-link)] underline font-medium"
                         >
                           {d.skill_name}
                         </a>
-                        {d?.via_llm && <span className="text-xs text-gray-400 ml-1">via LLM</span>}
+                        {d?.via_llm && <span className="text-xs text-[var(--color-text-muted)] ml-1">via LLM</span>}
                       </div>
-                      {d?.model && <p className="text-xs text-gray-400">Model: {d.model}</p>}
+                      {d?.model && <p className="text-xs text-[var(--color-text-muted)]">Model: {d.model}</p>}
                     </div>
                   ) : null;
                 })()}
@@ -656,16 +656,16 @@ export default function PipelinePage() {
                   const d = parseData(selected.data);
                   return d?.trait_type && !d?.skill_name ? (
                     <div className="space-y-2">
-                      <div className="text-sm text-gray-600">
+                      <div className="text-sm text-[var(--color-text-secondary)]">
                         <span className="font-semibold">Trait:</span>{" "}
                         <a
                           href={`/personality?project=${d.project_name || project}`}
-                          className="text-blue-600 underline font-medium"
+                          className="text-[var(--color-text-link)] underline font-medium"
                         >
                           {d.trait_type} &rarr; {d.trait_value?.slice(0, 60)}
                         </a>
                         {d?.confidence != null && (
-                          <span className="ml-2 text-xs text-gray-400">
+                          <span className="ml-2 text-xs text-[var(--color-text-muted)]">
                             confidence: {(d.confidence * 100).toFixed(0)}%
                           </span>
                         )}
@@ -679,16 +679,16 @@ export default function PipelinePage() {
                   const d = parseData(selected.data);
                   return d?.trait_type ? (
                     <div className="space-y-2">
-                      <div className="text-sm text-gray-600">
+                      <div className="text-sm text-[var(--color-text-secondary)]">
                         <span className="font-semibold">Trait:</span>{" "}
                         <a
                           href={`/personality?project=${d.project_name || project}`}
-                          className="text-blue-600 underline font-medium"
+                          className="text-[var(--color-text-link)] underline font-medium"
                         >
                           {d.trait_type} &rarr; {d.trait_value?.slice(0, 60)}
                         </a>
                         {d?.confidence != null && (
-                          <span className="ml-2 text-xs text-gray-400">
+                          <span className="ml-2 text-xs text-[var(--color-text-muted)]">
                             confidence: {(d.confidence * 100).toFixed(0)}%
                           </span>
                         )}
@@ -706,7 +706,7 @@ export default function PipelinePage() {
                     return d != null && Object.keys(d).length > 0 ? (
                       <div>
                         <h3 className="font-semibold mb-1">Raw JSON Data</h3>
-                        <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap">
+                        <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap">
                           {JSON.stringify(d, null, 2)}
                         </pre>
                       </div>
@@ -793,7 +793,7 @@ function EventRow({
           className={`flex-1 pb-3 ${isChild ? "pb-2" : ""} min-w-0`}
         >
           <div
-            className={`bg-white rounded-lg border p-3 ${
+            className={`bg-[var(--color-surface)] rounded-lg border p-3 ${
               isChild ? "p-2" : "p-3"
             } ${onClickDetail ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
             onClick={onClickDetail}
@@ -801,33 +801,33 @@ function EventRow({
             {/* Badge row */}
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span
-                className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[source] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}
+                className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[source] ?? "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]"}`}
               >
                 {sourceLabel}
               </span>
               {isExpanded !== undefined && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
-                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                  className="text-xs text-[var(--color-text-link)] hover:text-blue-800 font-medium"
                 >
                   {isExpanded ? "Collapse" : `+${countBadge ?? 0} observations`}
                 </button>
               )}
-              <span className="text-xs text-gray-400 flex-1 text-right" title={fmtAbs(timestamp)}>
+              <span className="text-xs text-[var(--color-text-muted)] flex-1 text-right" title={fmtAbs(timestamp)}>
                 {formatRelative(timestamp)}
               </span>
               {sessionId && !countBadge && (
-                <span className="text-xs text-gray-400 font-mono">
+                <span className="text-xs text-[var(--color-text-muted)] font-mono">
                   {sessionId.slice(0, 8)}
                 </span>
               )}
             </div>
             {/* Title + description */}
-            <p className={`font-semibold text-gray-900 ${isChild ? "text-xs" : "text-sm"}`}>
+            <p className={`font-semibold text-[var(--color-text-primary)] ${isChild ? "text-xs" : "text-sm"}`}>
               {title}
             </p>
             {description && (
-              <p className={`text-gray-500 ${isChild ? "text-xs" : "text-sm"}`}>
+              <p className={`text-[var(--color-text-muted)] ${isChild ? "text-xs" : "text-sm"}`}>
                 {description}
               </p>
             )}

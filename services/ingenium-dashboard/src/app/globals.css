@@ -1,2 +1,96 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Surface colors — cards, panels, containers */
+  --color-surface: #ffffff;
+  --color-surface-muted: #f9fafb;
+  --color-surface-hover: #f3f4f6;
+  --color-surface-selected: #eff6ff;
+  --color-surface-raised: #ffffff;
+
+  /* Border colors */
+  --color-border: #e5e7eb;
+  --color-border-muted: #f3f4f6;
+  --color-border-hover: #d1d5db;
+
+  /* Text colors */
+  --color-text-primary: #111827;
+  --color-text-secondary: #6b7280;
+  --color-text-muted: #9ca3af;
+  --color-text-link: #2563eb;
+  --color-text-link-hover: #1d4ed8;
+
+  /* State colors — backgrounds */
+  --color-error-bg: #fef2f2;
+  --color-error-text: #dc2626;
+  --color-error-border: #fecaca;
+  --color-warning-bg: #fffbeb;
+  --color-warning-text: #d97706;
+  --color-warning-border: #fde68a;
+  --color-success-bg: #f0fdf4;
+  --color-success-text: #16a34a;
+  --color-success-border: #bbf7d0;
+  --color-info-bg: #eff6ff;
+  --color-info-text: #2563eb;
+  --color-info-border: #bfdbfe;
+
+  /* Navigation */
+  --color-nav-bg: #ffffff;
+  --color-nav-border: #e5e7eb;
+  --color-nav-text: #6b7280;
+  --color-nav-text-hover: #111827;
+  --color-nav-text-active: #2563eb;
+
+  /* Code / pre blocks */
+  --color-code-bg: #f3f4f6;
+  --color-code-text: #111827;
+  --color-code-border: #e5e7eb;
+}
+
+.dark {
+  /* Surface colors */
+  --color-surface: #111827;
+  --color-surface-muted: #1f2937;
+  --color-surface-hover: #374151;
+  --color-surface-selected: #1e3a5f;
+  --color-surface-raised: #1f2937;
+
+  /* Border colors */
+  --color-border: #374151;
+  --color-border-muted: #1f2937;
+  --color-border-hover: #4b5563;
+
+  /* Text colors */
+  --color-text-primary: #f3f4f6;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #6b7280;
+  --color-text-link: #60a5fa;
+  --color-text-link-hover: #93bbfd;
+
+  /* State colors — backgrounds */
+  --color-error-bg: #7f1d1d33;
+  --color-error-text: #fca5a5;
+  --color-error-border: #991b1b66;
+  --color-warning-bg: #78350f33;
+  --color-warning-text: #fcd34d;
+  --color-warning-border: #92400e66;
+  --color-success-bg: #14532d33;
+  --color-success-text: #86efac;
+  --color-success-border: #16653466;
+  --color-info-bg: #1e3a5f33;
+  --color-info-text: #93c5fd;
+  --color-info-border: #1e40af66;
+
+  /* Navigation */
+  --color-nav-bg: #111827;
+  --color-nav-border: #374151;
+  --color-nav-text: #9ca3af;
+  --color-nav-text-hover: #f3f4f6;
+  --color-nav-text-active: #60a5fa;
+
+  /* Code / pre blocks */
+  --color-code-bg: #1f2937;
+  --color-code-text: #e5e7eb;
+  --color-code-border: #374151;
+}

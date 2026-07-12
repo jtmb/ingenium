@@ -15,34 +15,34 @@ type ColorSet = {
 
 const colorMap: Record<string, ColorSet> = {
   blue: {
-    bg: "bg-blue-50",
-    dmBg: "dark:bg-blue-900/30",
+    bg: "bg-[var(--color-surface-selected)]",
+    dmBg: "",
     accent: "bg-blue-400",
-    dmAccent: "dark:bg-blue-600",
+    dmAccent: "",
     border: "hover:border-blue-300",
     dmBorder: "dark:hover:border-blue-700",
   },
   purple: {
     bg: "bg-purple-50",
-    dmBg: "dark:bg-purple-900/30",
+    dmBg: "",
     accent: "bg-purple-400",
-    dmAccent: "dark:bg-purple-600",
+    dmAccent: "",
     border: "hover:border-purple-300",
     dmBorder: "dark:hover:border-purple-700",
   },
   emerald: {
     bg: "bg-emerald-50",
-    dmBg: "dark:bg-emerald-900/30",
+    dmBg: "",
     accent: "bg-emerald-400",
-    dmAccent: "dark:bg-emerald-600",
+    dmAccent: "",
     border: "hover:border-emerald-300",
     dmBorder: "dark:hover:border-emerald-700",
   },
   amber: {
-    bg: "bg-amber-50",
-    dmBg: "dark:bg-amber-900/30",
+    bg: "bg-[var(--color-warning-bg)]",
+    dmBg: "",
     accent: "bg-amber-400",
-    dmAccent: "dark:bg-amber-600",
+    dmAccent: "",
     border: "hover:border-amber-300",
     dmBorder: "dark:hover:border-amber-700",
   },
@@ -59,7 +59,7 @@ function Section({
 }) {
   return (
     <div>
-      <h2 className="text-lg font-semibold mb-1 text-gray-700 dark:text-gray-300">
+      <h2 className="text-lg font-semibold mb-1 text-[var(--color-text-primary)]">
         {title}
       </h2>
       <div
@@ -70,17 +70,17 @@ function Section({
           <Link
             key={p.href}
             href={p.href}
-            className={`group bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-6 hover:shadow-xl ${color.border} ${color.dmBorder} hover:-translate-y-0.5 transition-all duration-200`}
+            className={`group bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 hover:shadow-xl ${color.border} ${color.dmBorder} hover:-translate-y-0.5 transition-all duration-200`}
           >
             <div
               className={`w-10 h-10 ${color.bg} ${color.dmBg} rounded-lg flex items-center justify-center text-xl mb-3 group-hover:scale-110 transition-transform`}
             >
               {p.icon}
             </div>
-            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+            <h3 className="font-semibold text-[var(--color-text-primary)]">
               {p.name}
             </h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-sm text-[var(--color-text-muted)] mt-1">
               {p.desc}
             </p>
           </Link>
@@ -161,8 +161,8 @@ export default function Home() {
     <div className="space-y-10">
       {/* Hero */}
       <div className="text-center py-8">
-        <h1 className="text-4xl font-bold dark:text-gray-100">Ingenium</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-2 max-w-xl mx-auto">
+        <h1 className="text-4xl font-bold">Ingenium</h1>
+        <p className="text-[var(--color-text-muted)] mt-2 max-w-xl mx-auto">
           Complete AI agent development workspace. Skills, self-learning,
           kanban, email, MCP tools — all local, all pluggable.
         </p>
@@ -173,12 +173,12 @@ export default function Home() {
         {stats.map((s) => (
           <div
             key={s.label}
-            className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-6 text-center hover:shadow-lg transition-shadow"
+            className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 text-center hover:shadow-lg transition-shadow"
           >
-            <div className="text-3xl font-bold text-blue-600 dark:text-blue-400">
+            <div className="text-3xl font-bold text-[var(--color-text-link)]">
               {s.value}
             </div>
-            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <div className="text-sm text-[var(--color-text-muted)] mt-1">
               {s.label}
             </div>
           </div>

@@ -77,17 +77,17 @@ function shortId(id: string): string {
 const AGENT_COLORS: Record<string, string> = {
   orchestrator: "bg-purple-100 text-purple-700",
   execution: "bg-blue-100 text-blue-700",
-  research: "bg-green-100 text-green-700",
-  security: "bg-red-100 text-red-700",
+  research: "bg-[var(--color-success-bg)] text-green-700",
+  security: "bg-red-100 text-[var(--color-error-text)]",
   primary: "bg-purple-100 text-purple-700",
-  qa: "bg-green-100 text-green-700",
+  qa: "bg-[var(--color-success-bg)] text-green-700",
   docs: "bg-amber-100 text-amber-700",
   scout: "bg-blue-100 text-blue-700",
   explore: "bg-teal-100 text-teal-700",
 };
 
 function agentBadgeColor(category: string): string {
-  return AGENT_COLORS[category] ?? "bg-gray-100 text-gray-600";
+  return AGENT_COLORS[category] ?? "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]";
 }
 
 /** Status dot + label for a run. */
@@ -119,11 +119,11 @@ function RunStatusDot({ status }: { status: JobRun["status"] }) {
 /** Status badge for run table. */
 function RunStatusBadge({ status }: { status: JobRun["status"] }) {
   const colors: Record<string, string> = {
-    queued: "bg-gray-200 text-gray-700",
+    queued: "bg-gray-200 text-[var(--color-text-primary)]",
     running: "bg-blue-100 text-blue-700",
-    success: "bg-green-100 text-green-700",
-    failed: "bg-red-100 text-red-700",
-    timeout: "bg-red-100 text-red-700",
+    success: "bg-[var(--color-success-bg)] text-green-700",
+    failed: "bg-red-100 text-[var(--color-error-text)]",
+    timeout: "bg-red-100 text-[var(--color-error-text)]",
     cancelled: "bg-yellow-100 text-yellow-700",
   };
   const label: Record<string, string> = {
@@ -135,7 +135,7 @@ function RunStatusBadge({ status }: { status: JobRun["status"] }) {
     cancelled: "Cancelled",
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? "bg-gray-200 text-gray-700"}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? "bg-gray-200 text-[var(--color-text-primary)]"}`}>
       {label[status] ?? status}
     </span>
   );
@@ -152,12 +152,12 @@ function CronPreview({ cron }: { cron: string }) {
     <div>
       <div className="flex gap-1.5 mb-1">
         {parts.map((p, i) => (
-          <code key={i} className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-mono text-gray-700" title={labels[i]}>
+          <code key={i} className="px-1.5 py-0.5 bg-[var(--color-surface-muted)] rounded text-xs font-mono text-[var(--color-text-primary)]" title={labels[i]}>
             {p}
           </code>
         ))}
       </div>
-      <p className="text-xs text-gray-500">{cronToHuman(cron) || "custom schedule"}</p>
+      <p className="text-xs text-[var(--color-text-muted)]">{cronToHuman(cron) || "custom schedule"}</p>
     </div>
   );
 }
@@ -269,7 +269,7 @@ function JobFormOverlay({
     >
       <div className="max-w-2xl mx-auto space-y-4">
         {error && (
-          <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded p-3">{error}</div>
+          <div className="text-[var(--color-error-text)] text-sm bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3">{error}</div>
         )}
 
         {/* Name */}
@@ -278,7 +278,7 @@ function JobFormOverlay({
           <input
             value={form.name}
             onChange={(e) => update("name", e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
             placeholder="e.g., Nightly Security Scan"
           />
         </div>
@@ -289,7 +289,7 @@ function JobFormOverlay({
           <textarea
             value={form.description}
             onChange={(e) => update("description", e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm min-h-[60px]"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm min-h-[60px]"
             placeholder="Optional description of what this job does"
           />
         </div>
@@ -300,7 +300,7 @@ function JobFormOverlay({
           <select
             value={form.agent}
             onChange={(e) => update("agent", e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm bg-white hover:bg-gray-50 cursor-pointer"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
           >
             <option value="">— Select agent —</option>
             {agents.map((a) => (
@@ -317,7 +317,7 @@ function JobFormOverlay({
           <textarea
             value={form.prompt_template}
             onChange={(e) => update("prompt_template", e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono min-h-[200px]"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm font-mono min-h-[200px]"
             placeholder={`Write the prompt template. Use {{variable}} for dynamic values.`}
             rows={6}
           />
@@ -330,7 +330,7 @@ function JobFormOverlay({
             <input
               value={form.schedule_cron}
               onChange={(e) => update("schedule_cron", e.target.value)}
-              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono"
+              className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm font-mono"
               placeholder="*/15 * * * *"
             />
             {form.schedule_cron.trim() && (
@@ -343,7 +343,7 @@ function JobFormOverlay({
               type="number"
               value={form.timeout_minutes}
               onChange={(e) => update("timeout_minutes", parseInt(e.target.value) || 30)}
-              className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm"
+              className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
               min={1}
               max={1440}
             />
@@ -356,7 +356,7 @@ function JobFormOverlay({
           <input
             value={form.trigger_event}
             onChange={(e) => update("trigger_event", e.target.value)}
-            className="w-full border border-gray-200 rounded px-3 py-1.5 text-sm"
+            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
             placeholder="e.g., push, pr_opened"
           />
         </div>
@@ -365,7 +365,7 @@ function JobFormOverlay({
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 border border-gray-200 rounded text-sm"
+            className="px-3 py-1.5 border border-[var(--color-border)] rounded text-sm"
           >
             Cancel
           </button>
@@ -441,10 +441,10 @@ function LiveLogConsole({ run, project }: { run: JobRun; project: string }) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">
-          Logs {isRunning && <span className="text-xs text-gray-400 ml-1">(live)</span>}
+        <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+          Logs {isRunning && <span className="text-xs text-[var(--color-text-muted)] ml-1">(live)</span>}
         </h3>
-        <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+        <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-muted)] cursor-pointer">
           <input
             type="checkbox"
             checked={pinned}
@@ -460,7 +460,7 @@ function LiveLogConsole({ run, project }: { run: JobRun; project: string }) {
         className="bg-gray-900 text-gray-100 font-mono text-xs p-4 rounded max-h-96 overflow-y-auto"
       >
         {logs.length === 0 && (
-          <div className="text-gray-500 italic flex items-center gap-2">
+          <div className="text-[var(--color-text-muted)] italic flex items-center gap-2">
             {isRunning && (
               <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -539,7 +539,7 @@ function JobDetailView({
       {/* Back link */}
       <button
         onClick={onBack}
-        className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1"
+        className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] flex items-center gap-1"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -548,27 +548,27 @@ function JobDetailView({
       </button>
 
       {/* Job info card */}
-      <div className="bg-white rounded-lg border p-6 hover:shadow-md transition-shadow">
+      <div className="bg-[var(--color-surface)] rounded-lg border p-6 hover:shadow-md transition-shadow">
         <div className="flex items-start justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-bold">{job.name}</h1>
               <RunStatusDot status={runs[0]?.status ?? "queued"} />
             </div>
-            {job.description && <p className="text-sm text-gray-600">{job.description}</p>}
-            <div className="flex items-center gap-2 text-xs text-gray-500 pt-1">
+            {job.description && <p className="text-sm text-[var(--color-text-secondary)]">{job.description}</p>}
+            <div className="flex items-center gap-2 text-xs text-[var(--color-text-muted)] pt-1">
               <span className={`px-2 py-0.5 rounded font-medium ${agentBadgeColor(job.agent)}`}>
                 {job.agent}
               </span>
               {job.schedule_cron && (
-                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                <span className="bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] px-2 py-0.5 rounded">
                   {cronToHuman(job.schedule_cron)}
                 </span>
               )}
               {job.trigger_event && (
-                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{job.trigger_event}</span>
+                <span className="bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] px-2 py-0.5 rounded">{job.trigger_event}</span>
               )}
-              <span className="text-gray-400">Timeout: {job.timeout_minutes} min</span>
+              <span className="text-[var(--color-text-muted)]">Timeout: {job.timeout_minutes} min</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -579,7 +579,7 @@ function JobDetailView({
                 onChange={onToggleEnabled}
                 className="rounded"
               />
-              <span className={job.enabled ? "text-green-600" : "text-gray-400"}>
+              <span className={job.enabled ? "text-[var(--color-success-text)]" : "text-[var(--color-text-muted)]"}>
                 {job.enabled ? "Enabled" : "Disabled"}
               </span>
             </label>
@@ -589,8 +589,8 @@ function JobDetailView({
         {/* Prompt template preview */}
         {job.prompt_template && (
           <div className="mt-4">
-            <h3 className="text-xs font-medium text-gray-500 mb-1">Prompt Template</h3>
-            <pre className="bg-gray-50 border border-gray-200 rounded p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">
+            <h3 className="text-xs font-medium text-[var(--color-text-muted)] mb-1">Prompt Template</h3>
+            <pre className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">
               {job.prompt_template}
             </pre>
           </div>
@@ -623,11 +623,11 @@ function JobDetailView({
       <div className="space-y-4">
         {/* Live log for active run */}
         {activeRun && (
-          <div className="bg-white rounded-lg border p-4 hover:shadow-md transition-shadow">
+          <div className="bg-[var(--color-surface)] rounded-lg border p-4 hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-gray-700">
-                  Run <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">{shortId(activeRun.id)}</code>
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+                  Run <code className="text-xs bg-[var(--color-surface-muted)] px-1 py-0.5 rounded">{shortId(activeRun.id)}</code>
                 </h3>
                 <RunStatusBadge status={activeRun.status} />
               </div>
@@ -641,7 +641,7 @@ function JobDetailView({
                       // ignore
                     }
                   }}
-                  className="text-xs text-red-600 hover:text-red-800 px-2 py-1 border border-red-200 rounded hover:bg-red-50"
+                  className="text-xs text-[var(--color-error-text)] hover:text-red-800 px-2 py-1 border border-[var(--color-error-border)] rounded hover:bg-[var(--color-error-bg)]"
                 >
                   Cancel Run
                 </button>
@@ -649,7 +649,7 @@ function JobDetailView({
               {selectedRun && (
                 <button
                   onClick={() => setSelectedRun(null)}
-                  className="text-xs text-gray-500 hover:text-gray-700"
+                  className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
                 >
                   Close
                 </button>
@@ -660,19 +660,19 @@ function JobDetailView({
         )}
 
         {/* Run history table */}
-        <div className="bg-white rounded-lg border hover:shadow-md transition-shadow overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-200">
-            <h3 className="text-sm font-semibold text-gray-700">Run History ({runs.length})</h3>
+        <div className="bg-[var(--color-surface)] rounded-lg border hover:shadow-md transition-shadow overflow-hidden">
+          <div className="px-4 py-3 border-b border-[var(--color-border)]">
+            <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Run History ({runs.length})</h3>
           </div>
           {loadingRuns && runs.length === 0 ? (
-            <div className="p-4 text-sm text-gray-400">Loading...</div>
+            <div className="p-4 text-sm text-[var(--color-text-muted)]">Loading...</div>
           ) : runs.length === 0 ? (
-            <div className="p-4 text-sm text-gray-400 italic">No runs yet.</div>
+            <div className="p-4 text-sm text-[var(--color-text-muted)] italic">No runs yet.</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-gray-100 text-left text-xs text-gray-500">
+                  <tr className="border-b border-[var(--color-border-muted)] text-left text-xs text-[var(--color-text-muted)]">
                     <th className="px-4 py-2 font-medium">ID</th>
                     <th className="px-4 py-2 font-medium">Status</th>
                     <th className="px-4 py-2 font-medium">Trigger</th>
@@ -686,26 +686,26 @@ function JobDetailView({
                     <tr
                       key={run.id}
                       onClick={() => setSelectedRun(run)}
-                      className={`border-b border-gray-50 cursor-pointer hover:bg-gray-50 ${
-                        selectedRun?.id === run.id ? "bg-blue-50" : ""
+                      className={`border-b border-gray-50 cursor-pointer hover:bg-[var(--color-surface-hover)] ${
+                        selectedRun?.id === run.id ? "bg-[var(--color-surface-selected)]" : ""
                       }`}
                     >
                       <td className="px-4 py-2 font-mono text-xs">{shortId(run.id)}</td>
                       <td className="px-4 py-2">
                         <RunStatusBadge status={run.status} />
                       </td>
-                      <td className="px-4 py-2 text-gray-600">{run.trigger}</td>
-                      <td className="px-4 py-2 text-gray-500 text-xs">{fmtDate(run.started_at)}</td>
-                      <td className="px-4 py-2 text-gray-500">{duration(run.started_at, run.finished_at)}</td>
+                      <td className="px-4 py-2 text-[var(--color-text-secondary)]">{run.trigger}</td>
+                      <td className="px-4 py-2 text-[var(--color-text-muted)] text-xs">{fmtDate(run.started_at)}</td>
+                      <td className="px-4 py-2 text-[var(--color-text-muted)]">{duration(run.started_at, run.finished_at)}</td>
                       <td className="px-4 py-2">
                         {run.status === "running" ? (
                           <span className="text-blue-500">—</span>
                         ) : run.exit_code != null ? (
-                          <span className={run.exit_code === 0 ? "text-green-600" : "text-red-600"}>
+                          <span className={run.exit_code === 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-error-text)]"}>
                             {run.exit_code}
                           </span>
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-[var(--color-text-muted)]">—</span>
                         )}
                       </td>
                     </tr>
@@ -852,12 +852,12 @@ export default function JobsPage() {
       </div>
 
       {error && (
-        <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded p-3">{error}</div>
+        <div className="text-[var(--color-error-text)] text-sm bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3">{error}</div>
       )}
 
       {/* Job cards grid */}
       {sortedJobs.length === 0 ? (
-        <div className="text-center text-gray-500 py-12">
+        <div className="text-center text-[var(--color-text-muted)] py-12">
           <p className="text-lg font-semibold">No jobs yet</p>
           <p className="text-sm mt-1">Create a job to schedule agent runs.</p>
         </div>
@@ -928,12 +928,12 @@ function JobCard({
 
   return (
     <div
-      className="bg-white border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+      className="bg-[var(--color-surface)] border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
       onClick={onClick}
     >
       <div className="flex items-start justify-between mb-2">
         <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-semibold text-gray-900 truncate">{job.name}</h2>
+          <h2 className="text-lg font-semibold text-[var(--color-text-primary)] truncate">{job.name}</h2>
         </div>
         <div className="flex items-center gap-2 ml-2 shrink-0">
           {lastStatus ? (
@@ -949,7 +949,7 @@ function JobCard({
               e.stopPropagation();
               onRun();
             }}
-            className="text-gray-400 hover:text-green-600 p-1 rounded hover:bg-green-50"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-success-text)] p-1 rounded hover:bg-[var(--color-success-bg)]"
             title="Run Now"
           >
             <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -960,7 +960,7 @@ function JobCard({
       </div>
 
       {job.description && (
-        <p className="text-sm text-gray-600 mb-2 line-clamp-2">{job.description}</p>
+        <p className="text-sm text-[var(--color-text-secondary)] mb-2 line-clamp-2">{job.description}</p>
       )}
 
       <div className="flex items-center gap-2 mb-2">
@@ -970,12 +970,12 @@ function JobCard({
       </div>
 
       {job.schedule_cron && (
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-[var(--color-text-muted)]">
           Runs: {cronToHuman(job.schedule_cron)}
         </p>
       )}
 
-      <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-100">
+      <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--color-border-muted)]">
         <label
           className="flex items-center gap-1.5 text-sm cursor-pointer"
           onClick={(e) => e.stopPropagation()}
@@ -986,11 +986,11 @@ function JobCard({
             onChange={onToggleEnabled}
             className="rounded"
           />
-          <span className={job.enabled ? "text-green-600 text-xs" : "text-gray-400 text-xs"}>
+          <span className={job.enabled ? "text-[var(--color-success-text)] text-xs" : "text-[var(--color-text-muted)] text-xs"}>
             {job.enabled ? "Enabled" : "Disabled"}
           </span>
         </label>
-        <span className="text-xs text-gray-400">Timeout: {job.timeout_minutes}m</span>
+        <span className="text-xs text-[var(--color-text-muted)]">Timeout: {job.timeout_minutes}m</span>
       </div>
     </div>
   );

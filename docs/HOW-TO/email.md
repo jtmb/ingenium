@@ -101,7 +101,7 @@ After successful authentication, you should see:
 ### Viewing Inbox
 
 The inbox displays in a 3-pane layout:
-1. **Left sidebar** — folder tree (INBOX, [Gmail]/Sent Mail, etc.)
+1. **Left sidebar** — account dropdown, compose button, and folder list (INBOX, Sent, Drafts, Archive, Spam, Trash)
 2. **Middle pane** — email list with subject, sender, date preview
 3. **Right pane** — full message content when an email is selected
 
@@ -109,10 +109,11 @@ Click any email to view its complete headers and body in the right pane.
 
 ### Composing Messages
 
-1. Click "Compose" button (pencil icon) or press `Cmd/Ctrl + N`
-2. Fill in: To, Subject, Message body
-3. Attach files using paperclip icon if needed
+1. Click "Compose" button in the left sidebar
+2. The compose dialog opens as an overlay modal with "New Message" header
+3. Select a From account (dropdown), fill in To, CC/BCC (optional), Subject, and Message body
 4. Click "Send" — uses SMTP via nodemailer to deliver through Gmail/Outlook servers
+5. Click "Save Draft" to save without sending, or "Discard" to cancel
 
 ### Searching Emails
 
@@ -139,39 +140,49 @@ Search results appear instantly with highlighted matching text. Click a result t
 
 ### Managing Folders
 
-Standard IMAP folders are available:
-- **INBOX** — incoming messages
-- **[Gmail]/Sent Mail** — sent emails (Gmail)
-- **[Outlook]/Drafts** — unsent drafts (Outlook)
-- Custom labels/folders created in Gmail/Outlook web interface sync automatically
+Standard folders are available in the sidebar:
+- **INBOX** — incoming messages (default selected)
+- **Sent** — sent emails
+- **Drafts** — unsent drafts
+- **Archive** — archived messages
+- **Spam** — junk/spam folder
+- **Trash** — deleted messages
 
 ## MCP Tools Reference
 
-The email client registers these tools with the Ingenium MCP server:
+The email client registers these 13 tools with the Ingenium MCP server:
 
-| Tool | Description | Parameters | Returns |
-|------|-------------|------------|---------|
-| `ingenium_email_accounts` | List all configured accounts | — | Array of `{ id, provider, emailAddress }` objects |
-| `ingenium_email_send` | Compose and send new email | `{ accountId: string, to: string[], subject: string, body: string, attachments?: File[] }` | Message ID or error message |
-| `ingenium_email_search` | Search emails across all accounts | `{ query: string, limit?: number, accountId?: string }` | Array of matching email summaries with highlights |
-| `ingenium_email_read` | Fetch full messages by IDs | `{ ids: string[], includeHeaders?: boolean }` | Full message objects with MIME parsing results |
+| Tool | Description | Key Parameters | Returns |
+|------|-------------|----------------|---------|
+| `ingenium_email_accounts` | List configured accounts | `project` | Array of `{ id, email, name, provider }` objects |
+| `ingenium_email_send` | Compose and send | `project`, `account`, `to`, `subject`, `html` (optional: `text`, `cc`, `bcc`) | Send confirmation |
+| `ingenium_email_search` | Search across emails | `project`, `account`, `query` (optional: `folder`) | Matching email summaries |
+| `ingenium_email_read` | Read a single email | `project`, `account`, `uid`, `folder` | Full email with headers, body, attachments |
+| `ingenium_email_list` | List emails in folder | `project`, `account` (optional: `folder`, `page`) | Paginated email list |
+| `ingenium_email_folders` | List IMAP folders | `project`, `account` | Array of folder names |
+| `ingenium_email_draft` | Save a draft | `project`, `account`, `to`, `subject`, `html` | Draft saved confirmation |
+| `ingenium_email_draft_response` | Auto-draft a response | `project`, `account`, `uid` (optional: `folder`) | Draft saved to Drafts folder |
+| `ingenium_email_suggest` | Suggest a response | `project`, `account`, `uid`, `folder` | AI-generated response suggestion |
+| `ingenium_email_triage` | Triage inbox | `project`, `account` (optional: `limit`) | Priority-categorized emails |
+| `ingenium_email_patterns` | List learned patterns | `project` | Email-related skills |
+| `ingenium_email_watch_start` | Start IMAP IDLE watcher | `project`, `account` | Watcher started confirmation |
+| `ingenium_email_watch_status` | Check IMAP watcher | `project`, `account` | Running/stopped status |
 
 **Example usage in OpenCode:**
 ```typescript
 // List accounts
-const accounts = await ingenium_email_accounts();
-console.log("Configured:", accounts); // [{ id: "1", provider: "gmail", emailAddress: "user@gmail.com" }]
+const accounts = await ingenium_email_accounts({ project: "my-project" });
 
-// Search inbox for invoice-related emails  
-const results = await ingenium_email_search({ query: "invoice 2026", limit: 5 });
-results.forEach(msg => { console.log(`${msg.subject} from ${msg.sender}`); })
+// Read inbox
+const emails = await ingenium_email_list({ project: "my-project", account: "account-id", folder: "INBOX" });
 
-// Compose and send message
+// Compose and send
 await ingenium_email_send({ 
-  accountId: accounts[0].id,
-  to: ["recipient@example.com"],
+  project: "my-project",
+  account: "account-id",
+  to: "recipient@example.com",
   subject: "Project Update",
-  body: `Here's the latest status report...`
+  html: "<p>Here's the latest status report...</p>"
 });
 ```
 
@@ -229,9 +240,11 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 |---------|--------------|-----|
 | OAuth2 redirect fails (404) | Callback URI not registered in Google/Azure console | Add `http://localhost:3000/mail/oauth/callback` to authorized redirect URIs, restart server |
 | "Access denied" error after login | OAuth scopes too limited or expired refresh token | Re-authorize account via dashboard — complete full OAuth2 flow again |
-| Inbox empty but no errors | IMAP connection timeout (firewall blocking port 143) | Check firewall allows incoming/outgoing IMAP traffic, verify server is running on :4097 |
+| Inbox empty but no errors | IMAP connection timeout | Check firewall allows outbound IMAP (port 993) and SMTP (port 465), verify API is running on :4097 |
+| Account shows in dropdown but no emails | Account not fully authenticated | Remove the account and re-add via the setup flow |
+| Compose dialog has box-within-a-box layout | CSS nesting issue | Ensure EmailComposer is rendered directly inside Overlay's `children`, not wrapped in an extra `<div>` with border |
 | Search returns no results | Query syntax incompatible with FTS5 | Use simpler queries first: `subject:test` or just keywords without operators |
-| SMTP send fails (timeout) | Mail provider blocking local connections from container | Verify Docker network allows outbound SMTP, check mail server accepts relay from your IP range |
+| SMTP send fails (timeout) | Mail provider blocking local connections | Verify Docker network allows outbound SMTP, check mail server accepts relay from your IP range |
 
 ## Security Notes
 
@@ -254,8 +267,15 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 | `packages/ingenium-email/src/oauth.ts` | OAuth2 flow handlers (Google + Azure AD) | Email client core |
 | `packages/ingenium-email/src/accounts.ts` | Account management, credential encryption | Email client core |
 | `services/ingenium-api/routes/email.ts` | REST API endpoints for email operations | API layer |
-| `services/ingenium-dashboard/src/app/mail/page.tsx` | Dashboard UI for inbox/compose/search | Frontend |
+| `services/ingenium-dashboard/src/app/mail/page.tsx` | Dashboard 3-pane layout + compose overlay | Frontend |
+| `services/ingenium-dashboard/src/app/mail/components/EmailComposer.tsx` | Compose dialog form | Frontend |
+| `services/ingenium-dashboard/src/app/mail/components/AccountSetup.tsx` | Add account flow (OAuth + manual) | Frontend |
+| `services/ingenium-dashboard/src/app/mail/components/FolderSidebar.tsx` | Account dropdown + folder list | Frontend |
+| `services/ingenium-dashboard/src/app/mail/components/EmailList.tsx` | Email list with search + pagination | Frontend |
+| `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` | Full email display + actions | Frontend |
+| `services/ingenium-dashboard/src/app/components/Overlay.tsx` | Generic modal overlay component | Frontend |
+| `services/ingenium-dashboard/src/app/mail/oauth/callback/page.tsx` | OAuth callback handler + "Go to Mail" | Frontend |
 
 ---
 
-*Last updated: July 10, 2026 — Email client fully implemented with OAuth2 + IMAP/SMTP support.*
+*Last updated: July 12, 2026 — Email client with OAuth2 + IMAP/SMTP, compose overlay, account setup.*

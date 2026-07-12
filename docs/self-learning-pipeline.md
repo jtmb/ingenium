@@ -433,7 +433,7 @@ Observations must describe **user behavior**, not implementation activity:
 
 Implementation activity belongs in pipeline events, git commits, and the `/pipeline` timeline — not in observations. The synthesis pipeline only processes behavior-focused observations into personality traits.
 
-> 🔴 **The extraction engine handles observation automatically** by reading OpenCode message history via the API and using the synthesis LLM to extract durable user behavior rules. Manual `ingenium_observe()` calls in agent code are only needed for exceptional cases. All 9 agent files had their "🔴 Observation — Log User Interactions" sections removed.
+> 🔴 **The extraction engine handles observation automatically** by reading OpenCode message history via the API and using the synthesis LLM to extract durable user behavior rules. Manual `ingenium_observe()` calls in agent code are only needed for exceptional cases. All 10 agent files had their "🔴 Observation — Log User Interactions" sections removed.
 
 ---
 

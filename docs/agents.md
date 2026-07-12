@@ -2,7 +2,7 @@
 
 ## Overview
 
-Nine agents total: 1 primary, 8 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Eight specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, and security.
+Ten agents total: 1 primary, 9 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Nine specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, security, and vision analysis.
 
 ```mermaid
 flowchart TB
@@ -25,10 +25,12 @@ flowchart TB
         GATE -->|"📄 DOCS"| DOCS["@ingenium-docs"]
         GATE -->|"🛡️ AUDIT"| AUDITOR["@ingenium-security-auditor"]
         GATE -->|"🧠 CONTEXT"| SCOUT["@ingenium-scout"]
+        GATE -->|"👁️ VISION"| VB["@vision-bridge"]
         EXP --> MERGE["Merge results"]
         SE --> MERGE
         QA --> MERGE
         SCOUT --> MERGE
+        VB --> MERGE
         AUDITOR --> MERGE
         MERGE --> VERIFY["✅ Verify · tests · type-check"]
         VERIFY --> DOC["🔴 Spawn @ingenium-docs after EVERY change"]
@@ -43,11 +45,12 @@ flowchart TB
 
 | Agent | Type | Model | Provider | Access | Purpose |
 |-------|------|-------|----------|--------|---------|
-| **ingenium-orchestrator** | Primary | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Full R/W | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
+| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Full R/W | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
 | **ingenium-prompt-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
 | **ingenium-explore** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
 | **ingenium-software-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
+| **vision-bridge** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only (`read: allow`) | Vision analysis — reads screenshot files and produces structured technical descriptions for non-vision models |
 | **ingenium-software-engineer-fast** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes, performance-critical code |
 | **ingenium-qa** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit (`edit: allow`) | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code |
@@ -141,11 +144,11 @@ flowchart LR
 
 | Property | Value |
 |----------|-------|
-| **Model** | DeepSeek V4 Flash |
+| **Model** | DeepSeek V4 Pro |
 | **Access** | Full R/W |
 | **Invoked by** | User (Tab key) |
 | **Triggers** | User: "Execute", "Go ahead", "Implement", or provides a plan |
-| **Can spawn** | ALL 8 subagents (ingenium-prompt-engineer, explore, scout, security-auditor, software-engineer, software-engineer-fast, software-engineer-premium, qa, docs) plus the Multi-Model software engineer variants (fast, premium) |
+| **Can spawn** | ALL 9 subagents (ingenium-prompt-engineer, explore, scout, security-auditor, vision-bridge, software-engineer, software-engineer-fast, software-engineer-premium, qa, docs) plus the Multi-Model software engineer variants (fast, premium) |
 | **Direct bash** | ONLY: `git add/commit/push`, `git rev-parse`, test/build verification |
 
 | Phase | Action | Delegates to |
@@ -203,6 +206,28 @@ flowchart LR
 | Entry retrieval | `thread_read_entries` | Full entry content |
 | Decision tracking | All Thread tools | Past decisions, preferences, constraints |
 | Context upload | `thread_create_entry` | Save new findings to Thread |
+
+### @vision-bridge — Vision Analysis
+
+| Property | Value |
+|----------|-------|
+| **Model** | qwen3.5-9b (LM Studio) |
+| **Access** | Read-only (`read: allow`) |
+| **Invoked by** | Orchestrator or user \`@\` mention |
+| **Triggers** | "Analyze screenshot X", "Describe image Y", "What does this screenshot show?" |
+
+| Capability | Tools | Output |
+|-----------|-------|--------|
+| Screenshot analysis | `read` (image files) | Structured technical description (page/app state, layout, UI elements, data, visual state) |
+| Console inspection | `playwright_browser_console_messages` | Browser console logs for debugging |
+| Network inspection | `playwright_browser_network_requests` | Network request/response details |
+
+**Responsibilities:**
+- ✅ Read screenshot/image files and produce structured technical descriptions
+- ✅ Non-vision model bridge — enables models without vision to understand screenshots
+- ✅ Console and network log inspection when needed
+- ❌ Does NOT modify files (`write: deny`, `edit: deny`)
+- ❌ Does NOT search code (`glob: deny`, `grep: deny`)
 
 ### @ingenium-software-engineer — Code Implementation
 
@@ -300,7 +325,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 
 | Property | Value |
 |----------|-------|
-| **Model** | qwen3.5-9b (LM Studio) |
+| **Model** | DeepSeek V4 Flash |
 | **Access** | Bash + read-only (`write: deny`) |
 | **Invoked by** | Orchestrator or user \`@\` mention |
 | **Triggers** | "Audit X", "Check for secrets", "Security review of Y" |
@@ -337,10 +362,12 @@ flowchart LR
     GATE -->|"review/test"| QA["@qa"]
     GATE -->|"audit"| AUDIT["@security-auditor"]
     GATE -->|"context"| SCOUT["@scout"]
+    GATE -->|"vision"| VB["@vision-bridge"]
     EXP --> MERGE["Merge results"]
     SE --> MERGE
     QA --> MERGE
     SCOUT --> MERGE
+    VB --> MERGE
     AUDIT --> MERGE
     MERGE --> KREV["📋 Move to review<br/>ingenium_task_move <id> review"]
     KREV --> DOC["🔴 @docs"]
@@ -355,8 +382,9 @@ flowchart LR
 
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
-| DeepSeek V4 Pro (API) | \`ingenium-software-engineer-premium\` | 1 | Paid |
-| qwen3.5-9b (LM Studio) | `ingenium-orchestrator`, `ingenium-explore`, `ingenium-security-auditor`, `ingenium-prompt-engineer`, `ingenium-scout`, `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs` | 9 | Local |
+| DeepSeek V4 Pro (API) | \`ingenium-software-engineer-premium\`, \`ingenium-orchestrator\` | 2 | Paid |
+| DeepSeek V4 Flash (API) | \`ingenium-security-auditor\` | 1 | Paid |
+| qwen3.5-9b (LM Studio) | `ingenium-explore`, `ingenium-prompt-engineer`, `ingenium-scout`, `vision-bridge`, `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs` | 8 | Local |
 
 **Model configuration**: Model assignments are defined per-agent in their `.md` agent profile files (stored in `.opencode/agents/` and the DB `agents` table). Each agent's frontmatter includes a `model:` field. Agent definitions can be managed via the Ingenium Dashboard at `/agents` or via the `ingenium_agent_*` MCP tools.
 
@@ -370,6 +398,7 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-scout | \`@ingenium-scout\` | Read-only | orchestrator + user |
 | ingenium-prompt-engineer | \`@ingenium-prompt-engineer\` | Read-only | orchestrator + user |
 | ingenium-security-auditor | \`@ingenium-security-auditor\` | Bash + read-only | orchestrator + user |
+| vision-bridge | \`@vision-bridge\` | Read-only | orchestrator + user |
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
 | ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Read/Write | orchestrator only |
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |
