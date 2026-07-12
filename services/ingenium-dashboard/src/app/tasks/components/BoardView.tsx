@@ -268,7 +268,7 @@ function ColumnDroppable({
   return (
     <div
       ref={setNodeRef}
-      className={`bg-[var(--color-surface-muted)] rounded min-h-[160px] flex flex-col transition-colors ${isOver ? "bg-[var(--color-surface-selected)] ring-2 ring-blue-300" : ""}`}
+      className={`bg-[var(--color-surface)] rounded min-h-[160px] flex flex-col transition-colors border border-[var(--color-border)] ${isOver ? "bg-[var(--color-surface-selected)] ring-2 ring-blue-300" : ""}`}
     >
       {/* Column header */}
       <div
