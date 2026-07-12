@@ -82,7 +82,7 @@ export default function PersonalityPage() {
       </div>
 
       {sortMode === "newest" && (
-        <div className="bg-[var(--color-surface)] rounded border divide-y hover:shadow-md transition-shadow">
+        <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] divide-y hover:shadow-md transition-shadow">
           {[...traits]
             .filter(t => showHidden || (t.confidence || 0) >= 0.3)
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
@@ -108,7 +108,7 @@ export default function PersonalityPage() {
       )}
 
       {sortMode === "grouped" && Object.entries(grouped).length === 0 && (
-        <div className="bg-[var(--color-surface-muted)] p-8 rounded border text-center text-[var(--color-text-muted)]">
+        <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
           No personality traits learned yet. Traits are generated automatically from observations via the synthesis pipeline.
         </div>
       )}
@@ -131,7 +131,7 @@ export default function PersonalityPage() {
         const visibleTraits = (typeTraits as PersonalityTrait[]).filter(t => showHidden || (t.confidence || 0) >= 0.3);
         if (visibleTraits.length === 0) return null;
         return (
-        <div key={type} className="bg-[var(--color-surface)] rounded border overflow-hidden hover:shadow-md transition-shadow">
+        <div key={type} className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] overflow-hidden hover:shadow-md transition-shadow">
           <div className="bg-[var(--color-surface-muted)] px-4 py-2 border-b font-semibold text-sm flex items-center gap-2">
             <span>{TYPE_ICONS[type] || "📌"}</span>
             <span className="capitalize">{type.replace(/_/g, " ")}</span>
@@ -172,13 +172,13 @@ export default function PersonalityPage() {
             {selectedTrait.exemplar_text && (
               <div>
                 <h3 className="font-semibold mb-1">Exemplar</h3>
-                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border text-sm">{selectedTrait.exemplar_text}</pre>
+                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] text-sm">{selectedTrait.exemplar_text}</pre>
               </div>
             )}
             {selectedTrait.metadata && (
               <div>
                 <h3 className="font-semibold mb-1">Metadata</h3>
-                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border text-xs font-mono">{selectedTrait.metadata}</pre>
+                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] text-xs font-mono">{selectedTrait.metadata}</pre>
               </div>
             )}
             <div className="flex gap-2 pt-2">

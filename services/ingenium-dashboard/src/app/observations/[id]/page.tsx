@@ -91,7 +91,7 @@ export default function ObservationDetailPage() {
         </button>
       </div>
 
-      <div className="bg-[var(--color-surface)] p-6 rounded border shadow-sm space-y-6">
+      <div className="bg-[var(--color-surface)] p-6 rounded border border-[var(--color-border)] shadow-sm space-y-6">
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <div>
             <span className="font-semibold">Type:</span>{" "}
@@ -135,7 +135,7 @@ export default function ObservationDetailPage() {
 
         <div>
           <h3 className="font-semibold mb-2">Content</h3>
-          <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+          <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-sm font-mono whitespace-pre-wrap">
             {observation.content}
           </pre>
         </div>
@@ -144,11 +144,11 @@ export default function ObservationDetailPage() {
           <div>
             <h3 className="font-semibold mb-2">Context</h3>
             {parsedContext ? (
-              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-xs font-mono">
+              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono">
                 {JSON.stringify(parsedContext, null, 2)}
               </pre>
             ) : (
-              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">
+              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">
                 {observation.context}
               </pre>
             )}

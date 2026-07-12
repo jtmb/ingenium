@@ -338,7 +338,7 @@ export default function PipelinePage() {
 
       {/* ── Timeline ─────────────────────────────────────────────────── */}
       {events.length === 0 && (
-        <div className="bg-[var(--color-surface-muted)] p-8 rounded border text-center text-[var(--color-text-muted)]">
+        <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
           No pipeline events yet. Events are logged automatically during agent interactions.
         </div>
       )}
@@ -382,7 +382,7 @@ export default function PipelinePage() {
                           {group.events.map((obs) => (
                             <div
                               key={obs.id}
-                              className="bg-[var(--color-surface)] border rounded p-3 cursor-pointer hover:shadow-md transition-shadow"
+                              className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 cursor-pointer hover:shadow-md transition-shadow"
                               onClick={() => setSelected(obs)}
                             >
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -505,7 +505,7 @@ export default function PipelinePage() {
               Batch of {selected.events.length} observations from {selected.events[0]?.event_source ?? "unknown"}.
             </p>
             {selected.events.map((obs: PipelineEvent) => (
-              <div key={obs.id} className="border rounded p-3 bg-[var(--color-surface-muted)]">
+              <div key={obs.id} className="border border-[var(--color-border)] rounded p-3 bg-[var(--color-surface-muted)]">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
                   <span className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[obs.event_source] ?? ""}`}>
                     {obs.event_source}
@@ -521,7 +521,7 @@ export default function PipelinePage() {
                 {obs.data != null && (
                   <div className="mt-2">
                     <h3 className="text-xs font-semibold mb-1">Raw JSON Data</h3>
-                    <pre className="bg-[var(--color-surface-muted)] p-3 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap">
+                    <pre className="bg-[var(--color-surface-muted)] p-3 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono whitespace-pre-wrap">
                       {JSON.stringify(parseData(obs.data), null, 2)}
                     </pre>
                   </div>
@@ -706,7 +706,7 @@ export default function PipelinePage() {
                     return d != null && Object.keys(d).length > 0 ? (
                       <div>
                         <h3 className="font-semibold mb-1">Raw JSON Data</h3>
-                        <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap">
+                        <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono whitespace-pre-wrap">
                           {JSON.stringify(d, null, 2)}
                         </pre>
                       </div>
@@ -793,7 +793,7 @@ function EventRow({
           className={`flex-1 pb-3 ${isChild ? "pb-2" : ""} min-w-0`}
         >
           <div
-            className={`bg-[var(--color-surface)] rounded-lg border p-3 ${
+            className={`bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-3 ${
               isChild ? "p-2" : "p-3"
             } ${onClickDetail ? "cursor-pointer hover:shadow-md transition-shadow" : ""}`}
             onClick={onClickDetail}

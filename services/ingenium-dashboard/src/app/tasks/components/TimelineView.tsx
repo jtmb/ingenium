@@ -146,7 +146,7 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
   return (
     <div className="space-y-1">
       {/* Legend */}
-      <div className="flex gap-3 text-xs text-gray-500 mb-2 flex-wrap">
+      <div className="flex gap-3 text-xs text-[var(--color-text-muted)] mb-2 flex-wrap">
         {Object.entries(COLUMN_COLORS).map(([status, color]) => (
           <span key={status} className="flex items-center gap-1">
             <span className="w-3 h-3 rounded inline-block" style={{ backgroundColor: color }} />
@@ -158,21 +158,21 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
       {/* Scrollable timeline */}
       <div
         ref={scrollRef}
-        className="overflow-x-auto border border-gray-200 rounded bg-white"
+        className="overflow-x-auto border border-[var(--color-border)] rounded bg-[var(--color-surface)]"
       >
         <div style={{ minWidth: Math.max(totalDays * 40, 600) }}>
           {/* Header row: date labels */}
           <div
-            className="grid border-b border-gray-200 bg-gray-50 sticky top-0 z-10"
+            className="grid border-b border-[var(--color-border)] bg-[var(--color-surface-muted)] sticky top-0 z-10"
             style={{ gridTemplateColumns: `180px repeat(${totalDays}, 40px)` }}
           >
-            <div className="px-3 py-2 text-xs font-semibold text-gray-500 border-r border-gray-200">
+            <div className="px-3 py-2 text-xs font-semibold text-[var(--color-text-muted)] border-r border-[var(--color-border)]">
               Task
             </div>
             {dateLabels.map((dl, i) => (
               <div
                 key={i}
-                className="px-0.5 py-2 text-[10px] text-gray-400 text-center border-r border-gray-100 leading-tight"
+                className="px-0.5 py-2 text-[10px] text-[var(--color-text-muted)] text-center border-r border-[var(--color-border-muted)] leading-tight"
                 title={dl.date.toDateString()}
               >
                 {dl.date.getDate() === 1
@@ -192,19 +192,19 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
             return (
               <div
                 key={row.task.id}
-                className="grid border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                className="grid border-b border-[var(--color-border-muted)] hover:bg-[var(--color-surface-hover)] transition-colors"
                 style={{ gridTemplateColumns: `180px repeat(${totalDays}, 40px)` }}
               >
                 {/* Task label */}
                 <div
-                  className={`px-3 py-2 text-sm border-r border-gray-200 truncate flex items-center gap-1 ${
+                  className={`px-3 py-2 text-sm border-r border-[var(--color-border)] truncate flex items-center gap-1 ${
                     row.indent > 0 ? "pl-6" : ""
-                  } ${isEpic ? "font-semibold text-gray-900" : "text-gray-700"}`}
+                  } ${isEpic ? "font-semibold text-[var(--color-text-primary)]" : "text-[var(--color-text-primary)]"}`}
                   title={row.task.title}
                 >
-                  {row.indent > 0 && <span className="text-gray-300 text-xs">└</span>}
+                  {row.indent > 0 && <span className="text-[var(--color-text-muted)] text-xs">└</span>}
                   {isEpic && (
-                    <span className="text-xs text-gray-400 font-normal">⚡</span>
+                    <span className="text-xs text-[var(--color-text-muted)] font-normal">⚡</span>
                   )}
                   <span className="truncate">{row.task.title}</span>
                 </div>
@@ -232,7 +232,7 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
                 ) : (
                   /* Empty cells for tasks outside range */
                   Array.from({ length: totalDays }).map((_, i) => (
-                    <div key={i} className="border-r border-gray-50" />
+                    <div key={i} className="border-r border-[var(--color-border-muted)]" />
                   ))
                 )}
               </div>
@@ -240,7 +240,7 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
           })}
 
           {rows.length === 0 && (
-            <div className="py-8 text-center text-gray-400 text-sm">
+            <div className="py-8 text-center text-[var(--color-text-muted)] text-sm">
               No tasks to display. Create tasks to see the timeline.
             </div>
           )}

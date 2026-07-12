@@ -68,16 +68,16 @@ function EditableCell({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
-      className="border border-gray-300 rounded px-1 py-0.5 text-sm w-full"
+      className="border border-[var(--color-border)] rounded px-1 py-0.5 text-sm w-full"
       placeholder={placeholder}
     />
   ) : (
     <span
-      className="cursor-pointer hover:bg-gray-100 px-1 py-0.5 rounded inline-block min-w-[2rem]"
+      className="cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded inline-block min-w-[2rem]"
       onClick={() => setEditing(true)}
       title="Click to edit"
     >
-      {value || <span className="text-gray-400 italic">{placeholder ?? "—"}</span>}
+      {value || <span className="text-[var(--color-text-muted)] italic">{placeholder ?? "—"}</span>}
     </span>
   );
 }
@@ -104,7 +104,7 @@ function SortHeader({
   const active = currentSort === field;
   return (
     <th
-      className={`px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase cursor-pointer select-none hover:bg-gray-100 ${className ?? ""}`}
+      className={`px-3 py-2 text-left text-xs font-semibold text-[var(--color-text-muted)] uppercase cursor-pointer select-none hover:bg-[var(--color-surface-hover)] ${className ?? ""}`}
       onClick={() => onSort(field)}
     >
       {label}
@@ -181,7 +181,7 @@ export default function ListView({ project, tasks, onTasksChange }: ListViewProp
     <div className="overflow-x-auto">
       <table className="w-full text-sm border-collapse">
         <thead>
-          <tr className="bg-gray-50 border-b border-gray-200">
+          <tr className="bg-[var(--color-surface-muted)] border-b border-[var(--color-border)]">
             {([
               ["id", "ID"],
               ["title", "Title"],
@@ -207,10 +207,10 @@ export default function ListView({ project, tasks, onTasksChange }: ListViewProp
           {sortedTasks.map((t) => (
             <tr
               key={t.id}
-              className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors"
+              className="border-b border-[var(--color-border-muted)] hover:bg-[var(--color-surface-hover)] cursor-pointer transition-colors"
               onClick={() => setSelectedTask(t)}
             >
-              <td className="px-3 py-2 font-mono text-xs text-gray-500">
+              <td className="px-3 py-2 font-mono text-xs text-[var(--color-text-muted)]">
                 {t.id.slice(0, 8)}
               </td>
               <td className="px-3 py-2">
@@ -228,7 +228,7 @@ export default function ListView({ project, tasks, onTasksChange }: ListViewProp
                       ? "bg-blue-100 text-blue-700"
                       : t.column_id === "review"
                         ? "bg-amber-100 text-amber-700"
-                        : "bg-gray-100 text-gray-600"
+                        : "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
                 }`}>
                   {COLUMN_LABELS[t.column_id] || t.column_id || "todo"}
                 </span>
@@ -247,22 +247,22 @@ export default function ListView({ project, tasks, onTasksChange }: ListViewProp
                   placeholder="—"
                 />
               </td>
-              <td className="px-3 py-2 text-gray-500 text-xs">
+              <td className="px-3 py-2 text-[var(--color-text-muted)] text-xs">
                 {t.due_date
                   ? new Date(t.due_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                   : "—"}
               </td>
-              <td className="px-3 py-2 text-gray-500">
+              <td className="px-3 py-2 text-[var(--color-text-muted)]">
                 {t.issue_type || "—"}
               </td>
-              <td className="px-3 py-2 text-gray-500 text-xs">
+              <td className="px-3 py-2 text-[var(--color-text-muted)] text-xs">
                 {new Date(t.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
               </td>
             </tr>
           ))}
           {sortedTasks.length === 0 && (
             <tr>
-              <td colSpan={8} className="px-3 py-8 text-center text-gray-400">
+              <td colSpan={8} className="px-3 py-8 text-center text-[var(--color-text-muted)]">
                 No tasks yet.
               </td>
             </tr>

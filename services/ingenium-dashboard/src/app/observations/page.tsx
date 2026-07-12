@@ -84,14 +84,14 @@ export default function ObservationsPage() {
 
       <div className="space-y-2">
         {observations.length === 0 && (
-          <div className="bg-[var(--color-surface-muted)] p-8 rounded border text-center text-[var(--color-text-muted)]">
+          <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
             No observations yet. The agent will record observations automatically during interactions.
           </div>
         )}
         {observations.map((o: Observation) => (
           <div
             key={o.id}
-            className="bg-[var(--color-surface)] p-4 rounded border cursor-pointer hover:shadow-md transition-shadow group"
+            className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] cursor-pointer hover:shadow-md transition-shadow group"
             onClick={() => setSelected(o)}
           >
             <div className="flex gap-2 items-center mb-1 flex-wrap">
@@ -133,7 +133,7 @@ export default function ObservationsPage() {
             </div>
             <div>
               <h3 className="font-semibold mb-1">Content</h3>
-              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">{selected.content}</pre>
+              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-sm font-mono whitespace-pre-wrap">{selected.content}</pre>
             </div>
             {selected.context && (
               <div>
@@ -141,9 +141,9 @@ export default function ObservationsPage() {
                 {(() => {
                   const parsed = safeParseJson(selected.context);
                   return parsed ? (
-                    <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-xs font-mono">{JSON.stringify(parsed, null, 2)}</pre>
+                    <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono">{JSON.stringify(parsed, null, 2)}</pre>
                   ) : (
-                    <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">{selected.context}</pre>
+                    <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">{selected.context}</pre>
                   );
                 })()}
               </div>

@@ -265,7 +265,7 @@ export default function LogsPage() {
       </div>
 
       {/* ── Filter Bar ──────────────────────────────────────────────────── */}
-      <div className="bg-[var(--color-surface)] border rounded p-3 hover:shadow-md transition-shadow space-y-3">
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 hover:shadow-md transition-shadow space-y-3">
         {/* Source pills */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs text-[var(--color-text-muted)] mr-1 font-medium">
@@ -343,7 +343,7 @@ export default function LogsPage() {
 
       {/* ── Log Table ────────────────────────────────────────────────────── */}
       {loading && entries.length === 0 && (
-        <div className="bg-[var(--color-surface-muted)] border rounded p-12 text-center text-[var(--color-text-muted)]">
+        <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-12 text-center text-[var(--color-text-muted)]">
           Loading logs...
         </div>
       )}
@@ -355,7 +355,7 @@ export default function LogsPage() {
       )}
 
       {!loading && !error && filteredEntries.length === 0 && (
-        <div className="bg-[var(--color-surface-muted)] border rounded p-12 text-center text-[var(--color-text-muted)]">
+        <div className="bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-12 text-center text-[var(--color-text-muted)]">
           <p className="text-lg font-medium mb-1">No log entries yet.</p>
           <p className="text-sm">System is running. Logs will appear here as events occur.</p>
         </div>
@@ -365,7 +365,7 @@ export default function LogsPage() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="bg-[var(--color-surface)] border rounded overflow-y-auto max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
+          className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded overflow-y-auto max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
         >
           <table className="w-full text-sm font-mono">
             <thead className="sticky top-0 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] z-10">

@@ -548,7 +548,7 @@ function JobDetailView({
       </button>
 
       {/* Job info card */}
-      <div className="bg-[var(--color-surface)] rounded-lg border p-6 hover:shadow-md transition-shadow">
+      <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-6 hover:shadow-md transition-shadow">
         <div className="flex items-start justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -623,7 +623,7 @@ function JobDetailView({
       <div className="space-y-4">
         {/* Live log for active run */}
         {activeRun && (
-          <div className="bg-[var(--color-surface)] rounded-lg border p-4 hover:shadow-md transition-shadow">
+          <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] p-4 hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
@@ -660,7 +660,7 @@ function JobDetailView({
         )}
 
         {/* Run history table */}
-        <div className="bg-[var(--color-surface)] rounded-lg border hover:shadow-md transition-shadow overflow-hidden">
+        <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] hover:shadow-md transition-shadow overflow-hidden">
           <div className="px-4 py-3 border-b border-[var(--color-border)]">
             <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Run History ({runs.length})</h3>
           </div>
@@ -928,7 +928,7 @@ function JobCard({
 
   return (
     <div
-      className="bg-[var(--color-surface)] border rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
+      className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
       onClick={onClick}
     >
       <div className="flex items-start justify-between mb-2">
