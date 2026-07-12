@@ -126,7 +126,7 @@ export function createSkill(projectId: string, name: string, description: string
     db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
       .run(result.lastInsertRowid, content, description);
     checkpointAfterWrite();
-    writeSkillToDisk(getSkill(projectId, name)!);
+    // 🔴 writeSkillToDisk DISABLED to stop frontmatter amplification
     return getSkill(projectId, name)!;
   });
 }
@@ -157,7 +157,7 @@ export function updateSkill(projectId: string, name: string, content: string, de
       .run(current.rowid, content, getSkill(projectId, name)?.description ?? "");
 
     checkpointAfterWrite();
-    writeSkillToDisk(getSkill(projectId, name)!);
+    // 🔴 writeSkillToDisk DISABLED
     return getSkill(projectId, name);
   });
 }
