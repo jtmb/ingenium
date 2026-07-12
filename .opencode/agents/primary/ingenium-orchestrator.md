@@ -17,6 +17,7 @@ permission:
     "ingenium-software-engineer-fast": "allow"
     "ingenium-software-engineer-premium": "allow"
     "ingenium-scout": "allow"
+    "vision-bridge": "allow"
   playwright_*: allow
   skill:
     "@development-conventions": allow

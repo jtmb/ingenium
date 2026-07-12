@@ -12,6 +12,9 @@ permission:
   edit: allow
   write: allow
   playwright_*: allow
+  task:
+    "*": "deny"
+    "vision-bridge": "allow"
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
