@@ -45,40 +45,30 @@ async function triggerSynthesisForAllProjects(port: number) {
       logger.warn("scheduler", `Synthesis for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
     }
 
-    // Skill consolidation (LLM audit: merge redundant skills to maintain ≤20)
+    // 🔴 TEMPORARILY DISABLED — consolidation + sync corrupt skills
+    // TODO: re-enable after Phase 0 fixes are verified safe
+    /*
     try {
       const consolidationResult = await synthesis.consolidateSkills(p.id);
       if (consolidationResult.merged > 0 || consolidationResult.deleted > 0) {
         logger.info("scheduler", `Skill consolidation for "${p.name}": ${consolidationResult.summary}`);
       }
     } catch (err: any) {
-      logger.warn("scheduler", `Skill consolidation for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+      logger.warn("scheduler", `Skill consolidation for "${p.name}" failed: ${err.message}`, ...);
     }
+    */
 
     // Force WAL checkpoint after synthesis (no readers active)
     checkpointAfterWrite();
 
+    /*
     try {
-      const syncRes = await fetch(
-        `http://localhost:${port}/api/v1/skills/sync-all?project=${p.name}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        },
-      );
-      if (syncRes.ok) {
-        const syncData = (await syncRes.json()).data;
-        if (syncData.synced_to_db > 0 || syncData.written_to_disk > 0) {
-          logger.info(
-            "scheduler",
-            `Skill sync for "${p.name}": ${syncData.synced_to_db} from disk, ${syncData.written_to_disk} to disk`,
-          );
-        }
-      }
+      const syncRes = await fetch(...);
+      ...
     } catch (err: any) {
-      logger.debug("scheduler", `Skill sync for "${p.name}" error: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+      logger.debug("scheduler", ...);
     }
+    */
   }
 
   // Cross-project synthesis

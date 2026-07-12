@@ -1,9 +1,6 @@
 ---
 name: dashboard-screenshots
-description: "Playwright-based screenshot workflow for Ingenium Dashboard UI pages. Used for visual documentation, bug reports, and UI regression testing."
-category: testing
-tags: playwright, screenshots, dashboard, testing, ui
-alwaysApply: false
+description: ""
 ---
 
 # Dashboard Screenshots Skill

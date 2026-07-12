@@ -1,7 +1,6 @@
 ---
 name: security-audit
-description: "Security audit methodology — surface scanning for secrets, injection vulnerabilities, supply chain risks, and missing controls; automated git-history leak detection; severity-calibrated reporting with remediation guidance."
-tags: ["security", "audit", "vulnerability", "secrets", "leaks", "git-history"]
+description: ""
 ---
 
 # Security Audit

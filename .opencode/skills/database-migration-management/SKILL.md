@@ -1,7 +1,6 @@
 ---
 name: database-migration-management
-description: "Database migration patterns and safeguards — conditional application, table rebuild, FK handling, WAL safety, anti-corruption guards, and PRAGMA foreign_keys management for SQLite."
-tags: ["database", "migration", "wal", "sqlite", "fk", "fts5"]
+description: ""
 ---
 
 # Database Migration Management
