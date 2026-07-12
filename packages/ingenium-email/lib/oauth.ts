@@ -218,7 +218,7 @@ export async function getOAuthUrl(
     const { client: gClient } = await cachedGoogleClient(projectId);
     const url = gClient.generateAuthUrl({
       access_type: "offline",
-      scope: "https://mail.google.com/",
+      scope: "https://mail.google.com/ openid email profile",
       state,
       redirect_uri: getRedirectUri(),
     });
