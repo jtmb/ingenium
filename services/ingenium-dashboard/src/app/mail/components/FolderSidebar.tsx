@@ -57,7 +57,6 @@ export default function FolderSidebar({
             onAddAccount();
           } else {
             onSelectAccount?.(val);
-            onSelectFolder("INBOX");
           }
         }}
       >
