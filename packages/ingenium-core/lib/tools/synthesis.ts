@@ -4,7 +4,7 @@ import * as skills from "./skills.js";
 import * as projects from "./projects.js";
 import * as synthesisLlm from "./synthesis-llm.js";
 import type { SynthesisLLMResult } from "./synthesis-llm.js";
-import { getSetting } from "./settings.js";
+import { getSetting, setSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
 import { logger } from "../logger.js";
 
@@ -714,6 +714,20 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
   let merged = 0;
   let deleted = 0;
 
+  // Save pre-consolidation snapshot for restore capability
+  try {
+    const allSkillsForBackup = skills.listSkills(projectId);
+    const backupData = JSON.stringify(allSkillsForBackup.map((s: any) => ({
+      name: s.name,
+      content: s.content,
+      description: s.description,
+      file_tree: (s as any).file_tree || "{}",
+      tags: s.tags,
+      always_apply: (s as any).always_apply
+    })));
+    setSetting(projectId, "consolidation_backup", backupData.substring(0, 50000)); // cap at 50KB
+  } catch (_) { /* non-fatal */ }
+
   // Process merges: combine source skill into target, delete source
   for (const merge of result.merges || []) {
     try {
@@ -721,13 +735,17 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
       const source = skills.getSkill(projectId, merge.source);
       if (!target || !source) continue;
 
-      // Merge content: append source's SKILL.md after target's
-      const mergedContent = `${target.content}\n\n## Merged from ${merge.source}\n\n${source.content}`;
+      // Merge content: append source's SKILL.md after target's.
+      // Strip frontmatter from BOTH to avoid embedding YAML mid-document.
+      const targetBody = skills.stripLeadingFrontmatter(target.content);
+      const sourceBody = skills.stripLeadingFrontmatter(source.content);
+      const mergedContent = `${targetBody}\n\n## Merged from ${merge.source}\n\n${sourceBody}`;
 
       // Merge file_trees: combine reference files (source files prefixed)
       const targetTree = safeParseJson((target as any).file_tree || "{}");
       const sourceTree = safeParseJson((source as any).file_tree || "{}");
       for (const [key, val] of Object.entries(sourceTree)) {
+        if (key.startsWith("merged-")) continue; // already merged, skip to prevent nested prefixes
         targetTree[`merged-${merge.source}/${key}`] = val;
       }
 
