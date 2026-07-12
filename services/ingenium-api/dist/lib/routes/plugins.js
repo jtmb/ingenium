@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { plugins } from "ingenium-core";
+import { plugins, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
@@ -27,6 +27,7 @@ pluginsRouter.post("/", (req, res) => {
         res.status(201).json({ data: plugin });
     }
     catch (err) {
+        logger.error("plugins", `Plugin creation failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
         res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
     }
 });
@@ -75,6 +76,7 @@ pluginsRouter.put("/:name", (req, res) => {
         res.json({ data: updated });
     }
     catch (err) {
+        logger.error("plugins", `Plugin update failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
         res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
     }
 });

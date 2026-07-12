@@ -267,11 +267,23 @@ export async function exchangeCode(
   if (provider === "gmail") {
     const { client: gClient } = await cachedGoogleClient(projectId);
     const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
+    // Extract email from id_token JWT
+    let email: string | undefined;
+    if (tokens.id_token) {
+      try {
+        const parts = tokens.id_token.split(".");
+        if (parts.length >= 2 && parts[1]) {
+          const payload = JSON.parse(Buffer.from(parts[1]!, "base64").toString("utf8"));
+          email = payload.email;
+        }
+      } catch { /* non-fatal */ }
+    }
     return {
       accessToken: tokens.access_token ?? "",
       refreshToken: tokens.refresh_token ?? "",
       expiryDate: tokens.expiry_date ?? Date.now() + 3600_000,
       scope: tokens.scope ?? "https://mail.google.com/",
+      email,
     };
   }
 
@@ -291,6 +303,7 @@ export async function exchangeCode(
       refreshToken: "", // MSAL handles refresh internally
       expiryDate: result?.expiresOn?.getTime() ?? Date.now() + 3600_000,
       scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
+      email: result?.account?.username ?? undefined,
     };
   }
 

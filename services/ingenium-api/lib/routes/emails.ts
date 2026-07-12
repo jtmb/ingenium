@@ -133,11 +133,28 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
 
   try {
     const tokens = await exchangeCode(provider, code, state, redirectUri, projectId);
-    // Store tokens server-side — never return them to the client
-    if (accountId) {
-      storeTokens(projectId, accountId, tokens);
+    
+    // Create the account if it doesn't exist yet
+    let acctId = accountId;
+    if (!acctId) {
+      const existingAccounts = listAccounts(projectId);
+      const existing = existingAccounts.find(a => a.email === tokens.email);
+      if (existing) {
+        acctId = existing.id;
+      } else {
+        const account = addAccount(projectId, {
+          email: tokens.email || `${provider}-${Date.now()}@unknown`,
+          provider: provider as EmailProvider,
+          authType: "oauth2",
+          name: tokens.email || `${provider} account`,
+        });
+        acctId = account.id;
+      }
     }
-    res.json({ data: { success: true, accountId: accountId ?? null } });
+    
+    // Store tokens server-side — never return them to the client
+    storeTokens(projectId, acctId, tokens);
+    res.json({ data: { success: true, accountId: acctId } });
   } catch (err: any) {
     logger.error("email", "OAuth code exchange failed", { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "OAUTH_ERROR", message: err.message } });
