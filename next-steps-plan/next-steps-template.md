@@ -7,14 +7,23 @@
 One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below.
 
 
-## BUGS
+### THE REQUEST:
 
-### /mail
+Ok Great now. Make me a new skill. Call it "browsing-the-web"
 
-1. Clicking compose opens the new message box, but the new message box is broken it shows as a box within a box and then the inner box is centered. Use @vision-bridge to see `next-steps-plan/screenshots/analysis/image-1.png`
-2. Clicking add account works. Use @vision-bridge to see `next-steps-plan/screenshots/analysis/image-2.png` The issue is that after cicking go to mail it brings you back to the mail screen and you are not signed in.
-Use @vision-bridge to see `next-steps-plan/screenshots/analysis/image-3.png`
+I want this skill to follow the skill format outlined earlier.
 
+Step1. It should include "site recipes" under the resources folder. The site recipes will be skills tunned specifically for interacting with certain sites. 
+
+Step2. Create a custom agent call it browser-agent. It will have access to these skills.
+
+It will operate in two phases for it's agents directive.
+
+PHASE 1. 
+
+- 1. Check Agents Own Agents Directive
+- 2. Check Relevant site recipes for the ask (ex amazon.ca, youtube.com) before proceeding.
+- 3. Execute Ask, Log any errors to a file in the same directory as it'
 ---
 
 ### Documentation References

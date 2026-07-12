@@ -228,10 +228,15 @@ export default function MailPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            email: "demo@example.com",
+            email: "demo@ingenium.local",
             name: "Demo Account",
             provider: "custom",
             authType: "app_password",
+            imapHost: "imap",
+            imapPort: 3143,
+            smtpHost: "imap",
+            smtpPort: 3025,
+            appPassword: "password",
           }),
         });
         if (res.ok) {

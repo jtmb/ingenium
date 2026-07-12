@@ -6,7 +6,7 @@ export interface ProviderConfig {
   smtp: { host: string; port: number; tls: boolean };
 }
 
-/** Known email provider defaults. "custom" has empty hosts for user override. */
+/** Known email provider defaults. "custom" defaults to localhost for local dev IMAP/SMTP servers. */
 export const PROVIDERS: Record<EmailProvider, ProviderConfig> = {
   gmail: {
     imap: { host: "imap.gmail.com", port: 993, tls: true },
@@ -21,7 +21,7 @@ export const PROVIDERS: Record<EmailProvider, ProviderConfig> = {
     smtp: { host: "smtp.mail.yahoo.com", port: 587, tls: true },
   },
   custom: {
-    imap: { host: "", port: 993, tls: true },
-    smtp: { host: "", port: 587, tls: true },
+    imap: { host: "127.0.0.1", port: 993, tls: false },
+    smtp: { host: "127.0.0.1", port: 465, tls: false },
   },
 };
