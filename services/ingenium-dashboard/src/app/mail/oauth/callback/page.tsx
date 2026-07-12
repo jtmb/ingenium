@@ -16,11 +16,20 @@ function OAuthCallbackInner() {
   const searchParams = useSearchParams();
   const code = searchParams.get("code");
   const state = searchParams.get("state");
+  const error = searchParams.get("error");
+  const errorDesc = searchParams.get("error_description");
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    // Surface provider-disclosed errors (e.g. Google's access_denied) directly to the user
+    if (error) {
+      setStatus("error");
+      setErrorMsg(`${error}${errorDesc ? ": " + errorDesc : ""}`);
+      return;
+    }
+
     if (!code) {
       setStatus("error");
       setErrorMsg("No authorization code received from provider.");
