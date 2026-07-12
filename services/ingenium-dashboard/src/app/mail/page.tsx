@@ -30,6 +30,7 @@ export default function MailPage() {
   const [showAccountSetup, setShowAccountSetup] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
   const [sending, setSending] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Fetch accounts on mount
@@ -70,13 +71,17 @@ export default function MailPage() {
           const data = await res.json();
           setEmails(data.data || []);
           setTotal(data.total || 0);
+          setEmailError(null);
         } else {
+          const errData = await res.json().catch(() => ({ error: { message: "Failed to load emails" } }));
           setEmails([]);
           setTotal(0);
+          setEmailError(errData.error?.message || "Failed to load emails");
         }
       } catch {
         setEmails([]);
         setTotal(0);
+        setEmailError("Failed to load emails");
       } finally {
         setLoading(false);
       }
@@ -204,6 +209,7 @@ export default function MailPage() {
     setSelectedEmail(null);
     setPage(1);
     setSearchQuery("");
+    setEmailError(null);
   }, []);
 
   const handleSelectFolder = useCallback((folder: string) => {
@@ -211,6 +217,7 @@ export default function MailPage() {
     setSelectedEmail(null);
     setPage(1);
     setSearchQuery("");
+    setEmailError(null);
   }, []);
 
   // No accounts — show empty / setup state
@@ -316,6 +323,7 @@ export default function MailPage() {
           page={page}
           loading={loading}
           onSearch={handleSearch}
+          error={emailError}
         />
 
         {/* Email reader */}

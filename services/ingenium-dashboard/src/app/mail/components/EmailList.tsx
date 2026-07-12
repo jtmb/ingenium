@@ -13,6 +13,7 @@ export default function EmailList({
   page,
   loading,
   onSearch,
+  error,
 }: {
   emails: any[];
   selectedUid?: number;
@@ -22,6 +23,7 @@ export default function EmailList({
   page: number;
   loading: boolean;
   onSearch: (q: string) => void;
+  error?: string | null;
 }) {
   const pageSize = 50;
   const totalPages = Math.ceil(total / pageSize);
@@ -50,6 +52,13 @@ export default function EmailList({
           onChange={(e) => onSearch(e.target.value)}
         />
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="px-4 py-3 mx-4 mt-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       {/* Loading skeleton */}
       {loading && (
