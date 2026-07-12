@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { skills } from "ingenium-core";
+import { skills, synthesis } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import fs from "fs";
 import path from "path";
@@ -113,6 +113,9 @@ skillsRouter.post("/sync-all", (req, res) => {
             const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
             for (const e of entries) {
                 if (e.isDirectory()) {
+                    const skillMdPath = path.join(skillsDir, e.name, "SKILL.md");
+                    if (!fs.existsSync(skillMdPath))
+                        continue;
                     try {
                         const existing = skills.getSkill(projectId, e.name);
                         if (!existing) {
@@ -141,4 +144,17 @@ skillsRouter.post("/sync-all", (req, res) => {
         errors.push(`Failed to write skills to disk: ${err.message}`);
     }
     res.json({ data: { synced_to_db: fromDisk, written_to_disk: toDisk, errors } });
+});
+// POST /consolidate — LLM-driven skill audit to merge redundant skills, targeting ≤20
+skillsRouter.post("/consolidate", async (req, res) => {
+    const projectId = requireProject(req, res);
+    if (!projectId)
+        return;
+    try {
+        const result = await synthesis.consolidateSkills(projectId);
+        res.json({ data: result });
+    }
+    catch (err) {
+        res.status(500).json({ error: { code: "CONSOLIDATION_ERROR", message: err.message } });
+    }
 });

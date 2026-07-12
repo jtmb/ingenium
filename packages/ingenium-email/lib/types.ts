@@ -35,6 +35,7 @@ export interface OAuthToken {
   refreshToken: string;
   expiryDate: number;
   scope: string;
+  email?: string;
 }
 
 export interface EmailMessage {
