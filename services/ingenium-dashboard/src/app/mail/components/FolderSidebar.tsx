@@ -65,7 +65,7 @@ export default function FolderSidebar({
         )}
         {accounts.map((acct: any) => (
           <option key={acct.id} value={acct.id}>
-            {acct.email}
+            {acct.connected ? "🟢 " : "⚪ "}{acct.email}{!acct.connected ? " (not connected)" : ""}
           </option>
         ))}
         <option value="__add__" disabled={!onAddAccount}>
