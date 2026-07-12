@@ -10,6 +10,9 @@ permission:
   glob: allow
   grep: allow
   webfetch: allow
+  task:
+    "*": "deny"
+    "vision-bridge": "allow"
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
