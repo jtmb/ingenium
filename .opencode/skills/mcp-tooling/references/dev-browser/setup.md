@@ -62,7 +62,7 @@ console.log(JSON.stringify(tabs, null, 2));
 EOF
 ```
 
-> **WSL note:** Chrome runs on the Windows host. If you're inside Docker, use `host.docker.internal` as the Chrome host. If you're in WSL directly, `localhost` should work since WSL2 forwards `localhost`.
+> **WSL note:** Chrome runs on the Windows host. Chrome 150+ binds only to `127.0.0.1` — `--remote-debugging-address=0.0.0.0` is ignored. WSL2 cannot reach Windows `127.0.0.1:9222` directly. To drive Chrome from WSL, run `dev-browser` directly on Windows via `cmd.exe` pipe (see Pattern 5 in patterns.md). If you're inside Docker, use `host.docker.internal` as the Chrome host.
 
 ### Troubleshooting
 
@@ -73,11 +73,22 @@ kill $(lsof -ti:9222) 2>/dev/null; "/mnt/c/Program Files/Google/Chrome/Applicati
 ```
 
 #### Chrome remote debugging not reachable from WSL
-Verify Chrome is listening on `0.0.0.0` (not just `127.0.0.1`):
-```bash
-curl -s http://localhost:9222/json/version | head -5
+Chrome 150+ binds only to `127.0.0.1` — WSL2 cannot reach this directly. Verify Chrome is running from Windows side:
+```powershell
+powershell.exe -Command "Invoke-WebRequest -Uri 'http://127.0.0.1:9222/json/version' -UseBasicParsing -TimeoutSec 5"
 ```
-If empty, restart Chrome with `--remote-debugging-address=0.0.0.0 --remote-debugging-port=9222`.
+
+If empty, restart Chrome with:
+```bash
+"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" \
+  --remote-debugging-port=9222 \
+  --remote-allow-origins=* \
+  --user-data-dir="C:\Users\james\AppData\Local\Temp\chrome-debug" \
+  --no-first-run \
+  --new-window about:blank &
+```
+
+To drive Chrome from WSL, install and run `dev-browser` on Windows (see Pattern 5 in patterns.md).
 
 #### "Cannot find browser" error
 Run `dev-browser install` to download Chromium.
