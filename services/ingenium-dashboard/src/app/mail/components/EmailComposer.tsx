@@ -31,7 +31,7 @@ export default function EmailComposer({
   const formData = { to, cc: showCc ? cc : "", bcc: showBcc ? bcc : "", subject, body, accountId: fromAccount };
 
   return (
-    <div className="bg-white p-6 rounded-lg border space-y-4 max-w-2xl mx-auto">
+    <div className="space-y-4 max-w-2xl mx-auto">
       {/* From */}
       <div>
         <label className="block text-sm font-medium text-gray-900 mb-1">From</label>

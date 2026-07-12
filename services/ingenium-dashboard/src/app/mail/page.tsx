@@ -198,6 +198,14 @@ export default function MailPage() {
     setPage(1);
   }, []);
 
+  const handleSelectAccount = useCallback((accountId: string) => {
+    setSelectedAccount(accountId);
+    setSelectedFolder("INBOX");
+    setSelectedEmail(null);
+    setPage(1);
+    setSearchQuery("");
+  }, []);
+
   const handleSelectFolder = useCallback((folder: string) => {
     setSelectedFolder(folder);
     setSelectedEmail(null);
@@ -293,6 +301,7 @@ export default function MailPage() {
           selectedAccount={selectedAccount}
           selectedFolder={selectedFolder}
           onSelectFolder={handleSelectFolder}
+          onSelectAccount={handleSelectAccount}
           onCompose={handleCompose}
           onAddAccount={() => setShowAccountSetup(true)}
         />

@@ -9,6 +9,7 @@ export default function FolderSidebar({
   selectedAccount,
   selectedFolder,
   onSelectFolder,
+  onSelectAccount,
   onCompose,
   onAddAccount,
   folders: folderData,
@@ -17,6 +18,7 @@ export default function FolderSidebar({
   selectedAccount: string;
   selectedFolder: string;
   onSelectFolder: (f: string) => void;
+  onSelectAccount?: (accountId: string) => void;
   onCompose: () => void;
   onAddAccount: () => void;
   folders?: any[];
@@ -54,7 +56,7 @@ export default function FolderSidebar({
           if (val === "__add__") {
             onAddAccount();
           } else {
-            // Select account — parent handles folder reset
+            onSelectAccount?.(val);
             onSelectFolder("INBOX");
           }
         }}
