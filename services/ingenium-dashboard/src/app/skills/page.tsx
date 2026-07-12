@@ -114,15 +114,15 @@ export default function SkillsPage() {
       <h1 className="text-3xl font-bold">Skills ({skills.length})</h1>
       
       {/* Search + Upload */}
-      <div className="flex gap-2 items-center">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border p-2 rounded flex-1" />
-        <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white text-gray-600 hover:bg-gray-50 cursor-pointer">
+      <div className="flex gap-2 items-stretch">
+        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search skills..." className="border border-gray-200 p-2 rounded text-sm flex-1 h-10" />
+        <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded p-2 text-sm bg-white text-gray-600 hover:bg-gray-50 cursor-pointer h-10">
           <option value="alpha">Alphabetical</option>
           <option value="newest">Newest first</option>
         </select>
         <input ref={fileRef} type="file" accept=".md" onChange={handleUpload} className="hidden" />
         <button onClick={() => fileRef.current?.click()} disabled={uploadStatus === "uploading"}
-                className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50">
+                className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 h-10">
           {uploadStatus === "uploading" ? "Uploading..." : "Upload Skill"}
         </button>
         {uploadStatus === "success" && <span className="text-sm text-green-600">Uploaded!</span>}
