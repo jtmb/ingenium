@@ -154,6 +154,7 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
     
     // Store tokens server-side — never return them to the client
     storeTokens(projectId, acctId, tokens);
+    storeCredentials(projectId, acctId, { tokens });
     res.json({ data: { success: true, accountId: acctId } });
   } catch (err: any) {
     logger.error("email", "OAuth code exchange failed", { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
