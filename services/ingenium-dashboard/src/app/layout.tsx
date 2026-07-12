@@ -18,7 +18,14 @@ export const metadata: Metadata = {
 /** Root layout — includes the top navigation bar and wraps all page content. */
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme')||'system';if(t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})()`,
+          }}
+        />
+      </head>
       <body className="min-h-screen bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] overflow-x-hidden">
         <ThemeProvider>
         <nav className="bg-[var(--color-surface)] border-b border-[var(--color-border)] px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
