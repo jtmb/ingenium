@@ -280,12 +280,12 @@ export default function SettingsPage() {
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="border p-2 rounded w-full text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+          className="border p-2 rounded w-full text-sm"
         />
         <button
           type="button"
           onClick={() => togglePw(name)}
-          className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 whitespace-nowrap px-1"
+          className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-200 whitespace-nowrap px-1"
         >
           {showPw[name] ? "🙈 Hide" : "👁 Show"}
         </button>
@@ -297,19 +297,19 @@ export default function SettingsPage() {
     <div className="space-y-8">
       {/* Hero header */}
       <div>
-        <h1 className="text-3xl font-bold dark:text-gray-100">Settings</h1>
-        <p className="text-gray-500 dark:text-gray-400 mt-1">Configure system preferences</p>
+        <h1 className="text-3xl font-bold">Settings</h1>
+        <p className="text-[var(--color-text-muted)] mt-1">Configure system preferences</p>
       </div>
 
       {/* ── Appearance ── */}
-      <div className="bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700 p-6 space-y-4 hover:shadow-md transition-shadow">
-        <h2 className="text-lg font-semibold flex items-center gap-2 dark:text-gray-100">🎨 Appearance</h2>
+      <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 space-y-4 hover:shadow-md transition-shadow">
+        <h2 className="text-lg font-semibold flex items-center gap-2">🎨 Appearance</h2>
         <div>
-          <label className="block text-sm font-medium mb-1 dark:text-gray-200">Theme</label>
+          <label className="block text-sm font-medium mb-1">Theme</label>
           <select
             value={theme}
             onChange={(e) => setTheme(e.target.value as "system" | "light" | "dark")}
-            className="border border-gray-200 dark:border-gray-600 rounded px-3 py-1.5 text-sm bg-white dark:bg-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
+            className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] dark:hover:bg-gray-700 cursor-pointer"
           >
             <option value="system">System</option>
             <option value="light">Light</option>
@@ -319,10 +319,10 @@ export default function SettingsPage() {
       </div>
 
       {/* ── Archive Retention ── */}
-      <div className="bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700 p-6 space-y-4 hover:shadow-md transition-shadow">
-        <h2 className="text-lg font-semibold flex items-center gap-2 dark:text-gray-100">🗄️ Archive Retention</h2>
+      <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 space-y-4 hover:shadow-md transition-shadow">
+        <h2 className="text-lg font-semibold flex items-center gap-2">🗄️ Archive Retention</h2>
         <div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+          <p className="text-xs text-[var(--color-text-muted)] mb-2">
             Projects stay in the archive for this many days before being permanently deleted.
           </p>
           <div className="flex items-center gap-3">
@@ -332,25 +332,25 @@ export default function SettingsPage() {
               max={365}
               value={retentionDays}
               onChange={(e) => save(parseInt(e.target.value, 10) || 7)}
-              className="border p-2 rounded w-24 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100"
+              className="border p-2 rounded w-24"
             />
-            <span className="text-sm text-gray-600 dark:text-gray-400">days</span>
-            {saved && <span className="text-sm text-green-600 dark:text-green-400">Saved!</span>}
+            <span className="text-sm text-[var(--color-text-secondary)]">days</span>
+            {saved && <span className="text-sm text-[var(--color-success-text)]">Saved!</span>}
           </div>
         </div>
       </div>
 
       {/* ── Synthesis LLM ── */}
-      <div className="bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700 p-6 space-y-4 hover:shadow-md transition-shadow">
-        <h2 className="text-lg font-semibold flex items-center gap-2 dark:text-gray-100">🧠 Synthesis LLM</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Select an LLM provider for the self-learning pipeline to synthesize observations into skills and update personality traits.</p>
+      <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 space-y-4 hover:shadow-md transition-shadow">
+        <h2 className="text-lg font-semibold flex items-center gap-2">🧠 Synthesis LLM</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">Select an LLM provider for the self-learning pipeline to synthesize observations into skills and update personality traits.</p>
 
         {providers.length === 0 ? (
-          <p className="text-sm text-amber-600 dark:text-amber-400">No OpenCode providers detected. Configure a provider or use &quot;Custom Provider&quot; below.</p>
+          <p className="text-sm text-[var(--color-warning-text)]">No OpenCode providers detected. Configure a provider or use &quot;Custom Provider&quot; below.</p>
         ) : null}
 
         <div>
-          <label className="block text-sm font-medium dark:text-gray-200">Provider</label>
+          <label className="block text-sm font-medium">Provider</label>
           <select value={providerId} onChange={(e) => {
             const val = e.target.value;
             setProviderId(val);
@@ -365,7 +365,7 @@ export default function SettingsPage() {
               setEndpoint((firstModel?.[1] as any)?.api?.url || "");
               setSelectedModel(firstModel?.[0] || "");
             }
-          }} className="border p-2 rounded w-full text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+          }} className="border p-2 rounded w-full text-sm hover:bg-[var(--color-surface-hover)] dark:hover:bg-gray-700 cursor-pointer">
             <option value="">— No LLM (heuristics only) —</option>
             <option value="__custom__">— Custom Provider —</option>
             {(() => {
@@ -399,8 +399,8 @@ export default function SettingsPage() {
 
         {!isCustom && providerId && providerModels.length > 0 && (
           <div>
-            <label className="block text-sm font-medium dark:text-gray-200">Model</label>
-            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+            <label className="block text-sm font-medium">Model</label>
+            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm hover:bg-[var(--color-surface-hover)] dark:hover:bg-gray-700 cursor-pointer">
               {providerModels.map(([key, val]) => (
                 <option key={key} value={key}>{key} {(val as any)?.id ? `(${(val as any).id})` : ""}</option>
               ))}
@@ -409,17 +409,17 @@ export default function SettingsPage() {
         )}
 
         {isCustom && (
-          <div className="grid grid-cols-2 gap-4 p-3 bg-gray-50 dark:bg-gray-800 rounded border dark:border-gray-600">
+          <div className="grid grid-cols-2 gap-4 p-3 bg-[var(--color-surface-muted)] rounded border">
             <div className="col-span-2">
-              <label className="block text-sm font-medium dark:text-gray-200">Base URL</label>
-              <input type="text" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://api.myprovider.com/v1" className="border p-2 rounded w-full text-sm font-mono dark:bg-gray-900 dark:border-gray-600 dark:text-gray-100" />
+              <label className="block text-sm font-medium">Base URL</label>
+              <input type="text" value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="https://api.myprovider.com/v1" className="border p-2 rounded w-full text-sm font-mono" />
             </div>
             <div>
-              <label className="block text-sm font-medium dark:text-gray-200">Model ID</label>
-              <input type="text" value={customModel} onChange={(e) => setCustomModel(e.target.value)} placeholder="model-id" className="border p-2 rounded w-full text-sm font-mono dark:bg-gray-900 dark:border-gray-600 dark:text-gray-100" />
+              <label className="block text-sm font-medium">Model ID</label>
+              <input type="text" value={customModel} onChange={(e) => setCustomModel(e.target.value)} placeholder="model-id" className="border p-2 rounded w-full text-sm font-mono" />
             </div>
             <div>
-              <label className="block text-sm font-medium dark:text-gray-200">API Key</label>
+              <label className="block text-sm font-medium">API Key</label>
               <PwInput name="synthesisApiKey" value={apiKeyState} onChange={setApiKey} placeholder="sk-..." />
             </div>
           </div>
@@ -428,15 +428,15 @@ export default function SettingsPage() {
         {!isCustom && providerId && (
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium dark:text-gray-200">API Key {providerId === "opencode" ? <span className="text-gray-400 dark:text-gray-500 font-normal">(optional for free tier)</span> : ""}</label>
+              <label className="block text-sm font-medium">API Key {providerId === "opencode" ? <span className="font-normal">(optional for free tier)</span> : ""}</label>
               <PwInput name="synthesisApiKey" value={apiKeyState} onChange={setApiKey} placeholder="sk-..." />
             </div>
           </div>
         )}
 
         <div>
-          <label className="block text-sm font-medium mb-1 dark:text-gray-200">Run every</label>
-          <select value={String(intervalMin)} onChange={(e) => { setIntervalMin(Number(e.target.value)); handleIntervalSave(Number(e.target.value)); }} className="border p-2 rounded w-48 text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+          <label className="block text-sm font-medium mb-1">Run every</label>
+          <select value={String(intervalMin)} onChange={(e) => { setIntervalMin(Number(e.target.value)); handleIntervalSave(Number(e.target.value)); }} className="border p-2 rounded w-48 text-sm hover:bg-[var(--color-surface-hover)] dark:hover:bg-gray-700 cursor-pointer">
             <option value="5">5 minutes</option>
             <option value="15">15 minutes</option>
             <option value="30">30 minutes</option>
@@ -444,18 +444,18 @@ export default function SettingsPage() {
             <option value="240">4 hours</option>
             <option value="0">Disabled</option>
           </select>
-          {intervalSaved && <span className="text-sm text-green-600 dark:text-green-400 ml-2">Saved!</span>}
+          {intervalSaved && <span className="text-sm text-[var(--color-success-text)] ml-2">Saved!</span>}
         </div>
 
         {/* Backup Provider */}
-        <div className="border-t dark:border-gray-700 pt-3 mt-3">
-          <button type="button" onClick={() => setShowBackup(!showBackup)} className="text-sm font-medium text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100">
+        <div className="border-t pt-3 mt-3">
+          <button type="button" onClick={() => setShowBackup(!showBackup)} className="text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">
             {showBackup ? "▾" : "▸"} Backup Provider (fallback)
           </button>
           {showBackup && (
             <div className="mt-3 space-y-3">
               <div>
-                <label className="block text-sm font-medium dark:text-gray-200">Provider</label>
+                <label className="block text-sm font-medium">Provider</label>
                 <select value={backupProviderId} onChange={(e) => {
                   const val = e.target.value;
                   setBackupProviderId(val);
@@ -469,7 +469,7 @@ export default function SettingsPage() {
                   } else {
                     setBackupSelectedModel("");
                   }
-                }} className="border p-2 rounded w-full text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                }} className="border p-2 rounded w-full text-sm hover:bg-[var(--color-surface-hover)] dark:hover:bg-gray-700 cursor-pointer">
                   <option value="">— None —</option>
                   <option value="__custom__">— Custom Provider —</option>
                   {(() => {
@@ -487,21 +487,21 @@ export default function SettingsPage() {
                 </select>
               </div>
               {backupIsCustom && (
-                <div className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800 rounded border dark:border-gray-600">
+                <div className="space-y-3 p-3 bg-[var(--color-surface-muted)] rounded border">
                   <div>
-                    <label className="block text-sm font-medium dark:text-gray-200">Endpoint</label>
-                    <input type="text" value={backupCustomEndpoint} onChange={(e) => setBackupCustomEndpoint(e.target.value)} placeholder="https://api.myprovider.com/v1" className="border p-2 rounded w-full text-sm font-mono dark:bg-gray-900 dark:border-gray-600 dark:text-gray-100" />
+                    <label className="block text-sm font-medium">Endpoint</label>
+                    <input type="text" value={backupCustomEndpoint} onChange={(e) => setBackupCustomEndpoint(e.target.value)} placeholder="https://api.myprovider.com/v1" className="border p-2 rounded w-full text-sm font-mono" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium dark:text-gray-200">Model ID</label>
-                    <input type="text" value={backupCustomModel} onChange={(e) => setBackupCustomModel(e.target.value)} placeholder="model-id" className="border p-2 rounded w-full text-sm font-mono dark:bg-gray-900 dark:border-gray-600 dark:text-gray-100" />
+                    <label className="block text-sm font-medium">Model ID</label>
+                    <input type="text" value={backupCustomModel} onChange={(e) => setBackupCustomModel(e.target.value)} placeholder="model-id" className="border p-2 rounded w-full text-sm font-mono" />
                   </div>
                 </div>
               )}
               {backupProviderId && backupModels.length > 0 && (
                 <div>
-                  <label className="block text-sm font-medium dark:text-gray-200">Model</label>
-                  <select value={backupSelectedModel} onChange={(e) => setBackupSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
+                  <label className="block text-sm font-medium">Model</label>
+                  <select value={backupSelectedModel} onChange={(e) => setBackupSelectedModel(e.target.value)} className="border p-2 rounded w-full text-sm hover:bg-[var(--color-surface-hover)] dark:hover:bg-gray-700 cursor-pointer">
                     {backupModels.map(([key, val]) => (
                       <option key={key} value={key}>{key} {(val as any)?.id ? `(${(val as any).id})` : ""}</option>
                     ))}
@@ -510,7 +510,7 @@ export default function SettingsPage() {
               )}
               {backupProviderId && (
                 <div>
-                  <label className="block text-sm font-medium dark:text-gray-200">API Key {backupProviderId === "opencode" ? <span className="text-gray-400 dark:text-gray-500 font-normal">(optional for free tier)</span> : ""}</label>
+                  <label className="block text-sm font-medium">API Key {backupProviderId === "opencode" ? <span className="font-normal">(optional for free tier)</span> : ""}</label>
                   <PwInput name="backupApiKey" value={backupApiKey} onChange={setBackupApiKey} placeholder="sk-..." />
                 </div>
               )}
@@ -522,68 +522,68 @@ export default function SettingsPage() {
           <button onClick={saveLlmConfig} disabled={savingLlm} className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 text-sm">
             {savingLlm ? "Saving..." : "Save"}
           </button>
-          <button onClick={testLlmConnection} disabled={testing || !endpoint} className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 p-2 rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 text-sm">
+          <button onClick={testLlmConnection} disabled={testing || !endpoint} className="bg-gray-200 text-[var(--color-text-primary)] p-2 rounded hover:bg-gray-300 dark:hover:bg-gray-600 disabled:opacity-50 text-sm">
             {testing ? "Testing..." : "Test Connection"}
           </button>
-          {llmStatus && <span className={`text-sm ${llmStatus.startsWith("✅") ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>{llmStatus}</span>}
+          {llmStatus && <span className={`text-sm ${llmStatus.startsWith("✅") ? "text-[var(--color-success-text)]" : "text-[var(--color-error-text)]"}`}>{llmStatus}</span>}
         </div>
 
         {isCustom && customModel && endpoint && (
-          <div className="text-xs text-gray-400 dark:text-gray-500">
+          <div className="text-xs text-[var(--color-text-muted)]">
             Using custom provider: <strong>{endpoint}</strong> model: <strong>{customModel}</strong>
           </div>
         )}
         {!isCustom && selectedProvider && (
-          <div className="text-xs text-gray-400 dark:text-gray-500">
+          <div className="text-xs text-[var(--color-text-muted)]">
             Using <strong>{selectedModel || Object.keys(selectedProvider.models || {})[0]}</strong> from {selectedProvider.name} via {endpoint}
           </div>
         )}
         {providerId && (
-          <div className="text-xs text-gray-400 dark:text-gray-500">
+          <div className="text-xs text-[var(--color-text-muted)]">
             Synthesis runs every 15 minutes — observes → analyzes → creates/updates skills.
-            See <a href="/pipeline" className="text-blue-600 dark:text-blue-400 underline">Pipeline</a> for activity.
+            See <a href="/pipeline" className="text-[var(--color-text-link)] underline">Pipeline</a> for activity.
             Current mode: <strong>LLM-driven skill synthesis</strong>
           </div>
         )}
         {!providerId && (
-          <div className="text-xs text-gray-400 dark:text-gray-500">
+          <div className="text-xs text-[var(--color-text-muted)]">
             Current mode: <strong>Heuristic trait-only synthesis</strong>. Observations still processed into personality traits.
           </div>
         )}
       </div>
 
       {/* ── Email OAuth ── */}
-      <div className="bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700 p-6 space-y-4 hover:shadow-md transition-shadow">
-        <h2 className="text-lg font-semibold flex items-center gap-2 dark:text-gray-100">✉️ Email OAuth</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Google and Microsoft OAuth 2.0 credentials for connecting email accounts.</p>
+      <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 space-y-4 hover:shadow-md transition-shadow">
+        <h2 className="text-lg font-semibold flex items-center gap-2">✉️ Email OAuth</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">Google and Microsoft OAuth 2.0 credentials for connecting email accounts.</p>
 
         {/* Google */}
         <div>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Google (Gmail)</h3>
+          <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Google (Gmail)</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium dark:text-gray-200">Client ID</label>
+              <label className="block text-sm font-medium">Client ID</label>
               <input type="text" value={gmailClientId} onChange={(e) => setGmailClientId(e.target.value)}
-                placeholder="Google Cloud OAuth client ID" className="border p-2 rounded w-full text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100" />
+                placeholder="Google Cloud OAuth client ID" className="border p-2 rounded w-full text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium dark:text-gray-200">Client Secret</label>
+              <label className="block text-sm font-medium">Client Secret</label>
               <PwInput name="gmailSecret" value={gmailClientSecret} onChange={setGmailClientSecret} placeholder="Google Cloud OAuth client secret" />
             </div>
           </div>
         </div>
 
         {/* Microsoft */}
-        <div className="border-t dark:border-gray-700 pt-3">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Microsoft (Outlook)</h3>
+        <div className="border-t pt-3">
+          <h3 className="text-sm font-medium text-[var(--color-text-primary)] mb-2">Microsoft (Outlook)</h3>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium dark:text-gray-200">Client ID</label>
+              <label className="block text-sm font-medium">Client ID</label>
               <input type="text" value={outlookClientId} onChange={(e) => setOutlookClientId(e.target.value)}
-                placeholder="Azure AD application client ID" className="border p-2 rounded w-full text-sm dark:bg-gray-800 dark:border-gray-600 dark:text-gray-100" />
+                placeholder="Azure AD application client ID" className="border p-2 rounded w-full text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium dark:text-gray-200">Client Secret</label>
+              <label className="block text-sm font-medium">Client Secret</label>
               <PwInput name="outlookSecret" value={outlookClientSecret} onChange={setOutlookClientSecret} placeholder="Azure AD application client secret" />
             </div>
           </div>
@@ -594,7 +594,7 @@ export default function SettingsPage() {
             className="bg-blue-600 text-white p-2 rounded hover:bg-blue-700 disabled:opacity-50 text-sm">
             {savingOauth ? "Saving..." : "Save"}
           </button>
-          {oauthSaved && <span className="text-sm text-green-600 dark:text-green-400">Saved!</span>}
+          {oauthSaved && <span className="text-sm text-[var(--color-success-text)]">Saved!</span>}
         </div>
       </div>
 

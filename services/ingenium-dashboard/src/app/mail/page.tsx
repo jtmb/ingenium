@@ -256,7 +256,7 @@ export default function MailPage() {
 
     return (
       <div className="space-y-4">
-        <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
         <EmptyState
           message="No email accounts configured"
           action={{ label: "Add Account", onClick: () => setShowAccountSetup(true) }}
@@ -264,7 +264,7 @@ export default function MailPage() {
         <div className="text-center">
           <button
             onClick={loadDemoAccount}
-            className="text-xs text-gray-400 hover:text-gray-600 underline"
+            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline"
           >
             Load demo account for UI testing
           </button>
@@ -276,7 +276,7 @@ export default function MailPage() {
   if (showAccountSetup) {
     return (
       <div className="space-y-4">
-        <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
         <AccountSetup
           onComplete={async () => {
             setShowAccountSetup(false);
@@ -299,9 +299,9 @@ export default function MailPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-3xl font-bold text-gray-900 mb-6">Mail</h1>
+      <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
 
-      <div className="flex h-[calc(100vh-180px)] border border-gray-200 rounded bg-white overflow-hidden">
+      <div className="flex h-[calc(100vh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
         {/* Folder sidebar */}
         <FolderSidebar
           accounts={accounts}
@@ -352,7 +352,7 @@ export default function MailPage() {
           onCancel={handleComposeCancel}
         />
         {sending && (
-          <p className="text-sm text-gray-500 text-center mt-4">Sending...</p>
+          <p className="text-sm text-[var(--color-text-muted)] text-center mt-4">Sending...</p>
         )}
       </Overlay>
     </div>

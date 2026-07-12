@@ -14,13 +14,13 @@ type Level = (typeof ALL_LEVELS)[number];
 
 // ── Color maps ───────────────────────────────────────────────────────────
 const SOURCE_BADGE: Record<string, string> = {
-  agent: "bg-blue-50 text-blue-700 border-blue-200",
-  plugin: "bg-green-50 text-green-700 border-green-200",
+  agent: "bg-[var(--color-surface-selected)] text-blue-700 border-blue-200",
+  plugin: "bg-[var(--color-success-bg)] text-green-700 border-[var(--color-success-border)]",
   scheduler: "bg-purple-50 text-purple-700 border-purple-200",
   observer: "bg-cyan-50 text-cyan-700 border-cyan-200",
   "auto-observer": "bg-pink-50 text-pink-700 border-pink-200",
   synthesis: "bg-orange-50 text-orange-700 border-orange-200",
-  api: "bg-gray-50 text-gray-600 border-gray-200",
+  api: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]",
   configs: "bg-teal-50 text-teal-700 border-teal-200",
   skills: "bg-slate-50 text-slate-700 border-slate-200",
   email: "bg-indigo-50 text-indigo-700 border-indigo-200",
@@ -34,10 +34,10 @@ const LEVEL_DOT: Record<string, string> = {
 };
 
 const LEVEL_BADGE: Record<string, string> = {
-  debug: "bg-gray-100 text-gray-600 border-gray-300",
-  info: "bg-blue-50 text-blue-700 border-blue-200",
-  warn: "bg-amber-50 text-amber-700 border-amber-200",
-  error: "bg-red-50 text-red-700 border-red-200",
+  debug: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-gray-300",
+  info: "bg-[var(--color-surface-selected)] text-blue-700 border-blue-200",
+  warn: "bg-[var(--color-warning-bg)] text-amber-700 border-[var(--color-warning-border)]",
+  error: "bg-[var(--color-error-bg)] text-[var(--color-error-text)] border-[var(--color-error-border)]",
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -229,17 +229,17 @@ export default function LogsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-3xl font-bold">System Logs</h1>
-          <p className="text-sm text-gray-400 mt-1">
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">
             Live log stream from the Ingenium server
           </p>
         </div>
-        <div className="flex items-center gap-4 text-sm text-gray-600">
+        <div className="flex items-center gap-4 text-sm text-[var(--color-text-secondary)]">
           <span>
             Total: <strong>{total}</strong>
           </span>
           <span>
             Sources:{" "}
-            <strong className="text-blue-600">{activeSourcesCount}</strong>
+            <strong className="text-[var(--color-text-link)]">{activeSourcesCount}</strong>
           </span>
           <span>
             Displayed:{" "}
@@ -247,14 +247,14 @@ export default function LogsPage() {
               {filteredEntries.length}
             </strong>
           </span>
-          <span className="text-gray-400">
+          <span className="text-[var(--color-text-muted)]">
             {lastUpdate ? `Updated ${fmtTime(lastUpdate)}` : "—"}
           </span>
           <button
             onClick={() => setPaused((p) => !p)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
               paused
-                ? "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+                ? "bg-[var(--color-warning-bg)] border-amber-300 text-amber-700 hover:bg-amber-100"
                 : "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
             }`}
           >
@@ -265,10 +265,10 @@ export default function LogsPage() {
       </div>
 
       {/* ── Filter Bar ──────────────────────────────────────────────────── */}
-      <div className="bg-white border rounded p-3 hover:shadow-md transition-shadow space-y-3">
+      <div className="bg-[var(--color-surface)] border rounded p-3 hover:shadow-md transition-shadow space-y-3">
         {/* Source pills */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs text-gray-400 mr-1 font-medium">
+          <span className="text-xs text-[var(--color-text-muted)] mr-1 font-medium">
             Sources:
           </span>
           {/* All pill */}
@@ -277,13 +277,13 @@ export default function LogsPage() {
             className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
               selectedSources.has("all")
                 ? "bg-gray-800 text-white shadow-sm"
-                : "bg-white border border-gray-200 text-gray-500 hover:bg-gray-100"
+                : "bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
             }`}
           >
             All
           </button>
           {sources.map((src) => {
-            const badge = SOURCE_BADGE[src] ?? "bg-gray-50 text-gray-600 border-gray-200";
+            const badge = SOURCE_BADGE[src] ?? "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]";
             const isSelected = selectedSources.has(src);
             return (
               <button
@@ -292,7 +292,7 @@ export default function LogsPage() {
                 className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                   isSelected
                     ? `${badge} shadow-sm ring-1 ring-offset-1`
-                    : "bg-white border-gray-200 text-gray-500 hover:bg-gray-100"
+                    : "bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
                 }`}
               >
                 {SOURCE_LABEL[src] ?? src}
@@ -303,7 +303,7 @@ export default function LogsPage() {
 
         {/* Level checkboxes + search */}
         <div className="flex items-center gap-4 flex-wrap">
-          <span className="text-xs text-gray-400 font-medium">Levels:</span>
+          <span className="text-xs text-[var(--color-text-muted)] font-medium">Levels:</span>
           {ALL_LEVELS.map((lvl) => {
             const isSelected = selectedLevels.has(lvl);
             const dot = LEVEL_DOT[lvl] ?? "bg-gray-400";
@@ -311,7 +311,7 @@ export default function LogsPage() {
               <label
                 key={lvl}
                 className={`flex items-center gap-1.5 text-xs cursor-pointer select-none ${
-                  isSelected ? "text-gray-800 font-medium" : "text-gray-400"
+                  isSelected ? "text-[var(--color-text-primary)] font-medium" : "text-[var(--color-text-muted)]"
                 }`}
               >
                 <input
@@ -335,7 +335,7 @@ export default function LogsPage() {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search messages..."
-              className="w-full border border-gray-200 rounded text-xs px-3 py-1.5 focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200"
+              className="w-full border border-[var(--color-border)] rounded text-xs px-3 py-1.5 focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200"
             />
           </div>
         </div>
@@ -343,19 +343,19 @@ export default function LogsPage() {
 
       {/* ── Log Table ────────────────────────────────────────────────────── */}
       {loading && entries.length === 0 && (
-        <div className="bg-gray-50 border rounded p-12 text-center text-gray-400">
+        <div className="bg-[var(--color-surface-muted)] border rounded p-12 text-center text-[var(--color-text-muted)]">
           Loading logs...
         </div>
       )}
 
       {error && entries.length === 0 && (
-        <div className="bg-red-50 border border-red-200 rounded p-6 text-center text-red-600 text-sm">
+        <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
           {error}
         </div>
       )}
 
       {!loading && !error && filteredEntries.length === 0 && (
-        <div className="bg-gray-50 border rounded p-12 text-center text-gray-400">
+        <div className="bg-[var(--color-surface-muted)] border rounded p-12 text-center text-[var(--color-text-muted)]">
           <p className="text-lg font-medium mb-1">No log entries yet.</p>
           <p className="text-sm">System is running. Logs will appear here as events occur.</p>
         </div>
@@ -365,11 +365,11 @@ export default function LogsPage() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="bg-white border rounded overflow-y-auto max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
+          className="bg-[var(--color-surface)] border rounded overflow-y-auto max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
         >
           <table className="w-full text-sm font-mono">
-            <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 z-10">
-              <tr className="text-left text-xs text-gray-500 uppercase tracking-wider">
+            <thead className="sticky top-0 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] z-10">
+              <tr className="text-left text-xs text-[var(--color-text-muted)] uppercase tracking-wider">
                 <th className="px-4 py-2 whitespace-nowrap w-[80px]">Time</th>
                 <th className="px-4 py-2 whitespace-nowrap w-[110px]">Source</th>
                 <th className="px-4 py-2 whitespace-nowrap w-[60px]">Level</th>
@@ -380,18 +380,18 @@ export default function LogsPage() {
               {filteredEntries.map((entry, idx) => {
                 const sourceBadge =
                   SOURCE_BADGE[entry.source] ??
-                  "bg-gray-50 text-gray-600 border-gray-200";
+                  "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]";
                 const levelDot = LEVEL_DOT[entry.level] ?? "bg-gray-400";
                 const levelBadge =
                   LEVEL_BADGE[entry.level] ??
-                  "bg-gray-100 text-gray-600 border-gray-300";
+                  "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-gray-300";
                 return (
                   <tr
                     key={`${entry.timestamp}-${idx}`}
-                    className="hover:bg-gray-50 transition-colors"
+                    className="hover:bg-[var(--color-surface-hover)] transition-colors"
                     title={fmtFull(entry.timestamp)}
                   >
-                    <td className="px-4 py-1.5 text-xs text-gray-400 whitespace-nowrap">
+                    <td className="px-4 py-1.5 text-xs text-[var(--color-text-muted)] whitespace-nowrap">
                       {fmtTime(entry.timestamp)}
                     </td>
                     <td className="px-4 py-1.5 whitespace-nowrap">
@@ -411,7 +411,7 @@ export default function LogsPage() {
                         {entry.level.toUpperCase()}
                       </span>
                     </td>
-                    <td className="px-4 py-1.5 text-xs text-gray-700 break-all">
+                    <td className="px-4 py-1.5 text-xs text-[var(--color-text-primary)] break-all">
                       {entry.message}
                     </td>
                   </tr>

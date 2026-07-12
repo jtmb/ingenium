@@ -72,7 +72,7 @@ The extension package ships three OpenCode plugins — `observer.ts` (session ev
 
 ## Skills
 
-**What it does**: Browse and search all 22 AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns. Stored in split-skill format (SKILL.md + metadata.json + references/) with `file_tree` support for auxiliary files. Dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and highlight.js syntax highlighting in Preview/Source modes.
+**What it does**: Browse and search all 25 AI agent skills stored in the database. Skills cover debugging, security, testing, conventions, and framework-specific patterns. Stored in split-skill format (SKILL.md + metadata.json + references/) with `file_tree` support for auxiliary files. Dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and highlight.js syntax highlighting in Preview/Source modes.
 
 **How to use**:
 - View all skills in the Skills tab (card grid, 3 columns on desktop)
@@ -174,7 +174,7 @@ The `/learnings` page has been deprecated and redirects to `/observations`. See 
 
 ## Required Skills
 
-The Ingenium system uses skills to define agent behavior. Skills are organized in `.opencode/skills/` and loaded automatically based on `alwaysApply` flags, agent preflight directives, or AGENTS.md preflight check rules. The system includes 22 skills total.
+The Ingenium system uses skills to define agent behavior. Skills are organized in `.opencode/skills/` and loaded automatically based on `alwaysApply` flags, agent preflight directives, or AGENTS.md preflight check rules. The system includes 25 skills total.
 
 ### Mandatory Skills (All Agents)
 
@@ -211,11 +211,13 @@ While all agents load from the mandatory set, each agent's `permission.skill` bl
 
 ### Optional Skills
 
-These 14 skills provide guidance for specific contexts but are not required for core system function:
+These 16 skills provide guidance for specific contexts but are not required for core system function:
 
 | Skill | When to Use |
 |-------|-------------|
+| `dashboard-screenshots` | When taking Playwright screenshots of dashboard pages for documentation |
 | `database-conventions` | When working with SQLite, schema migrations, or database queries |
+| `database-migration-management` | When managing SQL migration sequencing and application |
 | `documentation-audit-workflow` | When auditing documentation quality across the project |
 | `git-history-hygiene` | When rewriting git history, managing large files, or cleaning repos |
 | `ingenium-ops` | When operating the Ingenium deployment (Docker, health checks, logs) |
@@ -225,9 +227,9 @@ These 14 skills provide guidance for specific contexts but are not required for 
 | `orchestrator-primer` | For new developers learning the orchestrator agent pipeline |
 | `parallel-session-hygiene` | When running multiple OpenCode sessions concurrently |
 | `per-project-scoping` | When isolating configuration by project context |
+| `security-audit` | When auditing code for security vulnerabilities and leaked secrets |
 | `self-learning` | Reference for the observation/synthesis pipeline (see `/pipeline`) |
 | `sqlite-wal-safety` | When handling WAL mode, concurrent access, or database file operations |
-| `test-debug` | When debugging test failures or writing test infrastructure |
 | `uncensored-direct-response` | When bypassing safety filters for trusted development tasks |
 
 ## MCP (Servers + Tool Manager)
@@ -418,7 +420,7 @@ These 14 skills provide guidance for specific contexts but are not required for 
 
 **How to use**:
 - Navigate to `/agents` in the dashboard
-- View all 9 agent profiles with their model, mode, and enabled status
+- View all 10 agent profiles with their model, mode, and enabled status
 - Enable/disable agents to control which are active
 - Filter agents by category (primary, research, execution, security)
 - Agents sync their `.md` files to disk for OpenCode loading

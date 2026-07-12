@@ -83,14 +83,14 @@ export default function ProjectsPage() {
       {/* View toggle + search */}
       <div className="flex gap-2 justify-between items-center">
         <div className="flex gap-2 items-center">
-          <button onClick={() => setView("active")} className={`px-3 py-1 rounded text-sm font-medium ${view === "active" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Active</button>
-          <button onClick={() => setView("archived")} className={`px-3 py-1 rounded text-sm font-medium ${view === "archived" ? "bg-blue-600 text-white" : "text-gray-600 hover:bg-gray-100"}`}>Archived</button>
+          <button onClick={() => setView("active")} className={`px-3 py-1 rounded text-sm font-medium ${view === "active" ? "bg-blue-600 text-white" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"}`}>Active</button>
+          <button onClick={() => setView("archived")} className={`px-3 py-1 rounded text-sm font-medium ${view === "archived" ? "bg-blue-600 text-white" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"}`}>Archived</button>
         </div>
         <input
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search projects..."
-          className="border border-gray-200 p-2 rounded text-sm w-64"
+          className="border border-[var(--color-border)] p-2 rounded text-sm w-64"
         />
       </div>
 
@@ -102,90 +102,90 @@ export default function ProjectsPage() {
           const synthCount = synth ? formatRelative(synth) : "—";
 
           return (
-            <div key={p.id} onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="bg-white rounded border overflow-hidden hover:shadow-md transition-shadow cursor-pointer">
+            <div key={p.id} onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="bg-[var(--color-surface)] rounded border overflow-hidden hover:shadow-md transition-shadow cursor-pointer">
               {/* Card header */}
-              <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="px-5 py-4 border-b border-[var(--color-border-muted)] flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-lg font-semibold">{p.name}</span>
                     {!!p.is_global && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">GLOBAL</span>}
-                    {p.archived_at && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-medium">ARCHIVED</span>}
+                    {p.archived_at && <span className="text-xs bg-red-100 text-[var(--color-error-text)] px-2 py-0.5 rounded font-medium">ARCHIVED</span>}
                   </div>
-                  <div className="text-xs text-gray-400 mt-0.5">Created {formatRelative(p.created_at)}</div>
+                  <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Created {formatRelative(p.created_at)}</div>
                 </div>
                 <div className="flex gap-2">
                   {view === "active" && (
                     <>
-                      <button onClick={(e) => { e.stopPropagation(); rename(p.name); }} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-gray-50 text-gray-600">Rename</button>
-                      <button onClick={(e) => { e.stopPropagation(); archive(p.name); }} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-red-50 text-red-600">Archive</button>
+                      <button onClick={(e) => { e.stopPropagation(); rename(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]">Rename</button>
+                      <button onClick={(e) => { e.stopPropagation(); archive(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-error-bg)] text-[var(--color-error-text)]">Archive</button>
                     </>
                   )}
                   {view === "archived" && (
                     <div className="flex gap-2">
-                      <button onClick={(e) => { e.stopPropagation(); restore(p.name); }} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-green-50 text-green-600">Restore</button>
-                      <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(p.name); }} className="text-xs px-3 py-1.5 border border-gray-200 rounded hover:bg-red-50 text-red-600">Delete</button>
+                      <button onClick={(e) => { e.stopPropagation(); restore(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-success-bg)] text-[var(--color-success-text)]">Restore</button>
+                      <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-error-bg)] text-[var(--color-error-text)]">Delete</button>
                     </div>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); setExpanded(expanded === p.name ? null : p.name); }} className="text-xs px-3 py-1.5 bg-gray-50 hover:bg-gray-100 rounded text-gray-600 font-medium">{expanded === p.name ? "Collapse" : "Detail ▸"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); setExpanded(expanded === p.name ? null : p.name); }} className="text-xs px-3 py-1.5 bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-hover)] rounded text-[var(--color-text-secondary)] font-medium">{expanded === p.name ? "Collapse" : "Detail ▸"}</button>
                 </div>
               </div>
 
               {/* Stats grid */}
               <div className="px-5 py-3 flex gap-6 text-sm">
-                <div className="text-gray-500">
-                  <span className="font-semibold text-gray-800">{d?.skills_count ?? "..."}</span> Skills
+                <div className="text-[var(--color-text-muted)]">
+                  <span className="font-semibold text-[var(--color-text-primary)]">{d?.skills_count ?? "..."}</span> Skills
                 </div>
-                <div className="text-gray-500">
-                  <span className="font-semibold text-gray-800">{d?.observation_stats?.total ?? "..."}</span> Observations
+                <div className="text-[var(--color-text-muted)]">
+                  <span className="font-semibold text-[var(--color-text-primary)]">{d?.observation_stats?.total ?? "..."}</span> Observations
                   {d?.observation_stats?.pending > 0 && <span className="text-amber-500 ml-1">({d.observation_stats.pending} pending)</span>}
                 </div>
-                <div className="text-gray-500">
-                  <span className="font-semibold text-gray-800">{d?.pipeline?.length ?? "..."}</span> Pipeline events
+                <div className="text-[var(--color-text-muted)]">
+                  <span className="font-semibold text-[var(--color-text-primary)]">{d?.pipeline?.length ?? "..."}</span> Pipeline events
                 </div>
-                <div className="text-gray-500">
-                  <span className="text-gray-400">Last synthesis:</span> <span className="font-medium text-gray-700">{synthCount}</span>
+                <div className="text-[var(--color-text-muted)]">
+                  <span className="text-[var(--color-text-muted)]">Last synthesis:</span> <span className="font-medium text-[var(--color-text-primary)]">{synthCount}</span>
                 </div>
                 <div className="flex-1" />
-                {p.path && <div className="text-xs text-gray-400 truncate max-w-[200px]" title={p.path}>{p.path}</div>}
+                {p.path && <div className="text-xs text-[var(--color-text-muted)] truncate max-w-[200px]" title={p.path}>{p.path}</div>}
               </div>
 
               {/* Expanded detail */}
               {expanded === p.name && d && (
-                <div className="border-t border-gray-100 px-5 py-4 bg-gray-50">
+                <div className="border-t border-[var(--color-border-muted)] px-5 py-4 bg-[var(--color-surface-muted)]">
                   <div className="grid grid-cols-2 gap-6">
                     {/* Recent skills */}
                     <div>
-                      <h3 className="font-semibold text-sm mb-2 text-gray-700">Recent Skills</h3>
+                      <h3 className="font-semibold text-sm mb-2 text-[var(--color-text-primary)]">Recent Skills</h3>
                       {d.recent_skills?.length > 0 ? (
                         <div className="space-y-1">
                           {d.recent_skills.slice(0, 5).map((s: any) => (
                             <div key={s.name} className="text-sm flex justify-between">
-                              <span className="text-blue-600">{s.name}</span>
-                              <span className="text-xs text-gray-400">{formatRelative(s.created_at)}</span>
+                              <span className="text-[var(--color-text-link)]">{s.name}</span>
+                              <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(s.created_at)}</span>
                             </div>
                           ))}
                         </div>
-                      ) : <p className="text-xs text-gray-400">No skills yet.</p>}
+                      ) : <p className="text-xs text-[var(--color-text-muted)]">No skills yet.</p>}
                     </div>
 
                     {/* Recent observations */}
                     <div>
-                      <h3 className="font-semibold text-sm mb-2 text-gray-700">Recent Observations</h3>
+                      <h3 className="font-semibold text-sm mb-2 text-[var(--color-text-primary)]">Recent Observations</h3>
                       {d.observation_stats?.recent?.length > 0 ? (
                         <div className="space-y-1">
                           {d.observation_stats.recent.slice(0, 5).map((o: any, i: number) => (
                             <div key={i} className="text-xs flex justify-between">
-                              <span className="text-gray-600 truncate max-w-[200px]">{o.content?.substring(0, 80)}</span>
-                              <span className="text-gray-400 ml-2">{formatRelative(o.created_at)}</span>
+                              <span className="text-[var(--color-text-secondary)] truncate max-w-[200px]">{o.content?.substring(0, 80)}</span>
+                              <span className="text-[var(--color-text-muted)] ml-2">{formatRelative(o.created_at)}</span>
                             </div>
                           ))}
                         </div>
-                      ) : <p className="text-xs text-gray-400">No observations yet.</p>}
+                      ) : <p className="text-xs text-[var(--color-text-muted)]">No observations yet.</p>}
                     </div>
 
                     {/* Pipeline events */}
                     <div className="col-span-2">
-                      <h3 className="font-semibold text-sm mb-2 text-gray-700">Recent Pipeline Activity</h3>
+                      <h3 className="font-semibold text-sm mb-2 text-[var(--color-text-primary)]">Recent Pipeline Activity</h3>
                       {d.pipeline?.length > 0 ? (
                         <div className="space-y-1">
                           {d.pipeline.map((e: any) => (
@@ -194,14 +194,14 @@ export default function ProjectsPage() {
                                 e.event_type?.startsWith("synthesis") ? "bg-emerald-100 text-emerald-700" :
                                 e.event_type?.startsWith("trait") ? "bg-blue-100 text-blue-700" :
                                 e.event_type?.startsWith("obs") ? "bg-amber-100 text-amber-700" :
-                                "bg-gray-100 text-gray-600"
+                                "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
                               }`}>{e.event_type}</span>
-                              <span className="text-gray-600 flex-1">{e.title}</span>
-                              <span className="text-gray-400">{formatRelative(e.created_at)}</span>
+                              <span className="text-[var(--color-text-secondary)] flex-1">{e.title}</span>
+                              <span className="text-[var(--color-text-muted)]">{formatRelative(e.created_at)}</span>
                             </div>
                           ))}
                         </div>
-                      ) : <p className="text-xs text-gray-400">No pipeline events.</p>}
+                      ) : <p className="text-xs text-[var(--color-text-muted)]">No pipeline events.</p>}
                     </div>
                   </div>
                 </div>
@@ -209,23 +209,23 @@ export default function ProjectsPage() {
             </div>
           );
         })}
-        {displayed.length === 0 && <p className="text-gray-400 py-8 text-center">No {view} projects.</p>}
+        {displayed.length === 0 && <p className="text-[var(--color-text-muted)] py-8 text-center">No {view} projects.</p>}
       </div>
 
       {/* Create modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowCreate(false)}>
-          <div className="bg-white p-6 rounded-lg shadow-xl w-96" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[var(--color-surface)] p-6 rounded-lg shadow-xl w-96" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-semibold mb-4">New Project</h3>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Project name"
-              className="border border-gray-200 p-2 rounded text-sm w-full mb-3"
+              className="border border-[var(--color-border)] p-2 rounded text-sm w-full mb-3"
               autoFocus
             />
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 rounded border border-gray-200 text-sm text-gray-600">Cancel</button>
+              <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 rounded border border-[var(--color-border)] text-sm text-[var(--color-text-secondary)]">Cancel</button>
               <button
                 onClick={() => { create(); setShowCreate(false); }}
                 disabled={!name}
@@ -241,12 +241,12 @@ export default function ProjectsPage() {
         title="Delete Project" subtitle="This action cannot be undone.">
         {confirmDelete && (
           <div className="space-y-4">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-[var(--color-text-secondary)]">
               Are you sure you want to permanently delete <strong>{confirmDelete}</strong>?
               All skills, observations, pipeline events, and settings for this project will be permanently removed.
             </p>
             <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 border border-gray-200 rounded text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 border border-[var(--color-border)] rounded text-sm hover:bg-[var(--color-surface-hover)]">Cancel</button>
               <button onClick={() => handleDelete(confirmDelete)} className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700">Delete</button>
             </div>
           </div>

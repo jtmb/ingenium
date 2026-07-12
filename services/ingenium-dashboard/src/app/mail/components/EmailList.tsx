@@ -42,32 +42,32 @@ export default function EmailList({
   };
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 border-r border-gray-200">
+    <div className="flex-1 flex flex-col min-w-0 border-r border-[var(--color-border)]">
       {/* Search bar */}
-      <div className="px-4 py-2 border-b border-gray-200 flex items-center gap-2">
+      <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2">
         <input
           type="text"
           placeholder="Search emails..."
-          className="flex-1 border border-gray-200 rounded px-3 py-1.5 text-sm text-gray-900 placeholder:text-gray-500 focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200"
+          className="flex-1 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200"
           onChange={(e) => onSearch(e.target.value)}
         />
       </div>
 
       {/* Error banner */}
       {error && (
-        <div className="px-4 py-3 mx-4 mt-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+        <div className="px-4 py-3 mx-4 mt-2 bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded text-sm text-[var(--color-error-text)]">
           {error}
         </div>
       )}
 
       {/* Loading skeleton */}
       {loading && (
-        <div className="flex-1 divide-y divide-gray-200">
+        <div className="flex-1 divide-y divide-[var(--color-border)]">
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="px-4 py-3 flex gap-3 animate-pulse">
-              <div className="w-40 h-4 bg-gray-100 rounded" />
-              <div className="flex-1 h-4 bg-gray-100 rounded" />
-              <div className="w-20 h-4 bg-gray-100 rounded" />
+              <div className="w-40 h-4 bg-[var(--color-surface-muted)] rounded" />
+              <div className="flex-1 h-4 bg-[var(--color-surface-muted)] rounded" />
+              <div className="w-20 h-4 bg-[var(--color-surface-muted)] rounded" />
             </div>
           ))}
         </div>
@@ -75,7 +75,7 @@ export default function EmailList({
 
       {/* Email rows */}
       {!loading && (
-        <div className="flex-1 divide-y divide-gray-200 overflow-y-auto">
+        <div className="flex-1 divide-y divide-[var(--color-border)] overflow-y-auto">
           {emails.map((email: any) => {
             const isUnread = !email.flags?.includes("\\Seen");
             const isSelected = selectedUid === email.uid;
@@ -84,31 +84,31 @@ export default function EmailList({
               <div
                 key={email.uid}
                 onClick={() => onSelect(email.uid)}
-                className={`px-4 py-3 border-b border-gray-200 hover:bg-gray-50 cursor-pointer flex items-start gap-2 ${
-                  isSelected ? "bg-blue-50" : ""
+                className={`px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer flex items-start gap-2 ${
+                  isSelected ? "bg-[var(--color-surface-selected)]" : ""
                 }`}
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2">
                     <span
                       className={`w-40 truncate text-sm ${
-                        isUnread ? "font-semibold text-gray-900" : "text-gray-600"
+                        isUnread ? "font-semibold text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"
                       }`}
                     >
                       {email.from?.[0]?.name || email.from?.[0]?.address || "Unknown"}
                     </span>
                     <span
                       className={`flex-1 truncate text-sm ${
-                        isUnread ? "font-medium text-gray-900" : "text-gray-600"
+                        isUnread ? "font-medium text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"
                       }`}
                     >
                       {email.subject || "(No subject)"}
                     </span>
-                    <span className="w-20 text-xs text-gray-500 text-right shrink-0">
+                    <span className="w-20 text-xs text-[var(--color-text-muted)] text-right shrink-0">
                       {formatDate(email.date)}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-500 truncate mt-0.5">
+                  <p className="text-sm text-[var(--color-text-muted)] truncate mt-0.5">
                     {email.body?.text?.substring(0, 120) || ""}
                   </p>
                 </div>
@@ -120,7 +120,7 @@ export default function EmailList({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-2 border-t border-gray-200 text-sm text-gray-600">
+        <div className="flex items-center justify-between px-4 py-2 border-t border-[var(--color-border)] text-sm text-[var(--color-text-secondary)]">
           <span>
             {total} message{total !== 1 ? "s" : ""}
           </span>
@@ -128,7 +128,7 @@ export default function EmailList({
             <button
               onClick={() => onPageChange(page - 1)}
               disabled={page <= 1}
-              className="px-2 py-1 border border-gray-200 rounded text-xs hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-2 py-1 border border-[var(--color-border)] rounded text-xs hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Prev
             </button>
@@ -138,7 +138,7 @@ export default function EmailList({
             <button
               onClick={() => onPageChange(page + 1)}
               disabled={page >= totalPages}
-              className="px-2 py-1 border border-gray-200 rounded text-xs hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-2 py-1 border border-[var(--color-border)] rounded text-xs hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Next
             </button>

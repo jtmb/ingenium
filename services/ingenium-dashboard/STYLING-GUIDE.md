@@ -19,6 +19,124 @@ Any visual changes to the dashboard MUST be reflected in this document.
 | Nav Background | `#FFFFFF` | `bg-white` |
 | Nav Border | `#E5E7EB` | `border-b border-gray-200` |
 
+## Dark Mode Token System
+
+> 🔴 **Hard rule**: Never use hardcoded Tailwind color classes for backgrounds, text, or borders. Always use CSS custom property tokens. Exception: `bg-blue-600` and similar solid accent colors for primary action buttons.
+
+The dashboard uses CSS custom properties (defined in `globals.css` via `@theme`) to handle light/dark mode automatically. There is no need for `dark:` classes on every component — tokens switch value automatically when the `.dark` class is applied to `<html>`.
+
+### How It Works
+
+1. **Token definition**: Tokens are declared as `@theme` custom properties in `globals.css` with light-mode defaults
+2. **Dark overrides**: A `.dark` selector block overrides each token with dark-mode values
+3. **Runtime toggle**: The `ThemeToggle` component adds/removes `.dark` on `<html>`; all tokens react instantly
+4. **No `dark:` prefixes**: Components use `var(--color-surface)` and get the correct color in both modes via the cascade
+
+### Token Mapping
+
+| Token | Light Value | Dark Value | Replaces |
+|-------|-------------|------------|----------|
+| `--color-surface` | `#ffffff` | `#111827` | `bg-white` |
+| `--color-surface-muted` | `#f9fafb` | `#1f2937` | `bg-gray-50`, `bg-gray-100` |
+| `--color-surface-hover` | `#f3f4f6` | `#374151` | `hover:bg-gray-50` / `hover:bg-gray-100` |
+| `--color-surface-selected` | `#eff6ff` | `#1e3a5f` | `bg-blue-50` |
+| `--color-border` | `#e5e7eb` | `#374151` | `border-gray-200` |
+| `--color-border-muted` | `#f3f4f6` | `#1f2937` | `border-gray-100` |
+| `--color-text-primary` | `#111827` | `#f3f4f6` | `text-gray-900` / `text-gray-800` / `text-gray-700` |
+| `--color-text-secondary` | `#6b7280` | `#9ca3af` | `text-gray-600` |
+| `--color-text-muted` | `#9ca3af` | `#6b7280` | `text-gray-500` / `text-gray-400` |
+| `--color-text-link` | `#2563eb` | `#60a5fa` | `text-blue-600` |
+| `--color-error-bg` | `#fef2f2` | `#7f1d1d33` | `bg-red-50` |
+| `--color-warning-bg` | `#fffbeb` | `#78350f33` | `bg-amber-50` |
+| `--color-success-bg` | `#f0fdf4` | `#14532d33` | `bg-green-50` / `bg-green-100` |
+
+### Usage: Old → New Class Migration
+
+**Backgrounds:**
+```html
+<!-- Old -->
+<div class="bg-white">...</div>
+<div class="bg-gray-50">...</div>
+<div class="hover:bg-gray-100">...</div>
+
+<!-- New -->
+<div class="bg-[var(--color-surface)]">...</div>
+<div class="bg-[var(--color-surface-muted)]">...</div>
+<div class="hover:bg-[var(--color-surface-hover)]">...</div>
+```
+
+**Text:**
+```html
+<!-- Old -->
+<h1 class="text-gray-900">Title</h1>
+<p class="text-gray-600">Body</p>
+<span class="text-gray-400">Caption</span>
+
+<!-- New -->
+<h1 class="text-[var(--color-text-primary)]">Title</h1>
+<p class="text-[var(--color-text-secondary)]">Body</p>
+<span class="text-[var(--color-text-muted)]">Caption</span>
+```
+
+**Borders:**
+```html
+<!-- Old -->
+<div class="border border-gray-200">...</div>
+<div class="border-b border-gray-100">...</div>
+
+<!-- New -->
+<div class="border border-[var(--color-border)]">...</div>
+<div class="border-b border-[var(--color-border-muted)]">...</div>
+```
+
+**Accent / Semantic backgrounds:**
+```html
+<!-- Old -->
+<div class="bg-blue-50">...</div>
+<div class="bg-red-50">...</div>
+<div class="bg-amber-50">...</div>
+<div class="bg-green-50">...</div>
+
+<!-- New -->
+<div class="bg-[var(--color-surface-selected)]">...</div>
+<div class="bg-[var(--color-error-bg)]">...</div>
+<div class="bg-[var(--color-warning-bg)]">...</div>
+<div class="bg-[var(--color-success-bg)]">...</div>
+```
+
+### Exceptions
+
+Solid accent colors for interactive elements still use Tailwind utility classes directly:
+
+| Element | Class | Reason |
+|---------|-------|--------|
+| Primary action button | `bg-blue-600 text-white` | Intentional accent, not a surface |
+| Destructive button | `bg-red-600 text-white` | Intentional alert accent, not a surface |
+| Active tab pill | `bg-blue-600 text-white` | Intentional accent, not a surface |
+
+These accent colors are the same in light and dark mode — they intentionally stand out against both backgrounds. Do not apply token variables to these.
+
+### Dark Mode FileTree / Sidebar Adaptation
+
+The FileTree and FolderSidebar components need special attention because they use `bg-gray-50` as their surface — which becomes `--color-surface-muted`:
+
+```html
+<!-- Before -->
+<div class="bg-gray-50 border-r border-gray-200 min-w-[200px]">
+
+<!-- After -->
+<div class="bg-[var(--color-surface-muted)] border-r border-[var(--color-border)] min-w-[200px]">
+```
+
+Selected items in FileTree also use the token:
+```html
+<!-- Before -->
+<div class="bg-blue-100 text-blue-800">
+
+<!-- After -->
+<div class="bg-[var(--color-surface-selected)] text-[var(--color-text-link)]">
+```
+
 ## Typography
 
 | Element | Size | Weight | Tailwind |

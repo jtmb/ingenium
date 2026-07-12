@@ -13,7 +13,7 @@ export default function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <p className="text-gray-500 text-sm mb-4">{message}</p>
+      <p className="text-[var(--color-text-muted)] text-sm mb-4">{message}</p>
       {action && (
         <button
           onClick={action.onClick}

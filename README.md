@@ -7,9 +7,9 @@
 ### Your complete AI agent development workspace. Agent orchestration, Kanban tasks, email with AI drafting, self-learning pipeline, MCP tool management, OpenCode browser integration — fully pluggable, local, and cost-effective.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-45%2B-green?style=flat-square" alt="45+ skills" />
+  <img src="https://img.shields.io/badge/skills-25-green?style=flat-square" alt="25 skills" />
   <img src="https://img.shields.io/badge/MCP%20tools-73-blue?style=flat-square" alt="73 MCP tools" />
-  <img src="https://img.shields.io/badge/agents-9-orange?style=flat-square" alt="9 agents" />
+  <img src="https://img.shields.io/badge/agents-10-orange?style=flat-square" alt="10 agents" />
   <img src="https://img.shields.io/badge/dashboard%20pages-16-8A2BE2?style=flat-square" alt="16 dashboard pages" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
@@ -18,7 +18,7 @@
 
 </div>
 
-**Ingenium** is a complete AI agent development workspace. It combines agent orchestration (9 subagent profiles), a Kanban task board, a full email client with AI auto-drafting, a self-learning pipeline with LLM-powered extraction and synthesis, an MCP server manager with per-tool toggles, OpenCode browser embedding, and project management — all accessible through a single MCP stdio transport. Pluggable into any MCP-compatible client (OpenCode, Cline, Claude Desktop, any provider), fully local and cost-effective. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
+**Ingenium** is a complete AI agent development workspace. It combines agent orchestration (10 subagent profiles), a Kanban task board, a full email client with AI auto-drafting, a self-learning pipeline with LLM-powered extraction and synthesis, an MCP server manager with per-tool toggles, OpenCode browser embedding, and project management — all accessible through a single MCP stdio transport. Pluggable into any MCP-compatible client (OpenCode, Cline, Claude Desktop, any provider), fully local and cost-effective. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
 ### OpenCode Web UI Embedded in Dashboard
 The dashboard includes an embedded OpenCode service at `/opencode` — a second OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
@@ -97,7 +97,7 @@ Multi-project configuration with name→UUID resolution and per-project SQLite d
 <p align="center"><img src="docs/assets/screenshot-projects.png" alt="Projects" width="600" /></p>
 
 ### 📚 Skills
-AI agent conventions engine — 45+ skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained split-skill format (SKILL.md + metadata.json + references/) stored at `.opencode/skills/`. Skills are loaded from the SQLite database via the MCP server and auto-invoked based on file type, framework detection, and slash commands. The `file_tree` column stores a JSON map of relative paths → content for complete data round-trips. The dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and syntax highlighting (highlight.js) in both Preview and Source views.
+AI agent conventions engine — 25+ skills covering debugging, testing, security, API design, containers, Kubernetes, SQL, TypeScript, Go, Rust, Python, Next.js, and more. Each skill is a self-contained split-skill format (SKILL.md + metadata.json + references/) stored at `.opencode/skills/`. Skills are loaded from the SQLite database via the MCP server and auto-invoked based on file type, framework detection, and slash commands. The `file_tree` column stores a JSON map of relative paths → content for complete data round-trips. The dashboard provides a split-pane skill viewer with collapsible file tree sidebar (FileTree component), inline editing per file, and syntax highlighting (highlight.js) in both Preview and Source views.
 → [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md)
 
 <p align="center">
@@ -140,7 +140,7 @@ MCP server configuration and tool management — dual-tab page with **Servers** 
 </p>
 
 ### 👤 Agents
-Agent profile management — create, enable, disable, and configure AI agent profiles (9 agents). Each agent has a model assignment, access permissions, category, and skill bindings. Manage agent profiles via the dashboard or `ingenium_agent_*` MCP tools. Agents support sync from disk to DB for round-trip editing.
+Agent profile management — create, enable, disable, and configure AI agent profiles (10 agents). Each agent has a model assignment, access permissions, category, and skill bindings. Manage agent profiles via the dashboard or `ingenium_agent_*` MCP tools. Agents support sync from disk to DB for round-trip editing.
 → [docs/agents.md](docs/agents.md)
 
 <p align="center"><img src="docs/assets/screenshot-agents.png" alt="Agents" width="600" /></p>
@@ -235,7 +235,7 @@ graph LR
     D[Browser<br/>Dashboard] -->|HTTP| C
     C -->|SQLite WAL| E[(SQLite<br/>FTS5)]
     
-    F[Agent Session] -->|skill-load| G[.opencode/skills/<br/>45+ skills]
+    F[Agent Session] -->|skill-load| G[.opencode/skills/<br/>25 skills]
     G -->|self-learning| H[Synthesis<br/>Pipeline]
     H -->|observations| E
     H -->|traits| E

@@ -6,9 +6,9 @@ import { useProject } from "../../../lib/ProjectContext";
 import { api, Observation } from "../../../lib/api";
 
 const TYPE_COLORS: Record<string, string> = {
-  correction: "bg-red-100 text-red-700",
+  correction: "bg-red-100 text-[var(--color-error-text)]",
   preference: "bg-purple-100 text-purple-700",
-  pattern: "bg-green-100 text-green-700",
+  pattern: "bg-[var(--color-success-bg)] text-green-700",
   insight: "bg-blue-100 text-blue-700",
   feedback: "bg-yellow-100 text-yellow-700",
   behavior: "bg-orange-100 text-orange-700",
@@ -20,9 +20,9 @@ const TYPE_COLORS: Record<string, string> = {
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-yellow-100 text-yellow-700",
-  processed: "bg-green-100 text-green-700",
-  skipped: "bg-gray-100 text-gray-500",
-  failed: "bg-red-100 text-red-700",
+  processed: "bg-[var(--color-success-bg)] text-green-700",
+  skipped: "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]",
+  failed: "bg-red-100 text-[var(--color-error-text)]",
 };
 
 function safeParseJson(raw: string | undefined | null): object | null {
@@ -56,11 +56,11 @@ export default function ObservationDetailPage() {
   if (error) {
     return (
       <div className="text-center py-20">
-        <h1 className="text-4xl font-bold text-gray-400">404</h1>
-        <p className="text-gray-500 mt-2">Observation not found</p>
+        <h1 className="text-4xl font-bold text-[var(--color-text-muted)]">404</h1>
+        <p className="text-[var(--color-text-muted)] mt-2">Observation not found</p>
         <button
           onClick={() => router.push("/observations")}
-          className="mt-4 text-blue-600 hover:underline"
+          className="mt-4 text-[var(--color-text-link)] hover:underline"
         >
           Back to observations
         </button>
@@ -72,7 +72,7 @@ export default function ObservationDetailPage() {
     return (
       <div className="text-center py-20">
         <div className="animate-spin h-8 w-8 border-2 border-gray-300 border-t-blue-600 rounded-full mx-auto" />
-        <p className="text-gray-500 mt-4">Loading observation...</p>
+        <p className="text-[var(--color-text-muted)] mt-4">Loading observation...</p>
       </div>
     );
   }
@@ -85,13 +85,13 @@ export default function ObservationDetailPage() {
         <h1 className="text-3xl font-bold">Observation #{observation.id}</h1>
         <button
           onClick={() => router.push("/observations")}
-          className="text-sm text-gray-500 hover:text-gray-700"
+          className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
         >
           &larr; Back to list
         </button>
       </div>
 
-      <div className="bg-white p-6 rounded border shadow-sm space-y-6">
+      <div className="bg-[var(--color-surface)] p-6 rounded border shadow-sm space-y-6">
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
           <div>
             <span className="font-semibold">Type:</span>{" "}
@@ -115,27 +115,27 @@ export default function ObservationDetailPage() {
           </div>
           <div>
             <span className="font-semibold">Importance:</span>{" "}
-            <span className="text-gray-600">{observation.importance ?? 5}/10</span>
+            <span className="text-[var(--color-text-secondary)]">{observation.importance ?? 5}/10</span>
           </div>
           <div>
             <span className="font-semibold">Source:</span>{" "}
-            <span className="text-gray-600">{observation.source || "agent"}</span>
+            <span className="text-[var(--color-text-secondary)]">{observation.source || "agent"}</span>
           </div>
           <div>
             <span className="font-semibold">Created:</span>{" "}
-            <span className="text-gray-600">
+            <span className="text-[var(--color-text-secondary)]">
               {new Date(observation.created_at).toLocaleString()}
             </span>
           </div>
           <div>
             <span className="font-semibold">Project:</span>{" "}
-            <span className="text-gray-600">{observation.project_id}</span>
+            <span className="text-[var(--color-text-secondary)]">{observation.project_id}</span>
           </div>
         </div>
 
         <div>
           <h3 className="font-semibold mb-2">Content</h3>
-          <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+          <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
             {observation.content}
           </pre>
         </div>
@@ -144,11 +144,11 @@ export default function ObservationDetailPage() {
           <div>
             <h3 className="font-semibold mb-2">Context</h3>
             {parsedContext ? (
-              <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-xs font-mono">
+              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-xs font-mono">
                 {JSON.stringify(parsedContext, null, 2)}
               </pre>
             ) : (
-              <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap text-gray-600">
+              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">
                 {observation.context}
               </pre>
             )}

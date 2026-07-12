@@ -9,8 +9,8 @@ Email Client → OAuth2 + IMAP/SMTP → Mail Providers (Gmail, Outlook)
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **74 tools**. It talks to the API over HTTP. Zero DB access.
-- `ingenium-dashboard` is a Next.js 16 App Router frontend with **15 pages**. It talks to the API over HTTP.
+- `ingenium-server` runs as an MCP stdio transport with **73 tools**. It talks to the API over HTTP. Zero DB access.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **16 pages**. It talks to the API over HTTP.
 
 ## Skill System
 
@@ -27,7 +27,7 @@ This means a skill can contain any number of auxiliary files (reference docs, ex
 
 ### Skill Seeds
 
-14 skills live at `.opencode/skills/` and are synced via `/sync-skills`.
+25 skills live at `.opencode/skills/` and are synced via `/sync-skills`.
 
 The MCP server provides tools for listing, loading, searching, creating, updating, deleting, enabling, disabling, and syncing skills. The `update-skill-index` workflow regenerates `SKILL-INDEX.md` from all skill files.
 
@@ -161,8 +161,8 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 74 tools. Calls API via HTTP. Zero DB access. | No |
-| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 15 pages. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 16 pages. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | IMAP/SMTP + OAuth2 email engine (imapflow, nodemailer, mailparser). DB Access: No. | No |
 
 ## Dashboard Pages
@@ -191,7 +191,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 
 ### MCP Tool Count
 
-The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **74 tools**. Tool categories:
+The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **73 tools**. Tool categories:
 
 | Category | Count | Tools |
 |----------|-------|-------|

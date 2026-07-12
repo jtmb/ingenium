@@ -65,15 +65,15 @@ export default function PersonalityPage() {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Personality Profile</h1>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400">Sort:</span>
-          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-gray-200 rounded px-3 py-1.5 text-sm bg-white text-gray-600 hover:bg-gray-50 cursor-pointer">
+          <span className="text-sm text-[var(--color-text-muted)]">Sort:</span>
+          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="grouped">Grouped by type</option>
             <option value="newest">Newest first</option>
           </select>
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-[var(--color-text-muted)]">
             {traits.filter(t => (t.confidence || 0) >= 0.3).length} trait(s)
             {hiddenCount > 0 && (
-              <button onClick={() => setShowHidden(!showHidden)} className="ml-2 text-sm text-blue-600 font-medium hover:underline cursor-pointer">
+              <button onClick={() => setShowHidden(!showHidden)} className="ml-2 text-sm text-[var(--color-text-link)] font-medium hover:underline cursor-pointer">
                 {showHidden ? "Hide" : `${hiddenCount} hidden`}
               </button>
             )}
@@ -82,22 +82,22 @@ export default function PersonalityPage() {
       </div>
 
       {sortMode === "newest" && (
-        <div className="bg-white rounded border divide-y hover:shadow-md transition-shadow">
+        <div className="bg-[var(--color-surface)] rounded border divide-y hover:shadow-md transition-shadow">
           {[...traits]
             .filter(t => showHidden || (t.confidence || 0) >= 0.3)
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             .map((t) => (
-            <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50 flex justify-between items-center" onClick={() => setSelectedTrait(t)}>
+            <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)] flex justify-between items-center" onClick={() => setSelectedTrait(t)}>
               <div className="flex items-center gap-3">
                 <span>{TYPE_ICONS[t.trait_type] || "📌"}</span>
                 <div>
                   <span className="font-medium">{t.display_label || t.trait_value}</span>
-                  <span className="text-xs text-gray-400 ml-2 capitalize">{t.trait_type?.replace(/_/g, " ")}</span>
+                  <span className="text-xs text-[var(--color-text-muted)] ml-2 capitalize">{t.trait_type?.replace(/_/g, " ")}</span>
                 </div>
               </div>
               <div className="flex items-center gap-3">
                 <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Dismiss trait">&times;</button>
-                <span className="text-xs text-gray-400">{formatRelative(t.created_at)}</span>
+                <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(t.created_at)}</span>
                 <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                   <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
                 </div>
@@ -108,20 +108,20 @@ export default function PersonalityPage() {
       )}
 
       {sortMode === "grouped" && Object.entries(grouped).length === 0 && (
-        <div className="bg-gray-50 p-8 rounded border text-center text-gray-400">
+        <div className="bg-[var(--color-surface-muted)] p-8 rounded border text-center text-[var(--color-text-muted)]">
           No personality traits learned yet. Traits are generated automatically from observations via the synthesis pipeline.
         </div>
       )}
 
       {sortMode === "grouped" && allHidden && !showHidden && (
-        <div className="bg-amber-50 border border-amber-200 rounded p-6 text-center">
-          <p className="text-amber-800 font-medium mb-2">
+        <div className="bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)] rounded p-6 text-center">
+          <p className="text-[var(--color-warning-text)] font-medium mb-2">
             {Object.keys(grouped).length} trait type(s) found, but all below the display threshold.
           </p>
-          <p className="text-amber-600 text-sm mb-3">
+          <p className="text-[var(--color-warning-text)] text-sm mb-3">
             Traits need 2+ confirming observations to reach the 0.30 display threshold (confidence ≥ 30%).
           </p>
-          <button onClick={() => setShowHidden(true)} className="px-4 py-2 bg-amber-100 text-amber-800 rounded text-sm font-medium hover:bg-amber-200">
+          <button onClick={() => setShowHidden(true)} className="px-4 py-2 bg-amber-100 text-[var(--color-warning-text)] rounded text-sm font-medium hover:bg-amber-200">
             Show all ({hiddenCount} hidden)
           </button>
         </div>
@@ -131,25 +131,25 @@ export default function PersonalityPage() {
         const visibleTraits = (typeTraits as PersonalityTrait[]).filter(t => showHidden || (t.confidence || 0) >= 0.3);
         if (visibleTraits.length === 0) return null;
         return (
-        <div key={type} className="bg-white rounded border overflow-hidden hover:shadow-md transition-shadow">
-          <div className="bg-gray-50 px-4 py-2 border-b font-semibold text-sm flex items-center gap-2">
+        <div key={type} className="bg-[var(--color-surface)] rounded border overflow-hidden hover:shadow-md transition-shadow">
+          <div className="bg-[var(--color-surface-muted)] px-4 py-2 border-b font-semibold text-sm flex items-center gap-2">
             <span>{TYPE_ICONS[type] || "📌"}</span>
             <span className="capitalize">{type.replace(/_/g, " ")}</span>
           </div>
           <div className="divide-y">
             {visibleTraits.map((t: PersonalityTrait) => (
-              <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-gray-50" onClick={() => setSelectedTrait(t)}>
+              <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)]" onClick={() => setSelectedTrait(t)}>
                 <div className="flex justify-between items-center">
                   <div>
                     <span className="font-medium">{t.display_label || t.trait_value}</span>
-                    {t.exemplar_text && <p className="text-xs text-gray-400 mt-0.5">"{t.exemplar_text.substring(0, 100)}"</p>}
+                    {t.exemplar_text && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">"{t.exemplar_text.substring(0, 100)}"</p>}
                   </div>
                   <div className="flex items-center gap-2">
                     <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Dismiss trait">&times;</button>
                     <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
                       <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
                     </div>
-                    <span className="text-xs text-gray-500 w-8">{Math.round((t.confidence || 0) * 100)}%</span>
+                    <span className="text-xs text-[var(--color-text-muted)] w-8">{Math.round((t.confidence || 0) * 100)}%</span>
                   </div>
                 </div>
               </div>
@@ -164,25 +164,25 @@ export default function PersonalityPage() {
         {selectedTrait && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="font-semibold">Type:</span> <span className="text-gray-600">{selectedTrait.trait_type}</span></div>
-              <div><span className="font-semibold">Value:</span> <span className="text-gray-600">{selectedTrait.trait_value}</span></div>
-              <div><span className="font-semibold">Confidence:</span> <span className="text-gray-600">{Math.round((selectedTrait.confidence || 0) * 100)}%</span></div>
-              <div><span className="font-semibold">Source:</span> <span className="text-gray-600">{selectedTrait.source}</span></div>
+              <div><span className="font-semibold">Type:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.trait_type}</span></div>
+              <div><span className="font-semibold">Value:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.trait_value}</span></div>
+              <div><span className="font-semibold">Confidence:</span> <span className="text-[var(--color-text-secondary)]">{Math.round((selectedTrait.confidence || 0) * 100)}%</span></div>
+              <div><span className="font-semibold">Source:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.source}</span></div>
             </div>
             {selectedTrait.exemplar_text && (
               <div>
                 <h3 className="font-semibold mb-1">Exemplar</h3>
-                <pre className="bg-gray-50 p-4 rounded border text-sm">{selectedTrait.exemplar_text}</pre>
+                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border text-sm">{selectedTrait.exemplar_text}</pre>
               </div>
             )}
             {selectedTrait.metadata && (
               <div>
                 <h3 className="font-semibold mb-1">Metadata</h3>
-                <pre className="bg-gray-50 p-4 rounded border text-xs font-mono">{selectedTrait.metadata}</pre>
+                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border text-xs font-mono">{selectedTrait.metadata}</pre>
               </div>
             )}
             <div className="flex gap-2 pt-2">
-              <button onClick={() => { handleDismiss(selectedTrait.id); setSelectedTrait(null); }} className="text-sm text-red-500 hover:text-red-700">Dismiss trait</button>
+              <button onClick={() => { handleDismiss(selectedTrait.id); setSelectedTrait(null); }} className="text-sm text-red-500 hover:text-[var(--color-error-text)]">Dismiss trait</button>
             </div>
           </div>
         )}

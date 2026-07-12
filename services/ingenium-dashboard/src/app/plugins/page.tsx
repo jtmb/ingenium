@@ -101,7 +101,7 @@ export default function PluginsPage() {
     return (
       <div className="space-y-8">
         <h1 className="text-3xl font-bold">Plugins</h1>
-        <p className="text-gray-500">Loading plugins...</p>
+        <p className="text-[var(--color-text-muted)]">Loading plugins...</p>
       </div>
     );
   }
@@ -131,10 +131,10 @@ export default function PluginsPage() {
       </div>
 
       {showCreate && (
-        <div className="bg-white p-4 rounded border hover:shadow-md transition-shadow">
+        <div         className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow">
           <div className="flex flex-row gap-2 items-end flex-wrap">
             <div className="flex flex-col">
-              <label className="text-xs text-gray-500 mb-1">Name</label>
+              <label className="text-xs text-[var(--color-text-muted)] mb-1">Name</label>
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -143,7 +143,7 @@ export default function PluginsPage() {
               />
             </div>
             <div className="flex flex-col">
-              <label className="text-xs text-gray-500 mb-1">File Path</label>
+              <label className="text-xs text-[var(--color-text-muted)] mb-1">File Path</label>
               <input
                 value={newPath}
                 onChange={(e) => setNewPath(e.target.value)}
@@ -152,7 +152,7 @@ export default function PluginsPage() {
               />
             </div>
             <div className="flex flex-col">
-              <label className="text-xs text-gray-500 mb-1">File (.ts)</label>
+              <label className="text-xs text-[var(--color-text-muted)] mb-1">File (.ts)</label>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -173,14 +173,14 @@ export default function PluginsPage() {
       )}
 
       {plugins.length === 0 ? (
-        <p className="text-gray-500">
+        <p className="text-[var(--color-text-muted)]">
           No plugins registered. Click &quot;Add Plugin&quot; to upload one.
         </p>
       ) : (
         <div className="space-y-3">
           {plugins.map((p) =>
             editingId === p.id ? (
-              <div key={p.id} className="bg-white p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
+              <div key={p.id} className="bg-[var(--color-surface)] p-4 rounded border space-y-3 hover:shadow-md transition-shadow">
                 <input
                   value={editPath}
                   onChange={(e) => setEditPath(e.target.value)}
@@ -202,7 +202,7 @@ export default function PluginsPage() {
                   </button>
                   <button
                     onClick={() => setEditingId(null)}
-                    className="bg-gray-200 text-gray-700 py-2 px-4 rounded text-sm hover:bg-gray-300 transition-colors"
+                    className="bg-gray-200 text-[var(--color-text-primary)] py-2 px-4 rounded text-sm hover:bg-gray-300 transition-colors"
                   >
                     Cancel
                   </button>
@@ -211,13 +211,13 @@ export default function PluginsPage() {
             ) : (
               <div
                 key={p.id}
-                className="bg-white p-4 rounded border hover:shadow-md transition-shadow flex flex-col gap-2 cursor-pointer"
+                className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow flex flex-col gap-2 cursor-pointer"
                 onClick={() => setSelectedPlugin(p)}
               >
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="font-medium">{p.name}</span>
-                    <span className="text-sm text-gray-500 ml-2">{p.file_path}</span>
+                    <span className="text-sm text-[var(--color-text-muted)] ml-2">{p.file_path}</span>
                   </div>
                   <div className="flex gap-2">
                     <button
@@ -234,7 +234,7 @@ export default function PluginsPage() {
                         setEditPath(p.file_path);
                         setEditContent(content);
                       }}
-                      className="bg-gray-100 text-gray-600 py-1 px-3 rounded text-sm hover:bg-gray-200 transition-colors"
+                      className="bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] py-1 px-3 rounded text-sm hover:bg-gray-200 transition-colors"
                     >
                       Edit
                     </button>
@@ -242,8 +242,8 @@ export default function PluginsPage() {
                       onClick={(e) => { e.stopPropagation(); toggle(p); }}
                       className={`py-1 px-3 rounded text-sm transition-colors ${
                         p.enabled
-                          ? "bg-green-100 text-green-700 hover:bg-green-200"
-                          : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                          ? "bg-[var(--color-success-bg)] text-green-700 hover:bg-green-200"
+                          : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] hover:bg-gray-200"
                       }`}
                     >
                       {p.enabled ? "Enabled" : "Disabled"}
@@ -257,7 +257,7 @@ export default function PluginsPage() {
                   </div>
                 </div>
                 {p.source_content && (
-                  <pre className="text-xs text-gray-400 font-mono truncate bg-gray-50 p-2 rounded">
+                  <pre className="text-xs text-[var(--color-text-muted)] font-mono truncate bg-[var(--color-surface-muted)] p-2 rounded">
                     {p.source_content.slice(0, 120)}
                     {p.source_content.length > 120 ? "..." : ""}
                   </pre>
@@ -275,20 +275,20 @@ export default function PluginsPage() {
       >
         {selectedPlugin && (
           <div className="space-y-4">
-            <div className="text-sm text-gray-600">
+            <div className="text-sm text-[var(--color-text-secondary)]">
               <span className="font-semibold">Enabled:</span>{" "}
-              <span className={selectedPlugin.enabled ? "text-green-600" : "text-red-600"}>
+              <span className={selectedPlugin.enabled ? "text-[var(--color-success-text)]" : "text-[var(--color-error-text)]"}>
                 {selectedPlugin.enabled ? "Yes" : "No"}
               </span>
             </div>
             {selectedPlugin.source_content && (
               <div>
-                <div className="flex items-center gap-2 border-b border-gray-200 pb-2 mb-2">
-                  <span className="px-3 py-1 text-sm rounded bg-gray-200 text-gray-400 cursor-not-allowed">Preview</span>
+                <div className="flex items-center gap-2 border-b border-[var(--color-border)] pb-2 mb-2">
+                  <span className="px-3 py-1 text-sm rounded bg-gray-200 text-[var(--color-text-muted)] cursor-not-allowed">Preview</span>
                   <span className="px-3 py-1 text-sm rounded bg-blue-600 text-white">Source</span>
-                  <span className="text-xs text-gray-400 ml-auto">Source code — not markdown</span>
+                  <span className="text-xs text-[var(--color-text-muted)] ml-auto">Source code — not markdown</span>
                 </div>
-                <pre className="bg-gray-50 p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border overflow-x-auto text-sm font-mono whitespace-pre-wrap">
                   {selectedPlugin.source_content}
                 </pre>
               </div>

@@ -19,11 +19,11 @@ function renderSimpleMarkdown(text: string): string {
   // Code blocks (fenced with ```)
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, lang, code) => {
     const langClass = lang ? `language-${lang.toLowerCase()}` : "";
-    return `<pre class="bg-gray-100 border p-3 rounded overflow-x-auto text-sm font-mono"><code class="${langClass}">${code.trim()}</code></pre>`;
+    return `<pre class="bg-[var(--color-surface-muted)] border p-3 rounded overflow-x-auto text-sm font-mono"><code class="${langClass}">${code.trim()}</code></pre>`;
   });
 
   // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 rounded text-sm font-mono">$1</code>');
+  html = html.replace(/`([^`]+)`/g, '<code class="bg-[var(--color-surface-muted)] px-1 rounded text-sm font-mono">$1</code>');
 
   // Headings
   html = html.replace(/^### (.+)$/gm, '<h3 class="text-lg font-semibold mt-4 mb-2">$1</h3>');
@@ -42,7 +42,7 @@ function renderSimpleMarkdown(text: string): string {
   html = html.replace(/^---$/gm, '<hr class="my-4 border-gray-300" />');
 
   // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-600 underline">$1</a>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-[var(--color-text-link)] underline">$1</a>');
 
   // Line breaks
   html = html.replace(/\n\n/g, '</p><p class="mb-2">');
@@ -89,13 +89,13 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
     <div className="space-y-4">
       {/* Toggle bar */}
       {isMarkdown && (
-        <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] pb-2">
           <button
             onClick={() => setViewMode("preview")}
             className={`px-3 py-1 text-sm rounded ${
               viewMode === "preview"
                 ? "bg-blue-600 text-white"
-                : "text-gray-600 hover:bg-gray-100"
+                : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
             }`}
           >
             Preview
@@ -105,7 +105,7 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
             className={`px-3 py-1 text-sm rounded ${
               viewMode === "source"
                 ? "bg-blue-600 text-white"
-                : "text-gray-600 hover:bg-gray-100"
+                : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
             }`}
           >
             Source
@@ -115,8 +115,8 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
 
       {/* Non-markdown indicator */}
       {!isMarkdown && (
-        <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
-          <span className="px-3 py-1 text-sm rounded bg-gray-200 text-gray-400 cursor-not-allowed">
+        <div className="flex items-center gap-2 border-b border-[var(--color-border)] pb-2">
+          <span className="px-3 py-1 text-sm rounded bg-gray-200 text-[var(--color-text-muted)] cursor-not-allowed">
             Preview
           </span>
           <span className="px-3 py-1 text-sm rounded bg-blue-600 text-white">
@@ -129,11 +129,11 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
       {isMarkdown && viewMode === "preview" ? (
         <div
           ref={containerRef}
-          className="prose prose-sm max-w-none text-gray-800 leading-relaxed"
+          className="prose prose-sm max-w-none text-[var(--color-text-primary)] leading-relaxed"
           dangerouslySetInnerHTML={{ __html: renderedHtml }}
         />
       ) : (
-        <pre className="bg-gray-50 border p-4 rounded overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+        <pre className="bg-[var(--color-surface-muted)] border p-4 rounded overflow-x-auto text-sm font-mono whitespace-pre-wrap">
           <code ref={sourceRef} className={langClass ? `language-${langClass}` : ""}>
             {content}
           </code>

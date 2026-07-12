@@ -66,7 +66,7 @@ packages/
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
 ├── ingenium-server/      # MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access. Tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
-└── ingenium-dashboard/   # Next.js 16 App Router frontend (15 pages). Calls API via HTTP. Zero DB access.
+└── ingenium-dashboard/   # Next.js 16 App Router frontend (16 pages). Calls API via HTTP. Zero DB access.
 ```
 
 **API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer. Commands are captured in the DB alongside skills, agents, and plugins.
@@ -80,9 +80,9 @@ The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
 | `/` | Home — feature cards overview |
 | `/opencode` | Embedded OpenCode web UI iframe |
 | `/projects` | Project management (create, rename, archive, restore) |
-| `/archive` | Archived projects with restore/purge |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
-| `/learnings` | Deprecated — redirects to `/observations` |
+| `/jobs` | Job queue and background task monitoring |
+| `/logs` | Structured logging and event viewer |
 | `/mail` | 3-pane email client (FolderSidebar, EmailList, EmailReader), AccountSetup when no accounts configured |
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
@@ -219,7 +219,7 @@ healthcheck:
 bash tests/test-self-improving.sh        # All 4 detection pipeline tests
 bash tests/test-self-improving.sh -v     # Verbose output
 bash tests/enforce-no-db-leaks.sh        # CI gate: verify no DB access leaks
-bash tests/test-agent-validation.sh      # Agent validation checks (9 agents)
+bash tests/test-agent-validation.sh      # Agent validation checks (10 agents)
 bash tests/test-append-only-files.sh     # Verify append-only file constraints
 
 # Run unit tests
@@ -256,7 +256,7 @@ Never log implementation notes as observations. Observations track the USER's be
 - "Fixed plugins table UNIQUE constraint"
 - Any description of code changes or architecture decisions
 
-> 🔴 **Agent files updated**: All 9 agent `.md` files had their "🔴 Observation — Log User Interactions" sections removed. Observation is now automatic via the server-side extraction engine reading OpenCode message history. Do not re-add manual observation sections to agent files.
+> 🔴 **Agent files updated**: All 10 agent `.md` files had their "🔴 Observation — Log User Interactions" sections removed. Observation is now automatic via the server-side extraction engine reading OpenCode message history. Do not re-add manual observation sections to agent files.
 
 **Observation types:**
 - `correction` — User corrects agent behavior
@@ -357,7 +357,7 @@ The **Auto-Observer** (`packages/ingenium-extension/auto-observer.ts`) is now a 
 
 **Configuration**: Uses `INGENIUM_API_URL` env var (default: `http://localhost:4097/api/v1`).
 
-> 🔴 **Note**: The Auto-Observer replaces manual `ingenium_observe` calls in agent code. All 9 agent files had their "🔴 Observation — Log User Interactions" sections removed since observation is now automatic.
+> 🔴 **Note**: The Auto-Observer replaces manual `ingenium_observe` calls in agent code. All 10 agent files had their "🔴 Observation — Log User Interactions" sections removed since observation is now automatic.
 
 ### Observation → Trait → Skill Flow
 

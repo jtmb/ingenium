@@ -83,7 +83,7 @@ function TreeNodeItem({ node, depth, onSelect, selectedFile }: { node: TreeNode;
           else if (hasContent) onSelect(node.path, node.content || "");
         }}
         className={`flex items-center gap-1 px-2 py-1 cursor-pointer rounded text-sm ${
-          isSelected ? "bg-blue-100 text-blue-800" : "hover:bg-gray-100"
+          isSelected ? "bg-blue-100 text-blue-800" : "hover:bg-[var(--color-surface-hover)]"
         }`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
       >
@@ -102,8 +102,8 @@ export default function FileTree({ fileTreeJson, skillContent, skillName, tags, 
   const tree = parseTree(fileTreeJson, skillContent, skillName, tags, alwaysApply);
 
   return (
-    <div className="border-r border-gray-200 h-full overflow-y-auto bg-gray-50 min-w-[220px] max-w-[300px]">
-      <div className="p-2 font-semibold text-sm text-gray-500 border-b">{skillName}</div>
+    <div className="border-r border-[var(--color-border)] h-full overflow-y-auto bg-[var(--color-surface-muted)] min-w-[220px] max-w-[300px]">
+      <div className="p-2 font-semibold text-sm text-[var(--color-text-muted)] border-b">{skillName}</div>
       <div className="py-1">
         {tree.map((node) => (
           <TreeNodeItem key={node.path} node={node} depth={0} onSelect={onSelectFile} selectedFile={selectedFile} />

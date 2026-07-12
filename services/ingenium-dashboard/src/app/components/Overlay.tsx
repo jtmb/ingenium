@@ -35,20 +35,20 @@ export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, 
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
       
       {/* Panel */}
-      <div className={`relative bg-white rounded-lg shadow-2xl flex flex-col ${
+      <div className={`relative bg-[var(--color-surface)] rounded-lg shadow-2xl flex flex-col ${
         fullScreen
           ? "w-[calc(100%-32px)] h-[calc(100%-32px)] m-4 max-w-none"
           : "mt-8 mb-8 w-11/12 max-w-5xl max-h-[90vh]"
       }`}>
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
           <div className="min-w-0">
             <h2 className="text-xl font-bold truncate">{title}</h2>
-            {subtitle && <p className="text-sm text-gray-500 truncate">{subtitle}</p>}
+            {subtitle && <p className="text-sm text-[var(--color-text-muted)] truncate">{subtitle}</p>}
           </div>
           <button
             onClick={onClose}
-            className="ml-4 p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full shrink-0"
+            className="ml-4 p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] rounded-full shrink-0"
             aria-label="Close"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -124,14 +124,14 @@ export default function AgentsPage() {
       </div>
 
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+        <div className="bg-red-100 border border-red-400 text-[var(--color-error-text)] px-4 py-3 rounded">
           {error}
           <button onClick={() => setError(null)} className="float-right font-bold">&times;</button>
         </div>
       )}
 
       {showCreate && (
-        <div className="bg-white p-4 rounded border space-y-4 hover:shadow-md transition-shadow">
+        <div className="bg-[var(--color-surface)] p-4 rounded border space-y-4 hover:shadow-md transition-shadow">
           <h2 className="text-xl font-semibold">Create New Agent</h2>
           <input
             className="border p-2 rounded w-full"
@@ -146,13 +146,13 @@ export default function AgentsPage() {
             onChange={e => setNewDesc(e.target.value)}
           />
           <div className="flex gap-4">
-            <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={newCat} onChange={e => setNewCat(e.target.value)}>
+            <select className="border p-2 rounded flex-1 hover:bg-[var(--color-surface-hover)] cursor-pointer" value={newCat} onChange={e => setNewCat(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="execution">Execution</option>
               <option value="research">Research</option>
               <option value="security">Security</option>
             </select>
-            <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={newMode} onChange={e => setNewMode(e.target.value)}>
+            <select className="border p-2 rounded flex-1 hover:bg-[var(--color-surface-hover)] cursor-pointer" value={newMode} onChange={e => setNewMode(e.target.value)}>
               <option value="primary">Primary</option>
               <option value="subagent">Subagent</option>
             </select>
@@ -179,10 +179,10 @@ export default function AgentsPage() {
         </div>
       )}
 
-      {loading && <p className="text-gray-500">Loading agents...</p>}
+      {loading && <p className="text-[var(--color-text-muted)]">Loading agents...</p>}
 
       {!loading && agents.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-[var(--color-text-muted)]">
           <p className="text-lg">No agents registered</p>
           <p className="text-sm">Use "Add Agent" to create your first agent. Agents are written to .opencode/agents/ and synced to global config.</p>
         </div>
@@ -193,7 +193,7 @@ export default function AgentsPage() {
           <h2 className="text-2xl font-semibold capitalize mb-4">{group.category}</h2>
           <div className="space-y-4">
             {group.items.map(agent => (
-              <div key={agent.id} className="bg-white p-4 rounded border hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelectedAgent(agent)}>
+              <div key={agent.id} className="bg-[var(--color-surface)] p-4 rounded border hover:shadow-md transition-shadow cursor-pointer" onClick={() => setSelectedAgent(agent)}>
                 {editingId === agent.id ? (
                   <div className="space-y-4">
                     <input
@@ -203,7 +203,7 @@ export default function AgentsPage() {
                       onChange={e => setEditDesc(e.target.value)}
                     />
                     <div className="flex gap-4">
-                      <select className="border p-2 rounded flex-1 hover:bg-gray-50 cursor-pointer" value={editCat} onChange={e => setEditCat(e.target.value)}>
+                      <select className="border p-2 rounded flex-1 hover:bg-[var(--color-surface-hover)] cursor-pointer" value={editCat} onChange={e => setEditCat(e.target.value)}>
                         <option value="primary">Primary</option>
                         <option value="execution">Execution</option>
                         <option value="research">Research</option>
@@ -245,7 +245,7 @@ export default function AgentsPage() {
                         <span className={`ml-2 text-xs px-2 py-0.5 rounded ${agent.mode === 'primary' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
                           {agent.mode}
                         </span>
-                        <span className={`ml-2 text-xs px-2 py-0.5 rounded ${agent.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
+                        <span className={`ml-2 text-xs px-2 py-0.5 rounded ${agent.enabled ? 'bg-[var(--color-success-bg)] text-green-800' : 'bg-gray-200 text-[var(--color-text-secondary)]'}`}>
                           {agent.enabled ? 'Enabled' : 'Disabled'}
                         </span>
                       </div>
@@ -270,11 +270,11 @@ export default function AgentsPage() {
                         </button>
                       </div>
                     </div>
-                    {agent.description && <p className="text-sm text-gray-600 mb-2">{agent.description}</p>}
-                    {agent.model && <p className="text-xs text-gray-400">Model: {agent.model}</p>}
+                    {agent.description && <p className="text-sm text-[var(--color-text-secondary)] mb-2">{agent.description}</p>}
+                    {agent.model && <p className="text-xs text-[var(--color-text-muted)]">Model: {agent.model}</p>}
                     <details className="mt-2">
-                      <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-700">Preview content</summary>
-                      <pre className="mt-2 text-xs bg-gray-50 p-2 rounded overflow-x-auto max-h-32 overflow-y-auto">
+                      <summary className="text-xs text-[var(--color-text-muted)] cursor-pointer hover:text-[var(--color-text-primary)]">Preview content</summary>
+                      <pre className="mt-2 text-xs bg-[var(--color-surface-muted)] p-2 rounded overflow-x-auto max-h-32 overflow-y-auto">
                         {agent.content.substring(0, 500)}{agent.content.length > 500 ? '...' : ''}
                       </pre>
                     </details>
@@ -295,10 +295,10 @@ export default function AgentsPage() {
         {selectedAgent && (
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="font-semibold">Category:</span> <span className="text-gray-600">{selectedAgent.category}</span></div>
-              <div><span className="font-semibold">Mode:</span> <span className="text-gray-600">{selectedAgent.mode}</span></div>
-              {selectedAgent.model && <div><span className="font-semibold">Model:</span> <span className="text-gray-600">{selectedAgent.model}</span></div>}
-              <div><span className="font-semibold">Enabled:</span> <span className={selectedAgent.enabled ? "text-green-600" : "text-red-600"}>{selectedAgent.enabled ? "Yes" : "No"}</span></div>
+              <div><span className="font-semibold">Category:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.category}</span></div>
+              <div><span className="font-semibold">Mode:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.mode}</span></div>
+              {selectedAgent.model && <div><span className="font-semibold">Model:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.model}</span></div>}
+              <div><span className="font-semibold">Enabled:</span> <span className={selectedAgent.enabled ? "text-[var(--color-success-text)]" : "text-[var(--color-error-text)]"}>{selectedAgent.enabled ? "Yes" : "No"}</span></div>
             </div>
             <MarkdownViewer content={selectedAgent.content} isMarkdown={true} />
           </div>

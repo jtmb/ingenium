@@ -48,11 +48,11 @@ export default function ConfigPage() {
       <h1 className="text-3xl font-bold">Config</h1>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-gray-200">
+      <div className="flex gap-1 border-b border-[var(--color-border)]">
         <button
           onClick={() => setTab("project")}
           className={`px-4 py-2 text-sm font-medium rounded-t ${
-            tab === "project" ? "bg-white text-blue-700 border border-b-white border-gray-200 -mb-px" : "text-gray-500 hover:text-gray-700"
+            tab === "project" ? "bg-[var(--color-surface)] text-blue-700 border border-b-white border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
           }`}
         >
           Project Config
@@ -60,7 +60,7 @@ export default function ConfigPage() {
         <button
           onClick={() => setTab("global")}
           className={`px-4 py-2 text-sm font-medium rounded-t ${
-            tab === "global" ? "bg-white text-blue-700 border border-b-white border-gray-200 -mb-px" : "text-gray-500 hover:text-gray-700"
+            tab === "global" ? "bg-[var(--color-surface)] text-blue-700 border border-b-white border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
           }`}
         >
           Global Config
@@ -68,19 +68,19 @@ export default function ConfigPage() {
       </div>
 
       {/* Editor */}
-      <div className="bg-white border border-gray-200 rounded p-4 space-y-3">
-        <div className="text-sm text-gray-500">{tab === "project" ? "opencode.json" : "opencode.jsonc"}</div>
+      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4 space-y-3">
+        <div className="text-sm text-[var(--color-text-muted)]">{tab === "project" ? "opencode.json" : "opencode.jsonc"}</div>
         <textarea
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          className="w-full border border-gray-200 rounded p-3 font-mono text-sm leading-relaxed"
+          className="w-full border border-[var(--color-border)] rounded p-3 font-mono text-sm leading-relaxed"
           rows={24}
           spellCheck={false}
         />
         <div className="flex gap-3">
           <button
             onClick={syncFromDisk}
-            className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-gray-50"
+            className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-[var(--color-surface-hover)]"
           >
             Sync from disk
           </button>
@@ -94,7 +94,7 @@ export default function ConfigPage() {
         </div>
         {message && (
           <div className={`text-sm px-3 py-2 rounded ${
-            message.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+            message.type === "success" ? "bg-[var(--color-success-bg)] text-green-700" : "bg-[var(--color-error-bg)] text-[var(--color-error-text)]"
           }`}>{message.text}</div>
         )}
       </div>

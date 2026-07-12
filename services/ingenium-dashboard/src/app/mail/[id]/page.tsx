@@ -110,8 +110,8 @@ export default function EmailDetailPage({
   if (loading) {
     return (
       <div className="space-y-4">
-        <h1 className="text-3xl font-bold text-gray-900 mb-6">Email</h1>
-        <div className="border border-gray-200 rounded bg-white">
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Email</h1>
+        <div className="border border-[var(--color-border)] rounded bg-[var(--color-surface)]">
           <EmailReader email={null} loading={true} accountId={accountId} onReply={() => {}} onForward={() => {}} onDelete={() => {}} onArchive={() => {}} />
         </div>
       </div>
@@ -121,9 +121,9 @@ export default function EmailDetailPage({
   if (error || !email) {
     return (
       <div className="space-y-4">
-        <h1 className="text-3xl font-bold text-gray-900 mb-6">Email</h1>
-        <div className="bg-white p-6 rounded-lg border text-center">
-          <p className="text-gray-500 text-sm mb-4">{error || "Email not found"}</p>
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Email</h1>
+        <div className="bg-[var(--color-surface)] p-6 rounded-lg border text-center">
+          <p className="text-[var(--color-text-muted)] text-sm mb-4">{error || "Email not found"}</p>
           <button
             onClick={() => router.push("/mail")}
             className="bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium"
@@ -140,12 +140,12 @@ export default function EmailDetailPage({
       <div className="flex items-center gap-2 mb-4">
         <button
           onClick={() => router.push("/mail")}
-          className="text-sm text-gray-600 hover:text-gray-900"
+          className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
         >
           ← Back to Inbox
         </button>
       </div>
-      <div className="border border-gray-200 rounded bg-white">
+      <div className="border border-[var(--color-border)] rounded bg-[var(--color-surface)]">
         <EmailReader
           email={email}
           loading={false}
