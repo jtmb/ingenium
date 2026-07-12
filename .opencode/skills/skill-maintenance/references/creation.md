@@ -24,12 +24,6 @@ tags: [creation, naming, frontmatter, template, split-skill]
 4. **Unique across the catalog**: Check SKILL-INDEX.md for conflicts
 5. **Short but specific**: 1-4 hyphenated segments preferred
 
-### Step C — Directory Structure
-
-**Monolithic** (small skills, <300 lines, single topic):
-```
-.opencode/skills/<name>/
-  SKILL.md                # Required — all content inline
 ```
 
 **Split** (large or multi-topic):
@@ -41,8 +35,6 @@ tags: [creation, naming, frontmatter, template, split-skill]
     topic-one.md
     topic-two.md
 ```
-
-Choose monolithic for <300 lines / single topic. Choose split when content would exceed 500 lines or covers multiple distinct subtopics.
 
 ### Step D — Frontmatter
 
@@ -62,9 +54,6 @@ description: "Process and analyze spreadsheet files (.csv, .xlsx) — data clean
 | `metadata` | ❌ | Map |
 
 ### Step E — Content Structure
-
-**Monolithic SKILL.md:**
-1. Title → When to Use → 🔴 HARD RULEs → Body → Cross-References
 
 **Split SKILL.md (index):**
 1. Frontmatter → When to Use → 🔴 HARD RULEs → Table of Contents → Cross-References
@@ -88,35 +77,6 @@ tags: [keyword, keyword]
 ```
 
 ### Templates
-
-**Monolithic template:**
-```markdown
----
-name: {skill-name}
-description: "{Action} {domain} — {specific capabilities}. Use when {trigger scenarios}."
----
-
-# {Title}
-
-## When to Use
-
-- "User says this trigger phrase"
-- "User mentions this scenario"
-
-## 🔴 HARD RULEs
-
-### 🔴 {Rule Title}
-
-{Description of the non-negotiable rule.}
-
-## {Section 1}
-
-{Content starts directly. No preamble.}
-
-## Cross-References
-
-- **`<related-skill>`** — {why related}
-```
 
 **Split-skill template (SKILL.md):**
 ```markdown
