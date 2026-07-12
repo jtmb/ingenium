@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { cookies } from "next/headers";
 import "./globals.css";
 import "highlight.js/styles/github.css";
 import "./hljs-dark.css";
@@ -16,13 +17,17 @@ export const metadata: Metadata = {
 };
 
 /** Root layout — includes the top navigation bar and wraps all page content. */
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  const themeCookie = cookieStore.get("theme")?.value;
+  const htmlClass = themeCookie === "dark" ? "dark" : "";
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className={htmlClass} suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('theme')||'system';if(t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')}catch(e){}})()`,
+            __html: `(function(){try{var m=document.cookie.match(/(?:^|;\\s*)theme=([^;]*)/);var c=m?m[1]:null;if(c==='dark')document.documentElement.classList.add('dark');else if(!c){var t=localStorage.getItem('theme')||'system';if(t==='dark'||(t==='system'&&window.matchMedia('(prefers-color-scheme:dark)').matches))document.documentElement.classList.add('dark')}}catch(e){}})()`,
           }}
         />
       </head>
