@@ -25,6 +25,8 @@ tags: [site-recipe, youtube, youtube.com, video, browser]
 
 ⚠️ **Search button warm-up:** The search button may require one manual click before programmatic clicks work. After warm-up, scripted clicks succeed. Set the input value and dispatch an `InputEvent` before clicking search.
 
+> 💡 **Reliable alternative:** Navigate directly to `https://www.youtube.com/results?search_query=<query>` (see Navigation Patterns below). This bypasses the warm-up click issue entirely.
+
 #### Video Cards (Search Results)
 
 | Purpose | Selector | Type | Verified |
@@ -228,10 +230,51 @@ if (confirmBtn) await confirmBtn.click();
 
 ---
 
+---
+
+### Pattern: Search via Direct URL (Bypass Search Form)
+
+**Goal:** Search YouTube without relying on the search form click interaction (avoids the warm-up click issue entirely).
+
+**Steps:**
+1. Navigate directly to `https://www.youtube.com/results?search_query=<URL-encoded-query>` with `{ waitUntil: "domcontentloaded" }`
+2. Wait 2-3s for dynamic content to load (YouTube loads results via JS after initial DOM)
+3. Query `ytd-video-renderer` elements for results
+
+**Why:** The search form button (`#search-icon-legacy`) requires a manual warm-up click before programmatic clicks work. The direct URL approach bypasses this entirely and is more reliable for automated use.
+
+**Wait strategy:** After navigation, wait 2-3s (static delay), then check for `ytd-video-renderer` elements. If none found, wait another 2s and retry.
+
+**Example script:**
+```js
+const query = "cat videos";
+const p = await browser.getPage("yt-search");
+await p.goto(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, { waitUntil: "domcontentloaded" });
+await new Promise(r => setTimeout(r, 3000)); // Let JS populate results
+
+const results = await p.evaluate(() => {
+  return [...document.querySelectorAll("ytd-video-renderer")]
+    .slice(0, 3)
+    .map(card => {
+      const titleEl = card.querySelector("#video-title");
+      const channelEl = card.querySelector("ytd-channel-name a");
+      return {
+        title: titleEl?.textContent?.trim() || null,
+        channel: channelEl?.textContent?.trim() || null,
+        url: titleEl?.href || null
+      };
+    });
+});
+console.log(JSON.stringify(results));
+```
+
+> 💡 **Verified working:** 2026-07-12 — direct URL search returned 3 video results in ~5s total (including Chrome launch).
+
 ### What Works / What Broke
 
 | Date | Task | What Broke | What Worked | Updated By |
 |------|------|------------|-------------|------------|
+| 2026-07-12 | Search "cat videos" | Search form button (`#search-icon-legacy`) required warm-up click — programmatic click timed out | ✅ Direct URL navigation `youtube.com/results?search_query=...` bypassed form entirely. Selectors confirmed: `ytd-video-renderer`, `#video-title`, `ytd-channel-name a`. Screenshot validated at 868KB | browser-agent |
 | — | — | — | — | Initial recipe |
 
 ---
