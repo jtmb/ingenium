@@ -28,7 +28,8 @@ export function stripLeadingFrontmatter(text: string): string {
     // Trim exactly one leading newline (the separator between blocks / body)
     if (t.startsWith("\r\n")) t = t.slice(2);
     else if (t.startsWith("\n")) t = t.slice(1);
-    else break; // nothing more to strip
+    // Don't break: the regex may have consumed the trailing newline,
+    // so the next block could follow immediately (stacked frontmatter).
 
     // Safety: guard against non-advancing regex
     if (t === prev) break;
@@ -67,9 +68,14 @@ export function writeSkillToDisk(skill: Skill): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
   // Write SKILL.md with YAML frontmatter
+  // Un-escape any existing escapes before re-escaping to prevent double-escape
+  const escaped = (skill.description || "")
+    .replace(/\\\\"/g, '"')  // un-escape double-escaped quotes
+    .replace(/\\"/g, '"')    // un-escape single-escaped quotes
+    .replace(/"/g, '\\"');   // re-escape exactly once
   const frontmatter = `---
 name: ${skill.name}
-description: "${(skill.description || "").replace(/"/g, '\\"')}"
+description: "${escaped}"
 created: ${(skill as any).created_at || new Date().toISOString()}
 ---
 `;
@@ -212,7 +218,9 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
     const nameMatch = content.match(/^name:\s*(.+)$/m);
     const descMatch = content.match(/^description:\s*"(.+)"$/m);
     const diskName = nameMatch?.[1] ?? name;
-    const description = descMatch?.[1] ?? "";
+    // Un-escape YAML-escaped quotes to restore original description text
+    const rawDescription = descMatch?.[1] ?? "";
+    const description = rawDescription.replace(/\\"/g, '"');
 
     // Read metadata.json
     const metaPath = resolve(filePath, "..", "metadata.json");
