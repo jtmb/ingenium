@@ -66,6 +66,22 @@ export default function MailPage() {
       .catch(() => setFolders([]));
   }, [selectedAccount]);
 
+  // Prefetch INBOX + common folders into cache (silent, doesn't touch UI)
+  useEffect(() => {
+    if (!selectedAccount || folders.length === 0) return;
+    const prefetch = (folder: string) =>
+      fetch(`${API_BASE}/emails?project=${PROJECT}&folder=${encodeURIComponent(folder)}&account=${selectedAccount}&page=1&limit=50`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (d?.data) emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: d.data, total: d.total || 0 });
+        })
+        .catch(() => {});
+    // Prefetch INBOX first, then batch the rest
+    prefetch("INBOX");
+    const others = folders.slice(1, 8).map((f: any) => f.path || f.name);
+    setTimeout(() => others.forEach(f => prefetch(f)), 5000); // defer non-INBOX by 5s
+  }, [selectedAccount, folders]);
+
   // Background poller: refresh INBOX every 30s
   useEffect(() => {
     if (!selectedAccount) return;
