@@ -256,7 +256,7 @@ export async function callSynthesisLLM(
         ],
         temperature: 0.3,
         max_tokens: 8192,
-        response_format: { type: "json_object" },
+        // LM Studio rejects "json_object" — omit response_format, rely on prompt.
       }),
       signal,
     });
@@ -319,24 +319,78 @@ function tryParseJSON(text: string): any {
   }
 }
 
-/**
- * Check if LLM synthesis is configured for the global project.
- */
-export function isLLMSynthesisConfigured(_projectId: string): boolean {
-  const gid = getGlobalProject()?.id;
-  return gid ? !!getSetting(gid, "synthesis_model") : false;
+// ── LLM Config Resolution ──────────────────────────────────
+
+export interface LLMConfig {
+  model: string;
+  apiKey?: string;
+  endpoint?: string;
 }
 
 /**
- * Get the configured LLM synthesis settings from the global project.
+ * Resolve LLM configuration with a fallback chain:
+ *   1. Global project (is_global = 1) → "synthesis_model", "synthesis_api_key", "synthesis_endpoint"
+ *   2. Current project (projectId) settings
+ *   3. Environment variables: SYNTHESIS_MODEL, SYNTHESIS_API_KEY, SYNTHESIS_ENDPOINT
+ *
+ * Returns null if no config is found anywhere.
  */
-export function getLLMSynthesisConfig(_projectId: string): { model: string; apiKey?: string } | null {
+export function resolveLLMConfig(projectId?: string): LLMConfig | null {
+  // 1. Try global project
   const gid = getGlobalProject()?.id;
-  if (!gid) return null;
-  const model = getSetting(gid, "synthesis_model");
-  const apiKey = getSetting(gid, "synthesis_api_key");
-  if (!model) return null;
-  return { model, apiKey: apiKey || undefined };
+  if (gid) {
+    const model = getSetting(gid, "synthesis_model");
+    if (model) {
+      return {
+        model,
+        apiKey: getSetting(gid, "synthesis_api_key") || undefined,
+        endpoint: getSetting(gid, "synthesis_endpoint") || undefined,
+      };
+    }
+  }
+
+  // 2. Fall back to current project
+  if (projectId) {
+    const model = getSetting(projectId, "synthesis_model");
+    if (model) {
+      return {
+        model,
+        apiKey: getSetting(projectId, "synthesis_api_key") || undefined,
+        endpoint: getSetting(projectId, "synthesis_endpoint") || undefined,
+      };
+    }
+  }
+
+  // 3. Fall back to environment variables
+  const envModel = process.env.SYNTHESIS_MODEL;
+  if (envModel) {
+    return {
+      model: envModel,
+      apiKey: process.env.SYNTHESIS_API_KEY || undefined,
+      endpoint: process.env.SYNTHESIS_ENDPOINT || undefined,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Check if LLM synthesis is configured for the global project,
+ * with fallback to the current project and env vars.
+ */
+export function isLLMSynthesisConfigured(projectId: string): boolean {
+  const config = resolveLLMConfig(projectId);
+  return config ? !!config.model : false;
+}
+
+/**
+ * Get the configured LLM synthesis settings.
+ * Falls back: global → project → env vars.
+ */
+export function getLLMSynthesisConfig(projectId: string): { model: string; apiKey?: string } | null {
+  const config = resolveLLMConfig(projectId);
+  if (!config || !config.model) return null;
+  return { model: config.model, apiKey: config.apiKey };
 }
 
 /**
@@ -366,15 +420,10 @@ export async function consolidateTraits(
   observations: Array<{ id: number; observation_type: string; content: string }>,
   existingTraits: Array<{ id: number; trait_type: string; trait_value: string; confidence: number }>,
 ): Promise<ConsolidationResult | null> {
-  if (!isLLMSynthesisConfigured(projectId)) return null;
+  const config = resolveLLMConfig(projectId);
+  if (!config || !config.model || !config.endpoint) return null;
 
-  const gid = getGlobalProject()?.id;
-  if (!gid) return null;
-
-  const model = getSetting(gid, "synthesis_model");
-  const apiKey = getSetting(gid, "synthesis_api_key") || undefined;
-  const endpoint = getSetting(gid, "synthesis_endpoint");
-  if (!model || !endpoint) return null;
+  const { model, apiKey, endpoint } = config;
 
   // Build prompt
   const obsText = observations.map(o =>
@@ -440,7 +489,7 @@ For each new observation, decide ONE of:
         ],
         temperature: 0.2,
         max_tokens: 8192,
-        response_format: { type: "json_object" },
+        // LM Studio rejects "json_object" — omit response_format, rely on prompt.
       }),
     });
 
@@ -642,7 +691,7 @@ export async function enrichObservations(
           ],
           temperature: 0.2,
           max_tokens: 2048,
-          response_format: attempt === 0 ? { type: "json_object" } : undefined,
+          // LM Studio rejects "json_object" — omit response_format, rely on prompt.
         }),
         signal,
       });
@@ -692,16 +741,15 @@ export async function enrichObservations(
 
 /**
  * Get the full LLM synthesis config including endpoint.
- * Extends getLLMSynthesisConfig to include endpoint.
+ * Falls back: global → project → env vars.
+ *
+ * @param projectId — Optional project ID for per-project fallback.
+ *   If omitted, only checks global config + env vars.
  */
-export function getFullLLMSynthesisConfig(): { model: string; apiKey?: string; endpoint?: string } | null {
-  const gid = getGlobalProject()?.id;
-  if (!gid) return null;
-  const model = getSetting(gid, "synthesis_model");
-  const apiKey = getSetting(gid, "synthesis_api_key");
-  const endpoint = getSetting(gid, "synthesis_endpoint");
-  if (!model || !endpoint) return null;
-  return { model, apiKey: apiKey || undefined, endpoint };
+export function getFullLLMSynthesisConfig(projectId?: string): { model: string; apiKey?: string; endpoint?: string } | null {
+  const config = resolveLLMConfig(projectId);
+  if (!config || !config.model || !config.endpoint) return null;
+  return { model: config.model, apiKey: config.apiKey, endpoint: config.endpoint };
 }
 
 // ── Skill Consolidation ──────────────────────────────────────
@@ -755,14 +803,13 @@ export async function callConsolidationLLM(
   overrideModel?: string,
   overrideApiKey?: string,
 ): Promise<ConsolidationSkillResult> {
-  const config = getLLMSynthesisConfig(projectId);
-  // Allow overrides to supply model/apiKey even if primary config is absent
-  const model = overrideModel ?? config?.model;
-  const apiKey = overrideApiKey ?? config?.apiKey;
+  // Resolve config with fallback, then apply overrides
+  const resolvedConfig = resolveLLMConfig(projectId);
+  const model = overrideModel ?? resolvedConfig?.model;
+  const apiKey = overrideApiKey ?? resolvedConfig?.apiKey;
   if (!model) return { merges: [], delete: [] };
 
-  const gid = getGlobalProject()?.id;
-  const endpointRaw = overrideEndpoint ?? (gid ? getSetting(gid, "synthesis_endpoint") : undefined);
+  const endpointRaw = overrideEndpoint ?? resolvedConfig?.endpoint;
   if (!endpointRaw) return { merges: [], delete: [] };
 
   const endpoint = endpointRaw.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
