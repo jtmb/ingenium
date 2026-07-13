@@ -139,12 +139,16 @@ export function getCredentials(
 
 function decodeTokens(stored: OAuthToken, encKey?: string): OAuthToken {
   if (encKey) {
-    return {
-      accessToken: decryptCredentials(stored.accessToken),
-      refreshToken: decryptCredentials(stored.refreshToken),
-      expiryDate: stored.expiryDate,
-      scope: stored.scope,
-    };
+    try {
+      return {
+        accessToken: decryptCredentials(stored.accessToken),
+        refreshToken: decryptCredentials(stored.refreshToken),
+        expiryDate: stored.expiryDate,
+        scope: stored.scope,
+      };
+    } catch {
+      // Decryption failed — tokens were stored unencrypted (old/different key)
+    }
   }
   return stored;
 }
