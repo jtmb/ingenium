@@ -84,7 +84,10 @@ export default function MailPage() {
       .then(d => {
         if (d?.data) {
           for (const [folder, result] of Object.entries(d.data) as [string, { emails: any[]; total: number }][]) {
-            emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: result.emails, total: result.total });
+            // Cache everything except INBOX (always fetch fresh for latest emails)
+            if (folder !== "INBOX") {
+              emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: result.emails, total: result.total });
+            }
           }
           emailCache.current.set(cacheKey, { emails: [], total: 0 }); // mark synced
         }
