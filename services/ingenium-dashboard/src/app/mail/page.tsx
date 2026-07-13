@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import FolderSidebar from "./components/FolderSidebar";
 import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
@@ -33,6 +33,7 @@ export default function MailPage() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [folders, setFolders] = useState<any[]>([]);
+  const emailCache = useRef<Map<string, { emails: any[]; total: number }>>(new Map());
 
   // Fetch accounts on mount
   useEffect(() => {
@@ -67,6 +68,16 @@ export default function MailPage() {
   useEffect(() => {
     if (!selectedAccount) return;
 
+    const cacheKey = `${selectedAccount}:${selectedFolder}:${page}:${searchQuery}`;
+    const cached = !searchQuery && refreshKey === 0 ? emailCache.current.get(cacheKey) : null;
+    if (cached) {
+      setEmails(cached.emails);
+      setTotal(cached.total);
+      setEmailError(null);
+      setLoading(false);
+      return;
+    }
+
     const fetchEmails = async () => {
       setLoading(true);
       try {
@@ -79,9 +90,14 @@ export default function MailPage() {
         const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
-          setEmails(data.data || []);
-          setTotal(data.total || 0);
+          const list = data.data || [];
+          const tot = data.total || 0;
+          setEmails(list);
+          setTotal(tot);
           setEmailError(null);
+          if (!searchQuery) {
+            emailCache.current.set(cacheKey, { emails: list, total: tot });
+          }
         } else {
           const errData = await res.json().catch(() => ({ error: { message: "Failed to load emails" } }));
           setEmails([]);
