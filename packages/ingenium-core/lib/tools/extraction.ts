@@ -34,6 +34,7 @@ interface ExtractionResult {
   created: number;
   skipped: number;
   watermark: number;
+  reason?: string; // set when extraction is skipped/fails with a clear reason
 }
 
 // ── Simple 31-bit hash (djb2 variant) ────────────────────
@@ -151,6 +152,13 @@ async function callLLMForExtraction(
 
   const baseEndpoint = config.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
+  // Create a 60-second timeout per batch to prevent hanging forever
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    logger.warn("extraction", "LLM batch call timed out after 60s — aborting");
+    controller.abort();
+  }, 60_000);
+
   // Single retry with json_object fallback (no response_format on retry)
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -165,9 +173,14 @@ async function callLLMForExtraction(
           ],
           temperature: 0.2,
           max_tokens: 2048,
-          response_format: attempt === 0 ? { type: "json_object" } : undefined,
+          // LM Studio rejects "json_object" (requires "json_schema" or "text").
+          // The system prompt already instructs strict JSON output, so skip response_format entirely.
+          response_format: undefined,
         }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeout);
 
       if (!res.ok) {
         if (attempt === 0) continue;
@@ -180,12 +193,18 @@ async function callLLMForExtraction(
       const rules = parseExtractionResponse(rawContent);
       return rules;
     } catch (err: any) {
+      clearTimeout(timeout);
+      if (err.name === "AbortError") {
+        logger.warn("extraction", "LLM batch call aborted (timeout or cancel) — returning empty results");
+        return [];
+      }
       if (attempt === 0) continue;
       logger.error("extraction", `LLM call failed: ${err?.message}`, { error: String(err?.message || err), name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
       return [];
     }
   }
 
+  clearTimeout(timeout);
   return [];
 }
 
@@ -260,16 +279,18 @@ export async function runExtraction(
   let highestTimestamp = 0;
 
   try {
-    // 1. Check LLM config
+    // 1. Check LLM config (with per-project fallback)
     if (!isLLMSynthesisConfigured(projectId)) {
-      logger.info("extraction", "No synthesis LLM configured — skipping extraction");
-      return { scanned: 0, candidates: 0, created: 0, skipped: 0, watermark: 0 };
+      const reason = "No synthesis LLM configured — check Settings page (synthesis_model) or set SYNTHESIS_MODEL env var. Self-learning disabled.";
+      logger.warn("extraction", reason, { projectId });
+      return { scanned: 0, candidates: 0, created: 0, skipped: 0, watermark: 0, reason };
     }
 
-    const llmConfig = getFullLLMSynthesisConfig();
+    const llmConfig = getFullLLMSynthesisConfig(projectId);
     if (!llmConfig || !llmConfig.endpoint) {
-      logger.info("extraction", "Synthesis LLM endpoint not configured — skipping extraction");
-      return { scanned: 0, candidates: 0, created: 0, skipped: 0, watermark: 0 };
+      const reason = "Synthesis LLM endpoint not configured — set synthesis_endpoint in Settings or SYNTHESIS_ENDPOINT env var";
+      logger.warn("extraction", reason, { projectId });
+      return { scanned: 0, candidates: 0, created: 0, skipped: 0, watermark: 0, reason };
     }
 
     // 2. Watermark
@@ -319,6 +340,7 @@ export async function runExtraction(
     const BATCH_SIZE = 15;
 
     for (let i = 0; i < rawCandidates.length; i += BATCH_SIZE) {
+      logger.info("extraction", `Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(rawCandidates.length / BATCH_SIZE)} (${rawCandidates.length} candidates total)`);
       const batch = rawCandidates.slice(i, i + BATCH_SIZE);
       const rules = await callLLMForExtraction(batch, {
         model: llmConfig.model,

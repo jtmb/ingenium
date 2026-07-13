@@ -202,10 +202,61 @@ export function startScheduler(port: number) {
     "scheduler",
     `Auto-synthesis initial default: ${SYNTHESIS_DEFAULT_MS / 1000}s (reads settings after first cycle)`,
   );
+
+  // Startup health check — diagnose config issues before the first cycle runs
+  logSynthesisHealth();
+
   setTimeout(() => triggerSynthesisForAllProjects(port), 30000);
   setTimeout(() => scheduleNext(port), 30000);
 
   // Start the job cron scheduler on a separate 60s cycle
   logger.info("scheduler", "Job cron scheduler started (60s cycle)");
   setTimeout(scheduleJobTick, 10_000); // Start after a short initial delay
+}
+
+/**
+ * Check that the synthesis LLM config is in a healthy state.
+ * Logs clear diagnostics to help operators fix config issues.
+ */
+function logSynthesisHealth(): void {
+  try {
+    const globalProject = projects.getGlobalProject();
+    if (globalProject) {
+      const model = settings.getSetting(globalProject.id, "synthesis_model");
+      const endpoint = settings.getSetting(globalProject.id, "synthesis_endpoint");
+      if (model && endpoint) {
+        logger.info("scheduler", `Synthesis LLM configured: model=${model}, endpoint=${endpoint.split("/v1")[0]}, project="${globalProject.name}"`);
+      } else if (model && !endpoint) {
+        logger.warn("scheduler", `Synthesis LLM partially configured: model=${model}, but endpoint is missing in project "${globalProject.name}"`);
+      } else {
+        logger.info("scheduler", `Global project "${globalProject.name}" exists but synthesis_model is not set — self-learning disabled until configured in Settings`);
+      }
+      return;
+    }
+
+    // No global project — scan all active projects for synthesis config
+    const allProjects = projects.listProjects();
+    const activeProjects = allProjects.filter(p => !p.archived_at);
+    const projectsWithSynthesis: string[] = [];
+
+    for (const p of activeProjects) {
+      const model = settings.getSetting(p.id, "synthesis_model");
+      if (model) {
+        projectsWithSynthesis.push(p.name);
+      }
+    }
+
+    if (projectsWithSynthesis.length > 0) {
+      logger.warn(
+        "scheduler",
+        `Synthesis LLM configured in ${projectsWithSynthesis.length} project(s) [${projectsWithSynthesis.join(", ")}] but NO project is marked global! ` +
+        `Self-learning pipeline will be SILENTLY disabled for ALL projects until one is set as global. ` +
+        `Fix: run /init-project or mark one project as global via Settings → save synthesis_model for "global-default".`,
+      );
+    } else {
+      logger.info("scheduler", "Synthesis LLM not configured — self-learning disabled until configured in Settings");
+    }
+  } catch (err: any) {
+    logger.warn("scheduler", `Synthesis health check failed: ${err.message}`, { error: err.message, name: err.name });
+  }
 }

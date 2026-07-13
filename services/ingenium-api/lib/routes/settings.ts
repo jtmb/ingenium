@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { settings, logger } from "ingenium-core";
+import { settings, logger, projects } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
 export const settingsRouter = Router();
@@ -25,6 +25,23 @@ settingsRouter.post("/", (req, res) => {
     return;
   }
   settings.setSetting(projectId, key, value);
+
+  // Self-heal: if saving synthesis_model config, ensure the project is marked global
+  // so the self-learning pipeline can find it. The pipeline only reads from the global
+  // project — if no project is marked global, extraction/synthesis silently disables.
+  if (key === "synthesis_model") {
+    const globalProject = projects.getGlobalProject();
+    if (!globalProject) {
+      const projectName = req.query.project as string;
+      if (projectName) {
+        const healed = projects.setProjectGlobal(projectName, true);
+        if (healed) {
+          logger.info("settings", `Self-healed: marked project "${projectName}" as global because synthesis_model was saved and no global project existed`);
+        }
+      }
+    }
+  }
+
   res.json({ data: { key, value } });
 });
 
