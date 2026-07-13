@@ -75,6 +75,7 @@ export default function MailPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [folders, setFolders] = useState<any[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
 
   // Fetch accounts on mount
   useEffect(() => {
@@ -295,23 +296,26 @@ export default function MailPage() {
   }, []);
 
   const handleDeleteAccount = useCallback(async (accountId: string) => {
-    if (!confirm("Remove this email account? This cannot be undone.")) return;
+    setDeleteAccountId(accountId);
+  }, []);
+
+  const confirmDeleteAccount = useCallback(async () => {
+    if (!deleteAccountId) return;
     try {
-      const res = await fetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, { method: "DELETE" });
-      if (res.ok || res.status === 204) {
-        // Refresh account list
-        const accountsRes = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
-        if (accountsRes.ok) {
-          const data = await accountsRes.json();
-          const accts = data.data || [];
-          setAccounts(accts);
-          if (selectedAccount === accountId) {
-            setSelectedAccount(accts.length > 0 ? accts[0].id : "");
-          }
+      await fetch(`${API_BASE}/emails/accounts/${deleteAccountId}?project=${project}`, { method: "DELETE" });
+      // Refresh account list
+      const accountsRes = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
+      if (accountsRes.ok) {
+        const data = await accountsRes.json();
+        const accts = data.data || [];
+        setAccounts(accts);
+        if (selectedAccount === deleteAccountId) {
+          setSelectedAccount(accts.length > 0 ? accts[0].id : "");
         }
       }
     } catch { /* non-fatal */ }
-  }, [selectedAccount, project]);
+    setDeleteAccountId(null);
+  }, [deleteAccountId, selectedAccount, project]);
 
   const handleSelectFolder = useCallback((folder: string) => {
     setSelectedFolder(folder);
@@ -472,6 +476,32 @@ export default function MailPage() {
         />
         {sending && (
           <p className="text-sm text-[var(--color-text-muted)] text-center mt-4">Sending...</p>
+        )}
+      </Overlay>
+
+      {/* Delete account confirmation */}
+      <Overlay
+        isOpen={deleteAccountId !== null}
+        onClose={() => setDeleteAccountId(null)}
+        title="Remove Account"
+        subtitle="This cannot be undone."
+      >
+        {deleteAccountId && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              Are you sure you want to remove{' '}
+              <strong>{accounts.find((a: any) => a.id === deleteAccountId)?.email || deleteAccountId}</strong>?
+              {' '}All cached emails for this account will be removed.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteAccountId(null)} className="px-4 py-2 border border-[var(--color-border)] rounded text-sm hover:bg-[var(--color-surface-hover)]">
+                Cancel
+              </button>
+              <button onClick={confirmDeleteAccount} className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700">
+                Remove
+              </button>
+            </div>
+          </div>
         )}
       </Overlay>
     </div>
