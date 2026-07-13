@@ -60,7 +60,7 @@ export default function MailPage() {
     if (!selectedAccount) return;
     fetch(`${API_BASE}/emails/folders?project=${PROJECT}&account=${selectedAccount}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.data) setFolders(d.data); })
+      .then(d => { if (d?.data) setFolders(d.data.filter((f: any) => f.name !== "[Gmail]")); })
       .catch(() => setFolders([]));
   }, [selectedAccount, refreshKey]);
 
