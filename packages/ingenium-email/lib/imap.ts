@@ -130,6 +130,9 @@ export async function listEmails(
     messages.push(parsed);
   }
 
+  // Ensure newest first by sorting on date
+  messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
   return { messages, total };
 }
 
