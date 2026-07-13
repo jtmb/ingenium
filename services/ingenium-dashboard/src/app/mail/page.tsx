@@ -57,32 +57,13 @@ export default function MailPage() {
     fetchAccounts();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch folders + sync on account switch
+  // Fetch folder list when account changes
   useEffect(() => {
     if (!selectedAccount) return;
-
     fetch(`${API_BASE}/emails/folders?project=${PROJECT}&account=${selectedAccount}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!d?.data) return;
-        const filtered = d.data.filter((f: any) => f.name !== "[Gmail]");
-        setFolders(filtered);
-        // Sync all folders in background
-        const targetFolders = filtered.slice(0, 12).map((f: any) => f.path || f.name);
-        return fetch(`${API_BASE}/emails/sync?project=${PROJECT}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account: selectedAccount, folders: targetFolders }),
-        }).then(r => r.ok ? r.json() : null);
-      })
-      .then(syncData => {
-        if (syncData?.data) {
-          for (const [folder, result] of Object.entries(syncData.data) as [string, { emails: any[]; total: number }][]) {
-            emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: result.emails, total: result.total });
-          }
-        }
-      })
-      .catch(() => {});
+      .then(d => { if (d?.data) setFolders(d.data.filter((f: any) => f.name !== "[Gmail]")); })
+      .catch(() => setFolders([]));
   }, [selectedAccount]);
 
   // Background poller: refresh INBOX every 30s
