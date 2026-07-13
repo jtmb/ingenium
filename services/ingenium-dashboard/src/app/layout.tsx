@@ -51,6 +51,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <a href="/pipeline" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">Pipeline</a>
           <a href="/logs" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">Logs</a>
           <a href="/settings" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">Settings</a>
+          <span className="text-gray-300">|</span>
+          <a href="/status" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">Status</a>
           <div className="ml-auto flex items-center gap-3">
             <ThemeToggle />
             <Suspense><ProjectSelector /></Suspense>

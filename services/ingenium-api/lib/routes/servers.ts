@@ -30,6 +30,21 @@ serversRouter.patch("/:name", (req, res) => {
   res.json({ data: { name: req.params.name, running } });
 });
 
+serversRouter.post("/sync-all", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  const { servers: serverList } = req.body;
+  if (!Array.isArray(serverList)) {
+    res.status(400).json({ error: "servers array required" });
+    return;
+  }
+  const results = serverList.map(
+    (s: { name: string; command: string; args?: string; env?: string; source?: string }) =>
+      servers.upsertServer(projectId, s.name, s.command, s.args, s.env, s.source)
+  );
+  res.json({ data: results });
+});
+
 serversRouter.delete("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;

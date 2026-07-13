@@ -20,21 +20,41 @@ function getProviderConfig(account: EmailAccount): ProviderConfig {
   return PROVIDERS[account.provider];
 }
 
-/** Build auth object for imapflow based on account type. */
+/** Build auth object for imapflow based on account type.
+ *  🔴 OAuth fallthrough guard: if authType is "oauth2" but accessToken is
+ *     missing/empty, throw a clear error instead of falling through to
+ *     password auth (which triggers ImapFlow "No password configured"). */
 function buildAuth(
   account: EmailAccount,
   auth?: { password?: string; tokens?: OAuthToken },
 ): { user: string; pass?: string; accessToken?: string } {
   const user = account.email;
-  if (account.authType === "oauth2" && auth?.tokens?.accessToken) {
-    return { user, accessToken: auth.tokens.accessToken };
+  if (account.authType === "oauth2") {
+    const accessToken = auth?.tokens?.accessToken;
+    if (!accessToken) {
+      throw new Error(
+        `OAuth2 account "${account.email}" has no access token. ` +
+        `Tokens may be expired or not yet provisioned. Re-authenticate the account.`,
+      );
+    }
+    return { user, accessToken };
   }
-  return { user, pass: auth?.password ?? "" };
+  // Password/app-password auth — require a non-empty password
+  const pass = auth?.password;
+  if (!pass) {
+    throw new Error(
+      `Account "${account.email}" has no password configured. ` +
+      `Provide appPassword credentials or switch to OAuth2.`,
+    );
+  }
+  return { user, pass };
 }
 
 // ── Public API ───────────────────────────────────────────────────────────
 
-/** Create an IMAP connection for the account and store it in the pool. */
+/** Create an IMAP connection for the account and store it in the pool.
+ *  🔴 Wrapped in try/catch so connection/auth failures produce normal errors,
+ *     never uncaught exceptions (critical for background setImmediate callers). */
 export async function connectAccount(
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
@@ -54,14 +74,22 @@ export async function connectAccount(
   const host = account.imapHost || config.imap.host;
   const port = account.imapPort || config.imap.port;
 
-  const client = new ImapFlow({
-    host,
-    port,
-    secure: config.imap.tls,
-    auth: buildAuth(account, auth),
-    logger: false,
-  });
-  await client.connect();
+  let client: ImapFlow;
+  try {
+    client = new ImapFlow({
+      host,
+      port,
+      secure: config.imap.tls,
+      auth: buildAuth(account, auth),
+      logger: false,
+    });
+    await client.connect();
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `IMAP connection failed for account "${account.email}" (${host}:${port}): ${msg}`,
+    );
+  }
   pool.set(account.id, client);
   return client;
 }

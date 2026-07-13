@@ -2,10 +2,10 @@
   "private": true,
   "workspaces": [
     "packages/ingenium-core",
+    "packages/ingenium-email",
     "services/ingenium-api",
     "services/ingenium-server",
-    "services/ingenium-dashboard",
-    "packages/ingenium-email"
+    "services/ingenium-dashboard"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

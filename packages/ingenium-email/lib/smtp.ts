@@ -39,16 +39,33 @@ export async function createTransport(
     secure: config.smtp.tls && port === 465,
   };
 
-  if (account.authType === "oauth2" && auth.tokens?.accessToken) {
+  // 🔴 OAuth fallthrough guard: if authType is "oauth2" but accessToken is
+  //    missing/empty, throw a clear error instead of falling through to
+  //    password auth (which would fail with "No password configured").
+  if (account.authType === "oauth2") {
+    const accessToken = auth.tokens?.accessToken;
+    if (!accessToken) {
+      throw new Error(
+        `OAuth2 account "${account.email}" has no access token for SMTP. ` +
+        `Tokens may be expired or not yet provisioned. Re-authenticate the account.`,
+      );
+    }
     smtpOptions.auth = {
       type: "OAuth2",
       user: account.email,
-      accessToken: auth.tokens.accessToken,
+      accessToken,
     };
   } else {
+    const pass = auth.password ?? "";
+    if (!pass) {
+      throw new Error(
+        `Account "${account.email}" has no password configured for SMTP. ` +
+        `Provide appPassword credentials or switch to OAuth2.`,
+      );
+    }
     smtpOptions.auth = {
       user: account.email,
-      pass: auth.password ?? "",
+      pass,
     };
   }
 

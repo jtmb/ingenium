@@ -291,6 +291,56 @@ async function syncSkills(worktree: string): Promise<UpsertResult> {
   return result;
 }
 
+// 6. MCP servers — read opencode.json mcp{} block, push to API
+async function syncServers(worktree: string): Promise<UpsertResult> {
+  const result: UpsertResult = { created: 0, skipped: 0, errors: 0 };
+  try {
+    const opencodePath = resolve(worktree, "opencode.json");
+    if (!existsSync(opencodePath)) return result;
+
+    const raw = readFileSync(opencodePath, "utf-8");
+    // Strip comments (// ...) for JSONC parsing
+    const stripped = raw.replace(/^\s*\/\/.*$/gm, "");
+    const config = JSON.parse(stripped);
+    const mcpBlock = config.mcp;
+    if (!mcpBlock || typeof mcpBlock !== "object") return result;
+
+    // List existing servers
+    const listRes = await fetch(`${API_BASE}/servers?${encodeProject()}`);
+    const existing = new Set<string>();
+    if (listRes.ok) {
+      const listData = await listRes.json() as { data: Array<{ name: string }> };
+      for (const s of listData.data) existing.add(s.name);
+    }
+
+    const serverEntries = Object.entries(mcpBlock) as [string, any][];
+    if (serverEntries.length === 0) return result;
+
+    const serverPayloads = serverEntries.map(([name, entry]) => {
+      const cmdArray: string[] = Array.isArray(entry.command) ? entry.command : [String(entry.command ?? "")];
+      const command = cmdArray[0] || "";
+      const args = cmdArray.length > 1 ? JSON.stringify(cmdArray.slice(1)) : undefined;
+      const env = entry.environment ? JSON.stringify(entry.environment) : undefined;
+      return { name, command, args, env, source: "opencode" as const };
+    });
+
+    const syncRes = await fetch(`${API_BASE}/servers/sync-all?${encodeProject()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ servers: serverPayloads }),
+    });
+    if (syncRes.ok) {
+      const newCount = serverPayloads.filter((p) => !existing.has(p.name)).length;
+      const updatedCount = serverPayloads.length - newCount;
+      result.created = newCount;
+      result.skipped = updatedCount;
+    } else {
+      result.errors++;
+    }
+  } catch { result.errors++; }
+  return result;
+}
+
 // ── plugin export ──────────────────────────────────────────────────
 
 export const OnboardingSyncPlugin = async (ctx: { worktree: string; client: any }) => {
@@ -306,9 +356,10 @@ export const OnboardingSyncPlugin = async (ctx: { worktree: string; client: any 
         syncCommands(worktree),
         syncAgents(worktree),
         syncSkills(worktree),
+        syncServers(worktree),
       ]);
 
-      const [plugR, cfgR, cmdR, agtR, sklR] = results;
+      const [plugR, cfgR, cmdR, agtR, sklR, srvR] = results;
 
       const parts: string[] = [];
       if (plugR.created > 0 || plugR.skipped > 0 || plugR.errors > 0)
@@ -321,6 +372,8 @@ export const OnboardingSyncPlugin = async (ctx: { worktree: string; client: any 
         parts.push(logResult("agents", agtR));
       if (sklR.created > 0 || sklR.skipped > 0 || sklR.errors > 0)
         parts.push(logResult("skills", sklR));
+      if (srvR.created > 0 || srvR.skipped > 0 || srvR.errors > 0)
+        parts.push(logResult("servers", srvR));
 
       if (parts.length > 0) {
         await ctx.client.app.log({

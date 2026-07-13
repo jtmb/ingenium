@@ -8,16 +8,36 @@ import EmptyState from "./components/EmptyState";
 import AccountSetup from "./components/AccountSetup";
 import Overlay from "../components/Overlay";
 import EmailComposer from "./components/EmailComposer";
-import { useProject } from "../../lib/ProjectContext";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+
+/**
+ * 🔴 Mail is always global — resolve the global project for all API calls.
+ * The dashboard's active project selector does NOT affect mail.
+ */
+function useMailProject(): string {
+  const [project, setProject] = useState("global-default");
+
+  useEffect(() => {
+    const API_URL = "http://localhost:4097/api/v1";
+    fetch(`${API_URL}/projects`)
+      .then(r => r.json())
+      .then(data => {
+        const global = data?.data?.find((p: any) => p.is_global);
+        if (global?.name) setProject(global.name);
+      })
+      .catch(() => { /* fallback to global-default */ });
+  }, []);
+
+  return project;
+}
 
 /**
  * Inbox page — 3-pane layout: FolderSidebar | EmailList | EmailReader
  * Fetches accounts on mount, then emails for the selected folder.
  */
 export default function MailPage() {
-  const project = useProject();
+  const project = useMailProject();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("");
   const [selectedFolder, setSelectedFolder] = useState("INBOX");
@@ -52,17 +72,17 @@ export default function MailPage() {
         // API not available — show empty state
       }
     };
-    fetchAccounts();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (project) fetchAccounts();
+  }, [project]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch folder list when account changes
   useEffect(() => {
-    if (!selectedAccount) return;
+    if (!selectedAccount || !project) return;
     fetch(`${API_BASE}/emails/folders?project=${project}&account=${selectedAccount}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.data) setFolders(d.data.filter((f: any) => f.name !== "[Gmail]")); })
       .catch(() => setFolders([]));
-  }, [selectedAccount]);
+  }, [selectedAccount, project]);
 
   // No more prefetch or background poller — server-side scheduler + DB cache handle this
 
@@ -101,7 +121,7 @@ export default function MailPage() {
       }
     };
     fetchEmails();
-  }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey]);
+  }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project]);
 
   const handleSelectEmail = useCallback(async (uid: number) => {
     setSelectedEmailLoading(true);
@@ -118,7 +138,7 @@ export default function MailPage() {
     } finally {
       setSelectedEmailLoading(false);
     }
-  }, [selectedAccount, selectedFolder]);
+  }, [selectedAccount, selectedFolder, project]);
 
   const handleCompose = useCallback(() => {
     setShowCompose(true);
@@ -150,7 +170,7 @@ export default function MailPage() {
     } finally {
       setSending(false);
     }
-  }, [selectedAccount]);
+  }, [selectedAccount, project]);
 
   const handleComposeSave = useCallback(async (data: any) => {
     try {
@@ -175,7 +195,7 @@ export default function MailPage() {
     } catch (err: any) {
       alert(err.message || "Failed to save draft");
     }
-  }, []);
+  }, [project]);
 
   const handleComposeCancel = useCallback(() => {
     setShowCompose(false);
@@ -195,7 +215,7 @@ export default function MailPage() {
     } catch {
       // Silently fail
     }
-  }, [selectedEmail, selectedAccount]);
+  }, [selectedEmail, selectedAccount, project]);
 
   const handleArchive = useCallback(async () => {
     if (!selectedEmail) return;
@@ -210,7 +230,7 @@ export default function MailPage() {
     } catch {
       // Silently fail
     }
-  }, [selectedEmail, selectedAccount]);
+  }, [selectedEmail, selectedAccount, project]);
 
   const handleSearch = useCallback((q: string) => {
     setSearchQuery(q);
@@ -256,7 +276,7 @@ export default function MailPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedAccount, selectedFolder, page, searchQuery]);
+  }, [selectedAccount, selectedFolder, page, searchQuery, project]);
 
   // No accounts — show empty / setup state
   if (accounts.length === 0 && !showAccountSetup) {

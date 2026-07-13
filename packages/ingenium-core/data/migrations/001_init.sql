@@ -99,13 +99,14 @@ END;
 CREATE TABLE IF NOT EXISTS servers (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL REFERENCES projects(id),
-    name TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
     command TEXT NOT NULL,
     args TEXT,
     env TEXT,
     enabled INTEGER DEFAULT 1,
     running INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    UNIQUE(project_id, name)
 );
 
 CREATE TABLE IF NOT EXISTS plugins (

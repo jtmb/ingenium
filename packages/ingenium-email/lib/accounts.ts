@@ -1,4 +1,6 @@
-/** Account CRUD using ingenium-core settings for encrypted credential storage. */
+/** Account CRUD using ingenium-core settings for encrypted credential storage.
+ *  🔴 All accounts are always global — the `projectId` parameter is accepted
+ *     for backward compatibility but ignored. Accounts live in the global project. */
 
 import { randomUUID } from "node:crypto";
 import { settings, getDb } from "ingenium-core";
@@ -26,15 +28,34 @@ interface StoredAccount {
   tokens?: OAuthToken;
 }
 
+// ── Global project resolution ─────────────────────────────────────────────
+
+let _cachedGlobalProjectId: string | null = null;
+
+/** Resolve the global project ID. Cached after first call for performance. */
+export function getGlobalProjectId(): string {
+  if (_cachedGlobalProjectId) return _cachedGlobalProjectId;
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const row = db.prepare(
+    "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL LIMIT 1",
+  ).get() as { id: string } | undefined;
+  if (!row) throw new Error("No global project found. Create one via /init-project or the Settings page.");
+  _cachedGlobalProjectId = row.id;
+  return row.id;
+}
+
 function settingsKey(accountId: string): string {
   return `${SETTINGS_PREFIX}${accountId}`;
 }
 
-/** List all email accounts for a project. */
-export function listAccounts(projectId: string): EmailAccount[] {
+// ── Account CRUD ───────────────────────────────────────────────────────────
+
+/** List all email accounts. Always uses the global project regardless of the passed projectId. */
+export function listAccounts(_projectId: string): EmailAccount[] {
+  const projectId = getGlobalProjectId();
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   const rows = db.prepare(
-    "SELECT key, value FROM settings WHERE project_id = ? AND key LIKE ?"
+    "SELECT key, value FROM settings WHERE project_id = ? AND key LIKE ?",
   ).all(projectId, `${SETTINGS_PREFIX}%`) as Array<{ key: string; value: string }>;
 
   return rows.map((row) => {
@@ -43,16 +64,21 @@ export function listAccounts(projectId: string): EmailAccount[] {
   });
 }
 
-/** Get a single email account by ID. */
-export function getAccount(projectId: string, accountId: string): EmailAccount | undefined {
+/** Get a single email account by ID. Always uses the global project. */
+export function getAccount(_projectId: string, accountId: string): EmailAccount | undefined {
+  const projectId = getGlobalProjectId();
   const raw = settings.getSetting(projectId, settingsKey(accountId));
   if (!raw) return undefined;
   const stored = JSON.parse(raw) as StoredAccount;
   return storedToAccount(stored);
 }
 
-/** Add a new email account with encrypted credentials. */
-export function addAccount(projectId: string, account: Omit<EmailAccount, "id" | "connected">): EmailAccount {
+/** Add a new email account with encrypted credentials. Always uses the global project. */
+export function addAccount(
+  _projectId: string,
+  account: Omit<EmailAccount, "id" | "connected">,
+): EmailAccount {
+  const projectId = getGlobalProjectId();
   const id = randomUUID();
   const stored: StoredAccount = {
     id,
@@ -70,19 +96,21 @@ export function addAccount(projectId: string, account: Omit<EmailAccount, "id" |
   return storedToAccount(stored);
 }
 
-/** Remove an email account by ID. */
-export function removeAccount(projectId: string, accountId: string): void {
+/** Remove an email account by ID. Always uses the global project. */
+export function removeAccount(_projectId: string, accountId: string): void {
+  const projectId = getGlobalProjectId();
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
     .run(projectId, settingsKey(accountId));
 }
 
-/** Store encrypted credentials for an account. */
+/** Store encrypted credentials for an account. Always uses the global project. */
 export function storeCredentials(
-  projectId: string,
+  _projectId: string,
   accountId: string,
   creds: { imapPass?: string; smtpPass?: string; tokens?: OAuthToken },
 ): void {
+  const projectId = getGlobalProjectId();
   const raw = settings.getSetting(projectId, settingsKey(accountId));
   if (!raw) throw new Error(`Account ${accountId} not found`);
 
@@ -101,13 +129,14 @@ export function storeCredentials(
   settings.setSetting(projectId, settingsKey(accountId), JSON.stringify(stored));
 }
 
-/** Get decrypted credentials for an account. */
+/** Get decrypted credentials for an account. Always uses the global project. */
 export function getCredentials(
-  projectId: string,
+  _projectId: string,
   accountId: string,
 ): { password?: string; tokens?: OAuthToken } | undefined {
+  const projectId = getGlobalProjectId();
   const raw = settings.getSetting(projectId, settingsKey(accountId));
-  
+
   let password: string | undefined;
   let tokens: OAuthToken | undefined;
   const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
@@ -168,12 +197,13 @@ export async function testConnection(
   }
 }
 
-/** Update the connected flag on an account. */
+/** Update the connected flag on an account. Always uses the global project. */
 export function setAccountConnected(
-  projectId: string,
+  _projectId: string,
   accountId: string,
   connected: boolean,
 ): void {
+  const projectId = getGlobalProjectId();
   const raw = settings.getSetting(projectId, settingsKey(accountId));
   if (!raw) throw new Error(`Account ${accountId} not found`);
 

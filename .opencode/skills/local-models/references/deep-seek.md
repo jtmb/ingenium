@@ -86,6 +86,46 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 ---
 
+### 8. Verify Sustained Runtime, Not a Single Request
+
+**Failure signature:** "API responds in 2ms — everything is working!" — but the API is silently crash-looping every 5 minutes. A single fast request hides systemic instability.
+
+**Rule:** After any code change that introduces or modifies background tasks (schedulers, watchers, async timers, setImmediate hooks), watch the service for **several minutes** and check restart counts (supervisord `spawned` events, docker restart count) — not just one curl.
+
+**Detection prompt:** "Did I watch the service for 5+ minutes and verify zero restarts, or did I just hit it once and call it working?"
+
+---
+
+### 9. Never process.exit Before an Async Log — Crash Causes Vanish
+
+**Failure signature:** The process crashes but leaves zero trace — because the crash handler fires an async `import()` to load the logger then synchronously calls `process.exit(1)`, killing the process before the log writes. Every crash is invisible.
+
+**Rule:** Crash handlers must log **synchronously** with `console.error(err.stack)` before calling `process.exit()`. An async log destined for a structured logger is fine as secondary, but the primary signal must be synchronous and reliable. Without this, crash-loop root causes are undetectable from logs alone.
+
+**Detection prompt:** "If my crash handler exits, does the error message get written before exit()? Is the log synchronous?"
+
+---
+
+### 10. Caching/Perf Isn't Done Until Proven With a Measured Second Load
+
+**Failure signature:** "Email cache layer built! 16 tests pass!" — but the cache is empty, every folder click hits live IMAP (30-60s), and the <2s requirement was never measured. Tests mocked the API and never hit the real path.
+
+**Rule:** A cache or performance feature ships only after a **timed, warm-cache load is below the specified threshold**. Measure: load → populate cache → reload → time the second load. If the second load isn't within the spec, the feature is NOT done regardless of test greenness.
+
+**Detection prompt:** "Did I time a warm-cache second load and verify it's under the performance target, or did I just verify the cache exists?"
+
+---
+
+### 11. When the User Says 'Empty/Slow After Rebuild,' Check Service Health First
+
+**Failure signature:** User reports "observations/personality/logs empty, everything slow after rebuild." DeepSeek investigates the dashboard client (ProjectContext, iframe lazy-load, N+1 queries) for an hour — but the real issue is the API silently crash-looping and all fetches failing.
+
+**Rule:** Before blaming the client or data layer, verify the backend is actually **stable** — check supervisord/docker restart counts, process uptime, and run a health-check loop. A crash-looping API explains all "empty data + slow" symptoms in one root cause.
+
+**Detection prompt:** "Did I check the backend's restart count and uptime before investigating slow/empty symptoms?"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -97,6 +137,10 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 | **Namespace misassignment** — Writing state to the wrong project | "Did I verify the right namespace, or assume a default?" |
 | **Isolated validation** — Checking endpoints but not the full flow | "Did I test the full integration path, or isolated pieces?" |
 | **Count-worship** — Treating data presence as feature correctness | "Did I check quality, or just count rows?" |
+| **Sustained runtime** — A single fast request hides crash-looping | "Did I watch for 5+ min and verify zero restarts?" |
+| **Async exit blindness** — process.exit() kills logs before they write | "Is my crash handler's primary log synchronous?" |
+| **Cache wishful thinking** — Assuming cache works without measuring warm load | "Did I time a warm-cache second load under threshold?" |
+| **Backend-blind triage** — Investigating the client while the API crash-loops | "Did I check backend restart count before blaming the client?" |
 
 ---
 

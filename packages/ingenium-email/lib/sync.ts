@@ -1,7 +1,8 @@
-/** Email sync — IMAP-to-DB synchronization with UIDVALIDITY tracking. */
+/** Email sync — IMAP-to-DB synchronization with UIDVALIDITY tracking.
+ *  Always uses the global project regardless of passed projectId. */
 
 import { emailCache } from "ingenium-core";
-import { getAccount, getCredentials } from "./accounts.js";
+import { getAccount, getCredentials, getGlobalProjectId } from "./accounts.js";
 import { connectAccount, listFolders } from "./imap.js";
 import { parseRawEmail } from "./parser.js";
 
@@ -23,11 +24,12 @@ export interface SyncResult {
  * @returns SyncResult with folder name, count of newly synced, total in mailbox.
  */
 export async function syncFolder(
-  projectId: string,
+  _projectId: string,
   accountId: string,
   folder: string,
   maxBatch: number = 200,
 ): Promise<SyncResult> {
+  const projectId = getGlobalProjectId();
   const account = getAccount(projectId, accountId);
   if (!account) {
     return { folder, synced: 0, total: 0, error: `Account ${accountId} not found` };
@@ -155,9 +157,10 @@ export async function syncFolder(
  * @returns Array of SyncResult, one per folder.
  */
 export async function syncAccountFolders(
-  projectId: string,
+  _projectId: string,
   accountId: string,
 ): Promise<SyncResult[]> {
+  const projectId = getGlobalProjectId();
   const account = getAccount(projectId, accountId);
   if (!account) {
     return [{ folder: "__all__", synced: 0, total: 0, error: `Account ${accountId} not found` }];
