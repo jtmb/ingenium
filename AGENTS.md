@@ -73,7 +73,7 @@ services/
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 17 route-based pages:
 
 | Page | Purpose |
 |------|---------|
@@ -84,6 +84,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
 | `/jobs` | Job queue and background task monitoring |
 | `/logs` | Structured logging and event viewer |
 | `/mail` | 3-pane email client (FolderSidebar, EmailList, EmailReader), AccountSetup when no accounts configured |
+| `/status` | Service status — real-time supervisord process states (running/starting/stopped), uptime, restart counts |
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
