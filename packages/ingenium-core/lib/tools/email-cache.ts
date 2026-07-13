@@ -225,6 +225,47 @@ export function updateSyncState(
   checkpointAfterWrite();
 }
 
+// ── Sync status queries ────────────────────────────────────────────────────
+
+export interface FolderSyncStatus {
+  folder: string;
+  cachedCount: number;
+  bodyCount: number;
+  lastSyncedAt: string | null;
+}
+
+/**
+ * Return per-folder sync status for all folders of an account.
+ * Used by the /sync-status endpoint to show cache state.
+ */
+export function getAccountFoldersSyncStatus(accountId: string): FolderSyncStatus[] {
+  const db = getDb(dbPath());
+  const folders = db.prepare(
+    `SELECT DISTINCT folder FROM email_cache WHERE account_id = ?
+     UNION
+     SELECT DISTINCT folder FROM email_sync_state WHERE account_id = ?`,
+  ).all(accountId, accountId) as Array<{ folder: string }>;
+
+  return folders.map(({ folder }) => {
+    const cacheRow = db.prepare(
+      "SELECT COUNT(*) as count FROM email_cache WHERE account_id = ? AND folder = ?",
+    ).get(accountId, folder) as { count: number };
+    const bodyRow = db.prepare(
+      "SELECT COUNT(*) as count FROM email_bodies WHERE account_id = ? AND folder = ?",
+    ).get(accountId, folder) as { count: number };
+    const syncRow = db.prepare(
+      "SELECT last_synced_at FROM email_sync_state WHERE account_id = ? AND folder = ?",
+    ).get(accountId, folder) as { last_synced_at: string | null } | undefined;
+
+    return {
+      folder,
+      cachedCount: cacheRow.count,
+      bodyCount: bodyRow.count,
+      lastSyncedAt: syncRow?.last_synced_at ?? null,
+    };
+  });
+}
+
 // ── Cache maintenance ──────────────────────────────────────────────────────
 
 /**

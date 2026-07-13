@@ -32,9 +32,28 @@ function useMailProject(): string {
   return project;
 }
 
+interface SyncFolderStatus {
+  folder: string;
+  cachedCount: number;
+  bodyCount: number;
+  lastSyncedAt: string | null;
+  syncing: boolean;
+}
+
+interface SyncStatus {
+  overall: "idle" | "syncing" | "done";
+  account: string;
+  totalFolders: number;
+  syncingFolders: number;
+  totalCached: number;
+  totalBodies: number;
+  folders: SyncFolderStatus[];
+}
+
 /**
  * Inbox page — 3-pane layout: FolderSidebar | EmailList | EmailReader
  * Fetches accounts on mount, then emails for the selected folder.
+ * Polls sync-status every 2s to show cache-warming progress.
  */
 export default function MailPage() {
   const project = useMailProject();
@@ -44,6 +63,7 @@ export default function MailPage() {
   const [selectedEmail, setSelectedEmail] = useState<any>(null);
   const [selectedEmailLoading, setSelectedEmailLoading] = useState(false);
   const [emails, setEmails] = useState<any[]>([]);
+  const [emailSource, setEmailSource] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -54,6 +74,7 @@ export default function MailPage() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [folders, setFolders] = useState<any[]>([]);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
   // Fetch accounts on mount
   useEffect(() => {
@@ -84,7 +105,31 @@ export default function MailPage() {
       .catch(() => setFolders([]));
   }, [selectedAccount, project]);
 
-  // No more prefetch or background poller — server-side scheduler + DB cache handle this
+  // Poll sync status every 2 seconds
+  useEffect(() => {
+    if (!selectedAccount) {
+      setSyncStatus(null);
+      return;
+    }
+
+    const pollSync = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/emails/sync-status?project=${project}&account=${selectedAccount}`,
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setSyncStatus(data.data);
+        }
+      } catch {
+        // Silently fail — sync status is non-critical
+      }
+    };
+
+    pollSync(); // Immediate first poll
+    const interval = setInterval(pollSync, 2000);
+    return () => clearInterval(interval);
+  }, [selectedAccount, project]);
 
   // Fetch emails when account/folder/page/search changes
   // Server-side DB cache serves sub-2ms — no need for in-memory cache
@@ -105,16 +150,19 @@ export default function MailPage() {
           const data = await res.json();
           setEmails(data.data || []);
           setTotal(data.total || 0);
+          setEmailSource(data.source || "");
           setEmailError(null);
         } else {
           const errData = await res.json().catch(() => ({ error: { message: "Failed to load emails" } }));
           setEmails([]);
           setTotal(0);
+          setEmailSource("");
           setEmailError(errData.error?.message || "Failed to load emails");
         }
       } catch {
         setEmails([]);
         setTotal(0);
+        setEmailSource("");
         setEmailError("Failed to load emails");
       } finally {
         setLoading(false);
@@ -266,6 +314,7 @@ export default function MailPage() {
         const data = await res.json();
         setEmails(data.data || []);
         setTotal(data.total || 0);
+        setEmailSource(data.source || "");
         setEmailError(null);
       } else {
         const errData = await res.json().catch(() => ({ error: { message: "Refresh failed" } }));
@@ -319,6 +368,35 @@ export default function MailPage() {
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
 
+      {/* Sync progress banner */}
+      {syncStatus && syncStatus.overall === "syncing" && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+          <svg className="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          <span>
+            Syncing {syncStatus.syncingFolders} of {syncStatus.totalFolders} folders...
+          </span>
+          <span className="text-blue-500">
+            ({syncStatus.totalCached} messages cached so far)
+          </span>
+        </div>
+      )}
+
+      {/* Sync complete banner (transient — only when just finished and cache has data) */}
+      {syncStatus && syncStatus.overall === "done" && syncStatus.totalCached > 0 && syncStatus.syncingFolders === 0 && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded text-sm text-green-800">
+          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          </svg>
+          <span>
+            Cache ready — {syncStatus.totalCached} messages across {syncStatus.totalFolders} folders
+            {syncStatus.totalBodies > 0 && ` (${syncStatus.totalBodies} bodies precached)`}
+          </span>
+        </div>
+      )}
+
       <div className="flex h-[calc(100vh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
         {/* Folder sidebar */}
         <FolderSidebar
@@ -344,6 +422,7 @@ export default function MailPage() {
           onSearch={handleSearch}
           error={emailError}
           onRefresh={handleRefresh}
+          source={emailSource}
         />
 
         {/* Email reader */}

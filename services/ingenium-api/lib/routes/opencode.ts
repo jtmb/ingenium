@@ -9,6 +9,7 @@ export const opencodeRouter = Router();
 opencodeRouter.get("/messages", (req, res) => {
   const since = parseInt(req.query.since as string || "0", 10);
   const limit = Math.min(parseInt(req.query.limit as string || "500", 10), 2000);
+  const project = (req.query.project as string) || "";
 
   try {
     // Host OpenCode DB mounted at /var/opencode/ via docker-compose
@@ -22,19 +23,33 @@ opencodeRouter.get("/messages", (req, res) => {
 
     const db = new Database(dbPath, { readonly: true, fileMustExist: true });
 
-    const rows = db.prepare(`
+    // Build query with optional project (worktree directory) filter
+    const projectClause = project
+      ? "AND (s.directory LIKE ('%/' || ?) OR s.directory LIKE ('%\\' || ?))"
+      : "";
+
+    const sql = `
       SELECT
         json_extract(p.data, '$.text') as text,
         p.time_created
       FROM part p
       JOIN message m ON p.message_id = m.id
+      JOIN session s ON m.session_id = s.id
       WHERE json_extract(m.data, '$.role') = 'user'
         AND json_extract(p.data, '$.type') = 'text'
         AND length(json_extract(p.data, '$.text')) > 10
         AND p.time_created > ?
+        AND s.parent_id IS NULL
+        ${projectClause}
       ORDER BY p.time_created DESC
       LIMIT ?
-    `).all(since, limit);
+    `;
+
+    const params: any[] = [since];
+    if (project) params.push(project, project);
+    params.push(limit);
+
+    const rows = db.prepare(sql).all(...params);
 
     db.close();
 
@@ -43,7 +58,7 @@ opencodeRouter.get("/messages", (req, res) => {
       time_created: r.time_created,
     }));
 
-    logger.info("opencode", `Returned ${messages.length} user messages from OpenCode DB (since=${since}, limit=${limit})`);
+    logger.info("opencode", `Returned ${messages.length} user messages from OpenCode DB (since=${since}, limit=${limit}, project=${project || "any"})`);
 
     res.json({ data: { messages, total: messages.length } });
   } catch (err: any) {
