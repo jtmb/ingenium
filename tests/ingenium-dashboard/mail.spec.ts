@@ -42,7 +42,7 @@ const MOCK_ACCOUNTS = {
       name: "james.branco@gmail.com",
       provider: "gmail",
       authType: "oauth2",
-      connected: false,
+      connected: true,
     },
   ],
   total: 1,
@@ -445,8 +445,8 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     const listBoxBefore = await getEmailListBoundingBox(page);
     expect(listBoxBefore).not.toBeNull();
 
-    // Verify "Select an email to read" is shown before selection
-    const emptyReader = page.getByText("Select an email to read").first();
+    // Verify "Select an email to read" empty state is shown before selection
+    const emptyReader = page.getByTestId("email-reader-empty");
     await expect(emptyReader).toBeVisible({ timeout: 3000 });
 
     // Click the first email row
@@ -459,11 +459,9 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     // List width should not change (no layout shift)
     expect(listBoxAfter!.width).toBeCloseTo(listBoxBefore!.width, 0);
 
-    // Reader pane should now show email content
-    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
-    await expect(readerPane).toBeVisible({ timeout: 5000 });
-
-    // Empty state text should be gone
+    // Reader pane should now show email content, and empty state MUST be gone
+    const readerContent = page.getByTestId("email-reader-content");
+    await expect(readerContent).toBeVisible({ timeout: 5000 });
     await expect(emptyReader).not.toBeVisible();
 
     // Take screenshots
