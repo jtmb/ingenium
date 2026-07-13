@@ -25,7 +25,7 @@ export default function EmailReader({
   // No email selected
   if (!email && !loading) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-3">
+      <div className="flex-1 min-w-[400px] flex flex-col items-center justify-center gap-3">
         <span className="text-3xl">✉️</span>
         <p className="text-[var(--color-text-muted)] text-sm">Select an email to read</p>
       </div>
@@ -35,7 +35,7 @@ export default function EmailReader({
   // Loading state
   if (loading) {
     return (
-      <div className="flex-1 flex flex-col animate-pulse">
+      <div className="flex-1 min-w-[400px] flex flex-col animate-pulse">
         <div className="bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] px-4 py-3 space-y-2">
           <div className="h-6 bg-[var(--color-surface-muted)] rounded w-2/3" />
           <div className="h-4 bg-[var(--color-surface-muted)] rounded w-1/3" />
@@ -56,7 +56,7 @@ export default function EmailReader({
   const ccList = email.cc?.map((c: any) => c.address).join(", ") || "";
 
   return (
-    <div className="flex-1 flex flex-col min-w-0">
+    <div className="flex-1 min-w-[400px] flex flex-col">
       {/* Header panel */}
       <div className="bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] px-4 py-3 space-y-1">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">

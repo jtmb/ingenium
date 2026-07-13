@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import FolderSidebar from "./components/FolderSidebar";
 import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
@@ -33,9 +33,6 @@ export default function MailPage() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [folders, setFolders] = useState<any[]>([]);
-  const emailCache = useRef<Map<string, { emails: any[]; total: number }>>(new Map());
-  const pollerRef = useRef<{ folder: string; page: number; query: string }>({ folder: "INBOX", page: 1, query: "" });
-  pollerRef.current = { folder: selectedFolder, page, query: searchQuery };
 
   // Fetch accounts on mount
   useEffect(() => {
@@ -66,57 +63,12 @@ export default function MailPage() {
       .catch(() => setFolders([]));
   }, [selectedAccount]);
 
-  // Prefetch INBOX + common folders into cache (silent, doesn't touch UI)
-  useEffect(() => {
-    if (!selectedAccount || folders.length === 0) return;
-    const prefetch = (folder: string) =>
-      fetch(`${API_BASE}/emails?project=${PROJECT}&folder=${encodeURIComponent(folder)}&account=${selectedAccount}&page=1&limit=50`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
-          if (d?.data) emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: d.data, total: d.total || 0 });
-        })
-        .catch(() => {});
-    // Prefetch INBOX first, then batch the rest
-    prefetch("INBOX");
-    const others = folders.slice(1, 8).map((f: any) => f.path || f.name);
-    setTimeout(() => others.forEach(f => prefetch(f)), 5000); // defer non-INBOX by 5s
-  }, [selectedAccount, folders]);
-
-  // Background poller: refresh INBOX every 30s
-  useEffect(() => {
-    if (!selectedAccount) return;
-    const id = setInterval(() => {
-      const p = pollerRef.current;
-      const inboxKey = `${selectedAccount}:INBOX:1:`;
-      fetch(`${API_BASE}/emails?project=${PROJECT}&folder=INBOX&account=${selectedAccount}&page=1&limit=50`)
-        .then(r => r.ok ? r.json() : null)
-        .then(d => {
-          if (d?.data) {
-            emailCache.current.set(inboxKey, { emails: d.data, total: d.total || 0 });
-            if (p.folder === "INBOX" && p.page === 1 && !p.query) {
-              setEmails(d.data);
-              setTotal(d.total || 0);
-            }
-          }
-        })
-        .catch(() => {});
-    }, 30_000);
-    return () => clearInterval(id);
-  }, [selectedAccount]);
+  // No more prefetch or background poller — server-side scheduler + DB cache handle this
 
   // Fetch emails when account/folder/page/search changes
+  // Server-side DB cache serves sub-2ms — no need for in-memory cache
   useEffect(() => {
     if (!selectedAccount) return;
-
-    const cacheKey = `${selectedAccount}:${selectedFolder}:${page}:${searchQuery}`;
-    const cached = !searchQuery ? emailCache.current.get(cacheKey) : null;
-    if (cached) {
-      setEmails(cached.emails);
-      setTotal(cached.total);
-      setEmailError(null);
-      setLoading(false);
-      return;
-    }
 
     const fetchEmails = async () => {
       setLoading(true);
@@ -130,14 +82,9 @@ export default function MailPage() {
         const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
-          const list = data.data || [];
-          const tot = data.total || 0;
-          setEmails(list);
-          setTotal(tot);
+          setEmails(data.data || []);
+          setTotal(data.total || 0);
           setEmailError(null);
-          if (!searchQuery) {
-            emailCache.current.set(cacheKey, { emails: list, total: tot });
-          }
         } else {
           const errData = await res.json().catch(() => ({ error: { message: "Failed to load emails" } }));
           setEmails([]);
@@ -192,7 +139,6 @@ export default function MailPage() {
       });
       if (res.ok) {
         setShowCompose(false);
-        emailCache.current.clear();
         setRefreshKey(k => k + 1);
       } else {
         const errData = await res.json().catch(() => ({ error: { message: "Send failed" } }));
@@ -220,7 +166,6 @@ export default function MailPage() {
       });
       if (res.ok) {
         setShowCompose(false);
-        emailCache.current.clear();
         setRefreshKey(k => k + 1);
       } else {
         const errData = await res.json().catch(() => ({ error: { message: "Save failed" } }));
@@ -244,7 +189,6 @@ export default function MailPage() {
         body: JSON.stringify({ account: selectedAccount }),
       });
       setSelectedEmail(null);
-      emailCache.current.clear();
       setRefreshKey(k => k + 1);
       setPage(1);
     } catch {
@@ -261,7 +205,6 @@ export default function MailPage() {
         body: JSON.stringify({ account: selectedAccount, fromFolder: selectedFolder, toFolder: "Archive" }),
       });
       setSelectedEmail(null);
-      emailCache.current.clear();
       setRefreshKey(k => k + 1);
     } catch {
       // Silently fail
@@ -290,45 +233,32 @@ export default function MailPage() {
     setEmailError(null);
   }, []);
 
+  const handleRefresh = useCallback(async () => {
+    if (!selectedAccount) return;
+    setLoading(true);
+    try {
+      const url = searchQuery
+        ? `${API_BASE}/emails/search?project=${PROJECT}&q=${encodeURIComponent(searchQuery)}&account=${selectedAccount}&refresh=true`
+        : `${API_BASE}/emails?project=${PROJECT}&folder=${encodeURIComponent(selectedFolder)}&account=${selectedAccount}&page=${page}&limit=50&refresh=true`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setEmails(data.data || []);
+        setTotal(data.total || 0);
+        setEmailError(null);
+      } else {
+        const errData = await res.json().catch(() => ({ error: { message: "Refresh failed" } }));
+        setEmailError(errData.error?.message || "Refresh failed");
+      }
+    } catch {
+      setEmailError("Refresh failed");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedAccount, selectedFolder, page, searchQuery]);
+
   // No accounts — show empty / setup state
   if (accounts.length === 0 && !showAccountSetup) {
-    const loadDemoAccount = async () => {
-      try {
-        const res = await fetch(`${API_BASE}/emails/accounts?project=${PROJECT}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: "demo@ingenium.local",
-            name: "Demo Account",
-            provider: "custom",
-            authType: "app_password",
-            imapHost: "imap",
-            imapPort: 3143,
-            smtpHost: "imap",
-            smtpPort: 3025,
-            appPassword: "password",
-          }),
-        });
-        if (res.ok) {
-          // Refresh accounts to trigger 3-pane render
-          const acctsRes = await fetch(`${API_BASE}/emails/accounts?project=${PROJECT}`);
-          if (acctsRes.ok) {
-            const data = await acctsRes.json();
-            const accts = data.data || [];
-            setAccounts(accts);
-            if (accts.length > 0) {
-              setSelectedAccount(accts[0].id);
-            }
-          }
-        } else {
-          const data = await res.json();
-          alert(data.error?.message || "Failed to create demo account");
-        }
-      } catch (err: any) {
-        alert("Failed to create demo account: " + (err.message || "Unknown error"));
-      }
-    };
-
     return (
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
@@ -336,14 +266,6 @@ export default function MailPage() {
           message="No email accounts configured"
           action={{ label: "Add Account", onClick: () => setShowAccountSetup(true) }}
         />
-        <div className="text-center">
-          <button
-            onClick={loadDemoAccount}
-            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline"
-          >
-            Load demo account for UI testing
-          </button>
-        </div>
       </div>
     );
   }
@@ -400,6 +322,7 @@ export default function MailPage() {
           loading={loading}
           onSearch={handleSearch}
           error={emailError}
+          onRefresh={handleRefresh}
         />
 
         {/* Email reader */}

@@ -48,6 +48,10 @@ export default function SettingsPage() {
   const [savingOauth, setSavingOauth] = useState(false);
   const [oauthSaved, setOauthSaved] = useState(false);
 
+  // Mail sync interval state
+  const [mailIntervalMin, setMailIntervalMin] = useState(5);
+  const [mailIntervalSaved, setMailIntervalSaved] = useState(false);
+
   // Password visibility toggles
   const [showPw, setShowPw] = useState<Record<string, boolean>>({});
   const togglePw = (name: string) => setShowPw(prev => ({ ...prev, [name]: !prev[name] }));
@@ -153,6 +157,21 @@ export default function SettingsPage() {
     setToast("Interval updated ✓");
     setTimeout(() => setIntervalSaved(false), 2000);
   };
+
+  const handleMailIntervalSave = async (min: number) => {
+    await api.settings.set("mail_sync_interval_ms", String(min * 60000), PROJECT);
+    setMailIntervalSaved(true);
+    setToast("Mail sync interval updated ✓");
+    setTimeout(() => setMailIntervalSaved(false), 2000);
+  };
+
+  // Fetch saved mail sync interval
+  useEffect(() => {
+    api.settings.get("mail_sync_interval_ms", PROJECT).then((r) => {
+      const ms = parseInt(r.data?.value, 10);
+      if (!isNaN(ms) && ms >= 0) setMailIntervalMin(ms / 60000);
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load Email OAuth settings
   useEffect(() => {
@@ -595,6 +614,34 @@ export default function SettingsPage() {
             {savingOauth ? "Saving..." : "Save"}
           </button>
           {oauthSaved && <span className="text-sm text-[var(--color-success-text)]">Saved!</span>}
+        </div>
+      </div>
+
+      {/* ── Mail Sync ── */}
+      <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 space-y-4 hover:shadow-md transition-shadow">
+        <h2 className="text-lg font-semibold flex items-center gap-2">✉️ Mail</h2>
+        <p className="text-sm text-[var(--color-text-muted)]">
+          How often the server checks for new emails in connected accounts.
+        </p>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Check every</label>
+          <select
+            value={String(mailIntervalMin)}
+            onChange={(e) => {
+              const min = Number(e.target.value);
+              setMailIntervalMin(min);
+              handleMailIntervalSave(min);
+            }}
+            className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+          >
+            <option value="0">Off</option>
+            <option value="1">1 minute</option>
+            <option value="5">5 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+          </select>
+          {mailIntervalSaved && <span className="text-sm text-[var(--color-success-text)] ml-2">Saved!</span>}
         </div>
       </div>
 

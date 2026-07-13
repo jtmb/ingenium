@@ -19,4 +19,5 @@ export * as configs from "./tools/configs.js";
 export * as extraction from "./tools/extraction.js";
 export * as jobs from "./tools/jobs.js";
 export * as mcpToolStates from "./tools/mcp-tool-states.js";
+export * as emailCache from "./tools/email-cache.js";
 //# sourceMappingURL=index.d.ts.map

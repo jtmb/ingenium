@@ -21,7 +21,7 @@ export const PROVIDERS: Record<EmailProvider, ProviderConfig> = {
     smtp: { host: "smtp.mail.yahoo.com", port: 587, tls: true },
   },
   custom: {
-    imap: { host: "127.0.0.1", port: 993, tls: false },
-    smtp: { host: "127.0.0.1", port: 465, tls: false },
+    imap: { host: "imap.example.com", port: 993, tls: true },
+    smtp: { host: "smtp.example.com", port: 587, tls: true },
   },
 };
