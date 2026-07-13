@@ -126,7 +126,7 @@ export default function EmailReader({
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {email.body?.html ? (
           <div
-            className="text-sm text-[var(--color-text-primary)] prose prose-sm max-w-none"
+            className="text-sm text-[var(--color-text-primary)] prose prose-sm max-w-none [&_img]:max-w-full [&_img]:h-auto"
             dangerouslySetInnerHTML={{ __html: email.body.html }}
           />
         ) : email.body?.text ? (
