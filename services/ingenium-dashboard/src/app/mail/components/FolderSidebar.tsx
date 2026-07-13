@@ -88,9 +88,9 @@ export default function FolderSidebar({
               }`}
             >
               <span className="truncate">{folder.name || folder.path}</span>
-              {(folder.unreadMessages ?? 0) > 0 && (
+              {(folder.totalMessages ?? 0) > 0 && (
                 <span className="text-xs text-[var(--color-text-muted)] ml-2">
-                  {folder.unreadMessages}
+                  {folder.totalMessages}
                 </span>
               )}
             </button>
