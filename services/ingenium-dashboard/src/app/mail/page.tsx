@@ -100,7 +100,8 @@ export default function MailPage() {
     if (!selectedAccount) return;
 
     const cacheKey = `${selectedAccount}:${selectedFolder}:${page}:${searchQuery}`;
-    const cached = !searchQuery ? emailCache.current.get(cacheKey) : null;
+    // Only cache non-INBOX folders (INBOX changes frequently)
+    const cached = !searchQuery && selectedFolder !== "INBOX" ? emailCache.current.get(cacheKey) : null;
     if (cached) {
       setEmails(cached.emails);
       setTotal(cached.total);
@@ -126,7 +127,7 @@ export default function MailPage() {
           setEmails(list);
           setTotal(tot);
           setEmailError(null);
-          if (!searchQuery) {
+          if (!searchQuery && selectedFolder !== "INBOX") {
             emailCache.current.set(cacheKey, { emails: list, total: tot });
           }
         } else {
