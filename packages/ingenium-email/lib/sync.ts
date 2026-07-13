@@ -53,10 +53,10 @@ export async function syncFolder(
 
     // UIDVALIDITY — if it changed, the server renumbered UIDs.
     // Clear the entire account cache and start fresh.
-    const uidValidity: number = (client.mailbox as any)?.uidValidity ?? 0;
+    const uidValidity = Number((client.mailbox as any)?.uidValidity ?? 0);
     const state = emailCache.getSyncState(accountId, folder);
 
-    if (state.uidvalidity > 0 && uidValidity > 0 && state.uidvalidity !== uidValidity) {
+    if (state.uidvalidity > 0 && uidValidity > 0 && Number(state.uidvalidity) !== uidValidity) {
       logger.warn("email", `UIDVALIDITY changed for ${account.email}/${folder}: was ${state.uidvalidity}, now ${uidValidity} — clearing cache`);
       emailCache.clearCache(accountId);
     }
