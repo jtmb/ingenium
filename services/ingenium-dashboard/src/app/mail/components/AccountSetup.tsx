@@ -43,34 +43,6 @@ export default function AccountSetup({
       .catch(() => setCredsConfigured(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const loadDemoAccount = async () => {
-    try {
-      const res = await fetch(`${apiBase}/emails/accounts?project=${PROJECT}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: "demo@ingenium.local",
-          name: "Demo Account",
-          provider: "custom",
-          authType: "app_password",
-          imapHost: "imap",
-          imapPort: 3143,
-          smtpHost: "imap",
-          smtpPort: 3025,
-          appPassword: "password",
-        }),
-      });
-      if (res.ok) {
-        onComplete();
-      } else {
-        const data = await res.json();
-        alert(data.error?.message || "Failed to create demo account");
-      }
-    } catch (err: any) {
-      alert("Failed to create demo account: " + (err.message || "Unknown error"));
-    }
-  };
-
   const handleOAuthRedirect = async (provider: string) => {
     setError(null);
     try {
@@ -224,14 +196,7 @@ export default function AccountSetup({
             <p className="text-sm text-[var(--color-text-secondary)] mt-1">Set up manually</p>
           </button>
         </div>
-        <div className="flex justify-between items-center">
-          <button
-            onClick={loadDemoAccount}
-            className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] underline"
-            title="Create a demo account for UI testing"
-          >
-            Load demo account for UI testing
-          </button>
+        <div className="flex justify-end items-center">
           <button
             onClick={onCancel}
             className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] py-2 px-4 rounded text-sm font-medium"

@@ -1,4 +1,5 @@
 "use client";
+import { useState, useRef, useEffect } from "react";
 
 /**
  * FolderSidebar — account selector + folder tree with unread counts.
@@ -37,8 +38,21 @@ export default function FolderSidebar({
     (a: any) => a.id === selectedAccount || a.email === selectedAccount
   );
 
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   return (
-    <div className="min-w-[200px] max-w-[250px] bg-[var(--color-surface-muted)] border-r border-[var(--color-border)] p-2 flex flex-col gap-2">
+    <div className="min-w-[200px] max-w-[250px] flex-shrink-0 bg-[var(--color-surface-muted)] border-r border-[var(--color-border)] p-2 flex flex-col gap-2">
       {/* Compose button */}
       <button
         onClick={onCompose}
@@ -47,31 +61,71 @@ export default function FolderSidebar({
         Compose
       </button>
 
-      {/* Account selector */}
-      <select
-        className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm text-[var(--color-text-primary)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
-        value={selectedAccount}
-        onChange={(e) => {
-          const val = e.target.value;
-          if (val === "__add__") {
-            onAddAccount();
-          } else {
-            onSelectAccount?.(val);
-          }
-        }}
-      >
-        {accounts.length === 0 && (
-          <option value="">No accounts</option>
+      {/* Account selector — custom dropdown */}
+      <div className="relative" ref={dropdownRef}>
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className="w-full flex items-center gap-2 border border-[var(--color-border)] rounded px-2 py-1.5 text-sm text-[var(--color-text-primary)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+        >
+          {selectedAccountData ? (
+            <>
+              <span className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-medium shrink-0">
+                {(selectedAccountData.email || selectedAccountData.id)[0].toUpperCase()}
+              </span>
+              <span className="flex-1 truncate text-left">{selectedAccountData.email}</span>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${selectedAccountData.connected ? "bg-green-500" : "bg-gray-400"}`} />
+            </>
+          ) : (
+            <span className="flex-1 text-left text-[var(--color-text-muted)]">Select account</span>
+          )}
+          <svg className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {isOpen && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg z-50">
+            {accounts.length === 0 && (
+              <div className="px-3 py-2 text-sm text-[var(--color-text-muted)]">No accounts</div>
+            )}
+            {accounts.map((acct: any) => (
+              <button
+                key={acct.id}
+                type="button"
+                onClick={() => {
+                  onSelectAccount?.(acct.id);
+                  setIsOpen(false);
+                }}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-[var(--color-surface-hover)] cursor-pointer ${
+                  (selectedAccount === acct.id || selectedAccount === acct.email) ? "bg-[var(--color-surface-selected)]" : ""
+                }`}
+              >
+                <span className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-medium shrink-0">
+                  {acct.email[0].toUpperCase()}
+                </span>
+                <span className="flex-1 truncate">{acct.email}</span>
+                <span className={`w-2 h-2 rounded-full shrink-0 ${acct.connected ? "bg-green-500" : "bg-gray-400"}`} />
+                {!acct.connected && (
+                  <span className="text-xs text-[var(--color-text-muted)]">(not connected)</span>
+                )}
+              </button>
+            ))}
+            {onAddAccount && (
+              <>
+                <div className="border-t border-[var(--color-border)]" />
+                <button
+                  type="button"
+                  onClick={() => { onAddAccount(); setIsOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-blue-600 hover:bg-[var(--color-surface-hover)] cursor-pointer"
+                >
+                  + Add Account
+                </button>
+              </>
+            )}
+          </div>
         )}
-        {accounts.map((acct: any) => (
-          <option key={acct.id} value={acct.id}>
-            {acct.connected ? "🟢 " : "⚪ "}{acct.email}{!acct.connected ? " (not connected)" : ""}
-          </option>
-        ))}
-        <option value="__add__" disabled={!onAddAccount}>
-          + Add Account
-        </option>
-      </select>
+      </div>
 
       {/* Folder tree */}
       <div className="flex flex-col gap-0.5 mt-1">

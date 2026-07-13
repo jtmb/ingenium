@@ -14,6 +14,7 @@ export default function EmailList({
   loading,
   onSearch,
   error,
+  onRefresh,
 }: {
   emails: any[];
   selectedUid?: number;
@@ -24,6 +25,7 @@ export default function EmailList({
   loading: boolean;
   onSearch: (q: string) => void;
   error?: string | null;
+  onRefresh?: () => void;
 }) {
   const pageSize = 50;
   const totalPages = Math.ceil(total / pageSize);
@@ -42,7 +44,7 @@ export default function EmailList({
   };
 
   return (
-    <div className="flex-1 flex flex-col min-w-0 border-r border-[var(--color-border)]">
+    <div className="w-[350px] min-w-[300px] flex-shrink-0 flex flex-col border-r border-[var(--color-border)]">
       {/* Search bar */}
       <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2">
         <input
@@ -51,6 +53,17 @@ export default function EmailList({
           className="flex-1 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200"
           onChange={(e) => onSearch(e.target.value)}
         />
+        {onRefresh && (
+          <button
+            onClick={onRefresh}
+            title="Refresh"
+            className="px-2 py-1.5 border border-[var(--color-border)] rounded text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] flex-shrink-0"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Error banner */}

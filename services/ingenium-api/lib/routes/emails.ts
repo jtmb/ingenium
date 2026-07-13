@@ -1,6 +1,6 @@
 import { Router, Response } from "express";
 import { requireProject } from "../helpers.js";
-import { logger } from "ingenium-core";
+import { logger, emailCache } from "ingenium-core";
 import {
   // Account CRUD
   listAccounts,
@@ -35,6 +35,9 @@ import {
   startWatcher,
   getWatcherStatus,
   stopWatcher,
+  // Sync
+  syncFolder,
+  syncAccountFolders,
 } from "ingenium-email";
 import type {
   EmailAccount,
@@ -42,6 +45,7 @@ import type {
   SearchQuery,
   SendOptions,
   EmailProvider,
+  EmailMessage,
 } from "ingenium-email";
 
 export const emailsRouter = Router();
@@ -437,47 +441,80 @@ emailsRouter.get("/watch/status", (req, res) => {
 
 // ── Root Email Routes ────────────────────────────────────────────────────
 
-/** POST /sync?project= — Sync multiple folders at once, returns cached results. */
+/** POST /sync?project=&account=&folder= — Trigger DB-backed email sync.
+ *  POST /emails/sync?account=<id>            — sync all folders
+ *  POST /emails/sync?account=<id>&folder=X   — sync single folder */
 emailsRouter.post("/sync", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const accountId = req.body.account;
-  const result = await getAccountAuthOrError(res, projectId, accountId);
-  if (!result) return;
+  // Support both query params and body for account/folder
+  const accountId = (req.query.account as string) ?? req.body.account;
+  if (!accountId) {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "account query parameter is required" },
+    });
+    return;
+  }
 
-  const folders = (req.body.folders as string[]) ?? ["INBOX", "Sent", "Drafts", "Archive", "Spam", "Trash"];
-  const limit = 50;
-
-  const { account, auth } = result;
+  const folder = (req.query.folder as string) ?? null;
 
   try {
-    // Connect once, fetch all folders in parallel
-    await connectAccount(account, auth);
-    
-    const folderPromises = folders.map(async (folder): Promise<[string, { emails: any[]; total: number }]> => {
-      try {
-        const { messages, total } = await listEmails(account.id, folder, 1, limit);
-        return [folder, { emails: messages as any[], total }];
-      } catch {
-        return [folder, { emails: [], total: 0 }] as const;
+    if (folder) {
+      // Sync single folder
+      const result = await syncFolder(projectId, accountId, folder);
+      if (result.error) {
+        res.status(500).json({ error: { code: "SYNC_ERROR", message: result.error } });
+        return;
       }
-    });
-    
-    const entries = await Promise.all(folderPromises);
-    const results: Record<string, { emails: any[]; total: number }> = {};
-    for (const [folder, data] of entries) {
-      results[folder] = data;
+      res.json({ data: { folder, synced: result.synced, total: result.total } });
+    } else {
+      // Sync all folders
+      const results = await syncAccountFolders(projectId, accountId);
+      const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
+      const errors = results.filter((r) => r.error).map((r) => ({ folder: r.folder, error: r.error }));
+      res.json({
+        data: {
+          account: accountId,
+          folders: results.length,
+          totalSynced,
+          results: results.map((r) => ({ folder: r.folder, synced: r.synced, total: r.total })),
+          errors: errors.length > 0 ? errors : undefined,
+        },
+      });
     }
-
-    res.json({ data: results });
   } catch (err: any) {
     logger.error("email", `Sync failed for account ${accountId}`, { error: err.message, name: err.name, method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+    res.status(500).json({ error: { code: "SYNC_ERROR", message: err.message } });
   }
 });
 
-/** GET /?project=&account=&folder=&page=&limit= — List and paginate emails. */
+/** Convert a cached email row to an EmailMessage-compatible shape for the API. */
+function cachedToEmailMessage(c: emailCache.CachedEmail): Partial<EmailMessage> {
+  let envelope: Record<string, unknown> = {};
+  if (c.envelope_json) {
+    try { envelope = JSON.parse(c.envelope_json) as Record<string, unknown>; } catch { /* empty */ }
+  }
+  return {
+    uid: c.uid,
+    subject: c.subject ?? "(no subject)",
+    from: Array.isArray(envelope.from) ? (envelope.from as EmailMessage["from"]) : [{ name: c.from_name ?? undefined, address: c.from_addr ?? "" }],
+    to: Array.isArray(envelope.to) ? (envelope.to as EmailMessage["to"]) : [],
+    cc: Array.isArray(envelope.cc) ? (envelope.cc as EmailMessage["cc"]) : [],
+    date: c.date ?? new Date().toISOString(),
+    body: { text: c.snippet ?? undefined },
+    attachments: c.has_attachments ? [] : [],  // attachment detail lives in body cache
+    flags: ((): string[] => { try { return JSON.parse(c.flags) as string[]; } catch { return []; } })(),
+    folder: c.folder,
+    messageId: (envelope.messageId as string) ?? undefined,
+    threadId: (envelope.threadId as string) ?? undefined,
+    inReplyTo: (envelope.inReplyTo as string) ?? undefined,
+    references: (envelope.references as string) ?? undefined,
+  };
+}
+
+/** GET /?project=&account=&folder=&page=&limit=&refresh= — List and paginate emails.
+ *  Uses DB cache when available; falls back to direct IMAP. */
 emailsRouter.get("/", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -489,14 +526,66 @@ emailsRouter.get("/", async (req, res) => {
   const folder = (req.query.folder as string) ?? "INBOX";
   const page = parseInt((req.query.page as string) ?? "1", 10) || 1;
   const limit = parseInt((req.query.limit as string) ?? "50", 10) || 50;
+  const refresh = req.query.refresh === "true";
 
   const { account, auth } = result;
 
+  // ── Force refresh: skip cache, fetch from IMAP, populate cache ──────
+  if (refresh) {
+    try {
+      const { messages, total } = await withImapConnection(account, auth, (id) =>
+        listEmails(id, folder, page, limit),
+      );
+      // Populate cache in background (fire-and-forget)
+      setImmediate(() => {
+        syncFolder(projectId, account.id, folder).catch(() => {});
+      });
+      res.json({ data: messages, total, source: "imap" });
+      return;
+    } catch (err: any) {
+      logger.error("email", `List emails (refresh) failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
+      res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+      return;
+    }
+  }
+
+  // ── Check DB cache first ───────────────────────────────────────────
+  const { emails: cached, total: cachedTotal } = emailCache.getCachedEmails(
+    account.id, folder, page, limit,
+  );
+
+  if (cached.length > 0) {
+    // We have cached data — return it immediately.
+    // Optionally trigger a background sync if cache might be stale.
+    const state = emailCache.getSyncState(account.id, folder);
+    const lastSynced = state.last_synced_at ? new Date(state.last_synced_at).getTime() : 0;
+    const staleThresholdMs = 5 * 60 * 1000; // 5 minutes
+    if (Date.now() - lastSynced > staleThresholdMs) {
+      setImmediate(() => {
+        syncFolder(projectId, account.id, folder).catch(() => {});
+      });
+    }
+
+    res.json({
+      data: cached.map(cachedToEmailMessage),
+      total: cachedTotal,
+      source: "cache",
+    });
+    return;
+  }
+
+  // ── No cache — fall back to IMAP, populating cache for next time ───
   try {
     const { messages, total } = await withImapConnection(account, auth, (id) =>
       listEmails(id, folder, page, limit),
     );
-    res.json({ data: messages, total });
+
+    // Populate cache in background
+    setImmediate(() => {
+      syncFolder(projectId, account.id, folder).catch(() => {});
+    });
+
+    res.json({ data: messages, total, source: "imap" });
   } catch (err: any) {
     logger.error("email", `List emails failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
