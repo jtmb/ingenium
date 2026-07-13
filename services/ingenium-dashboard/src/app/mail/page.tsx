@@ -69,7 +69,7 @@ export default function MailPage() {
     if (!selectedAccount) return;
 
     const cacheKey = `${selectedAccount}:${selectedFolder}:${page}:${searchQuery}`;
-    const cached = !searchQuery && refreshKey === 0 ? emailCache.current.get(cacheKey) : null;
+    const cached = !searchQuery ? emailCache.current.get(cacheKey) : null;
     if (cached) {
       setEmails(cached.emails);
       setTotal(cached.total);
@@ -152,6 +152,7 @@ export default function MailPage() {
       });
       if (res.ok) {
         setShowCompose(false);
+        emailCache.current.clear();
         setRefreshKey(k => k + 1);
       } else {
         const errData = await res.json().catch(() => ({ error: { message: "Send failed" } }));
@@ -179,6 +180,7 @@ export default function MailPage() {
       });
       if (res.ok) {
         setShowCompose(false);
+        emailCache.current.clear();
         setRefreshKey(k => k + 1);
       } else {
         const errData = await res.json().catch(() => ({ error: { message: "Save failed" } }));
@@ -202,7 +204,8 @@ export default function MailPage() {
         body: JSON.stringify({ account: selectedAccount }),
       });
       setSelectedEmail(null);
-      // Refresh list
+      emailCache.current.clear();
+      setRefreshKey(k => k + 1);
       setPage(1);
     } catch {
       // Silently fail
@@ -218,7 +221,8 @@ export default function MailPage() {
         body: JSON.stringify({ account: selectedAccount, fromFolder: selectedFolder, toFolder: "Archive" }),
       });
       setSelectedEmail(null);
-      setPage(1);
+      emailCache.current.clear();
+      setRefreshKey(k => k + 1);
     } catch {
       // Silently fail
     }
