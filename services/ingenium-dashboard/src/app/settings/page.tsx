@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { api } from "../../lib/api";
 import { useTheme } from "../components/ThemeProvider";
+import { useProject } from "../../lib/ProjectContext";
 
 /**
  * Settings page — user-configurable preferences for the Ingenium dashboard.
@@ -9,6 +10,7 @@ import { useTheme } from "../components/ThemeProvider";
  */
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
+  const project = useProject();
   const [retentionDays, setRetentionDays] = useState(7);
   const [saved, setSaved] = useState(false);
 
@@ -40,7 +42,6 @@ export default function SettingsPage() {
   const backupProvider = providers.find(p => p.id === backupProviderId);
 
   // Email OAuth state
-  const PROJECT = "gh-llm-bootstrap";
   const [gmailClientId, setGmailClientId] = useState("");
   const [gmailClientSecret, setGmailClientSecret] = useState("");
   const [outlookClientId, setOutlookClientId] = useState("");
@@ -159,7 +160,7 @@ export default function SettingsPage() {
   };
 
   const handleMailIntervalSave = async (min: number) => {
-    await api.settings.set("mail_sync_interval_ms", String(min * 60000), PROJECT);
+    await api.settings.set("mail_sync_interval_ms", String(min * 60000), project);
     setMailIntervalSaved(true);
     setToast("Mail sync interval updated ✓");
     setTimeout(() => setMailIntervalSaved(false), 2000);
@@ -167,7 +168,7 @@ export default function SettingsPage() {
 
   // Fetch saved mail sync interval
   useEffect(() => {
-    api.settings.get("mail_sync_interval_ms", PROJECT).then((r) => {
+    api.settings.get("mail_sync_interval_ms", project).then((r) => {
       const ms = parseInt(r.data?.value, 10);
       if (!isNaN(ms) && ms >= 0) setMailIntervalMin(ms / 60000);
     }).catch(() => {});
@@ -176,10 +177,10 @@ export default function SettingsPage() {
   // Load Email OAuth settings
   useEffect(() => {
     Promise.all([
-      api.settings.get("oauth_gmail_client_id", PROJECT),
-      api.settings.get("oauth_gmail_client_secret", PROJECT),
-      api.settings.get("oauth_outlook_client_id", PROJECT),
-      api.settings.get("oauth_outlook_client_secret", PROJECT),
+      api.settings.get("oauth_gmail_client_id", project),
+      api.settings.get("oauth_gmail_client_secret", project),
+      api.settings.get("oauth_outlook_client_id", project),
+      api.settings.get("oauth_outlook_client_secret", project),
     ]).then(([gid, gs, oid, os]) => {
       if (gid.data?.value) setGmailClientId(gid.data.value);
       if (gs.data?.value) setGmailClientSecret(gs.data.value);
@@ -191,10 +192,10 @@ export default function SettingsPage() {
   const saveOauth = async () => {
     setSavingOauth(true);
     try {
-      await api.settings.set("oauth_gmail_client_id", gmailClientId, PROJECT);
-      await api.settings.set("oauth_gmail_client_secret", gmailClientSecret, PROJECT);
-      await api.settings.set("oauth_outlook_client_id", outlookClientId, PROJECT);
-      await api.settings.set("oauth_outlook_client_secret", outlookClientSecret, PROJECT);
+      await api.settings.set("oauth_gmail_client_id", gmailClientId, project);
+      await api.settings.set("oauth_gmail_client_secret", gmailClientSecret, project);
+      await api.settings.set("oauth_outlook_client_id", outlookClientId, project);
+      await api.settings.set("oauth_outlook_client_secret", outlookClientSecret, project);
       setOauthSaved(true);
       setToast("OAuth settings saved ✓");
       setTimeout(() => setOauthSaved(false), 2000);

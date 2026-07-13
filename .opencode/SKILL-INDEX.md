@@ -56,6 +56,14 @@ When adding a new skill:
 3. Add entry to this file in the table above
 4. Run `/update-skill-index` to regenerate
 
+## Reference Files
+
+Skills may include reference files under `references/`. Notable references:
+
+| Skill | Reference | Description |
+|-------|-----------|-------------|
+| `local-models` | `references/deep-seek.md` | DeepSeek V4 reasoning failure patterns — orchestrator safety protocol |
+
 ## Related Documentation
 
 - [docs/HOW-TO/skills.md](./HOW-TO/skills.md) — Skill system usage guide

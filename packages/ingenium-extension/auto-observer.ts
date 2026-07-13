@@ -12,7 +12,7 @@ import { tool } from "@opencode-ai/plugin"
 
 // Configuration
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1"
-const PROJECT = process.env.INGENIUM_PROJECT || "gh-llm-bootstrap"
+const PROJECT = process.env.INGENIUM_PROJECT || "global-default"
 
 // In-memory throttle — fire at most once per 60s
 let lastFire = 0

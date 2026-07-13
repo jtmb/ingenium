@@ -43,10 +43,16 @@ export default function ObservationsPage() {
   const [typeFilter, setTypeFilter] = useState("");
   const [selected, setSelected] = useState<any>(null);
   const [stats, setStats] = useState({ total: 0, pending: 0 });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.observations.list(project, statusFilter, typeFilter).then((r) => setObservations(r.data || [])).catch(() => {});
-    api.observations.stats(project).then((r) => setStats(r.data || { total: 0, pending: 0 })).catch(() => {});
+    setError(null);
+    api.observations.list(project, statusFilter, typeFilter)
+      .then((r) => setObservations(r.data || []))
+      .catch(() => setError("Failed to load observations — API may be unreachable"));
+    api.observations.stats(project)
+      .then((r) => setStats(r.data || { total: 0, pending: 0 }))
+      .catch(() => { /* stats are non-critical */ });
   }, [project, statusFilter, typeFilter]);
 
   return (
@@ -83,7 +89,12 @@ export default function ObservationsPage() {
       </div>
 
       <div className="space-y-2">
-        {observations.length === 0 && (
+        {error && (
+          <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
+            {error}
+          </div>
+        )}
+        {!error && observations.length === 0 && (
           <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
             No observations yet. The agent will record observations automatically during interactions.
           </div>

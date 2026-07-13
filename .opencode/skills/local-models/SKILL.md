@@ -122,12 +122,14 @@ If count > 100, narrow the search or use a different approach.
 | [`references/lm-studio-api.md`](references/lm-studio-api.md) | LM Studio server info, API endpoints, provider configuration, common issues |
 | [`references/cross-model-strategy.md`](references/cross-model-strategy.md) | Comparison tables, which model for which task, prompt adaptation by model size, skill adaptation guide |
 | [`references/qwen-3.5-9b.md`](references/qwen-3.5-9b.md) | 🔴 qwen-3.5-9b subagent safety protocol — phase limits, anti-loop, anti-hallucination, file write verification |
+| [`references/deep-seek.md`](references/deep-seek.md) | 🔴 DeepSeek V4 (Pro/Flash) orchestrator reasoning protocol — dependency blame, mock blindness, scope reclassification, deploy loop, namespace misassignment, end-to-end validation, count-worship |
 
 ## Model-Specific Protocols
 
 For model-specific subagent safety rules (phase limits, anti-loop constraints), see:
 
 - **[qwen-3.5-9b.md](references/qwen-3.5-9b.md)** — Required reading for all qwen-3.5-9b subagents (ingenium-docs, ingenium-explore, ingenium-scout)
+- **[deep-seek.md](references/deep-seek.md)** — Required reading for DeepSeek V4 Pro/Flash (ingenium-orchestrator, ingenium-qa, ingenium-docs) — 7 reasoning failure patterns with detection prompts
 
 ## Cross-References
 

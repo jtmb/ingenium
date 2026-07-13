@@ -8,15 +8,16 @@ import EmptyState from "./components/EmptyState";
 import AccountSetup from "./components/AccountSetup";
 import Overlay from "../components/Overlay";
 import EmailComposer from "./components/EmailComposer";
+import { useProject } from "../../lib/ProjectContext";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
-const PROJECT = "gh-llm-bootstrap";
 
 /**
  * Inbox page — 3-pane layout: FolderSidebar | EmailList | EmailReader
  * Fetches accounts on mount, then emails for the selected folder.
  */
 export default function MailPage() {
+  const project = useProject();
   const [accounts, setAccounts] = useState<any[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string>("");
   const [selectedFolder, setSelectedFolder] = useState("INBOX");
@@ -38,7 +39,7 @@ export default function MailPage() {
   useEffect(() => {
     const fetchAccounts = async () => {
       try {
-        const res = await fetch(`${API_BASE}/emails/accounts?project=${PROJECT}`);
+        const res = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
         if (res.ok) {
           const data = await res.json();
           const accts = data.data || [];
@@ -57,7 +58,7 @@ export default function MailPage() {
   // Fetch folder list when account changes
   useEffect(() => {
     if (!selectedAccount) return;
-    fetch(`${API_BASE}/emails/folders?project=${PROJECT}&account=${selectedAccount}`)
+    fetch(`${API_BASE}/emails/folders?project=${project}&account=${selectedAccount}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.data) setFolders(d.data.filter((f: any) => f.name !== "[Gmail]")); })
       .catch(() => setFolders([]));
@@ -75,9 +76,9 @@ export default function MailPage() {
       try {
         let url: string;
         if (searchQuery) {
-          url = `${API_BASE}/emails/search?project=${PROJECT}&q=${encodeURIComponent(searchQuery)}&account=${selectedAccount}`;
+          url = `${API_BASE}/emails/search?project=${project}&q=${encodeURIComponent(searchQuery)}&account=${selectedAccount}`;
         } else {
-          url = `${API_BASE}/emails?project=${PROJECT}&folder=${encodeURIComponent(selectedFolder)}&account=${selectedAccount}&page=${page}&limit=50`;
+          url = `${API_BASE}/emails?project=${project}&folder=${encodeURIComponent(selectedFolder)}&account=${selectedAccount}&page=${page}&limit=50`;
         }
         const res = await fetch(url);
         if (res.ok) {
@@ -106,7 +107,7 @@ export default function MailPage() {
     setSelectedEmailLoading(true);
     try {
       const res = await fetch(
-        `${API_BASE}/emails/${uid}?project=${PROJECT}&account=${selectedAccount}`
+        `${API_BASE}/emails/${uid}?project=${project}&account=${selectedAccount}&folder=${encodeURIComponent(selectedFolder)}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -117,7 +118,7 @@ export default function MailPage() {
     } finally {
       setSelectedEmailLoading(false);
     }
-  }, [selectedAccount]);
+  }, [selectedAccount, selectedFolder]);
 
   const handleCompose = useCallback(() => {
     setShowCompose(true);
@@ -132,7 +133,7 @@ export default function MailPage() {
       if (data.bcc) body.bcc = data.bcc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
       if (data.body) body.text = data.body;
 
-      const res = await fetch(`${API_BASE}/emails?project=${PROJECT}`, {
+      const res = await fetch(`${API_BASE}/emails?project=${project}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -159,7 +160,7 @@ export default function MailPage() {
       if (data.bcc) body.bcc = data.bcc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
       if (data.body) body.text = data.body;
 
-      const res = await fetch(`${API_BASE}/emails/draft?project=${PROJECT}`, {
+      const res = await fetch(`${API_BASE}/emails/draft?project=${project}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -183,7 +184,7 @@ export default function MailPage() {
   const handleDelete = useCallback(async () => {
     if (!selectedEmail) return;
     try {
-      await fetch(`${API_BASE}/emails/${selectedEmail.uid}?project=${PROJECT}`, {
+      await fetch(`${API_BASE}/emails/${selectedEmail.uid}?project=${project}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account: selectedAccount }),
@@ -199,7 +200,7 @@ export default function MailPage() {
   const handleArchive = useCallback(async () => {
     if (!selectedEmail) return;
     try {
-      await fetch(`${API_BASE}/emails/${selectedEmail.uid}/move?project=${PROJECT}`, {
+      await fetch(`${API_BASE}/emails/${selectedEmail.uid}/move?project=${project}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account: selectedAccount, fromFolder: selectedFolder, toFolder: "Archive" }),
@@ -238,8 +239,8 @@ export default function MailPage() {
     setLoading(true);
     try {
       const url = searchQuery
-        ? `${API_BASE}/emails/search?project=${PROJECT}&q=${encodeURIComponent(searchQuery)}&account=${selectedAccount}&refresh=true`
-        : `${API_BASE}/emails?project=${PROJECT}&folder=${encodeURIComponent(selectedFolder)}&account=${selectedAccount}&page=${page}&limit=50&refresh=true`;
+        ? `${API_BASE}/emails/search?project=${project}&q=${encodeURIComponent(searchQuery)}&account=${selectedAccount}&refresh=true`
+        : `${API_BASE}/emails?project=${project}&folder=${encodeURIComponent(selectedFolder)}&account=${selectedAccount}&page=${page}&limit=50&refresh=true`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
@@ -278,7 +279,7 @@ export default function MailPage() {
           onComplete={async () => {
             setShowAccountSetup(false);
             try {
-              const res = await fetch(`${API_BASE}/emails/accounts?project=${PROJECT}`);
+              const res = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
               if (res.ok) {
                 const data = await res.json();
                 setAccounts(data.data || []);

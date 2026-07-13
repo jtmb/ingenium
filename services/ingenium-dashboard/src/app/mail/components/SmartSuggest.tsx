@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useProject } from "../../../lib/ProjectContext";
 
 /**
  * SmartSuggest — fetches a response suggestion from the /emails/suggest endpoint
@@ -19,6 +20,8 @@ export default function SmartSuggest({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const project = useProject();
+
   useEffect(() => {
     if (!emailUid) return;
 
@@ -27,7 +30,7 @@ export default function SmartSuggest({
     setError(null);
 
     const base = apiUrl || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
-    fetch(`${base}/emails/suggest/${emailUid}?project=gh-llm-bootstrap&account=${accountId}`)
+    fetch(`${base}/emails/suggest/${emailUid}?project=${project}&account=${accountId}`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch suggestion");
         return res.json();

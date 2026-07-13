@@ -99,29 +99,65 @@ function buildSearchCriteria(query: SearchQuery): Record<string, unknown> {
   return crit;
 }
 
-/** List and paginate emails from a folder. */
+/** Check if a SearchQuery has any active filter criteria. */
+function hasSearchCriteria(query: SearchQuery): boolean {
+  return !!(query.query || query.unseen || query.flagged || query.answered ||
+    query.from || query.to || query.subject || query.since || query.before);
+}
+
+/** List and paginate emails from a folder.
+ *  Uses windowed sequence-range fetch (default 200) to avoid scanning 62K+ mailboxes. */
 export async function listEmails(
   accountId: string,
   folder: string,
   page: number,
   limit: number,
   query?: SearchQuery,
+  windowSize: number = 200,
 ): Promise<{ messages: EmailMessage[]; total: number }> {
   const client = getConnection(accountId);
   await client.mailboxOpen(folder);
 
-  const criteria = query ? buildSearchCriteria(query) : { all: true };
-  const matchResult = await client.search(criteria);
-  const matches = matchResult === false ? [] : matchResult;
-  const total = matches.length;
+  const total = (client.mailbox as { exists: number }).exists;
 
-  // IMAP returns UIDs ascending (oldest first) — reverse for newest first
-  const sorted = [...matches].reverse();
-  const start = (page - 1) * limit;
-  const pageUids = sorted.slice(start, start + limit);
+  // ── Filtered search path (limited results, no windowing needed) ────
+  if (query && hasSearchCriteria(query)) {
+    const criteria = buildSearchCriteria(query);
+    const matchResult = await client.search(criteria);
+    const matches = matchResult === false ? [] : matchResult;
+    const matchCount = matches.length;
+
+    const sorted = [...matches].reverse();
+    const start = (page - 1) * limit;
+    const pageUids = sorted.slice(start, start + limit);
+
+    const messages: EmailMessage[] = [];
+    for await (const msg of client.fetch(pageUids, { envelope: true, uid: true, flags: true, source: true }, { uid: true })) {
+      const raw = msg.source?.toString("utf-8") ?? "";
+      const parsed = await parseRawEmail(raw);
+      parsed.uid = msg.uid;
+      parsed.flags = msg.flags ? [...msg.flags] : [];
+      parsed.folder = folder;
+      messages.push(parsed);
+    }
+
+    messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return { messages, total: matchCount };
+  }
+
+  // ── Unfiltered path — windowed sequence-range fetch ─────────────────
+  if (total === 0) {
+    return { messages: [], total: 0 };
+  }
+
+  const windowStart = Math.max(1, total - windowSize + 1);
+  const rangeStr = `${windowStart}:${total}`;
 
   const messages: EmailMessage[] = [];
-  for await (const msg of client.fetch(pageUids, { envelope: true, uid: true, flags: true, source: true })) {
+  for await (const msg of client.fetch(
+    rangeStr,
+    { envelope: true, uid: true, flags: true, source: true },
+  )) {
     const raw = msg.source?.toString("utf-8") ?? "";
     const parsed = await parseRawEmail(raw);
     parsed.uid = msg.uid;
@@ -130,10 +166,14 @@ export async function listEmails(
     messages.push(parsed);
   }
 
-  // Ensure newest first by sorting on date
+  // Sort newest first by date
   messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  return { messages, total };
+  // Apply pagination within the window
+  const start = (page - 1) * limit;
+  const paged = messages.slice(start, start + limit);
+
+  return { messages: paged, total };
 }
 
 /** Get a single email by UID. */

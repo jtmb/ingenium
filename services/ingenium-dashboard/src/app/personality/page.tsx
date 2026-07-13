@@ -25,6 +25,7 @@ export default function PersonalityPage() {
   const [selectedTrait, setSelectedTrait] = useState<any>(null);
   const [sortMode, setSortMode] = useState<"grouped" | "newest">("grouped");
   const [showHidden, setShowHidden] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function formatRelative(iso: string): string {
     const diff = Date.now() - new Date(iso).getTime();
@@ -38,8 +39,13 @@ export default function PersonalityPage() {
   }
 
   useEffect(() => {
-    api.personality.list(project).then((r) => setTraits(r.data || [])).catch(() => {});
-    api.personality.profile(project).then((r) => setProfile(r.data || [])).catch(() => {});
+    setError(null);
+    api.personality.list(project)
+      .then((r) => setTraits(r.data || []))
+      .catch(() => setError("Failed to load personality traits — API may be unreachable"));
+    api.personality.profile(project)
+      .then((r) => setProfile(r.data || []))
+      .catch(() => { /* profile is supplementary */ });
   }, [project]);
 
   const hiddenCount = traits.filter(t => (t.confidence || 0) < 0.3).length;
@@ -107,7 +113,12 @@ export default function PersonalityPage() {
         </div>
       )}
 
-      {sortMode === "grouped" && Object.entries(grouped).length === 0 && (
+      {error && (
+        <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-6 text-center text-[var(--color-error-text)] text-sm">
+          {error}
+        </div>
+      )}
+      {!error && sortMode === "grouped" && Object.entries(grouped).length === 0 && (
         <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
           No personality traits learned yet. Traits are generated automatically from observations via the synthesis pipeline.
         </div>

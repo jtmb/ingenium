@@ -6,8 +6,10 @@ export default function OpenCodeFrame() {
   const pathname = usePathname();
   const isOpenCode = pathname === "/opencode";
 
+  if (!isOpenCode) return null;
+
   return (
-    <div className={`fixed inset-0 top-[57px] ${isOpenCode ? "" : "hidden"}`}>
+    <div className="fixed inset-0 top-[57px]">
       <iframe
         src="http://localhost:4098/"
         className="w-full h-full border-0"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useProject } from "../../../lib/ProjectContext";
 
 /**
  * AccountSetup — two modes: provider selection grid and manual (app password) form.
@@ -26,17 +27,17 @@ export default function AccountSetup({
   const [error, setError] = useState<string | null>(null);
 
   const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
-  const PROJECT = "gh-llm-bootstrap";
+  const project = useProject();
 
   // Check if OAuth credentials are configured in settings
   const [credsConfigured, setCredsConfigured] = useState<boolean | null>(null);
   useEffect(() => {
-    fetch(`${apiBase}/settings?project=${PROJECT}&key=oauth_gmail_client_id`)
+    fetch(`${apiBase}/settings?project=${project}&key=oauth_gmail_client_id`)
       .then(r => r.json())
       .then(d => {
         const hasGmail = !!d.data?.value;
         // Also check for Outlook
-        return fetch(`${apiBase}/settings?project=${PROJECT}&key=oauth_outlook_client_id`)
+        return fetch(`${apiBase}/settings?project=${project}&key=oauth_outlook_client_id`)
           .then(r => r.json())
           .then(d2 => setCredsConfigured(hasGmail || !!d2.data?.value));
       })
@@ -46,7 +47,7 @@ export default function AccountSetup({
   const handleOAuthRedirect = async (provider: string) => {
     setError(null);
     try {
-      const res = await fetch(`${apiBase}/emails/accounts/oauth/url?project=${encodeURIComponent(PROJECT)}&provider=${provider}`);
+      const res = await fetch(`${apiBase}/emails/accounts/oauth/url?project=${encodeURIComponent(project)}&provider=${provider}`);
       const json = await res.json();
       if (!res.ok || !json.data?.url) {
         setError(json.error?.message || "Failed to get OAuth URL — check credentials in Settings");
@@ -64,7 +65,7 @@ export default function AccountSetup({
     setTestResult(null);
     try {
       // Create the account first, then test with the returned ID
-      const createRes = await fetch(`${apiBase}/emails/accounts?project=${PROJECT}`, {
+      const createRes = await fetch(`${apiBase}/emails/accounts?project=${project}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -94,7 +95,7 @@ export default function AccountSetup({
       }
 
       // Test the connection using the account ID
-      const testRes = await fetch(`${apiBase}/emails/accounts/${accountId}/test?project=${PROJECT}`, {
+      const testRes = await fetch(`${apiBase}/emails/accounts/${accountId}/test?project=${project}`, {
         method: "POST",
       });
       const testData = await testRes.json();
@@ -103,7 +104,7 @@ export default function AccountSetup({
       } else {
         setTestResult(testData.data?.error || testData.error?.message || "Connection failed");
         // Remove the account since connection failed
-        await fetch(`${apiBase}/emails/accounts/${accountId}?project=${PROJECT}`, {
+        await fetch(`${apiBase}/emails/accounts/${accountId}?project=${project}`, {
           method: "DELETE",
         });
       }
@@ -116,7 +117,7 @@ export default function AccountSetup({
 
   const handleAddAccount = async () => {
     try {
-      const res = await fetch(`${apiBase}/emails/accounts?project=${PROJECT}`, {
+      const res = await fetch(`${apiBase}/emails/accounts?project=${project}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

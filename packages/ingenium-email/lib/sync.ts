@@ -16,12 +16,17 @@ export interface SyncResult {
  * Sync a single folder for an account. Checks UIDVALIDITY, fetches new emails
  * with UID > last_uid, and upserts them into the email_cache.
  *
+ * On first sync (last_uid=0) uses a windowed sequence-range fetch to avoid
+ * scanning the entire mailbox. Incremental syncs use UID search capped at maxBatch.
+ *
+ * @param maxBatch Maximum emails to sync per call (default 200). Prevents timeout on 62K+ mailboxes.
  * @returns SyncResult with folder name, count of newly synced, total in mailbox.
  */
 export async function syncFolder(
   projectId: string,
   accountId: string,
   folder: string,
+  maxBatch: number = 200,
 ): Promise<SyncResult> {
   const account = getAccount(projectId, accountId);
   if (!account) {
@@ -49,23 +54,36 @@ export async function syncFolder(
     }
 
     const lastUid = state.uidvalidity === uidValidity ? state.last_uid : 0;
+    const total = (client.mailbox as { exists: number }).exists;
 
-    // Fetch UIDs greater than last_uid (incremental). For initial sync (lastUid=0)
-    // this fetches everything.
+    // ── Resolve UIDs to sync ──────────────────────────────────────────
     let uids: number[];
-    try {
-      // IMAP UID range search: "101:*" fetches all UIDs >= 101
-      const result = await client.search({ uid: `${lastUid + 1}:*` } as Record<string, unknown>);
-      uids = result === false ? [] : (result as number[]);
-    } catch {
-      // Range search may not be supported — fall back to fetch-all + filter
-      const allResult = await client.search({ all: true });
-      uids = (allResult === false ? [] : allResult).filter((uid) => uid > lastUid);
-    }
 
-    // Get total mailbox count for reporting
-    const allUids = await client.search({ all: true });
-    const total = allUids === false ? 0 : allUids.length;
+    if (lastUid === 0) {
+      // First sync — use windowed sequence-range to avoid scanning all messages.
+      // Fetch by sequence, capturing UIDs, for the most recent maxBatch emails.
+      const windowStart = Math.max(1, total - maxBatch + 1);
+      const fetchedUids: number[] = [];
+      for await (const msg of client.fetch(
+        `${windowStart}:${total}`,
+        { uid: true },
+      )) {
+        fetchedUids.push(msg.uid);
+      }
+      uids = fetchedUids;
+    } else {
+      // Incremental sync — UIDs > last_uid, capped at maxBatch
+      try {
+        const result = await client.search({ uid: `${lastUid + 1}:*` } as Record<string, unknown>);
+        uids = (result === false ? [] : (result as number[])).slice(0, maxBatch);
+      } catch {
+        // Range search may not be supported — fall back to search-all + filter
+        const allResult = await client.search({ all: true });
+        uids = (allResult === false ? [] : allResult)
+          .filter((uid) => uid > lastUid)
+          .slice(0, maxBatch);
+      }
+    }
 
     if (uids.length === 0) {
       // No new emails — still persist sync state so future syncs skip this range
@@ -83,7 +101,7 @@ export async function syncFolder(
       flags: true,
       bodyStructure: true,
       source: true,
-    })) {
+    }, { uid: true })) {
       try {
         const raw = msg.source?.toString("utf-8") ?? "";
         const parsed = await parseRawEmail(raw);
@@ -158,7 +176,7 @@ export async function syncAccountFolders(
 
     const results: SyncResult[] = [];
     for (const folder of folders) {
-      const result = await syncFolder(projectId, accountId, folder.name);
+      const result = await syncFolder(projectId, accountId, folder.path);
       results.push(result);
     }
 

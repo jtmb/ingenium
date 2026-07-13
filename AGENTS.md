@@ -96,6 +96,20 @@ The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
 
 > The dashboard talks to the API layer only — zero direct DB access. Commands are managed via MCP tools without a dedicated page.
 
+### Project Identity Model
+
+Ingenium uses a **two-project identity model** distinguishing between server/public and external sessions:
+
+- **Server/public project** (`global-default`, `is_global=1`) — The container's own OpenCode session. Its global config lives at `~/.config/opencode/opencode.jsonc` (set by the Docker entrypoint). This project is used by the container's opencode-webui, email service, and dashboard default. Created automatically by `scripts/docker-entrypoint.sh`.
+
+- **External sessions** — Projects named after their repo worktree (e.g., `gh-llm-bootstrap`). These connect via the `@ingenium/extension` plugins. The `INGENIUM_PROJECT` environment variable controls which project the extension plugins write to. For external sessions, the project name derives from the worktree directory.
+
+  The container entrypoint script sets `INGENIUM_PROJECT=global-default` in `opencode.jsonc`, ensuring container processes always target the server project.
+
+The dashboard resolves the default project dynamically by fetching the `is_global=1` project from the API. Users can switch projects via the **ProjectSelector** dropdown on the `/projects` page or through MCP tools.
+
+**Key rule**: When writing shared resources (skills, plugins, configs, settings) from within the container's OpenCode web UI or from dashboard operations, use the `global-default` project. When working from an external OpenCode session (like this repo's worktree-derived project), the `INGENIUM_PROJECT` env var in the MCP server config determines the target. See the `INGENIUM_PROJECT` entry in the Environment Variables table below.
+
 ---
 
 ## 🔴 MANDATORY — Database Isolation
@@ -618,6 +632,7 @@ See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrato
 | `INGENIUM_CORE_DB_PATH` | `./.ingenium/data.db` | core + API | SQLite database file path |
 | `INGENIUM_HOME` | `~/.ingenium` | core, supervisord | Ingenium data home directory |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | ingenium-core | Global config path for skills/plugins/commands; overridable to custom directory |
+| `INGENIUM_PROJECT` | `global-default` | @ingenium/extension plugins | Project name for extension plugins to write to (container = `global-default`, external = derived from worktree directory name) |
 | `LOG_LEVEL` | `info` | ingenium-server | Pino log level |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:4097/api/v1` | ingenium-dashboard | API base URL for dashboard (browser-side) |
 | `CORS_ORIGIN` | `*` | ingenium-api | Allowed CORS origin |

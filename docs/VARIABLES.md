@@ -13,6 +13,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `LOG_LEVEL` | `info` | `logger.ts` | Pino log level (`debug`, `info`, `warn`, `error`) |
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | `tools/paths.ts` | Global config path for skills/plugins/commands; overridable to custom directory |
+| `INGENIUM_PROJECT` | `global-default` | extension plugins (`observer-core.ts`, `skill-sync.ts`, `onboarding-sync.ts`, `auto-observer.ts`) | Project name for extension plugins to write to (container = `global-default`, external = derived from worktree directory name) |
 
 ## API (`services/ingenium-api`)
 

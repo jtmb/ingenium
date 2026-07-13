@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
-const DEFAULT_PROJECT = "gh-llm-bootstrap";
+const DEFAULT_PROJECT = process.env.INGENIUM_PROJECT || "global-default";
 
 /**
  * Fetch all skills from the API and write any missing ones to the local

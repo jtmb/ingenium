@@ -32,13 +32,16 @@ export default function ProjectsPage() {
   };
   useEffect(() => { load(); }, []);
 
-  // Fetch details for all active projects
+  // Fetch details for all active projects in parallel
   useEffect(() => {
-    for (const p of projects) {
-      api.projects.detail(p.name).then((r) => {
-        setDetails((prev) => ({ ...prev, [p.name]: r.data }));
-      }).catch(() => {});
-    }
+    if (projects.length === 0) return;
+    Promise.all(projects.map((p) =>
+      api.projects.detail(p.name).then((r) => ({ name: p.name, data: r.data }))
+    )).then((results) => {
+      const batch: Record<string, any> = {};
+      for (const r of results) batch[r.name] = r.data;
+      setDetails((prev) => ({ ...prev, ...batch }));
+    }).catch(() => {});
   }, [projects]);
 
   const create = async () => {

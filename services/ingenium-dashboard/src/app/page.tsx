@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useProject } from "../lib/ProjectContext";
 
 type Stat = { label: string; value: string };
 type PageCard = { name: string; href: string; desc: string; icon: string };
@@ -95,6 +96,7 @@ function Section({
  * Fetches counts from the API on mount.
  */
 export default function Home() {
+  const project = useProject();
   const [stats, setStats] = useState<Stat[]>([
     { label: "Projects", value: "..." },
     { label: "Skills", value: "..." },
@@ -106,7 +108,7 @@ export default function Home() {
 
   useEffect(() => {
     const BASE = "http://localhost:4097/api/v1";
-    const P = "gh-llm-bootstrap";
+    const P = project;
 
     (async () => {
       const s: Stat[] = [];
@@ -128,7 +130,7 @@ export default function Home() {
       }
       setStats(s);
     })();
-  }, []);
+  }, [project]);
 
   const buildPages: PageCard[] = [
     { name: "OpenCode", href: "/opencode", desc: "Embedded AI workspace", icon: "🖥️" },
