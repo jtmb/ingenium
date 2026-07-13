@@ -64,16 +64,13 @@ export default function MailPage() {
       .catch(() => setFolders([]));
   }, [selectedAccount, refreshKey]);
 
-  // Prefetch all folder contents on account switch (runs after folders load)
+  // Prefetch all folder contents on account switch
   useEffect(() => {
     if (!selectedAccount || folders.length === 0) return;
     const cacheKey = `${selectedAccount}:synced`;
     if (emailCache.current.get(cacheKey)) return;
 
-    // Use the first 6 folders from the actual folder list, or defaults
-    const targetFolders = folders.length > 0 
-      ? folders.slice(0, 12).map((f: any) => f.path || f.name)
-      : ["INBOX", "Sent", "Drafts", "Archive", "Spam", "Trash"];
+    const targetFolders = folders.slice(0, 12).map((f: any) => f.path || f.name);
 
     fetch(`${API_BASE}/emails/sync?project=${PROJECT}`, {
       method: "POST",
@@ -84,24 +81,42 @@ export default function MailPage() {
       .then(d => {
         if (d?.data) {
           for (const [folder, result] of Object.entries(d.data) as [string, { emails: any[]; total: number }][]) {
-            // Cache everything except INBOX (always fetch fresh for latest emails)
-            if (folder !== "INBOX") {
-              emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: result.emails, total: result.total });
-            }
+            emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: result.emails, total: result.total });
           }
-          emailCache.current.set(cacheKey, { emails: [], total: 0 }); // mark synced
+          emailCache.current.set(cacheKey, { emails: [], total: 0 });
         }
       })
       .catch(() => {});
-  }, [selectedAccount]);
+  }, [selectedAccount, folders]);
+
+  // Background poller: refresh INBOX every 30s when account is active
+  useEffect(() => {
+    if (!selectedAccount) return;
+    const interval = setInterval(() => {
+      const inboxKey = `${selectedAccount}:INBOX:1:`;
+      fetch(`${API_BASE}/emails?project=${PROJECT}&folder=INBOX&account=${selectedAccount}&page=1&limit=50`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {
+          if (d?.data) {
+            emailCache.current.set(inboxKey, { emails: d.data, total: d.total || 0 });
+            // If INBOX is currently selected, update the UI
+            if (selectedFolder === "INBOX" && page === 1 && !searchQuery) {
+              setEmails(d.data);
+              setTotal(d.total || 0);
+            }
+          }
+        })
+        .catch(() => {});
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [selectedAccount, selectedFolder, page, searchQuery]);
 
   // Fetch emails when account/folder/page/search changes
   useEffect(() => {
     if (!selectedAccount) return;
 
     const cacheKey = `${selectedAccount}:${selectedFolder}:${page}:${searchQuery}`;
-    // Only cache non-INBOX folders (INBOX changes frequently)
-    const cached = !searchQuery && selectedFolder !== "INBOX" ? emailCache.current.get(cacheKey) : null;
+    const cached = !searchQuery ? emailCache.current.get(cacheKey) : null;
     if (cached) {
       setEmails(cached.emails);
       setTotal(cached.total);
@@ -127,7 +142,7 @@ export default function MailPage() {
           setEmails(list);
           setTotal(tot);
           setEmailError(null);
-          if (!searchQuery && selectedFolder !== "INBOX") {
+          if (!searchQuery) {
             emailCache.current.set(cacheKey, { emails: list, total: tot });
           }
         } else {
