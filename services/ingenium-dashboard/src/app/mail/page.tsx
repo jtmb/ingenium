@@ -34,6 +34,8 @@ export default function MailPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [folders, setFolders] = useState<any[]>([]);
   const emailCache = useRef<Map<string, { emails: any[]; total: number }>>(new Map());
+  const pollerRef = useRef<{ folder: string; page: number; query: string }>({ folder: "INBOX", page: 1, query: "" });
+  pollerRef.current = { folder: selectedFolder, page, query: searchQuery };
 
   // Fetch accounts on mount
   useEffect(() => {
@@ -55,52 +57,46 @@ export default function MailPage() {
     fetchAccounts();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch folder list when account changes
+  // Fetch folders + sync on account switch
   useEffect(() => {
     if (!selectedAccount) return;
+
     fetch(`${API_BASE}/emails/folders?project=${PROJECT}&account=${selectedAccount}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.data) setFolders(d.data.filter((f: any) => f.name !== "[Gmail]")); })
-      .catch(() => setFolders([]));
-  }, [selectedAccount, refreshKey]);
-
-  // Prefetch all folder contents on account switch
-  useEffect(() => {
-    if (!selectedAccount || folders.length === 0) return;
-    const cacheKey = `${selectedAccount}:synced`;
-    if (emailCache.current.get(cacheKey)) return;
-
-    const targetFolders = folders.slice(0, 12).map((f: any) => f.path || f.name);
-
-    fetch(`${API_BASE}/emails/sync?project=${PROJECT}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account: selectedAccount, folders: targetFolders }),
-    })
-      .then(r => r.ok ? r.json() : null)
       .then(d => {
-        if (d?.data) {
-          for (const [folder, result] of Object.entries(d.data) as [string, { emails: any[]; total: number }][]) {
+        if (!d?.data) return;
+        const filtered = d.data.filter((f: any) => f.name !== "[Gmail]");
+        setFolders(filtered);
+        // Sync all folders in background
+        const targetFolders = filtered.slice(0, 12).map((f: any) => f.path || f.name);
+        return fetch(`${API_BASE}/emails/sync?project=${PROJECT}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account: selectedAccount, folders: targetFolders }),
+        }).then(r => r.ok ? r.json() : null);
+      })
+      .then(syncData => {
+        if (syncData?.data) {
+          for (const [folder, result] of Object.entries(syncData.data) as [string, { emails: any[]; total: number }][]) {
             emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: result.emails, total: result.total });
           }
-          emailCache.current.set(cacheKey, { emails: [], total: 0 });
         }
       })
       .catch(() => {});
-  }, [selectedAccount, folders]);
+  }, [selectedAccount]);
 
-  // Background poller: refresh INBOX every 30s when account is active
+  // Background poller: refresh INBOX every 30s
   useEffect(() => {
     if (!selectedAccount) return;
-    const interval = setInterval(() => {
+    const id = setInterval(() => {
+      const p = pollerRef.current;
       const inboxKey = `${selectedAccount}:INBOX:1:`;
       fetch(`${API_BASE}/emails?project=${PROJECT}&folder=INBOX&account=${selectedAccount}&page=1&limit=50`)
         .then(r => r.ok ? r.json() : null)
         .then(d => {
           if (d?.data) {
             emailCache.current.set(inboxKey, { emails: d.data, total: d.total || 0 });
-            // If INBOX is currently selected, update the UI
-            if (selectedFolder === "INBOX" && page === 1 && !searchQuery) {
+            if (p.folder === "INBOX" && p.page === 1 && !p.query) {
               setEmails(d.data);
               setTotal(d.total || 0);
             }
@@ -108,8 +104,8 @@ export default function MailPage() {
         })
         .catch(() => {});
     }, 30_000);
-    return () => clearInterval(interval);
-  }, [selectedAccount, selectedFolder, page, searchQuery]);
+    return () => clearInterval(id);
+  }, [selectedAccount]);
 
   // Fetch emails when account/folder/page/search changes
   useEffect(() => {
