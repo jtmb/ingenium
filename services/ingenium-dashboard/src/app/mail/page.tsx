@@ -32,6 +32,7 @@ export default function MailPage() {
   const [sending, setSending] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [folders, setFolders] = useState<any[]>([]);
 
   // Fetch accounts on mount
   useEffect(() => {
@@ -52,6 +53,15 @@ export default function MailPage() {
     };
     fetchAccounts();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch folder list when account changes
+  useEffect(() => {
+    if (!selectedAccount) return;
+    fetch(`${API_BASE}/emails/folders?project=${PROJECT}&account=${selectedAccount}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.data) setFolders(d.data); })
+      .catch(() => setFolders([]));
+  }, [selectedAccount, refreshKey]);
 
   // Fetch emails when account/folder/page/search changes
   useEffect(() => {
@@ -316,6 +326,7 @@ export default function MailPage() {
           onSelectAccount={handleSelectAccount}
           onCompose={handleCompose}
           onAddAccount={() => setShowAccountSetup(true)}
+          folders={folders}
         />
 
         {/* Email list */}
