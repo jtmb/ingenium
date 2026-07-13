@@ -283,3 +283,20 @@ export function clearCache(accountId: string): { listings: number; bodies: numbe
   checkpointAfterWrite();
   return result;
 }
+
+/**
+ * Clear cached data for a single folder (listings, bodies, sync state).
+ * Use this when a single folder's UIDVALIDITY changes instead of nuking the
+ * entire account cache. Much cheaper than clearCache().
+ */
+export function clearFolderCache(accountId: string, folder: string): { listings: number; bodies: number } {
+  const result = execTransaction(() => {
+    const db = getDb(dbPath());
+    const bodyResult = db.prepare("DELETE FROM email_bodies WHERE account_id = ? AND folder = ?").run(accountId, folder);
+    const listingResult = db.prepare("DELETE FROM email_cache WHERE account_id = ? AND folder = ?").run(accountId, folder);
+    db.prepare("DELETE FROM email_sync_state WHERE account_id = ? AND folder = ?").run(accountId, folder);
+    return { listings: listingResult.changes, bodies: bodyResult.changes };
+  });
+  checkpointAfterWrite();
+  return result;
+}

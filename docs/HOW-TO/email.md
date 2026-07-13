@@ -23,9 +23,9 @@ The email client uses a **cache-first** pattern to ensure the UI never blocks on
 
 3. **Body caching** — When an email is opened for reading, the body (HTML + text) is fetched from IMAP and cached via `emailCache.getCachedEmailBody()`. Subsequent reads return from cache with `source: "cache"`.
 
-4. **Startup prefetch** — On API server start, `prefetchAllAccounts()` iterates all connected accounts and triggers a background sync for all folders, warming the cache before any user interaction.
+4. **Startup prefetch** — On API server start, `prefetchAllAccounts()` iterates all connected accounts and triggers a background sync for all folders with `skipFresh: true`, warming only stale caches before any user interaction.
 
-5. **Per-connection prefetch** — The first time a given server lifetime touches an account, all folders are prefetched in the background. Subsequent requests to any folder find the cache already populated.
+5. **`skipFresh` option** — `syncAccountFolders()` accepts a `skipFresh` option. When `true`, folders synced within the `freshMs` window (default: 1 hour, based on DB `last_synced_at` timestamp) are skipped. This prevents full resyncs on every restart — the guard is derived from durable DB state, not an ephemeral in-memory Set.
 
 ### Why Cache-First?
 
@@ -35,6 +35,18 @@ The email client uses a **cache-first** pattern to ensure the UI never blocks on
 - **Container restarts** — Supervisord autorestart clears in-memory state, but the SQLite cache persists across restarts
 
 > **Note**: The cache is backed by the `email_cache` and `email_bodies` tables in the Ingenium SQLite database. It persists across container restarts. A "force refresh" parameter is available to bypass cache and re-fetch from IMAP.
+
+### 🔴 Per-Folder Cache Invalidation
+
+When an IMAP folder's UIDVALIDITY changes (server renumbered UIDs), only that folder's cache is cleared via `clearFolderCache(accountId, folder)` — NOT the entire account. This prevents cascading full-resync failures when a virtual folder (e.g., Gmail's Starred) changes its UIDVALIDITY while INBOX is perfectly healthy. Previous code used `clearCache(accountId)` which nuked all 12+ folders on any single UIDVALIDITY change.
+
+### 🔴 Folder List Caching
+
+The IMAP folder list is cached per-account via the settings key `email_folders_<accountId>`. On first load, the list is fetched from live IMAP and cached in settings. Subsequent loads serve from cache immediately while triggering a background refresh. This prevents a 3-5s IMAP LIST call on every folder pane mount.
+
+### 🔴 No In-Memory Prefetch Guard
+
+The old `prefetchedAccounts` in-memory Set that gated background prefetch has been **removed**. It caused full resync storms on every API restart because the Set was always empty after a deploy. Replaced by the `skipFresh` option on `syncAccountFolders()` which checks the durable DB `last_synced_at` timestamp — persists across restarts.
 
 ## Prerequisites
 
@@ -300,7 +312,9 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 | `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` | Full email display + actions | Frontend |
 | `services/ingenium-dashboard/src/app/components/Overlay.tsx` | Generic modal overlay component | Frontend |
 | `services/ingenium-dashboard/src/app/mail/oauth/callback/page.tsx` | OAuth callback handler + "Go to Mail" | Frontend |
+| `packages/ingenium-email/lib/sync.ts` | `syncAccountFolders()` with `skipFresh` option, `clearFolderCache()` per-folder invalidation | Email client core |
+| `packages/ingenium-core/lib/tools/email-cache.ts` | `clearFolderCache()`, `getSyncState()`, `clearCache()` | Core library |
 
 ---
 
-*Last updated: July 12, 2026 — Email client with OAuth2 + IMAP/SMTP, compose overlay, account setup.*
+*Last updated: July 13, 2026 — Email client with OAuth2 + IMAP/SMTP, compose overlay, account setup, per-folder cache invalidation, skipFresh option, folder-list caching.*

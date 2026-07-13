@@ -154,8 +154,6 @@ async function getAccountAuthOrError(
 
 /** Wrapper that connects, runs the callback, marks account as connected.
  *  Only disconnects on errors — let the pool manage connections normally. */
-const prefetchedAccounts = new Set<string>();
-
 async function withImapConnection<T>(
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
@@ -165,24 +163,9 @@ async function withImapConnection<T>(
   await connectAccount(account, auth);
   try {
     const result = await fn(account.id);
-    // Mark as connected after first successful IMAP operation
     try {
       setAccountConnected(projectId, account.id, true);
     } catch { /* non-fatal */ }
-
-    // Prefetch: populate cache for all folders on first connection per account per server lifetime
-    if (!prefetchedAccounts.has(account.id)) {
-      prefetchedAccounts.add(account.id);
-      setImmediate(() => {
-        trackSync(account.id, null, () =>
-          syncAccountFolders(projectId, account.id),
-        ).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("email", `Background prefetch failed for account ${account.id}: ${msg}`);
-        });
-      });
-    }
-
     return result;
   } catch (err) {
     await disconnectAccount(account.id).catch(() => {});
@@ -369,8 +352,33 @@ emailsRouter.get("/folders", async (req, res) => {
   if (!result) return;
 
   const { account, auth } = result;
+  const projectId = resolveEmailProject();
+
+  // Check cache first
+  try {
+    const { settings } = await import("ingenium-core");
+    const cached = settings.getSetting(projectId, `email_folders_${accountId}`);
+    if (cached) {
+      const folders = JSON.parse(cached);
+      // Fire background refresh
+      withImapConnection(account, auth, async (id) => {
+        const fresh = await listFolders(id);
+        try {
+          settings.setSetting(projectId, `email_folders_${accountId}`, JSON.stringify(fresh));
+        } catch { /* non-fatal */ }
+      }).catch(() => {});
+      res.json({ data: folders, total: folders.length, source: "cache" });
+      return;
+    }
+  } catch { /* non-fatal — fall through to live IMAP */ }
+
   try {
     const folders = await withImapConnection(account, auth, (id) => listFolders(id));
+    // Cache folder list for future loads
+    try {
+      const { settings } = await import("ingenium-core");
+      settings.setSetting(projectId, `email_folders_${accountId}`, JSON.stringify(folders));
+    } catch { /* non-fatal */ }
     res.json({ data: folders, total: folders.length });
   } catch (err: any) {
     logger.error("email", `List folders failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
@@ -520,7 +528,7 @@ emailsRouter.post("/sync", async (req, res) => {
       res.json({ data: { folder, synced: result.synced, total: result.total } });
     } else {
       const results = await trackSync(accountId, null, () =>
-        syncAccountFolders(projectId, accountId),
+        syncAccountFolders(projectId, accountId, { skipFresh: false, onFolder: (f, a) => markSyncing(accountId, f, a) }),
       );
       const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
       const errors = results.filter((r) => r.error).map((r) => ({ folder: r.folder, error: r.error }));
@@ -1084,7 +1092,7 @@ export async function prefetchAllAccounts(): Promise<void> {
 
         // Fire and forget — let the scheduler handle retries
         trackSync(acct.id, null, () =>
-          syncAccountFolders(projectId, acct.id),
+          syncAccountFolders(projectId, acct.id, { skipFresh: true, onFolder: (f, a) => markSyncing(acct.id, f, a) }),
         ).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           logger.warn("email", `Startup prefetch failed for account ${acct.id}: ${msg}`);

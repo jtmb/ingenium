@@ -81,7 +81,7 @@ flowchart TB
 ┌─────────────────────────────────────────────────────────────┐
 │  PHASE 0: EXTRACTION (Server-Side)                          │
 │  - Extraction engine reads OpenCode messages via API        │
-│  - Watermark-gated, content-hash dedup                      │
+│  - Watermark-gated, full-text content-hash dedup            │
 │  - Regex pre-filter selects candidates, LLM extracts rules  │
 │  - No-LLM = no observations (zero regex fallback garbage)   │
 └─────────────────────────────────────────────────────────────┘
@@ -117,10 +117,17 @@ User interacts with OpenCode (:4098)
   │
   ├─ Server-Side Extraction Engine (extraction.ts, runs in API scheduler)
   │   → reads OpenCode DB at /var/opencode/opencode.db via GET /api/v1/opencode/messages
-  │   → watermark-gated read + content-hash dedup prevents re-processing
+  │   → watermark-gated read + full-text content-hash dedup prevents re-processing
+  │     (hashes the entire message, not a 200-char slice)
   │   → cheap regex pre-filter selects candidate messages (NOT final extraction)
   │   → batches of 15 sent to synthesis LLM for durable behavior rule extraction
   │   → only LLM output becomes observations — raw snippets NEVER enter DB
+  │   → max_tokens: 4096 (increased for reasoning models like Qwen — reasoning
+  │     consumes half the token budget)
+  │   → reasoning_content fallback: reads from msg.reasoning_content when
+  │     msg.content is empty (common with reasoning model responses)
+  │   → 🔴 Failure-aware watermark: watermark does NOT advance if ANY batch
+  │     fails LLM extraction, preventing gaps from transient errors
   │   → pipeline event: extraction_completed
   │
   ├─ Auto-Observer Plugin (auto-observer.ts, thin trigger only)
@@ -194,8 +201,10 @@ Extraction Engine (extraction.ts)
   │
   ├─ Watermark + Dedup gate
   │   → Per-project setting: extraction_watermark (last-processed message ID)
-  │   → Per-project setting: extraction_seen_hashes (content-hash set for dedup)
+  │   → Per-project setting: extraction_seen_hashes (full-text content-hash set for dedup — hashes the entire message, not a 200-char slice, preventing hash collisions and missed dedup)
   │   → Only new messages since last run are considered
+  │   → 🔴 Failure-aware: watermark does NOT advance if ANY LLM batch failed.
+  │     This prevents gaps caused by transient API errors.
   │
   ├─ Regex Pre-Filter (candidate selection only — NOT final extraction)
   │   → Identifies messages that MAY contain user behavior
@@ -206,6 +215,10 @@ Extraction Engine (extraction.ts)
   │   → Each batch sent to synthesis LLM with structured prompt
   │   → LLM extracts DURABLE USER BEHAVIOR RULES as JSON
   │   → Only LLM output becomes observations — raw snippets NEVER enter DB
+  │   → max_tokens: 4096 (increased for reasoning models like Qwen)
+  │   → reasoning_content fallback: if the LLM returns empty content but
+  │     populated reasoning_content (common with reasoning models), it is
+  │     used as the extraction source instead
   │
   └─ No-LLM = No Observations
       → If no synthesis LLM configured, extraction creates 0 observations
@@ -1350,7 +1363,8 @@ curl -X POST http://localhost:4097/api/v1/skills/sync-all?project=gh-llm-bootstr
 | 2.3.0 | 2026-07-10 | Removed deprecated `/learnings` page and `ingenium_learning_log` tools. Added local-persistence skill for DB→disk sync. `docs/self-learning-pipeline.md` moved from root. |
 | 3.0.0 | 2026-07-11 | **Auto-Observer**: New `auto-observer.ts` plugin reads OpenCode DB, detects behavior patterns via regex (4 categories), auto-creates observations. **Pattern/insight skip**: `pattern` and `insight` observation types no longer create personality traits. **Confidence overhaul**: Starting confidence reduced to 0.05–0.15, requires 2+ confirmations to reach display threshold (0.30), capped at 0.95, decays -0.05 after 7 days. **Pipeline enrichment**: `synthesis_completed` includes model/endpoint/insights, `trait_created` includes observation_ids/skill_links/model. **Cross-project synthesis (Phase 3)**: Skills used in 2+ projects promoted to global-default. **Backup LLM provider**: Automatic fallback if primary provider fails. **@ingenium/extension package**: New npm package bundling MCP server + 3 plugins. **Global config path resolution**: Global projects write to `~/.config/opencode/` via shared `paths.ts` module. **Projects page overhaul**: Rich cards with detail panel, expandable views, delete confirmation. **Config tracking**: DB-backed `configs` table with `/config` dashboard page. |
 | 4.0.0 | 2026-07-11 | **Server-Side Extraction**: Rewrote observation detection from regex-based plugin to LLM-first server-side architecture. The `auto-observer.ts` plugin is now a ~62-line thin trigger; all extraction runs in the API scheduler via `extraction.ts`. **LLM consolidation**: Phase 1 synthesis now uses LLM consolidation (CONFIRM/CREATE/IGNORE) instead of heuristic mapping — traits are normalized statements, not raw snippets. **Confidence model fixed**: Traits start at 0.10–0.15, +0.15 per confirmation, cap 0.95, display gate ≥0.30 with "N hidden" toggle. **Phase 2 fixes**: LLM-synthesized skills written to disk via `writeSkillToDisk()`, 3+ observation minimum for skill creation, LLM personality_traits now actually created. **DELETE endpoints**: New `/observations/:id`, `/observations?source=X`, `/personality/:id`, `/personality` DELETE capabilities. **Migrations 018/019**: Extraction events + FK SET NULL for safe observation deletion. **Pipeline events**: Added `extraction_completed`, `extraction_failed`, `skill_created`, `skill_updated`. Scheduler now runs extraction → synthesis → skill-sync in sequence. |
+| 4.1.0 | 2026-07-13 | **Extraction hardening**: Full-text content hash (not 200-char slice) for dedup, failure-aware watermark (doesn't advance on LLM errors), `reasoning_content` fallback for reasoning model responses, `max_tokens` increased to 4096. **Email fixes**: `clearFolderCache()` for per-folder UIDVALIDITY (not entire account), `skipFresh` option on `syncAccountFolders()` with DB-based staleness check, folder-list caching via `email_folders_<accountId>` settings key, removed ephemeral `prefetchedAccounts` in-memory guard. |
 
 ---
 
-*Last updated: July 11, 2026 (v4.0.0 — server-side extraction, LLM consolidation, confidence model fixed, DELETE endpoints, migrations 018/019)*
+*Last updated: July 13, 2026 (v4.1.0 — extraction hardening, per-folder cache invalidation, skipFresh option)*

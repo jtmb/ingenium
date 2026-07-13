@@ -14,13 +14,11 @@ function setThemeCookie(value: "light" | "dark") {
 }
 
 export default function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("system");
-  const [resolved, setResolved] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    const saved = localStorage.getItem("theme") as Theme | null;
-    if (saved) setThemeState(saved);
-  }, []);
+  const [theme, setThemeState] = useState<Theme>(() =>
+    typeof window === "undefined" ? "system"
+    : ((localStorage.getItem("theme") as Theme | null) ?? "system"));
+  const [resolved, setResolved] = useState<"light" | "dark">(() =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light");
 
   useEffect(() => {
     const root = document.documentElement;
