@@ -107,31 +107,46 @@ export function getCredentials(
   accountId: string,
 ): { password?: string; tokens?: OAuthToken } | undefined {
   const raw = settings.getSetting(projectId, settingsKey(accountId));
-  if (!raw) return undefined;
-
-  const stored = JSON.parse(raw) as StoredAccount;
-  const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
-
+  
   let password: string | undefined;
   let tokens: OAuthToken | undefined;
+  const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
 
-  if (stored.imapPass) {
-    password = encKey ? decryptCredentials(stored.imapPass) : stored.imapPass;
+  // Read from the account settings key
+  if (raw) {
+    const stored = JSON.parse(raw) as StoredAccount;
+    if (stored.imapPass) {
+      password = encKey ? decryptCredentials(stored.imapPass) : stored.imapPass;
+    }
+    if (stored.tokens) {
+      tokens = decodeTokens(stored.tokens, encKey);
+    }
   }
-  if (stored.tokens) {
-    if (encKey) {
-      tokens = {
-        accessToken: decryptCredentials(stored.tokens.accessToken),
-        refreshToken: decryptCredentials(stored.tokens.refreshToken),
-        expiryDate: stored.tokens.expiryDate,
-        scope: stored.tokens.scope,
-      };
-    } else {
-      tokens = stored.tokens;
+
+  // Fallback: also check the OAuth token key (email_oauth_<id>)
+  if (!tokens) {
+    const oauthRaw = settings.getSetting(projectId, `email_oauth_${accountId}`);
+    if (oauthRaw) {
+      try {
+        const oauthStored = JSON.parse(oauthRaw) as OAuthToken;
+        tokens = decodeTokens(oauthStored, encKey);
+      } catch { /* ignore parse errors */ }
     }
   }
 
   return { password, tokens };
+}
+
+function decodeTokens(stored: OAuthToken, encKey?: string): OAuthToken {
+  if (encKey) {
+    return {
+      accessToken: decryptCredentials(stored.accessToken),
+      refreshToken: decryptCredentials(stored.refreshToken),
+      expiryDate: stored.expiryDate,
+      scope: stored.scope,
+    };
+  }
+  return stored;
 }
 
 /** Test the IMAP connection for an account and return folder listing. */
