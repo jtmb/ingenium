@@ -437,6 +437,41 @@ emailsRouter.get("/watch/status", (req, res) => {
 
 // ── Root Email Routes ────────────────────────────────────────────────────
 
+/** POST /sync?project= — Sync multiple folders at once, returns cached results. */
+emailsRouter.post("/sync", async (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+
+  const accountId = req.body.account;
+  const result = await getAccountAuthOrError(res, projectId, accountId);
+  if (!result) return;
+
+  const folders = (req.body.folders as string[]) ?? ["INBOX", "Sent", "Drafts", "Archive", "Spam", "Trash"];
+  const limit = 50;
+
+  const { account, auth } = result;
+
+  try {
+    // Connect once, then fetch all folders within the same connection
+    await connectAccount(account, auth);
+    const results: Record<string, { emails: any[]; total: number }> = {};
+
+    for (const folder of folders) {
+      try {
+        const { messages, total } = await listEmails(account.id, folder, 1, limit);
+        results[folder] = { emails: messages, total };
+      } catch {
+        results[folder] = { emails: [], total: 0 };
+      }
+    }
+
+    res.json({ data: results });
+  } catch (err: any) {
+    logger.error("email", `Sync failed for account ${accountId}`, { error: err.message, name: err.name, method: req.method, path: req.originalUrl });
+    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+  }
+});
+
 /** GET /?project=&account=&folder=&page=&limit= — List and paginate emails. */
 emailsRouter.get("/", async (req, res) => {
   const projectId = requireProject(req, res);
