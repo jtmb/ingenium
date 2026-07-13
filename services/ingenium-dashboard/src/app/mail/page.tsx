@@ -64,16 +64,21 @@ export default function MailPage() {
       .catch(() => setFolders([]));
   }, [selectedAccount, refreshKey]);
 
-  // Prefetch all folder contents on account switch
+  // Prefetch all folder contents on account switch (runs after folders load)
   useEffect(() => {
-    if (!selectedAccount) return;
+    if (!selectedAccount || folders.length === 0) return;
     const cacheKey = `${selectedAccount}:synced`;
-    if (emailCache.current.get(cacheKey)) return; // already synced
+    if (emailCache.current.get(cacheKey)) return;
+
+    // Use the first 6 folders from the actual folder list, or defaults
+    const targetFolders = folders.length > 0 
+      ? folders.slice(0, 12).map((f: any) => f.path || f.name)
+      : ["INBOX", "Sent", "Drafts", "Archive", "Spam", "Trash"];
 
     fetch(`${API_BASE}/emails/sync?project=${PROJECT}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account: selectedAccount, folders: ["INBOX", "Sent", "Drafts", "Archive", "Spam", "Trash"] }),
+      body: JSON.stringify({ account: selectedAccount, folders: targetFolders }),
     })
       .then(r => r.ok ? r.json() : null)
       .then(d => {

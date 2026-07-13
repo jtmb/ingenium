@@ -452,17 +452,22 @@ emailsRouter.post("/sync", async (req, res) => {
   const { account, auth } = result;
 
   try {
-    // Connect once, then fetch all folders within the same connection
+    // Connect once, fetch all folders in parallel
     await connectAccount(account, auth);
-    const results: Record<string, { emails: any[]; total: number }> = {};
-
-    for (const folder of folders) {
+    
+    const folderPromises = folders.map(async (folder): Promise<[string, { emails: any[]; total: number }]> => {
       try {
         const { messages, total } = await listEmails(account.id, folder, 1, limit);
-        results[folder] = { emails: messages, total };
+        return [folder, { emails: messages as any[], total }];
       } catch {
-        results[folder] = { emails: [], total: 0 };
+        return [folder, { emails: [], total: 0 }] as const;
       }
+    });
+    
+    const entries = await Promise.all(folderPromises);
+    const results: Record<string, { emails: any[]; total: number }> = {};
+    for (const [folder, data] of entries) {
+      results[folder] = data;
     }
 
     res.json({ data: results });
