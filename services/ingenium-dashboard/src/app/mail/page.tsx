@@ -294,6 +294,25 @@ export default function MailPage() {
     setEmailError(null);
   }, []);
 
+  const handleDeleteAccount = useCallback(async (accountId: string) => {
+    if (!confirm("Remove this email account? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, { method: "DELETE" });
+      if (res.ok || res.status === 204) {
+        // Refresh account list
+        const accountsRes = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
+        if (accountsRes.ok) {
+          const data = await accountsRes.json();
+          const accts = data.data || [];
+          setAccounts(accts);
+          if (selectedAccount === accountId) {
+            setSelectedAccount(accts.length > 0 ? accts[0].id : "");
+          }
+        }
+      }
+    } catch { /* non-fatal */ }
+  }, [selectedAccount, project]);
+
   const handleSelectFolder = useCallback((folder: string) => {
     setSelectedFolder(folder);
     setSelectedEmail(null);
@@ -407,6 +426,7 @@ export default function MailPage() {
           onSelectAccount={handleSelectAccount}
           onCompose={handleCompose}
           onAddAccount={() => setShowAccountSetup(true)}
+          onDeleteAccount={handleDeleteAccount}
           folders={folders}
         />
 

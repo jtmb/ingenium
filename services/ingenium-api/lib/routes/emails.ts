@@ -984,6 +984,9 @@ export async function migrateEmailAccountsToGlobal(): Promise<number> {
            VALUES (?, ?, ?)
            ON CONFLICT(project_id, key) DO NOTHING`,
         ).run(globalId, row.key, row.value);
+        // Delete from source so the account only lives in global — prevents
+        // resurrection on next rebuild if user deleted it from global.
+        db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?").run(row.project_id, row.key);
         migrated++;
       }
     }
@@ -1009,6 +1012,7 @@ export async function migrateEmailAccountsToGlobal(): Promise<number> {
            VALUES (?, ?, ?)
            ON CONFLICT(project_id, key) DO NOTHING`,
         ).run(globalId, row.key, row.value);
+        db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?").run(row.project_id, row.key);
         migrated++;
       }
     }
@@ -1034,6 +1038,7 @@ export async function migrateEmailAccountsToGlobal(): Promise<number> {
            VALUES (?, ?, ?)
            ON CONFLICT(project_id, key) DO NOTHING`,
         ).run(globalId, row.key, row.value);
+        db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?").run(row.project_id, row.key);
         migrated++;
       }
     }
