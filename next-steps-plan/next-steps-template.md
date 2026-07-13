@@ -6,7 +6,7 @@
  You are allowed to plan for spawning 6 subagents at once. Obviously don't spawn 6 subagents for everything just tasks that can use the speedup (like software engineer or qa tasks) 
  - At the end of your plan when it's ready to handoff, include a copy paste line i can copy that tells the orchestrator how many agents he's allowed to run. Keep this short about one sentence. 
  Example:
- ` "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, ensure you use the todo tool. "`
+ ` "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, ensure you use the todo tool and please ensure you check over the sub-agent output at the end for concerns, reccomendations, findings, bugs etc. Add anny findings as a new task in the todo and have them fixed."`
 
 ## DIRECTIVE:
 One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below:

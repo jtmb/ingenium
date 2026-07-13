@@ -38,6 +38,8 @@ import {
   // Sync
   syncFolder,
   syncAccountFolders,
+  // Connection state
+  setAccountConnected,
 } from "ingenium-email";
 import type {
   EmailAccount,
@@ -89,16 +91,22 @@ async function getAccountAuthOrError(
   return { account, auth: { password: creds.password, tokens } };
 }
 
-/** Wrapper that connects, runs the callback. Only disconnects on errors.
- *  Let the connection pool manage connections for normal operations. */
+/** Wrapper that connects, runs the callback, marks account as connected.
+ *  Only disconnects on errors — let the pool manage connections normally. */
 async function withImapConnection<T>(
+  projectId: string,
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
   fn: (accountId: string) => Promise<T>,
 ): Promise<T> {
   await connectAccount(account, auth);
   try {
-    return await fn(account.id);
+    const result = await fn(account.id);
+    // Mark as connected after first successful IMAP operation
+    try {
+      setAccountConnected(projectId, account.id, true);
+    } catch { /* non-fatal */ }
+    return result;
   } catch (err) {
     await disconnectAccount(account.id).catch(() => {
       /* non-fatal */
@@ -287,7 +295,7 @@ emailsRouter.get("/search", async (req, res) => {
   if (req.query.before) query.before = req.query.before as string;
 
   try {
-    const uids = await withImapConnection(account, auth, (id) =>
+    const uids = await withImapConnection(projectId, account, auth, (id) =>
       searchEmails(id, folder, query),
     );
     res.json({ data: uids, total: uids.length });
@@ -308,7 +316,7 @@ emailsRouter.get("/folders", async (req, res) => {
 
   const { account, auth } = result;
   try {
-    const folders = await withImapConnection(account, auth, (id) => listFolders(id));
+    const folders = await withImapConnection(projectId, account, auth, (id) => listFolders(id));
     res.json({ data: folders, total: folders.length });
   } catch (err: any) {
     logger.error("email", `List folders failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
@@ -329,7 +337,7 @@ emailsRouter.get("/triage", async (req, res) => {
   const limit = parseInt((req.query.limit as string) ?? "20", 10) || 20;
 
   try {
-    const triageResults = await withImapConnection(account, auth, (id) =>
+    const triageResults = await withImapConnection(projectId, account, auth, (id) =>
       triageEmails(projectId, id, limit),
     );
     res.json({ data: triageResults, total: triageResults.length });
@@ -360,7 +368,7 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
   const { account, auth } = result;
 
   try {
-    const suggestion = await withImapConnection(account, auth, (id) =>
+    const suggestion = await withImapConnection(projectId, account, auth, (id) =>
       suggestResponse(projectId, id, uid, folder),
     );
     if (!suggestion) {
@@ -533,7 +541,7 @@ emailsRouter.get("/", async (req, res) => {
   // ── Force refresh: skip cache, fetch from IMAP, populate cache ──────
   if (refresh) {
     try {
-      const { messages, total } = await withImapConnection(account, auth, (id) =>
+      const { messages, total } = await withImapConnection(projectId, account, auth, (id) =>
         listEmails(id, folder, page, limit),
       );
       // Populate cache in background (fire-and-forget)
@@ -576,7 +584,7 @@ emailsRouter.get("/", async (req, res) => {
 
   // ── No cache — fall back to IMAP, populating cache for next time ───
   try {
-    const { messages, total } = await withImapConnection(account, auth, (id) =>
+    const { messages, total } = await withImapConnection(projectId, account, auth, (id) =>
       listEmails(id, folder, page, limit),
     );
 
@@ -685,7 +693,7 @@ emailsRouter.get("/:uid", async (req, res) => {
   const { account, auth } = result;
 
   try {
-    const email = await withImapConnection(account, auth, (id) =>
+    const email = await withImapConnection(projectId, account, auth, (id) =>
       getEmail(id, folder, uid),
     );
     if (!email) {
@@ -728,7 +736,7 @@ emailsRouter.patch("/:uid/move", async (req, res) => {
 
   const { account, auth } = result;
   try {
-    await withImapConnection(account, auth, (id) =>
+    await withImapConnection(projectId, account, auth, (id) =>
       moveEmail(id, uid, fromFolder, toFolder),
     );
     res.json({ data: { moved: true, uid, fromFolder, toFolder } });
@@ -765,7 +773,7 @@ emailsRouter.patch("/:uid/flags", async (req, res) => {
 
   const { account, auth } = result;
   try {
-    await withImapConnection(account, auth, (id) =>
+    await withImapConnection(projectId, account, auth, (id) =>
       setFlags(id, folder, uid, flags),
     );
     res.json({ data: { flagsSet: true, uid, folder, flags } });
@@ -796,7 +804,7 @@ emailsRouter.delete("/:uid", async (req, res) => {
   const { account, auth } = result;
 
   try {
-    await withImapConnection(account, auth, (id) =>
+    await withImapConnection(projectId, account, auth, (id) =>
       deleteEmail(id, folder, uid),
     );
     res.status(204).send();
