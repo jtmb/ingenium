@@ -26,6 +26,7 @@ import {
   // OAuth
   getOAuthUrl,
   exchangeCode,
+  getValidTokens,
   // Triage
   triageEmails,
   // Responder
@@ -48,11 +49,11 @@ export const emailsRouter = Router();
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 /** Resolve account + credentials or send a 422/404 and return null. */
-function getAccountAuthOrError(
+async function getAccountAuthOrError(
   res: Response,
   projectId: string,
   accountId?: string,
-): { account: EmailAccount; auth: { password?: string; tokens?: OAuthToken } } | null {
+): Promise<{ account: EmailAccount; auth: { password?: string; tokens?: OAuthToken } } | null> {
   if (!accountId) {
     res.status(422).json({
       error: { code: "VALIDATION_ERROR", message: "account query parameter is required" },
@@ -73,7 +74,15 @@ function getAccountAuthOrError(
     });
     return null;
   }
-  return { account, auth: { password: creds.password, tokens: creds.tokens } };
+  // Refresh OAuth tokens if expired
+  let tokens = creds.tokens;
+  if (account.authType === "oauth2" && tokens?.expiryDate && tokens.expiryDate < Date.now() + 60_000) {
+    try {
+      const refreshed = await getValidTokens(projectId, accountId, account.provider as EmailProvider);
+      if (refreshed) tokens = refreshed;
+    } catch { /* use existing tokens */ }
+  }
+  return { account, auth: { password: creds.password, tokens } };
 }
 
 /** Wrapper that connects, runs the callback. Only disconnects on errors.
@@ -232,7 +241,7 @@ emailsRouter.post("/accounts/:id/test", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.params.id!;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const { account, auth } = result;
@@ -259,7 +268,7 @@ emailsRouter.get("/search", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.query.account as string | undefined;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const folder = (req.query.folder as string) ?? "INBOX";
@@ -290,7 +299,7 @@ emailsRouter.get("/folders", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.query.account as string | undefined;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const { account, auth } = result;
@@ -309,7 +318,7 @@ emailsRouter.get("/triage", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.query.account as string | undefined;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const { account, auth } = result;
@@ -332,7 +341,7 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.query.account as string | undefined;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const uid = parseInt(req.params.uid!, 10);
@@ -434,7 +443,7 @@ emailsRouter.get("/", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.query.account as string | undefined;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const folder = (req.query.folder as string) ?? "INBOX";
@@ -460,7 +469,7 @@ emailsRouter.post("/draft", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.body.account;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const { to, cc, bcc, subject, html, text, inReplyTo, references } = req.body;
@@ -495,7 +504,7 @@ emailsRouter.post("/", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.body.account;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const { to, cc, bcc, subject, html, text, inReplyTo, references } = req.body;
@@ -532,7 +541,7 @@ emailsRouter.get("/:uid", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.query.account as string | undefined;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const uid = parseInt(req.params.uid!, 10);
@@ -569,7 +578,7 @@ emailsRouter.patch("/:uid/move", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.body.account;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const uid = parseInt(req.params.uid!, 10);
@@ -606,7 +615,7 @@ emailsRouter.patch("/:uid/flags", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.body.account;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const uid = parseInt(req.params.uid!, 10);
@@ -643,7 +652,7 @@ emailsRouter.delete("/:uid", async (req, res) => {
   if (!projectId) return;
 
   const accountId = req.body.account;
-  const result = getAccountAuthOrError(res, projectId, accountId);
+  const result = await getAccountAuthOrError(res, projectId, accountId);
   if (!result) return;
 
   const uid = parseInt(req.params.uid!, 10);
