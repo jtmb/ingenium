@@ -11,6 +11,31 @@ The Ingenium email client provides:
 - **MIME parsing** with mailparser for message content extraction
 - **Search functionality** across email subjects, senders, and bodies
 
+## Cache-First Architecture (Never-Block)
+
+The email client uses a **cache-first** pattern to ensure the UI never blocks on live IMAP connections:
+
+### How It Works
+
+1. **GET emails always serves from cache** — The API (`GET /api/v1/emails/list`) always checks the SQLite email cache first. If cached data exists, it returns immediately (source: `"cache"`) and triggers a background stale-cache refresh. The user sees data instantly.
+
+2. **Cache miss = instant return + background fetch** — If the cache is empty (first request), the API returns immediately with whatever is available and fires a background sync. The UI **never waits** on IMAP.
+
+3. **Body caching** — When an email is opened for reading, the body (HTML + text) is fetched from IMAP and cached via `emailCache.getCachedEmailBody()`. Subsequent reads return from cache with `source: "cache"`.
+
+4. **Startup prefetch** — On API server start, `prefetchAllAccounts()` iterates all connected accounts and triggers a background sync for all folders, warming the cache before any user interaction.
+
+5. **Per-connection prefetch** — The first time a given server lifetime touches an account, all folders are prefetched in the background. Subsequent requests to any folder find the cache already populated.
+
+### Why Cache-First?
+
+- **IMAP is slow** — Live IMAP LIST operations can take 2-10s depending on folder size and network latency
+- **OAuth2 token refresh** — Expired tokens add latency to every IMAP operation
+- **Multiple folders** — A single inbox view may need to cache INBOX, Sent, Drafts, etc.
+- **Container restarts** — Supervisord autorestart clears in-memory state, but the SQLite cache persists across restarts
+
+> **Note**: The cache is backed by the `email_cache` and `email_bodies` tables in the Ingenium SQLite database. It persists across container restarts. A "force refresh" parameter is available to bypass cache and re-fetch from IMAP.
+
 ## Prerequisites
 
 Before using the email client:
