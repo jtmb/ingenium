@@ -93,6 +93,8 @@ async function getAccountAuthOrError(
 
 /** Wrapper that connects, runs the callback, marks account as connected.
  *  Only disconnects on errors — let the pool manage connections normally. */
+const prefetchedAccounts = new Set<string>();
+
 async function withImapConnection<T>(
   projectId: string,
   account: EmailAccount,
@@ -106,6 +108,15 @@ async function withImapConnection<T>(
     try {
       setAccountConnected(projectId, account.id, true);
     } catch { /* non-fatal */ }
+
+    // Prefetch: populate cache for all folders on first connection per account per server lifetime
+    if (!prefetchedAccounts.has(account.id)) {
+      prefetchedAccounts.add(account.id);
+      setImmediate(() => {
+        syncAccountFolders(projectId, account.id).catch(() => {});
+      });
+    }
+
     return result;
   } catch (err) {
     await disconnectAccount(account.id).catch(() => {
@@ -497,12 +508,17 @@ emailsRouter.post("/sync", async (req, res) => {
   }
 });
 
-/** Convert a cached email row to an EmailMessage-compatible shape for the API. */
+/** Convert a cached email row to an EmailMessage-compatible shape for the API.
+ *  Includes body HTML/Text from the email_bodies cache when available. */
 function cachedToEmailMessage(c: emailCache.CachedEmail): Partial<EmailMessage> {
   let envelope: Record<string, unknown> = {};
   if (c.envelope_json) {
     try { envelope = JSON.parse(c.envelope_json) as Record<string, unknown>; } catch { /* empty */ }
   }
+
+  // Check body cache for full HTML/text content
+  const cachedBody = emailCache.getCachedEmailBody(c.account_id, c.folder, c.uid);
+
   return {
     uid: c.uid,
     subject: c.subject ?? "(no subject)",
@@ -510,7 +526,10 @@ function cachedToEmailMessage(c: emailCache.CachedEmail): Partial<EmailMessage> 
     to: Array.isArray(envelope.to) ? (envelope.to as EmailMessage["to"]) : [],
     cc: Array.isArray(envelope.cc) ? (envelope.cc as EmailMessage["cc"]) : [],
     date: c.date ?? new Date().toISOString(),
-    body: { text: c.snippet ?? undefined },
+    body: {
+      text: cachedBody?.text ?? c.snippet ?? undefined,
+      html: cachedBody?.html ?? undefined,
+    },
     attachments: c.has_attachments ? [] : [],  // attachment detail lives in body cache
     flags: ((): string[] => { try { return JSON.parse(c.flags) as string[]; } catch { return []; } })(),
     folder: c.folder,
@@ -672,7 +691,8 @@ emailsRouter.post("/", async (req, res) => {
 
 // ── UID Parameterized Routes ─────────────────────────────────────────────
 
-/** GET /:uid?project=&account=&folder= — Get a single email by UID. */
+/** GET /:uid?project=&account=&folder= — Get a single email by UID.
+ *  Uses email_bodies cache when available; falls back to IMAP and caches result. */
 emailsRouter.get("/:uid", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -692,6 +712,22 @@ emailsRouter.get("/:uid", async (req, res) => {
   const folder = (req.query.folder as string) ?? "INBOX";
   const { account, auth } = result;
 
+  // ── Check body cache first ─────────────────────────────────────────
+  const cachedBody = emailCache.getCachedEmailBody(account.id, folder, uid);
+  const cachedListing = emailCache.getCachedEmail(account.id, folder, uid);
+
+  if (cachedBody && cachedListing) {
+    const email = cachedToEmailMessage(cachedListing);
+    // Ensure body content comes from the body cache (not snippet)
+    email.body = {
+      text: cachedBody.text ?? email.body?.text,
+      html: cachedBody.html ?? email.body?.html,
+    };
+    res.json({ data: email, source: "cache" });
+    return;
+  }
+
+  // ── Cache miss — fetch from IMAP and cache the body ────────────────
   try {
     const email = await withImapConnection(projectId, account, auth, (id) =>
       getEmail(id, folder, uid),
@@ -702,7 +738,26 @@ emailsRouter.get("/:uid", async (req, res) => {
       });
       return;
     }
-    res.json({ data: email });
+
+    // Cache the body so future reads skip IMAP
+    try {
+      const headersJson = email.messageId ? JSON.stringify({
+        messageId: email.messageId,
+        threadId: email.threadId,
+        inReplyTo: email.inReplyTo,
+        references: email.references,
+      }) : null;
+      emailCache.upsertEmailBody(
+        account.id,
+        folder,
+        uid,
+        email.body.html ?? null,
+        email.body.text ?? null,
+        headersJson,
+      );
+    } catch { /* non-fatal — body cache is best-effort */ }
+
+    res.json({ data: email, source: "imap" });
   } catch (err: any) {
     logger.error("email", `Get email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });

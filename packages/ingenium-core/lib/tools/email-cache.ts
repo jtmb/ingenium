@@ -128,6 +128,20 @@ export function getCachedEmails(
   return { emails, total: totalRow.count };
 }
 
+/**
+ * Look up a single cached email by account + folder + uid.
+ */
+export function getCachedEmail(
+  accountId: string,
+  folder: string,
+  uid: number,
+): CachedEmail | undefined {
+  const db = getDb(dbPath());
+  return db.prepare(
+    "SELECT * FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?",
+  ).get(accountId, folder, uid) as CachedEmail | undefined;
+}
+
 // ── Email body cache ───────────────────────────────────────────────────────
 
 /**

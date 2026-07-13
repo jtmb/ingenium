@@ -1,5 +1,32 @@
 # Architecture
 
+## Project Identity Model
+
+Ingenium uses a **two-project identity model** distinguishing between server/public and external sessions:
+
+### Server/Public Project (`global-default`)
+- **Project name**: `global-default` (with `is_global=1`)
+- **Used by**: The container's own OpenCode session (opencode-webui), email service, and dashboard default
+- **Global config location**: `/home/appuser/.config/opencode/opencode.jsonc` (set by the Docker entrypoint at `scripts/docker-entrypoint.sh`)
+- **Plugin target**: Extension plugins inside the container use `INGENIUM_PROJECT=global-default` (set in `opencode.jsonc` at line 32 of the entrypoint)
+- **Created automatically** by `scripts/docker-entrypoint.sh` during container startup via `POST /api/v1/projects`
+
+### External Sessions
+- **Project name**: Derived from the worktree directory name (e.g., `gh-llm-bootstrap` for a repo cloned to `/home/user/repos/gh-llm-bootstrap`)
+- **Used by**: External OpenCode sessions (CLI, VS Code) that connect via the `@ingenium/extension` plugins
+- **Plugin target**: The `INGENIUM_PROJECT` environment variable in the MCP server's `opencode.json` entry controls which project extension plugins write to
+- **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the observer, skill-sync, and auto-observer plugins
+
+### Resolution & Switching
+- The **dashboard** resolves the default project dynamically by fetching the `is_global=1` project from the API (`GET /api/v1/projects` with `is_global` filter)
+- Users can switch projects via the **ProjectSelector** dropdown on the `/projects` page or through MCP tools like `ingenium_project_init` and `ingenium_project_set_global`
+- When writing shared resources (skills, plugins, configs, settings), use `global-default`. When working from an external session, the `INGENIUM_PROJECT` env var determines the target
+
+### Key Rule
+> **Never assume a worktree-derived project name is the shared namespace.** The `global-default` project (with `is_global=1`) is the sole server/public namespace for shared resources. External sessions (like this repo's worktree-derived project) have their own isolated workspace — shared resources (skills, plugins, configs, settings) must be written to `global-default` explicitly, never to the worktree-derived project.
+
+---
+
 ## Data Flow
 
 ```

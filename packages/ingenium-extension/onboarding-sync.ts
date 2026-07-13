@@ -3,7 +3,7 @@ import { resolve, basename, dirname, extname } from "node:path";
 import { homedir } from "node:os";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
-const DEFAULT_PROJECT = "gh-llm-bootstrap";
+const DEFAULT_PROJECT = process.env.INGENIUM_PROJECT || "global-default";
 
 // ── helpers ────────────────────────────────────────────────────────
 

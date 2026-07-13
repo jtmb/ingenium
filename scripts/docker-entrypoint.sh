@@ -28,7 +28,8 @@ if [ ! -f "$OC_CONFIG" ]; then
       "command": ["node", "/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],
       "enabled": true,
       "environment": {
-        "INGENIUM_API_URL": "http://localhost:4097/api/v1"
+        "INGENIUM_API_URL": "http://localhost:4097/api/v1",
+        "INGENIUM_PROJECT": "global-default"
       }
     }
   },
@@ -46,7 +47,7 @@ fi
 exec supervisord -c /app/supervisord.conf &
 sleep 5
 curl -s -X POST 'http://localhost:4097/api/v1/projects?project=global-default' \
-  -H 'Content-Type: application/json' -d '{"name":"global-default"}' > /dev/null 2>&1 || true
+  -H 'Content-Type: application/json' -d '{"name":"global-default","is_global":true}' > /dev/null 2>&1 || true
 
 # Register Ingenium MCP server in Ingenium DB so dashboard shows it
 curl -s -X POST 'http://localhost:4097/api/v1/servers?project=global-default' \

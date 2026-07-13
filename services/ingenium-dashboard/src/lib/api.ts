@@ -1,5 +1,5 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4097/api/v1";
-const DEFAULT_PROJECT = "gh-llm-bootstrap";
+const DEFAULT_PROJECT = "global-default";
 
 /** Internal fetch wrapper that handles errors and content types uniformly. */
 async function request<T>(path: string, options?: RequestInit): Promise<T> {

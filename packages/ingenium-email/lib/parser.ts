@@ -72,8 +72,7 @@ export function sanitizeHtml(html: string): string {
   // Remove javascript: URIs in href/src attributes
   sanitized = sanitized.replace(/\bhref\s*=\s*["']javascript:[^"']*["']/gi, "");
   sanitized = sanitized.replace(/\bsrc\s*=\s*["']javascript:[^"']*["']/gi, "");
-  // Strip data: URIs in src attributes
-  sanitized = sanitized.replace(/\bsrc\s*=\s*["']data:[^"']*["']/gi, "");
+  // Note: data: URIs are preserved — they are embedded MIME content safe for email display
   // Remove inline event handlers (onclick, onload, onerror, etc.)
   sanitized = sanitized.replace(/\s+on\w+\s*=\s*"[^"]*"/gi, "");
   sanitized = sanitized.replace(/\s+on\w+\s*=\s*'[^']*'/gi, "");
