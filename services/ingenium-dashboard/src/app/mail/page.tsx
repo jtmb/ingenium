@@ -76,10 +76,12 @@ export default function MailPage() {
   const [folders, setFolders] = useState<any[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
+  const [accountsLoading, setAccountsLoading] = useState(true);
 
   // Fetch accounts on mount
   useEffect(() => {
     const fetchAccounts = async () => {
+      setAccountsLoading(true);
       try {
         const res = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
         if (res.ok) {
@@ -92,6 +94,8 @@ export default function MailPage() {
         }
       } catch {
         // API not available — show empty state
+      } finally {
+        setAccountsLoading(false);
       }
     };
     if (project) fetchAccounts();
@@ -350,8 +354,24 @@ export default function MailPage() {
     }
   }, [selectedAccount, selectedFolder, page, searchQuery, project]);
 
+  // Loading — accounts are still being fetched
+  if (accountsLoading) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
+        <div className="flex items-center gap-3 text-[var(--color-text-muted)]">
+          <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span>Loading accounts…</span>
+        </div>
+      </div>
+    );
+  }
+
   // No accounts — show empty / setup state
-  if (accounts.length === 0 && !showAccountSetup) {
+  if (accounts.length === 0 && !showAccountSetup && !accountsLoading) {
     return (
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
