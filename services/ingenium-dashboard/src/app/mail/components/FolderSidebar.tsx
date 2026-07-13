@@ -13,6 +13,7 @@ export default function FolderSidebar({
   onSelectAccount,
   onCompose,
   onAddAccount,
+  onDeleteAccount,
   folders: folderData,
 }: {
   accounts: any[];
@@ -22,6 +23,7 @@ export default function FolderSidebar({
   onSelectAccount?: (accountId: string) => void;
   onCompose: () => void;
   onAddAccount: () => void;
+  onDeleteAccount?: (accountId: string) => void;
   folders?: any[];
 }) {
   const defaultFolders = [
@@ -90,26 +92,37 @@ export default function FolderSidebar({
               <div className="px-3 py-2 text-sm text-[var(--color-text-muted)]">No accounts</div>
             )}
             {accounts.map((acct: any) => (
-              <button
-                key={acct.id}
-                type="button"
-                onClick={() => {
-                  onSelectAccount?.(acct.id);
-                  setIsOpen(false);
-                }}
-                className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-[var(--color-surface-hover)] cursor-pointer ${
-                  (selectedAccount === acct.id || selectedAccount === acct.email) ? "bg-[var(--color-surface-selected)]" : ""
-                }`}
-              >
-                <span className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-medium shrink-0">
-                  {acct.email[0].toUpperCase()}
-                </span>
-                <span className="flex-1 truncate">{acct.email}</span>
-                <span className={`w-2 h-2 rounded-full shrink-0 ${acct.connected ? "bg-green-500" : "bg-gray-400"}`} />
-                {!acct.connected && (
-                  <span className="text-xs text-[var(--color-text-muted)]">(not connected)</span>
+              <div key={acct.id} className="flex items-center group">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSelectAccount?.(acct.id);
+                    setIsOpen(false);
+                  }}
+                  className={`flex-1 flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-[var(--color-surface-hover)] cursor-pointer ${
+                    (selectedAccount === acct.id || selectedAccount === acct.email) ? "bg-[var(--color-surface-selected)]" : ""
+                  }`}
+                >
+                  <span className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-medium shrink-0">
+                    {acct.email[0].toUpperCase()}
+                  </span>
+                  <span className="flex-1 truncate">{acct.email}</span>
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${acct.connected ? "bg-green-500" : "bg-gray-400"}`} />
+                  {!acct.connected && (
+                    <span className="text-xs text-[var(--color-text-muted)]">(not connected)</span>
+                  )}
+                </button>
+                {onDeleteAccount && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onDeleteAccount(acct.id); setIsOpen(false); }}
+                    className="px-2 py-2 text-sm text-red-500 hover:bg-red-50 hover:text-red-700 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shrink-0"
+                    title="Remove account"
+                  >
+                    ✕
+                  </button>
                 )}
-              </button>
+              </div>
             ))}
             {onAddAccount && (
               <>
