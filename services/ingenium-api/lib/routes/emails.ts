@@ -439,7 +439,7 @@ emailsRouter.get("/", async (req, res) => {
 
   const folder = (req.query.folder as string) ?? "INBOX";
   const page = parseInt((req.query.page as string) ?? "1", 10) || 1;
-  const limit = parseInt((req.query.limit as string) ?? "20", 10) || 20;
+  const limit = parseInt((req.query.limit as string) ?? "50", 10) || 50;
 
   const { account, auth } = result;
 
