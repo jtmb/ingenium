@@ -218,7 +218,7 @@ export async function getOAuthUrl(
   settings.setSetting(pid, `oauth_state_${provider}`, state);
 
   if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient(_projectId);
+    const { client: gClient } = await cachedGoogleClient(pid);
     const url = gClient.generateAuthUrl({
       access_type: "offline",
       prompt: "consent",
@@ -268,7 +268,7 @@ export async function exchangeCode(
   const redirectUri = _redirectUri ?? getRedirectUri();
 
   if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient(_projectId);
+    const { client: gClient } = await cachedGoogleClient(pid);
     const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
     // Extract email from id_token JWT
     let email: string | undefined;
