@@ -17,7 +17,7 @@ import { observationsRouter } from "../lib/routes/observations.js";
 import { personalityRouter } from "../lib/routes/personality.js";
 import { synthesisRouter } from "../lib/routes/synthesis.js";
 import { pipelineRouter } from "../lib/routes/pipeline.js";
-import { emailsRouter } from "../lib/routes/emails.js";
+import { emailsRouter, migrateEmailAccountsToGlobal, prefetchAllAccounts } from "../lib/routes/emails.js";
 import { commandsRouter } from "../lib/routes/commands.js";
 import { configRouter } from "../lib/routes/configs.js";
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
@@ -25,6 +25,7 @@ import { logsRouter } from "../lib/routes/logs.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
 import { extractionRouter } from "../lib/routes/extraction.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
+import { servicesRouter } from "../lib/routes/services.js";
 import { startScheduler } from "../lib/scheduler.js";
 const app = express();
 app.use(helmet());
@@ -56,12 +57,26 @@ app.use("/api/v1/logs", logsRouter);
 app.use("/api/v1/opencode", opencodeRouter);
 app.use("/api/v1/extraction", extractionRouter);
 app.use("/api/v1/jobs", jobsRouter);
+// System-level routes (no project dependency)
+app.use("/api/v1/services", servicesRouter);
 // Error handler
 app.use(errorHandler);
 // Start server + scheduler
 app.listen(config.port, () => {
     logger.info("api", `ingenium-api listening on port ${config.port}`);
     startScheduler(config.port);
+    // 🔴 Email: migrate any project-scoped accounts to global, then prefetch
+    setTimeout(() => {
+        migrateEmailAccountsToGlobal().then((migrated) => {
+            if (migrated > 0) {
+                logger.info("api", `Migrated ${migrated} email settings to global project`);
+            }
+            // Start prefetch after migration completes
+            prefetchAllAccounts().then(() => {
+                logger.info("api", "Email prefetch job dispatched for all connected accounts");
+            });
+        });
+    }, 10_000); // Delay to ensure DB is fully initialized
     // 🔴 Durability: run WAL checkpoint + integrity check at startup
     const dbPath = process.env.INGENIUM_CORE_DB_PATH || "/app/.ingenium/data.db";
     try {
@@ -74,21 +89,29 @@ app.listen(config.port, () => {
         logger.error("api", `DB startup check failed: ${e.message}`, { stack: e.stack });
     }
 });
-// Crash handlers — log unhandled errors before process exits
+// Crash handlers — log unhandled errors before process exits.
+// 🔴 Log SYNCHRONOUSLY with console.error first — the async import() race with
+//    process.exit(1) hides every crash from the structured logger. Consolers
+//    write to stderr synchronously so supervisord always captures them.
 process.on("uncaughtException", (err) => {
+    console.error("[api] FATAL uncaught exception:", err.message, "\n", err.stack);
+    // Best-effort async log to structured logger — may or may not complete
     import("ingenium-core").then(({ logger: crashLogger }) => {
         crashLogger.error("api", "Uncaught exception — process will exit", { error: err.message, stack: err.stack });
     }).catch(() => {
-        console.error("[api] FATAL uncaught exception:", err.message, err.stack);
+        // Already logged to console.error above
     });
     process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
     const message = reason instanceof Error ? reason.message : String(reason);
+    const stack = reason instanceof Error ? reason.stack : undefined;
+    console.error("[api] FATAL unhandled rejection:", stack ?? message);
+    // Best-effort async log — do NOT exit; Node warns but does not crash by default
     import("ingenium-core").then(({ logger: crashLogger }) => {
-        crashLogger.error("api", "Unhandled rejection", { error: message });
+        crashLogger.error("api", "Unhandled rejection", { error: message, stack });
     }).catch(() => {
-        console.error("[api] FATAL unhandled rejection:", message);
+        // Already logged to console.error above
     });
 });
 process.on("SIGTERM", () => {

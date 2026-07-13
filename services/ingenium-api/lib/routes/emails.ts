@@ -50,6 +50,58 @@ import type {
   EmailMessage,
 } from "ingenium-email";
 
+// ── Sync tracking ──────────────────────────────────────────────────────────
+// Tracks which accounts+folders are currently being synced so the
+// /sync-status endpoint can report progress to the dashboard.
+
+interface SyncTracker {
+  syncing: boolean;
+  folders: Map<string, boolean>; // folder -> syncing
+}
+
+const syncTrackers = new Map<string, SyncTracker>();
+
+function getTracker(accountId: string): SyncTracker {
+  let t = syncTrackers.get(accountId);
+  if (!t) {
+    t = { syncing: false, folders: new Map() };
+    syncTrackers.set(accountId, t);
+  }
+  return t;
+}
+
+function markSyncing(accountId: string, folder: string, active: boolean): void {
+  const t = getTracker(accountId);
+  t.folders.set(folder, active);
+  t.syncing = [...t.folders.values()].some(v => v);
+}
+
+async function trackSync<T>(
+  accountId: string,
+  folder: string | null,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (folder) {
+    markSyncing(accountId, folder, true);
+  } else {
+    // Full account sync — mark all tracked folders
+    const t = getTracker(accountId);
+    t.syncing = true;
+  }
+
+  try {
+    return await fn();
+  } finally {
+    if (folder) {
+      markSyncing(accountId, folder, false);
+    } else {
+      const t = getTracker(accountId);
+      t.syncing = false;
+      t.folders.clear();
+    }
+  }
+}
+
 export const emailsRouter = Router();
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -122,7 +174,9 @@ async function withImapConnection<T>(
     if (!prefetchedAccounts.has(account.id)) {
       prefetchedAccounts.add(account.id);
       setImmediate(() => {
-        syncAccountFolders(projectId, account.id).catch((err: unknown) => {
+        trackSync(account.id, null, () =>
+          syncAccountFolders(projectId, account.id),
+        ).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           logger.warn("email", `Background prefetch failed for account ${account.id}: ${msg}`);
         });
@@ -456,14 +510,18 @@ emailsRouter.post("/sync", async (req, res) => {
 
   try {
     if (folder) {
-      const result = await syncFolder(projectId, accountId, folder);
+      const result = await trackSync(accountId, folder, () =>
+        syncFolder(projectId, accountId, folder),
+      );
       if (result.error) {
         res.status(500).json({ error: { code: "SYNC_ERROR", message: result.error } });
         return;
       }
       res.json({ data: { folder, synced: result.synced, total: result.total } });
     } else {
-      const results = await syncAccountFolders(projectId, accountId);
+      const results = await trackSync(accountId, null, () =>
+        syncAccountFolders(projectId, accountId),
+      );
       const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
       const errors = results.filter((r) => r.error).map((r) => ({ folder: r.folder, error: r.error }));
       res.json({
@@ -479,6 +537,57 @@ emailsRouter.post("/sync", async (req, res) => {
   } catch (err: any) {
     logger.error("email", `Sync failed for account ${accountId}`, { error: err.message, name: err.name, method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "SYNC_ERROR", message: err.message } });
+  }
+});
+
+/** GET /sync-status?project=&account= — Return per-folder sync and cache status.
+ *  Includes overall sync state (idle/syncing/done) and per-folder counts. */
+emailsRouter.get("/sync-status", (req, res) => {
+  const accountId = req.query.account as string | undefined;
+  if (!accountId) {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "account query parameter is required" },
+    });
+    return;
+  }
+
+  try {
+    const tracker = getTracker(accountId);
+    const folders = emailCache.getAccountFoldersSyncStatus(accountId);
+
+    // Count currently syncing folders
+    const syncingFolders = folders.filter((f: { folder: string; cachedCount: number }) => tracker.folders.get(f.folder) === true);
+    const syncingCount = syncingFolders.length;
+
+    let overall: "idle" | "syncing" | "done";
+    if (syncingCount > 0) {
+      overall = "syncing";
+    } else if (folders.length > 0 && folders.some((f: { cachedCount: number }) => f.cachedCount > 0)) {
+      overall = "done";
+    } else {
+      overall = "idle";
+    }
+
+    const totalCached = folders.reduce((sum: number, f: { cachedCount: number }) => sum + f.cachedCount, 0);
+    const totalBodies = folders.reduce((sum: number, f: { bodyCount: number }) => sum + f.bodyCount, 0);
+
+    res.json({
+      data: {
+        overall,
+        account: accountId,
+        totalFolders: folders.length,
+        syncingFolders: syncingCount,
+        totalCached,
+        totalBodies,
+        folders: folders.map((f: { folder: string; cachedCount: number; bodyCount: number; lastSyncedAt: string | null }) => ({
+          ...f,
+          syncing: tracker.folders.get(f.folder) === true,
+        })),
+      },
+    });
+  } catch (err: any) {
+    logger.error("email", `Sync-status query failed for account ${accountId}`, { error: err.message });
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
   }
 });
 
@@ -544,7 +653,9 @@ emailsRouter.get("/", async (req, res) => {
       );
       // Populate cache in background (fire-and-forget)
       setImmediate(() => {
-        syncFolder(projectId, account.id, folder).catch((err: unknown) => {
+        trackSync(account.id, folder, () =>
+          syncFolder(projectId, account.id, folder),
+        ).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           logger.warn("email", `Background folder sync failed for account ${account.id}/${folder}: ${msg}`);
         });
@@ -570,7 +681,9 @@ emailsRouter.get("/", async (req, res) => {
     const staleThresholdMs = 5 * 60 * 1000; // 5 minutes
     if (Date.now() - lastSynced > staleThresholdMs) {
       setImmediate(() => {
-        syncFolder(projectId, account.id, folder).catch((err: unknown) => {
+        trackSync(account.id, folder, () =>
+          syncFolder(projectId, account.id, folder),
+        ).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           logger.warn("email", `Background stale-cache sync failed for account ${account.id}/${folder}: ${msg}`);
         });
@@ -588,7 +701,9 @@ emailsRouter.get("/", async (req, res) => {
   // ── 🔴 Cache miss — NEVER block on live IMAP. Return immediately. ──
   // Fire a background sync so the cache is populated for the next request.
   setImmediate(() => {
-    syncFolder(projectId, account.id, folder).catch((err: unknown) => {
+    trackSync(account.id, folder, () =>
+      syncFolder(projectId, account.id, folder),
+    ).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn("email", `Background cache-populate sync failed for account ${account.id}/${folder}: ${msg}`);
     });
@@ -944,20 +1059,34 @@ export async function prefetchAllAccounts(): Promise<void> {
     const projectId = resolveEmailProject();
     const accounts = listAccounts(projectId);
 
+    if (accounts.length === 0) {
+      logger.info("email", "Startup prefetch: no accounts configured, skipping");
+      return;
+    }
+
+    logger.info("email", `Startup prefetch: beginning sync for ${accounts.length} account(s)`);
+
     for (const acct of accounts) {
       try {
         // Connect the account (this also handles auth/token refresh)
         const creds = getCredentials(projectId, acct.id);
-        if (!creds) continue;
+        if (!creds) {
+          logger.warn("email", `Startup prefetch SKIP: no credentials for ${acct.email}`);
+          continue;
+        }
+
+        logger.info("email", `Startup prefetch: launching sync for ${acct.email}`);
 
         // Fire and forget — let the scheduler handle retries
-        syncAccountFolders(projectId, acct.id).catch((err: unknown) => {
+        trackSync(acct.id, null, () =>
+          syncAccountFolders(projectId, acct.id),
+        ).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           logger.warn("email", `Startup prefetch failed for account ${acct.id}: ${msg}`);
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        logger.warn("email", `Startup prefetch error for account ${acct.id}: ${msg}`);
+        logger.warn("email", `Startup prefetch error for account ${acct.email}: ${msg}`);
       }
     }
   } catch (err: unknown) {

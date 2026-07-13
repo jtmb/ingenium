@@ -126,6 +126,46 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 ---
 
+### 12. Test the User's Exact Action, Not an Adjacent Endpoint
+
+**Failure signature:** QA passes because the email list endpoint returns quickly, while the actual user action (clicking an email to read it) takes minutes and was never tested. The test validated the wrong thing — an adjacent signal that happens to be fast — while the real broken action went unchecked for multiple runs.
+
+**Rule:** Every QA test must reproduce the user's **exact sequence of actions** and **measure their timings**. If the requirement is "email opens in <2s," the test must click an email row and assert the body text is visible within 2s — not just check that the list endpoint returns cache hits. Test what the user does, not what the code exposes nearby.
+
+**Detection prompt:** "Am I testing the actual user action with a measured timing, or did I validate an adjacent endpoint/state that happens to be green?"
+
+---
+
+### 13. Verify Pipelines Are Processing CURRENT Input, Not Just That Old Output Exists
+
+**Failure signature:** QA confirms "observations: 10, traits: 9 — pipeline works!" — but these are all hours-old rows. The pipeline hasn't produced a single new observation in 3+ hours of active work because it's silently discarding all current input.
+
+**Rule:** When verifying a data pipeline, check the **latest timestamp** — it must be newer than the deploy time (or the start of the QA window). Old rows prove the pipeline worked ONCE, not that it works NOW. A running count that never changes means the pipeline is dead.
+
+**Detection prompt:** "Is the latest row timestamp fresher than the deploy time, or am I just counting old rows and calling it working?"
+
+---
+
+### 14. Swallowed Error Returns Are Invisible Failures — Always Log Before Returning an Error Sentinel
+
+**Failure signature:** `syncFolder` returns `{error: "some message"}` to the caller, but the error is **never logged** — the caller discards it, the prefetch is silently failing on every folder, and the logs show nothing. Weeks of debugging wasted because the failure was invisible.
+
+**Rule:** Whenever a function returns an error sentinel (a result object with an `error` field, or a null/undefined failure), it MUST log the error (at minimum `logger.warn`) BEFORE returning. This applies to background jobs, async callbacks, and fire-and-forget tasks where callers might swallow errors.
+
+**Detection prompt:** "If this function returns an error sentinel, does it log the error BEFORE returning? Will a silent failure be visible in the logs?"
+
+---
+
+### 15. A 'Pending/Empty' State With No Progress Indicator Is Indistinguishable from Broken
+
+**Failure signature:** All folders show `source:"pending" count:0` — the prefetch never populated anything. But the UI shows... nothing. No spinner, no "Syncing…", no progress — just a void that the user interprets as "this doesn't work." The feature is partially implemented but gives zero feedback.
+
+**Rule:** Any async operation that serves a "not ready yet" state MUST render a visible, animated progress indicator (spinner, progress bar, syncing count). Never show a blank page while background work is in flight. The user cannot tell "loading" from "broken."
+
+**Detection prompt:** "When this feature is cold/loading, does the UI show a visible progress indicator, or does it show a blank void?"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -141,6 +181,10 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 | **Async exit blindness** — process.exit() kills logs before they write | "Is my crash handler's primary log synchronous?" |
 | **Cache wishful thinking** — Assuming cache works without measuring warm load | "Did I time a warm-cache second load under threshold?" |
 | **Backend-blind triage** — Investigating the client while the API crash-loops | "Did I check backend restart count before blaming the client?" |
+| **Adjacent validation** — Testing a fast endpoint instead of the user's actual slow action | "Am I testing the actual user action with a measured timing?" |
+| **Stale-pipeline trust** — Counting old rows and calling the pipeline working | "Is the latest row timestamp fresher than the deploy time?" |
+| **Silent-error returns** — Returning error sentinels without logging them | "Does this function log the error BEFORE returning its sentinel?" |
+| **Blank-void loading** — Showing nothing while async work is in flight | "Does the cold/loading state show a visible progress indicator?" |
 
 ---
 

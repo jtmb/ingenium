@@ -51,7 +51,7 @@ function hashText(text: string): string {
 
 /** Message is too short or too long to contain a meaningful behavioral signal */
 function isReasonableLength(text: string): boolean {
-  return text.length >= 30 && text.length <= 1500;
+  return text.length >= 30 && text.length <= 6000;
 }
 
 /** Messages that start with obvious task/technical markers */
@@ -106,11 +106,13 @@ function setWatermark(projectId: string, ts: number): void {
 async function fetchMessages(
   watermark: number,
   limit: number,
+  projectName: string,
 ): Promise<CandidateMessage[]> {
   const port = process.env.INGENIUM_API_PORT || "4097";
   const url = new URL(`http://localhost:${port}/api/v1/opencode/messages`);
   url.searchParams.set("since", String(watermark));
   url.searchParams.set("limit", String(limit));
+  url.searchParams.set("project", projectName);
 
   const res = await fetch(url.toString());
   if (!res.ok) {
@@ -136,8 +138,9 @@ Return STRICT JSON:
 Return {"rules":[]} if nothing qualifies. Each content MUST be a complete sentence starting with 'User'. Do not echo the raw message.`;
 
 function buildBatchUserPrompt(messages: CandidateMessage[]): string {
+  const MAX_MSG_LEN = 4000;
   return messages
-    .map((m, i) => `[${i + 1}] ${m.text}`)
+    .map((m, i) => `[${i + 1}] ${m.text.length > MAX_MSG_LEN ? m.text.slice(0, MAX_MSG_LEN) + "…" : m.text}`)
     .join("\n\n");
 }
 
@@ -268,7 +271,7 @@ function parseExtractionResponse(raw: string): ExtractionRule[] {
 
 export async function runExtraction(
   projectId: string,
-  _projectName: string,
+  projectName: string,
   opts?: { limit?: number },
 ): Promise<ExtractionResult> {
   const limit = opts?.limit ?? 500;
@@ -297,7 +300,7 @@ export async function runExtraction(
     const watermark = getWatermark(projectId);
 
     // 3. Fetch messages
-    const messages = await fetchMessages(watermark, limit);
+    const messages = await fetchMessages(watermark, limit, projectName);
     scanned = messages.length;
 
     if (scanned === 0) {
