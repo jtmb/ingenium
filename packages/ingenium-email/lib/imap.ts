@@ -115,7 +115,7 @@ export async function listEmails(
   const matches = matchResult === false ? [] : matchResult;
   const total = matches.length;
 
-  // Paginate: newest UIDs first
+  // IMAP returns UIDs ascending (oldest first) — reverse for newest first
   const sorted = [...matches].reverse();
   const start = (page - 1) * limit;
   const pageUids = sorted.slice(start, start + limit);
