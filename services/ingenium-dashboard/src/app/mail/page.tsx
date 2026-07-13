@@ -64,6 +64,29 @@ export default function MailPage() {
       .catch(() => setFolders([]));
   }, [selectedAccount, refreshKey]);
 
+  // Prefetch all folder contents on account switch
+  useEffect(() => {
+    if (!selectedAccount) return;
+    const cacheKey = `${selectedAccount}:synced`;
+    if (emailCache.current.get(cacheKey)) return; // already synced
+
+    fetch(`${API_BASE}/emails/sync?project=${PROJECT}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account: selectedAccount, folders: ["INBOX", "Sent", "Drafts", "Archive", "Spam", "Trash"] }),
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.data) {
+          for (const [folder, result] of Object.entries(d.data) as [string, { emails: any[]; total: number }][]) {
+            emailCache.current.set(`${selectedAccount}:${folder}:1:`, { emails: result.emails, total: result.total });
+          }
+          emailCache.current.set(cacheKey, { emails: [], total: 0 }); // mark synced
+        }
+      })
+      .catch(() => {});
+  }, [selectedAccount]);
+
   // Fetch emails when account/folder/page/search changes
   useEffect(() => {
     if (!selectedAccount) return;
@@ -163,7 +186,7 @@ export default function MailPage() {
     } finally {
       setSending(false);
     }
-  }, []);
+  }, [selectedAccount]);
 
   const handleComposeSave = useCallback(async (data: any) => {
     try {
