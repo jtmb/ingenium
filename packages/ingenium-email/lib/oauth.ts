@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import type { OAuthToken } from "./types.js";
 import type { EmailProvider } from "./types.js";
 import { settings, getDb } from "ingenium-core";
+import { getGlobalProjectId } from "./accounts.js";
 
 // ── OAuth credential resolution ──────────────────────────────────────────
 
@@ -88,12 +89,13 @@ function oauthKey(accountId: string): string {
   return `${OAUTH_SETTINGS_PREFIX}${accountId}`;
 }
 
-/** Store encrypted OAuth tokens in settings. */
+/** Store encrypted OAuth tokens in settings. Always uses the global project. */
 export function storeTokens(
-  projectId: string,
+  _projectId: string,
   accountId: string,
   tokens: OAuthToken,
 ): void {
+  const projectId = getGlobalProjectId();
   const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
   let payload: OAuthToken;
   if (encKey) {
@@ -109,12 +111,13 @@ export function storeTokens(
   settings.setSetting(projectId, oauthKey(accountId), JSON.stringify(payload));
 }
 
-/** Retrieve and optionally refresh stored OAuth tokens. */
+/** Retrieve and optionally refresh stored OAuth tokens. Always uses the global project. */
 export async function getValidTokens(
-  projectId: string,
+  _projectId: string,
   accountId: string,
   provider: EmailProvider,
 ): Promise<OAuthToken | null> {
+  const projectId = getGlobalProjectId();
   const raw = settings.getSetting(projectId, oauthKey(accountId));
   if (!raw) return null;
 
@@ -203,19 +206,19 @@ async function getMsalApp(projectId?: string): Promise<import("@azure/msal-node"
 
 // ── Public API ────────────────────────────────────────────────────────────
 
-/** Generate an OAuth authorization URL for the given provider. */
+/** Generate an OAuth authorization URL for the given provider. Always uses the global project. */
 export async function getOAuthUrl(
   provider: EmailProvider,
-  projectId?: string,
+  _projectId?: string,
 ): Promise<{ url: string; state: string }> {
   const state = crypto.randomBytes(16).toString("hex");
-  const pid = projectId || "gh-llm-bootstrap";
+  const pid = getGlobalProjectId();
 
   // Store state for CSRF validation on callback
   settings.setSetting(pid, `oauth_state_${provider}`, state);
 
   if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient(projectId);
+    const { client: gClient } = await cachedGoogleClient(_projectId);
     const url = gClient.generateAuthUrl({
       access_type: "offline",
       prompt: "consent",
@@ -227,7 +230,7 @@ export async function getOAuthUrl(
   }
 
   if (provider === "outlook") {
-    const msalApp = await getMsalApp(projectId);
+    const msalApp = await getMsalApp(_projectId);
     const url = await msalApp.getAuthCodeUrl({
       scopes: [
         "https://outlook.office.com/IMAP.AccessAsUser.All",
@@ -244,16 +247,15 @@ export async function getOAuthUrl(
   return { url: "", state };
 }
 
-/** Exchange an authorization code for OAuth tokens. */
+/** Exchange an authorization code for OAuth tokens. Always uses the global project. */
 export async function exchangeCode(
   provider: EmailProvider,
   code: string,
   state: string,
   _redirectUri?: string,
-  projectId?: string,
+  _projectId?: string,
 ): Promise<OAuthToken> {
-  // Validate state parameter (CSRF protection)
-  const pid = projectId || "gh-llm-bootstrap";
+  const pid = getGlobalProjectId();
   const storedState = settings.getSetting(pid, `oauth_state_${provider}`);
   if (!storedState || storedState !== state) {
     throw new Error(`OAuth state mismatch for provider ${provider}. Possible CSRF attack.`);
@@ -266,7 +268,7 @@ export async function exchangeCode(
   const redirectUri = _redirectUri ?? getRedirectUri();
 
   if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient(projectId);
+    const { client: gClient } = await cachedGoogleClient(_projectId);
     const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
     // Extract email from id_token JWT
     let email: string | undefined;
@@ -289,7 +291,7 @@ export async function exchangeCode(
   }
 
   if (provider === "outlook") {
-    const msalApp = await getMsalApp(projectId);
+    const msalApp = await getMsalApp(_projectId);
     const result = await msalApp.acquireTokenByCode({
       code,
       scopes: [

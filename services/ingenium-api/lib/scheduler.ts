@@ -1,6 +1,6 @@
 import { settings, projects, logger, extraction, synthesis, jobs, checkpointAfterWrite } from "ingenium-core";
 import { executeJobRun } from "./job-runner.js";
-import { listAccounts, syncAccountFolders } from "ingenium-email";
+import { listAccounts, syncAccountFolders, getGlobalProjectId } from "ingenium-email";
 
 const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
 
@@ -89,7 +89,7 @@ async function triggerSynthesisForAllProjects(port: number) {
 // Mail sync scheduler — independent timer, reads "mail_sync_interval_ms"
 // ============================================================================
 
-const MAIL_SYNC_DEFAULT_MS = 0; // disabled by default
+const MAIL_SYNC_DEFAULT_MS = 300_000; // 5 minutes — enabled by default now that email is global
 
 function getMailSyncInterval(): number {
   try {
@@ -107,22 +107,15 @@ function getMailSyncInterval(): number {
   return MAIL_SYNC_DEFAULT_MS;
 }
 
+/** Sync mail for the global project only — accounts are always global. */
 async function triggerMailSyncForAllProjects(): Promise<void> {
-  const allProjects = projects.listProjects();
-  const activeProjects = allProjects.filter((p) => !p.archived_at);
-
-  for (const p of activeProjects) {
-    let accounts;
-    try {
-      accounts = listAccounts(p.id);
-    } catch (err: any) {
-      logger.warn("mail-sync", `Failed to list accounts for "${p.name}": ${err.message}`);
-      continue;
-    }
+  try {
+    const globalId = getGlobalProjectId();
+    const accounts = listAccounts(globalId);
 
     for (const acct of accounts) {
       try {
-        const results = await syncAccountFolders(p.id, acct.id);
+        const results = await syncAccountFolders(globalId, acct.id);
         const synced = results.reduce((sum, r) => sum + r.synced, 0);
         const errors = results.filter((r) => r.error);
         if (synced > 0 || errors.length > 0) {
@@ -132,6 +125,9 @@ async function triggerMailSyncForAllProjects(): Promise<void> {
         logger.warn("mail-sync", `Sync failed for "${acct.email}": ${err.message}`);
       }
     }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn("mail-sync", `Global project lookup failed: ${msg}`);
   }
 }
 
@@ -269,20 +265,27 @@ export function startScheduler(port: number) {
   // Startup health check — diagnose config issues before the first cycle runs
   logSynthesisHealth();
 
-  setTimeout(() => triggerSynthesisForAllProjects(port), 30000);
+  setTimeout(() => {
+    triggerSynthesisForAllProjects(port).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      const name = err instanceof Error ? err.name : "Unknown";
+      const stack = err instanceof Error ? err.stack : undefined;
+      logger.error("scheduler", `Initial synthesis cycle failed: ${msg}`, { error: msg, name, stack: stack?.split("\n").slice(0, 5).join("\n") });
+    });
+  }, 30000);
   setTimeout(() => scheduleNext(port), 30000);
 
   // Start the job cron scheduler on a separate 60s cycle
   logger.info("scheduler", "Job cron scheduler started (60s cycle)");
   setTimeout(scheduleJobTick, 10_000); // Start after a short initial delay
 
-  // Start mail sync scheduler (independent interval, disabled by default)
+  // Start mail sync scheduler (5 min default, now that email is global)
   const mailInterval = getMailSyncInterval();
   if (mailInterval > 0) {
     logger.info("mail-sync", `Mail sync scheduler started (${mailInterval / 1000}s cycle)`);
     setTimeout(scheduleMailSync, 15_000); // Start after a short initial delay
   } else {
-    logger.info("mail-sync", "Mail sync disabled (mail_sync_interval_ms = 0 or not configured)");
+    logger.info("mail-sync", "Mail sync disabled (mail_sync_interval_ms = 0)");
   }
 }
 

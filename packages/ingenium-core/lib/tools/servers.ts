@@ -35,6 +35,32 @@ export function updateServer(projectId: string, name: string, fields: { running?
   });
 }
 
+export function upsertServer(projectId: string, name: string, command: string, args?: string, env?: string, source?: string): Server {
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const existing = db.prepare("SELECT * FROM servers WHERE project_id = ? AND name = ?").get(projectId, name) as Server | undefined;
+
+  if (existing) {
+    execTransaction(() => {
+      db.prepare(
+        `UPDATE servers SET command = ?, args = ?, env = ?, source = ? WHERE project_id = ? AND name = ?`
+      ).run(command, args ?? null, env ?? null, source ?? "opencode", projectId, name);
+      checkpointAfterWrite();
+    });
+    return db.prepare("SELECT * FROM servers WHERE project_id = ? AND name = ?").get(projectId, name) as Server;
+  }
+
+  return execTransaction(() => {
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO servers (id, project_id, name, command, args, env, source, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, projectId, name, command, args ?? null, env ?? null, source ?? "opencode", now);
+    checkpointAfterWrite();
+    return db.prepare("SELECT * FROM servers WHERE id = ?").get(id) as Server;
+  });
+}
+
 export function removeServer(projectId: string, name: string): void {
   execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
