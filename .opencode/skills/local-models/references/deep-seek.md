@@ -166,6 +166,56 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 ---
 
+### 16. Ephemeral Guards for Expensive Operations
+
+**Failure signature:** Using in-memory sets or flags (e.g., `new Set()`, boolean variable) to gate expensive operations like full-account email syncs. After every API restart/deploy, the guard is reset to empty → the expensive operation fires again for ALL data → full resync storm on every deploy.
+
+**Rule:** Any guard preventing expensive operations that run on process startup MUST be derived from persistent/durable data (DB timestamps like `last_synced_at`, file-based markers, settings keys). Ask: "Does this guard survive a process restart?" If the answer is no, use a persistent source.
+
+**Detection prompt:** "Does this guard survive a process restart, or will it fire the expensive operation after every deploy?"
+
+---
+
+### 17. Fix Every Occurrence of a Pattern
+
+**Failure signature:** Applying a fix to one occurrence of a bug pattern but missing a sibling occurrence in the same function. Example: adding `Number()` coercion to uidvalidity comparison at line 59 of sync.ts but leaving the identical comparison at line 64 with strict `===` — causing the bug to persist undetected.
+
+**Rule:** After applying a targeted fix (Number() coercion, null guard, type cast), grep the same function/file for sibling occurrences of the SAME pattern. Fixing one instance while leaving another is self-defeating — it looks fixed but isn't.
+
+**Detection prompt:** "Did I grep for sibling occurrences of this exact pattern in the same function/file? Am I sure there isn't a second identical comparison that needs the same fix?"
+
+---
+
+### 18. Scope Invalidation to the Failure Domain
+
+**Failure signature:** `clearCache(accountId)` nuking the ENTIRE account's cache (all 12 folders, all bodies, all sync state) when ONE folder's UIDVALIDITY changes. The user clicks Starred → Gmail reports a UIDVALIDITY change for that virtual folder → entire INBOX cache wiped → visible full resync.
+
+**Rule:** Cache invalidation must be scoped to the smallest unit that actually changed. If one folder's UIDVALIDITY changes, clear only that folder. If one email's body is stale, update only that email. Broader clears create cascading user-visible failures.
+
+**Detection prompt:** "Does my invalidation touch more data than what actually changed? Does clearing X folder's data also wipe Y folder's cache?"
+
+---
+
+### 19. Recreate the User's Exact Environment Conditions
+
+**Failure signature:** QA validates "dark mode works" on a light OS with light theme — passes. But the user reports a dark flash on every page load. The user's actual conditions were: dark OS + light app theme. The flash only manifests under that specific combination, which the test never reproduced.
+
+**Rule:** When reproducing a user-reported issue (especially transient visual bugs like paint flashes), you MUST replicate their EXACT starting conditions — OS preference, localStorage state, cookie state, screen resolution, browser. Instrument at the symptom's actual channel: MutationObserver for class changes, PerformanceObserver for paint timing, request interception for network patterns. Screenshots and API-level tests won't catch it.
+
+**Detection prompt:** "Did I reproduce the user's exact starting conditions (OS preference, cookie state, localStorage)? Am I observing the symptom's actual channel (DOM mutations, paint events) or a proxy?"
+
+---
+
+### 20. Zero-Output Pipelines Must Log Why
+
+**Failure signature:** The extraction pipeline runs, finds candidates, calls the LLM... and produces 0 observations. The logs just say "completed: created=0" with zero diagnostic context. Is the model rejecting everything? Is the response unparseable? Is the reasoning model consuming all tokens? Impossible to tell because the raw LLM response was never logged.
+
+**Rule:** Any pipeline that can legitimately produce zero output MUST log the reason when it does. For LLM pipelines: log the raw response (truncated to 500 chars), model used, batch size. For data pipelines: log counts at each stage (scanned, filtered, deduped, processed). Zero output with no diagnostic context is indistinguishable from a bug.
+
+**Detection prompt:** "If this pipeline produces zero output, will the logs contain enough context to diagnose WHY? Can I distinguish 'genuinely nothing to process' from 'everything silently failed'?"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -185,6 +235,11 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 | **Stale-pipeline trust** — Counting old rows and calling the pipeline working | "Is the latest row timestamp fresher than the deploy time?" |
 | **Silent-error returns** — Returning error sentinels without logging them | "Does this function log the error BEFORE returning its sentinel?" |
 | **Blank-void loading** — Showing nothing while async work is in flight | "Does the cold/loading state show a visible progress indicator?" |
+| **Ephemeral guards** — In-memory state reset causing expensive operations after restart | "Does this guard survive a process restart?" |
+| **Sibling-omission** — Fixing one occurrence but missing another identical pattern | "Did I grep for sibling occurrences of this pattern?" |
+| **Scoped invalidation** — Clearing more data than what actually changed | "Does my invalidation touch more data than what changed?" |
+| **Exact-condition testing** — Testing in a different environment than the user's | "Did I reproduce the user's exact starting conditions?" |
+| **Silent-empty pipeline** — Producing zero output with no diagnostic context | "Will the logs show WHY this pipeline produced zero output?" |
 
 ---
 

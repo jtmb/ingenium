@@ -27,6 +27,7 @@ Thumbs.db
 
 # ── Playwright test artifacts ────────────────────────────
 playwright-report/
+test-results/
 tests/test-results/
 playwright/.cache/
 

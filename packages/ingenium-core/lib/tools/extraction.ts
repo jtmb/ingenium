@@ -33,6 +33,7 @@ interface ExtractionResult {
   candidates: number;
   created: number;
   skipped: number;
+  failedBatches: number;
   watermark: number;
   reason?: string; // set when extraction is skipped/fails with a clear reason
 }
@@ -132,6 +133,13 @@ const EXTRACTION_SYSTEM_PROMPT = `You extract DURABLE USER BEHAVIOR RULES from c
 
 REJECT: one-off task instructions, feature requests for the thing being built right now, code/file paths, questions, fragments, anything not generalizable. Each rule must describe a user behavior that will apply across future sessions — not a specific implementation task.
 
+EXAMPLES of VALID durable rules:
+- "User wants in-app modal dialogs instead of browser confirm()" (from correction about UI choices)
+- "User requires QA to reproduce exact reported user actions, not adjacent endpoints" (from frustration about tests)
+- "User prefers OneShot builds that are deployed and tested before delivery" (from workflow directive)
+
+KEY INSIGHT: corrections about HOW work is done (testing rigor, UI conventions, deployment workflow) ARE durable even when stated during a specific build task. Only reject instructions about WHAT to build (feature X, file Y, component Z) — the "what" is one-off but the "how" is durable.
+
 Return STRICT JSON:
 {"rules":[{"content":"User prefers ...","type":"preference|correction|workflow|terminology|pattern","importance":1-10}]}
 
@@ -147,7 +155,7 @@ function buildBatchUserPrompt(messages: CandidateMessage[]): string {
 async function callLLMForExtraction(
   messages: CandidateMessage[],
   config: { model: string; endpoint: string; apiKey?: string },
-): Promise<ExtractionRule[]> {
+): Promise<{ rules: ExtractionRule[]; failed: boolean }> {
   const userContent = buildBatchUserPrompt(messages);
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -175,7 +183,7 @@ async function callLLMForExtraction(
             { role: "user", content: userContent },
           ],
           temperature: 0.2,
-          max_tokens: 2048,
+          max_tokens: 4096, // Qwen is a reasoning model — reasoning_content can consume half the budget
           // LM Studio rejects "json_object" (requires "json_schema" or "text").
           // The system prompt already instructs strict JSON output, so skip response_format entirely.
           response_format: undefined,
@@ -188,27 +196,38 @@ async function callLLMForExtraction(
       if (!res.ok) {
         if (attempt === 0) continue;
         logger.warn("extraction", `LLM returned ${res.status}`, { status: res.status });
-        return [];
+        return { rules: [], failed: true };
       }
 
       const json = await res.json();
-      const rawContent = json.choices?.[0]?.message?.content || "{}";
+      const msg = json.choices?.[0]?.message;
+      // Reasoning models (Qwen) may put output in reasoning_content when content is empty
+      const rawContent = msg?.content || msg?.reasoning_content || "{}";
       const rules = parseExtractionResponse(rawContent);
-      return rules;
+      if (rules.length === 0) {
+        logger.info("extraction", "LLM returned 0 rules from batch", {
+          rawResponse: rawContent.slice(0, 500),
+          batchSize: messages.length,
+          model: config.model,
+        });
+      } else {
+        logger.info("extraction", `LLM extracted ${rules.length} rules from batch`, { batchSize: messages.length });
+      }
+      return { rules, failed: false };
     } catch (err: any) {
       clearTimeout(timeout);
       if (err.name === "AbortError") {
         logger.warn("extraction", "LLM batch call aborted (timeout or cancel) — returning empty results");
-        return [];
+        return { rules: [], failed: true };
       }
       if (attempt === 0) continue;
       logger.error("extraction", `LLM call failed: ${err?.message}`, { error: String(err?.message || err), name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
-      return [];
+      return { rules: [], failed: true };
     }
   }
 
   clearTimeout(timeout);
-  return [];
+  return { rules: [], failed: true };
 }
 
 /** Parse the LLM response JSON with defensive handling. */
@@ -286,14 +305,14 @@ export async function runExtraction(
     if (!isLLMSynthesisConfigured(projectId)) {
       const reason = "No synthesis LLM configured — check Settings page (synthesis_model) or set SYNTHESIS_MODEL env var. Self-learning disabled.";
       logger.warn("extraction", reason, { projectId });
-      return { scanned: 0, candidates: 0, created: 0, skipped: 0, watermark: 0, reason };
+      return { scanned: 0, candidates: 0, created: 0, skipped: 0, failedBatches: 0, watermark: 0, reason };
     }
 
     const llmConfig = getFullLLMSynthesisConfig(projectId);
     if (!llmConfig || !llmConfig.endpoint) {
       const reason = "Synthesis LLM endpoint not configured — set synthesis_endpoint in Settings or SYNTHESIS_ENDPOINT env var";
       logger.warn("extraction", reason, { projectId });
-      return { scanned: 0, candidates: 0, created: 0, skipped: 0, watermark: 0, reason };
+      return { scanned: 0, candidates: 0, created: 0, skipped: 0, failedBatches: 0, watermark: 0, reason };
     }
 
     // 2. Watermark
@@ -305,7 +324,7 @@ export async function runExtraction(
 
     if (scanned === 0) {
       logger.info("extraction", `No messages since watermark ${watermark}`);
-      return { scanned: 0, candidates: 0, created: 0, skipped: 0, watermark };
+      return { scanned: 0, candidates: 0, created: 0, skipped: 0, failedBatches: 0, watermark };
     }
 
     // 4. Pre-filter candidates
@@ -318,13 +337,13 @@ export async function runExtraction(
 
       if (!isCandidate(m.text)) return false;
 
-      const hash = hashText(m.text.trim().slice(0, 200));
+      const hash = hashText(m.text.trim());
       if (seenHashes.has(hash)) return false;
 
       seenHashes.add(hash);
       newHashesAdded = true;
       return true;
-    }).map(m => ({ ...m, hash: hashText(m.text.trim().slice(0, 200)) }));
+    }).map(m => ({ ...m, hash: hashText(m.text.trim()) }));
 
     candidates = rawCandidates.length;
 
@@ -336,20 +355,26 @@ export async function runExtraction(
       if (newHashesAdded) {
         saveSeenHashes(projectId, seenHashes);
       }
-      return { scanned, candidates: 0, created: 0, skipped: 0, watermark: highestTimestamp || watermark };
+      return { scanned, candidates: 0, created: 0, skipped: 0, failedBatches: 0, watermark: highestTimestamp || watermark };
     }
 
     // 5. Batch LLM extraction
     const BATCH_SIZE = 15;
+    let failedBatches = 0;
 
     for (let i = 0; i < rawCandidates.length; i += BATCH_SIZE) {
       logger.info("extraction", `Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(rawCandidates.length / BATCH_SIZE)} (${rawCandidates.length} candidates total)`);
       const batch = rawCandidates.slice(i, i + BATCH_SIZE);
-      const rules = await callLLMForExtraction(batch, {
+      const { rules, failed } = await callLLMForExtraction(batch, {
         model: llmConfig.model,
         endpoint: llmConfig.endpoint,
         apiKey: llmConfig.apiKey,
       });
+
+      if (failed) {
+        failedBatches++;
+        continue; // do NOT process rules from failed batches
+      }
 
       for (const rule of rules) {
         // Map rule type to valid observation_type
@@ -380,13 +405,19 @@ export async function runExtraction(
       // (rules filtered out by parseExtractionResponse are implicit skips)
     }
 
-    // 6. Advance watermark
-    if (highestTimestamp > watermark) {
+    // 6. Advance watermark — ONLY if no batches failed
+    if (failedBatches === 0 && highestTimestamp > watermark) {
       setWatermark(projectId, highestTimestamp);
+    } else if (failedBatches > 0) {
+      logger.warn("extraction", `Skipping watermark advance: ${failedBatches}/${Math.ceil(rawCandidates.length / BATCH_SIZE)} batches failed`);
     }
 
-    // 7. Persist seen hashes
-    saveSeenHashes(projectId, seenHashes);
+    // 7. Persist seen hashes — ONLY if no batches failed
+    if (failedBatches === 0 && newHashesAdded) {
+      saveSeenHashes(projectId, seenHashes);
+    } else if (failedBatches > 0) {
+      logger.warn("extraction", "Skipping seen-hash save due to batch failures");
+    }
 
     // 8. Log pipeline event
     try {
@@ -401,6 +432,7 @@ export async function runExtraction(
           candidates,
           created,
           skipped,
+          failedBatches,
           model: llmConfig.model,
         },
       );
@@ -408,7 +440,7 @@ export async function runExtraction(
       logger.error("extraction", `Failed to log pipeline event: ${err?.message}`, { error: String(err?.message || err), name: err?.name || "Error", stack: err?.stack?.split("\n").slice(0, 5).join("\n") });
     }
 
-    return { scanned, candidates, created, skipped, watermark: highestTimestamp || watermark };
+    return { scanned, candidates, created, skipped, failedBatches, watermark: highestTimestamp || watermark };
   } catch (err: any) {
     // Log failure but don't throw — scheduler must continue
     logger.error("extraction", `Extraction run failed: ${err?.message}`, { error: String(err?.message || err), name: err?.name || "Error", stack: err.stack });
@@ -420,13 +452,13 @@ export async function runExtraction(
         "system",
         `Extraction failed: ${String(err?.message || err)}`,
         undefined,
-        { scanned, candidates, created, skipped, error: String(err?.message || err) },
+        { scanned, candidates, created, skipped, failedBatches: 0, error: String(err?.message || err) },
       );
     } catch {
       // Non-fatal
     }
 
-    return { scanned, candidates, created, skipped, watermark: highestTimestamp || getWatermark(projectId) };
+    return { scanned, candidates, created, skipped, failedBatches: 0, watermark: highestTimestamp || getWatermark(projectId) };
   }
 }
 

@@ -411,8 +411,10 @@ export default function MailPage() {
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
 
-      {/* Sync progress banner */}
+      {/* Sync progress banner — only for selected folder or cold cache */}
       {syncStatus && syncStatus.overall === "syncing" && (
+        syncStatus.folders?.some((f: any) => f.folder === selectedFolder && f.syncing) || syncStatus.totalCached === 0
+      ) && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
           <svg className="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />

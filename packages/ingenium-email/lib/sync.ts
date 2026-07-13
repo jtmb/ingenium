@@ -57,11 +57,11 @@ export async function syncFolder(
     const state = emailCache.getSyncState(accountId, folder);
 
     if (state.uidvalidity > 0 && uidValidity > 0 && Number(state.uidvalidity) !== uidValidity) {
-      logger.warn("email", `UIDVALIDITY changed for ${account.email}/${folder}: was ${state.uidvalidity}, now ${uidValidity} — clearing cache`);
-      emailCache.clearCache(accountId);
+      logger.warn("email", `UIDVALIDITY changed for ${account.email}/${folder}: was ${state.uidvalidity}, now ${uidValidity} — clearing folder cache`);
+      emailCache.clearFolderCache(accountId, folder);
     }
 
-    const lastUid = state.uidvalidity === uidValidity ? state.last_uid : 0;
+    const lastUid = Number(state.uidvalidity) === uidValidity ? state.last_uid : 0;
     const total = (client.mailbox as { exists: number }).exists;
 
     // ── Resolve UIDs to sync ──────────────────────────────────────────
@@ -221,6 +221,11 @@ export async function syncFolder(
 export async function syncAccountFolders(
   _projectId: string,
   accountId: string,
+  opts?: {
+    skipFresh?: boolean;
+    freshMs?: number;
+    onFolder?: (folder: string, active: boolean) => void;
+  },
 ): Promise<SyncResult[]> {
   const projectId = getGlobalProjectId();
   const account = getAccount(projectId, accountId);
@@ -245,7 +250,20 @@ export async function syncAccountFolders(
 
     const results: SyncResult[] = [];
     for (const folder of folders) {
+      if (opts?.skipFresh) {
+        const st = emailCache.getSyncState(accountId, folder.path);
+        const freshMs = opts.freshMs ?? 3_600_000; // 1 hour default
+        if (st.last_synced_at) {
+          const msSince = Date.now() - new Date(st.last_synced_at).getTime();
+          if (msSince < freshMs && st.last_uid > 0) {
+            logger.info("email", `skip fresh: ${account.email}/${folder.path} (synced ${Math.round(msSince / 1000)}s ago)`);
+            continue;
+          }
+        }
+      }
+      opts?.onFolder?.(folder.path, true);
       const result = await syncFolder(projectId, accountId, folder.path);
+      opts?.onFolder?.(folder.path, false);
       results.push(result);
     }
 
