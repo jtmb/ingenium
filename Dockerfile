@@ -66,7 +66,7 @@ COPY --chown=appuser:appuser .opencode/skills ./.opencode/skills
 RUN chmod +x /app/entrypoint.sh
 
 # Create shared config and data directories with proper ownership
-RUN mkdir -p /app/config /app/.ingenium/logs /app/.opencode/skills && chown -R appuser:appuser /app/config /app/.ingenium /app/.opencode /app/.opencode/skills
+RUN mkdir -p /app/config /app/.ingenium/logs /app/.opencode/skills /workspace && chown -R appuser:appuser /app/config /app/.ingenium /app/.opencode /app/.opencode/skills /workspace
 # Pre-create appuser home for OpenCode config persistence
 RUN mkdir -p /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log && chown -R appuser:appuser /home/appuser
 # Pre-create both the container default and the fallback opencode.json
