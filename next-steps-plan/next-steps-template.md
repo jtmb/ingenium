@@ -14,31 +14,30 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 
 ### THE REQUESTS:
 
-1. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future. The mail implementation has many bugs. The emails contents themselves do not load on some emails and then do a while later  there might be some kind of background process or sync the user is not aware of, either way its bad practice. All the user sees is emails not loading. Also when i try to open attachments i get: {"error":{"code":"ATTACHMENT_ERROR","message":"Gmail API GET /users/me/messages/66616/attachments/0 returned 400 Bad Request — {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Invalid attachment token\",\n    \"errors\": [\n      {\n        \"message\": \"Invalid attachment token\",\n        \"domain\": \"global\",\n        \"reason\": \"invalidArgument\"\n      }\n    ],\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n"}}
+1. Please move settings button to the very right of the bav bar, remove the project selector from nav bar, move it into pages where it applies. Also remove the dark mode/light mode toggle from top nav it's already in settings pannel.
 
-2. please redisign /settings to look like the opencode web s ettings pannel. Please see `/home/brajam/repos/gh-llm-bootstrap/tests/vision/image.png`
+2. Deepseek does not need to afk watch the docker container for 5 minutes that adds no value but waste time.
 
-I would like a settings pannel like that with categorie tabs. Also the setttings screen should be a full screen overlay. 
-Each ui endpoint should have a settings tab:
-Projects
-Skills
-Tasks
-Jobs
-Plugins
-Mail
-Agents
-MCP
-Config
-Observations
-Personality
-Pipeline
-Logs
+3. Dark mode has a lot of incositencies/ Lack of visible card hover states. Please use screenshots to validate each page in dark mode. I want consitency across the app. Lightmode is fine, it's dark mode that is lacking. Especially the pill button colours they are not right for dark mode at all. The settings pannel looks fine. Try to use the theming from there. 
 
-When you are in a particular ui page (like projects) for example, if the user opens settings while at /projects, it will open the settings tab for projects automatically.
+4. /tasks the "add" task button does not work. Please ensure that /tasks is a fully functional kanban module.
 
+5. /mail refresh button does nothing. My emails are there now but im not getting new ones. Also add a visual spinning animation to the current refresh icon when it's doing the fetch
+
+6. /mail the attachments don't download. It grabs some random file with characters instead of the document :
+
+(example email from starred ibox: James medical note Jun 30 2026)
+
+ANGjdJ_Jt0bbNXZHVa4NBe1d3kq0q71tioY4USkm1F0gdEs0EAp4RAKZPXDX-WhKYRCUI6QGihPXKRUND5gm8PXblBBibYgJ0Mk54dSk2XeAjG07bxGIx3HnfHV8qnUxJqBI8rNF6ILlCWaUkOp1GD1RSivB9IDjfSb2tN6lAHEb29JM1UbKa9kiPhZKasg63VVhMZk2_iJCQVJ9WuZNk3KnzU
 
 **Documentation references bellow:**
 
+7. Getting an error on response suggestions for email in http://localhost:3000/logs:
+
+19:24:28	Email	
+ERROR	Suggest response failed for account b5867b1d-84b5-473f-9e97-5f7a8d6e1fe8
+19:24:28	Email	
+ERROR	Suggest response failed for account b5867b1d-84b5-473f-9e97-5f7a8d6e1fe8
 ---
 
 ### Documentation References
