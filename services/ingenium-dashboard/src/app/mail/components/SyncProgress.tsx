@@ -92,9 +92,11 @@ export default function SyncProgress({
   syncingFolders,
   totalCached,
 }: SyncProgressProps) {
-  const complete = folders.filter((f) => f.cachedCount > 0).length;
-  const total = folders.length;
-  const pct = total > 0 ? Math.round((complete / total) * 100) : 0;
+  const activeFolders = folders.filter((f) => f.state !== "error");
+  const complete = activeFolders.filter((f) => f.cachedCount > 0).length;
+  const total = activeFolders.length;
+  const pct = total > 0 ? Math.round((complete / total) * 100) : 100;
+  const errorFolders = folders.filter((f) => f.state === "error");
 
   return (
     <div className="max-w-2xl mx-auto py-12 px-4">
