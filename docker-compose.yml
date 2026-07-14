@@ -22,7 +22,7 @@ services:
       - opencode-config:/home/appuser/.config
       - opencode-data:/home/appuser/.local
       - ./opencode.json:/app/opencode.json:ro
-      - ${HOME:-~}/repos:/workspace
+      - ${HOME:-~}/repos/opencodeweb_workspace:/workspace
       - ${HOME:-~}/.local/share/opencode:/var/opencode:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4097/api/v1/health"]

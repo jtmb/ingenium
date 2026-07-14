@@ -28,8 +28,11 @@ import * as agentTools from "../lib/tools/agents.js";
 import { observationStore, observationSearch, observationList, observationStats, } from "../lib/tools/observations.js";
 import { personalityProfile, personalityTraits, } from "../lib/tools/personality.js";
 import { synthesisRun, synthesisStatus, synthesisCrossProject, } from "../lib/tools/synthesis.js";
+import { extractionRun } from "../lib/tools/extraction.js";
 import * as emailTools from "../lib/tools/emails.js";
 import * as configTools from "../lib/tools/configs.js";
+import * as logTools from "../lib/tools/logs.js";
+import * as jobTools from "../lib/tools/jobs.js";
 // ── Tool State Check Wrapper ──────────────────────────────
 const API_CLIENT = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
 async function checkToolEnabled(toolName, project) {
@@ -92,6 +95,10 @@ server.registerTool("ingenium_skill_delete", { description: "Delete a skill by n
 server.registerTool("ingenium_skill_enable", { description: "Enable a skill and sync to disk.", inputSchema: { project: projectParam, name: z.string() } }, wrapHandler("ingenium_skill_enable", async ({ project, name }) => skillTools.skillEnable(project, name)));
 server.registerTool("ingenium_skill_disable", { description: "Disable a skill and remove from disk.", inputSchema: { project: projectParam, name: z.string() } }, wrapHandler("ingenium_skill_disable", async ({ project, name }) => skillTools.skillDisable(project, name)));
 server.registerTool("ingenium_skill_sync", { description: "Sync a skill from its .md file on disk to the DB — edits made directly to the file are persisted.", inputSchema: { project: projectParam, name: z.string() } }, wrapHandler("ingenium_skill_sync", async ({ project, name }) => skillTools.skillSync(project, name)));
+server.registerTool("ingenium_skill_consolidate", {
+    description: "Trigger LLM-driven skill audit — merges redundant skills to maintain ≤20 total. Analyzes all enabled skills and proposes merges/deletes for overlapping topics.",
+    inputSchema: { project: projectParam },
+}, wrapHandler("ingenium_skill_consolidate", async ({ project }) => skillTools.skillConsolidate(project)));
 // ── Observations ──────────────────────────────────────────
 server.registerTool("ingenium_observe", {
     description: "Store an observation about the user's behavior, preferences, or interaction pattern. The agent uses this naturally during its workflow — no explicit self-reporting needed. Types: correction, preference, pattern, insight, feedback, behavior, terminology, workflow, error, goal.",
@@ -138,6 +145,11 @@ server.registerTool("ingenium_synthesis_cross_project", {
     description: "Trigger cross-project synthesis — evaluates patterns across all projects and promotes shared patterns to the global-default project.",
     inputSchema: { project: projectParam },
 }, wrapHandler("ingenium_synthesis_cross_project", async ({ project }) => synthesisCrossProject(project)));
+// ── Extraction ──────────────────────────────────────────
+server.registerTool("ingenium_extraction_run", {
+    description: "Trigger LLM-based observation extraction — scans OpenCode messages since last watermark, pre-filters candidates via cheap regex, then uses the synthesis LLM to extract durable user behavior rules.",
+    inputSchema: { project: projectParam },
+}, wrapHandler("ingenium_extraction_run", async ({ project }) => extractionRun(project)));
 // ── Tasks ───────────────────────────────────────────────
 server.registerTool("ingenium_task_create", {
     description: "Create a new task with optional description and assignee.",
@@ -158,6 +170,72 @@ server.registerTool("ingenium_task_move", {
 }, wrapHandler("ingenium_task_move", async ({ project, task_id, column_id }) => taskTools.taskMove(project, task_id, column_id)));
 server.registerTool("ingenium_task_complete", { description: "Mark a task as completed.", inputSchema: { project: projectParam, task_id: z.string() } }, wrapHandler("ingenium_task_complete", async ({ project, task_id }) => taskTools.taskComplete(project, task_id)));
 server.registerTool("ingenium_task_next", { description: "Get the highest-priority next task to work on.", inputSchema: { project: projectParam } }, wrapHandler("ingenium_task_next", async ({ project }) => taskTools.taskNext(project)));
+server.registerTool("ingenium_task_update", {
+    description: "Update task fields (title, description, assigned_to, priority, etc.).",
+    inputSchema: {
+        project: projectParam,
+        task_id: z.string(),
+        fields: z.record(z.unknown()),
+    },
+}, wrapHandler("ingenium_task_update", async ({ project, task_id, fields }) => taskTools.taskUpdate(project, task_id, fields)));
+server.registerTool("ingenium_task_delete", { description: "Delete a task by ID.", inputSchema: { project: projectParam, task_id: z.string() } }, wrapHandler("ingenium_task_delete", async ({ project, task_id }) => taskTools.taskDelete(project, task_id)));
+server.registerTool("ingenium_task_search", {
+    description: "Full-text search across tasks.",
+    inputSchema: { project: projectParam, query: z.string(), limit: z.number().optional() },
+}, wrapHandler("ingenium_task_search", async ({ project, query, limit }) => taskTools.taskSearch(project, query, limit)));
+server.registerTool("ingenium_task_comment", {
+    description: "Add a comment to a task, optionally threaded under a parent comment.",
+    inputSchema: {
+        project: projectParam,
+        task_id: z.string(),
+        author: z.string(),
+        body: z.string(),
+        parent_comment_id: z.string().optional(),
+    },
+}, wrapHandler("ingenium_task_comment", async ({ project, task_id, author, body, parent_comment_id }) => taskTools.taskComment(project, task_id, author, body, parent_comment_id)));
+server.registerTool("ingenium_task_activity", {
+    description: "Get activity feed for a task.",
+    inputSchema: { project: projectParam, task_id: z.string(), limit: z.number().optional() },
+}, wrapHandler("ingenium_task_activity", async ({ project, task_id, limit }) => taskTools.taskActivity(project, task_id, limit)));
+server.registerTool("ingenium_task_link", {
+    description: "Link two tasks together (blocks, relates_to, duplicates).",
+    inputSchema: {
+        project: projectParam,
+        task_id: z.string(),
+        linked_task_id: z.string(),
+        link_type: z.string(),
+    },
+}, wrapHandler("ingenium_task_link", async ({ project, task_id, linked_task_id, link_type }) => taskTools.taskLink(project, task_id, linked_task_id, link_type)));
+server.registerTool("ingenium_task_board_config_get", {
+    description: "Get board configuration (columns and custom field definitions).",
+    inputSchema: { project: projectParam },
+}, wrapHandler("ingenium_task_board_config_get", async ({ project }) => taskTools.taskBoardConfigGet(project)));
+server.registerTool("ingenium_task_board_config_set", {
+    description: "Set board configuration (columns and/or custom field definitions).",
+    inputSchema: {
+        project: projectParam,
+        columns: z.array(z.unknown()).optional(),
+        custom_field_defs: z.array(z.unknown()).optional(),
+    },
+}, wrapHandler("ingenium_task_board_config_set", async ({ project, columns, custom_field_defs }) => taskTools.taskBoardConfigSet(project, columns, custom_field_defs)));
+server.registerTool("ingenium_task_subtask_create", {
+    description: "Create a subtask under an existing parent task.",
+    inputSchema: {
+        project: projectParam,
+        parent_id: z.string(),
+        title: z.string(),
+        description: z.string().optional(),
+        assigned_to: z.string().optional(),
+    },
+}, wrapHandler("ingenium_task_subtask_create", async ({ project, parent_id, title, description, assigned_to }) => taskTools.taskSubtaskCreate(project, parent_id, title, description, assigned_to)));
+server.registerTool("ingenium_task_notifications", {
+    description: "List task notifications for a recipient, optionally filtered by unread status.",
+    inputSchema: {
+        project: projectParam,
+        recipient: z.string(),
+        unread: z.boolean().optional(),
+    },
+}, wrapHandler("ingenium_task_notifications", async ({ project, recipient, unread }) => taskTools.taskNotifications(project, recipient, unread)));
 // ── Plans ─────────────────────────────────────────────
 server.registerTool("ingenium_plan_save", {
     description: "Save a context entry with optional tags and priority.",
@@ -244,6 +322,21 @@ server.registerTool("ingenium_agent_delete", { description: "Delete an agent by 
 server.registerTool("ingenium_agent_enable", { description: "Enable an agent and write its .md file to disk.", inputSchema: { project: projectParam, name: z.string() } }, wrapHandler("ingenium_agent_enable", async ({ project, name }) => agentTools.agentEnable(project, name)));
 server.registerTool("ingenium_agent_disable", { description: "Disable an agent and remove its .md file from disk.", inputSchema: { project: projectParam, name: z.string() } }, wrapHandler("ingenium_agent_disable", async ({ project, name }) => agentTools.agentDisable(project, name)));
 server.registerTool("ingenium_agent_sync", { description: "Sync an agent from its .md file on disk to the DB — edits made directly to the file are persisted.", inputSchema: { project: projectParam, name: z.string() } }, wrapHandler("ingenium_agent_sync", async ({ project, name }) => agentTools.agentSync(project, name)));
+// ── Logs ──────────────────────────────────────────────
+server.registerTool("ingenium_logs_list", {
+    description: "List recent system log entries from the unified logger. Filter by source, level, or time.",
+    inputSchema: {
+        project: projectParam,
+        source: z.string().optional(),
+        level: z.string().optional(),
+        since: z.string().optional(),
+        limit: z.number().optional(),
+    },
+}, wrapHandler("ingenium_logs_list", async ({ project, source, level, since, limit }) => logTools.logsList(project, source, level, since, limit)));
+server.registerTool("ingenium_logs_sources", {
+    description: "List active log sources (e.g., scheduler, api, auto-observer).",
+    inputSchema: { project: projectParam },
+}, wrapHandler("ingenium_logs_sources", async ({ project }) => logTools.logsSources(project)));
 // ── Email ──────────────────────────────────────────────
 server.registerTool("ingenium_email_list", {
     description: "List emails in a folder. Use this to check inbox, sent items, or any folder.",
@@ -304,6 +397,37 @@ server.registerTool("ingenium_email_watch_status", {
     description: "Check if the IMAP IDLE watcher is running for an account.",
     inputSchema: { project: projectParam, account: z.string() },
 }, wrapHandler("ingenium_email_watch_status", async ({ project, account }) => emailTools.emailWatchStatus(project, account)));
+// ── Jobs ──────────────────────────────────────────────
+server.registerTool("ingenium_job_list", { description: "List all jobs for a project.", inputSchema: { project: projectParam } }, wrapHandler("ingenium_job_list", async ({ project }) => jobTools.jobList(project)));
+server.registerTool("ingenium_job_create", {
+    description: "Create a new job with optional schedule, trigger event, and timeout.",
+    inputSchema: {
+        project: projectParam,
+        name: z.string(),
+        description: z.string().optional(),
+        agent: z.string(),
+        prompt_template: z.string(),
+        schedule_cron: z.string().optional(),
+        trigger_event: z.string().optional(),
+        timeout_minutes: z.number().optional(),
+    },
+}, wrapHandler("ingenium_job_create", async ({ project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes }) => jobTools.jobCreate(project, name, description, agent, prompt_template, schedule_cron, trigger_event, timeout_minutes)));
+server.registerTool("ingenium_job_update", {
+    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes).",
+    inputSchema: {
+        project: projectParam,
+        job_id: z.string(),
+        fields: z.record(z.unknown()),
+    },
+}, wrapHandler("ingenium_job_update", async ({ project, job_id, fields }) => jobTools.jobUpdate(project, job_id, fields)));
+server.registerTool("ingenium_job_delete", { description: "Delete a job by ID.", inputSchema: { project: projectParam, job_id: z.string() } }, wrapHandler("ingenium_job_delete", async ({ project, job_id }) => jobTools.jobDelete(project, job_id)));
+server.registerTool("ingenium_job_run", { description: "Manually trigger a job run.", inputSchema: { project: projectParam, job_id: z.string() } }, wrapHandler("ingenium_job_run", async ({ project, job_id }) => jobTools.jobRun(project, job_id)));
+server.registerTool("ingenium_job_runs", { description: "List all runs for a job.", inputSchema: { project: projectParam, job_id: z.string() } }, wrapHandler("ingenium_job_runs", async ({ project, job_id }) => jobTools.jobRuns(project, job_id)));
+server.registerTool("ingenium_job_run_logs", {
+    description: "Get log entries for a specific run, optionally after a sequence number for tail polling.",
+    inputSchema: { project: projectParam, run_id: z.string(), after: z.number().optional() },
+}, wrapHandler("ingenium_job_run_logs", async ({ project, run_id, after }) => jobTools.jobRunLogs(project, run_id, after)));
+server.registerTool("ingenium_job_run_cancel", { description: "Cancel a running job.", inputSchema: { project: projectParam, run_id: z.string() } }, wrapHandler("ingenium_job_run_cancel", async ({ project, run_id }) => jobTools.jobRunCancel(project, run_id)));
 // ── Start ───────────────────────────────────────────────
 async function main() {
     const transport = new StdioServerTransport();

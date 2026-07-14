@@ -17,7 +17,8 @@ import { observationsRouter } from "../lib/routes/observations.js";
 import { personalityRouter } from "../lib/routes/personality.js";
 import { synthesisRouter } from "../lib/routes/synthesis.js";
 import { pipelineRouter } from "../lib/routes/pipeline.js";
-import { emailsRouter, migrateEmailAccountsToGlobal, prefetchAllAccounts } from "../lib/routes/emails.js";
+import { emailsRouter, migrateEmailAccountsToGlobal } from "../lib/routes/emails.js";
+import { startEngine, getGlobalProjectId } from "ingenium-email";
 import { commandsRouter } from "../lib/routes/commands.js";
 import { configRouter } from "../lib/routes/configs.js";
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
@@ -94,16 +95,15 @@ app.listen(config.port, () => {
   logger.info("api", `ingenium-api listening on port ${config.port}`);
   startScheduler(config.port);
 
-  // 🔴 Email: migrate any project-scoped accounts to global, then prefetch
+  // 🔴 Email: migrate any project-scoped accounts to global, start sync engine
   setTimeout(() => {
     migrateEmailAccountsToGlobal().then((migrated) => {
       if (migrated > 0) {
         logger.info("api", `Migrated ${migrated} email settings to global project`);
       }
-      // Start prefetch after migration completes
-      prefetchAllAccounts().then(() => {
-        logger.info("api", "Email prefetch job dispatched for all connected accounts");
-      });
+      // Start the sync engine instead of prefetch (engine owns all IMAP I/O now)
+      startEngine(getGlobalProjectId());
+      logger.info("api", "Email sync engine started for all connected accounts");
     });
   }, 10_000); // Delay to ensure DB is fully initialized
 

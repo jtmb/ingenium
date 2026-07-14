@@ -27,6 +27,24 @@ import { extractionRouter } from "../lib/routes/extraction.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { servicesRouter } from "../lib/routes/services.js";
 import { startScheduler } from "../lib/scheduler.js";
+// ── Defense-in-depth crash handlers ──────────────────────────────────────────
+// 🔴 Log SYNCHRONOUSLY with console.error — async logs die before process.exit(1)
+//    writes, hiding every crash from supervisord. See deep-seek Lessons 9 & 24.
+//    unhandledRejection → log only (transport-layer errors should not crash)
+//    uncaughtException   → log + exit(1) (undefined state, supervisord restarts)
+process.on("uncaughtException", (err) => {
+    console.error("[api] FATAL uncaughtException — exiting:", err.message);
+    console.error(err.stack || "(no stack)");
+    process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    const stack = reason instanceof Error ? reason.stack : "(no stack)";
+    console.error("[api] FATAL unhandledRejection:", msg);
+    console.error(stack);
+    // Do NOT call process.exit for unhandledRejection — just log.
+    // The process may recover; exiting turns transport-layer issues into outages.
+});
 const app = express();
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigin }));
@@ -88,31 +106,6 @@ app.listen(config.port, () => {
     catch (e) {
         logger.error("api", `DB startup check failed: ${e.message}`, { stack: e.stack });
     }
-});
-// Crash handlers — log unhandled errors before process exits.
-// 🔴 Log SYNCHRONOUSLY with console.error first — the async import() race with
-//    process.exit(1) hides every crash from the structured logger. Consolers
-//    write to stderr synchronously so supervisord always captures them.
-process.on("uncaughtException", (err) => {
-    console.error("[api] FATAL uncaught exception:", err.message, "\n", err.stack);
-    // Best-effort async log to structured logger — may or may not complete
-    import("ingenium-core").then(({ logger: crashLogger }) => {
-        crashLogger.error("api", "Uncaught exception — process will exit", { error: err.message, stack: err.stack });
-    }).catch(() => {
-        // Already logged to console.error above
-    });
-    process.exit(1);
-});
-process.on("unhandledRejection", (reason) => {
-    const message = reason instanceof Error ? reason.message : String(reason);
-    const stack = reason instanceof Error ? reason.stack : undefined;
-    console.error("[api] FATAL unhandled rejection:", stack ?? message);
-    // Best-effort async log — do NOT exit; Node warns but does not crash by default
-    import("ingenium-core").then(({ logger: crashLogger }) => {
-        crashLogger.error("api", "Unhandled rejection", { error: message, stack });
-    }).catch(() => {
-        // Already logged to console.error above
-    });
 });
 process.on("SIGTERM", () => {
     import("ingenium-core").then(({ logger: crashLogger }) => {

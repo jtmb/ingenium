@@ -8,6 +8,9 @@ import SmartSuggest from "./SmartSuggest";
 export default function EmailReader({
   email,
   loading,
+  downloading,
+  downloadError,
+  onRetry,
   accountId,
   onReply,
   onForward,
@@ -16,6 +19,9 @@ export default function EmailReader({
 }: {
   email: any;
   loading: boolean;
+  downloading?: boolean;
+  downloadError?: string | null;
+  onRetry?: () => void;
   accountId?: string;
   onReply: () => void;
   onForward: () => void;
@@ -46,6 +52,36 @@ export default function EmailReader({
           <div className="h-4 bg-[var(--color-surface-muted)] rounded w-full" />
           <div className="h-4 bg-[var(--color-surface-muted)] rounded w-3/4" />
         </div>
+      </div>
+    );
+  }
+
+  // Downloading state (202 pending — body not yet cached)
+  if (downloading) {
+    return (
+      <div data-testid="email-reader-downloading" className="flex-1 min-w-[400px] flex flex-col items-center justify-center gap-3">
+        <svg className="animate-spin w-8 h-8 text-blue-500" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+        </svg>
+        <p className="text-sm text-[var(--color-text-muted)]">Downloading email body…</p>
+      </div>
+    );
+  }
+
+  // Download error state (202 polling timed out)
+  if (downloadError) {
+    return (
+      <div data-testid="email-reader-error" className="flex-1 min-w-[400px] flex flex-col items-center justify-center gap-3">
+        <p className="text-sm text-[var(--color-error-text)]">{downloadError}</p>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+          >
+            Retry
+          </button>
+        )}
       </div>
     );
   }

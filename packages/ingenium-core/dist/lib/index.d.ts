@@ -1,5 +1,6 @@
 export * from "./db.js";
 export * as skills from "./tools/skills.js";
+export { getSkillsBase, getPluginsBase, getCommandsBase } from "./tools/paths.js";
 export * as tasks from "./tools/tasks.js";
 export * as context from "./tools/context.js";
 export * as projects from "./tools/projects.js";

@@ -14,9 +14,17 @@ interface Service {
   description: string;
 }
 
+interface ApplicationInfo {
+  name: string;
+  state: "healthy" | "degraded" | "stopped" | "starting" | "idle" | "disabled" | "error" | "unknown";
+  description: string;
+  detail?: string;
+}
+
 interface StatusResponse {
   data: {
     services: Service[];
+    applications: ApplicationInfo[];
     overall: "healthy" | "degraded" | "down";
     error?: string;
   };
@@ -77,26 +85,92 @@ function stateBadge(state: ServiceState): {
   }
 }
 
+function appStateBadge(state: ApplicationInfo["state"]): {
+  label: string;
+  bg: string;
+  text: string;
+  dotClass: string;
+} {
+  switch (state) {
+    case "healthy":
+      return {
+        label: "Healthy",
+        bg: "bg-[var(--color-success-bg)]",
+        text: "text-[var(--color-success-text)]",
+        dotClass: "status-dot-green",
+      };
+    case "degraded":
+      return {
+        label: "Degraded",
+        bg: "bg-[var(--color-warning-bg)]",
+        text: "text-[var(--color-warning-text)]",
+        dotClass: "status-dot-amber",
+      };
+    case "stopped":
+      return {
+        label: "Stopped",
+        bg: "bg-red-50",
+        text: "text-red-700",
+        dotClass: "status-dot-red",
+      };
+    case "starting":
+      return {
+        label: "Starting",
+        bg: "bg-[var(--color-warning-bg)]",
+        text: "text-[var(--color-warning-text)]",
+        dotClass: "status-dot-amber",
+      };
+    case "idle":
+      return {
+        label: "Idle",
+        bg: "bg-gray-50",
+        text: "text-gray-600",
+        dotClass: "status-dot-gray",
+      };
+    case "disabled":
+      return {
+        label: "Disabled",
+        bg: "bg-gray-50",
+        text: "text-gray-500",
+        dotClass: "status-dot-gray",
+      };
+    case "error":
+      return {
+        label: "Error",
+        bg: "bg-red-50",
+        text: "text-red-700",
+        dotClass: "status-dot-red",
+      };
+    default:
+      return {
+        label: "Unknown",
+        bg: "bg-gray-50",
+        text: "text-gray-500",
+        dotClass: "status-dot-gray",
+      };
+  }
+}
+
 function healthBanner(
   overall: string,
   degradedCount: number
 ): { label: string; bg: string; text: string } {
   if (overall === "healthy") {
     return {
-      label: "All services healthy",
+      label: "All healthy",
       bg: "bg-[var(--color-success-bg)]",
       text: "text-[var(--color-success-text)]",
     };
   }
   if (overall === "degraded") {
     return {
-      label: `${degradedCount} service(s) degraded`,
+      label: `${degradedCount} component(s) degraded`,
       bg: "bg-[var(--color-warning-bg)]",
       text: "text-[var(--color-warning-text)]",
     };
   }
   return {
-    label: "All services down",
+    label: "All down",
     bg: "bg-[var(--color-error-bg)]",
     text: "text-[var(--color-error-text)]",
   };
@@ -132,9 +206,15 @@ export default function StatusPage() {
   }, [fetchStatus]);
 
   const services = status?.data?.services ?? [];
+  const applications = status?.data?.applications ?? [];
   const overall = status?.data?.overall ?? "down";
-  const degradedCount = services.filter((s) => s.state !== "running").length;
-  const banner = healthBanner(overall, degradedCount);
+  const degradedServiceCount = services.filter((s) => s.state !== "running").length;
+  const degradedAppCount = applications.filter(
+    (a) => a.state === "error" || a.state === "stopped"
+  ).length;
+  const effectiveOverall =
+    degradedAppCount > 0 && overall === "healthy" ? "degraded" : overall;
+  const banner = healthBanner(effectiveOverall, degradedServiceCount + degradedAppCount);
 
   // Show error banner if API itself is unreachable
   if (error && !status) {
@@ -167,9 +247,9 @@ export default function StatusPage() {
       <div className={`${banner.bg} border border-[var(--color-border)] rounded p-4 flex items-center gap-3`}>
         <span
           className={`inline-block w-3 h-3 rounded-full ${
-            overall === "healthy"
+            effectiveOverall === "healthy"
               ? "bg-[var(--color-success-text)]"
-              : overall === "degraded"
+              : effectiveOverall === "degraded"
               ? "bg-[var(--color-warning-text)] animate-pulse"
               : "bg-[var(--color-error-text)]"
           }`}
@@ -227,6 +307,42 @@ export default function StatusPage() {
         })}
       </div>
 
+      {/* Application Services section */}
+      {applications.length > 0 && (
+        <>
+          <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
+            Application Services
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {applications.map((app) => {
+              const badge = appStateBadge(app.state);
+              return (
+                <div
+                  key={app.name}
+                  className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-4 hover:shadow-md transition-shadow"
+                >
+                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
+                    {app.name}
+                  </h3>
+                  <p className="text-xs text-[var(--color-text-muted)] mb-3 min-h-[1.5rem]">
+                    {app.description}
+                  </p>
+                  <div
+                    className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full ${badge.bg} ${badge.text} text-xs font-medium`}
+                  >
+                    <span className={`inline-block w-2 h-2 rounded-full ${badge.dotClass}`} />
+                    {badge.label}
+                  </div>
+                  {app.detail && (
+                    <p className="text-xs text-[var(--color-text-muted)] mt-2">{app.detail}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
       {/* Empty state */}
       {services.length === 0 && !error && (
         <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-12 text-center">
@@ -255,6 +371,9 @@ export default function StatusPage() {
         }
         .status-dot-red {
           background-color: var(--color-error-text, #dc2626);
+        }
+        .status-dot-gray {
+          background-color: #9ca3af;
         }
         @keyframes statusPulse {
           0%, 100% { opacity: 1; }

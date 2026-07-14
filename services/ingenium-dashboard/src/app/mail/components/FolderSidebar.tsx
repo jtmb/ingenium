@@ -16,6 +16,7 @@ export default function FolderSidebar({
   onDeleteAccount,
   folders: folderData,
   syncingFolders,
+  folderSyncStatuses,
 }: {
   accounts: any[];
   selectedAccount: string;
@@ -27,6 +28,7 @@ export default function FolderSidebar({
   onDeleteAccount?: (accountId: string) => void;
   folders?: any[];
   syncingFolders?: string[];
+  folderSyncStatuses?: any[];
 }) {
   const defaultFolders = [
     { name: "INBOX", path: "INBOX", unreadMessages: 0 },
@@ -149,10 +151,17 @@ export default function FolderSidebar({
         {folders.map((folder: any) => {
           const isSelected = selectedFolder === folder.path || selectedFolder === folder.name;
           const isSyncing = syncingFolders?.includes(folder.path || folder.name);
+          const folderKey = folder.path || folder.name;
+          const syncStatus = folderSyncStatuses?.find(
+            (fs: any) => fs.folder === folderKey
+          );
+          const engineState = syncStatus?.engineState;
+          const showEngineProgress =
+            engineState && engineState.bodiesCached < engineState.bodiesWindow;
           return (
             <button
-              key={folder.path || folder.name}
-              onClick={() => onSelectFolder(folder.path || folder.name)}
+              key={folderKey}
+              onClick={() => onSelectFolder(folderKey)}
               className={`flex items-center justify-between px-3 py-1.5 text-sm rounded text-left transition-colors ${
                 isSelected
                   ? "bg-blue-100 text-blue-800 font-medium"
@@ -168,11 +177,18 @@ export default function FolderSidebar({
                 )}
                 <span className="truncate">{folder.name || folder.path}</span>
               </span>
-              {(folder.totalMessages ?? 0) > 0 && (
-                <span className="text-xs text-[var(--color-text-muted)] ml-2">
-                  {folder.totalMessages}
-                </span>
-              )}
+              <span className="flex items-center gap-2">
+                {showEngineProgress && (
+                  <span className="text-[10px] text-[var(--color-text-muted)]">
+                    {engineState.bodiesCached}/{engineState.bodiesWindow}
+                  </span>
+                )}
+                {(folder.totalMessages ?? 0) > 0 && (
+                  <span className="text-xs text-[var(--color-text-muted)]">
+                    {folder.totalMessages}
+                  </span>
+                )}
+              </span>
             </button>
           );
         })}

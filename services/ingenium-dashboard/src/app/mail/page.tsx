@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import FolderSidebar from "./components/FolderSidebar";
 import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
@@ -32,12 +32,18 @@ function useMailProject(): string {
   return project;
 }
 
+interface EngineFolderState {
+  bodiesCached: number;
+  bodiesWindow: number;
+}
+
 interface SyncFolderStatus {
   folder: string;
   cachedCount: number;
   bodyCount: number;
   lastSyncedAt: string | null;
   syncing: boolean;
+  engineState?: EngineFolderState;
 }
 
 interface SyncStatus {
@@ -77,6 +83,10 @@ export default function MailPage() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
   const [accountsLoading, setAccountsLoading] = useState(true);
+  const [emailPending, setEmailPending] = useState(false);
+  const [emailDownloadError, setEmailDownloadError] = useState<string | null>(null);
+  const [pendingEmailUid, setPendingEmailUid] = useState<number | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch accounts on mount
   useEffect(() => {
@@ -136,6 +146,16 @@ export default function MailPage() {
     return () => clearInterval(interval);
   }, [selectedAccount, project]);
 
+  // Cleanup polling interval on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, []);
+
   // Fetch emails when account/folder/page/search changes
   // Server-side DB cache serves sub-2ms — no need for in-memory cache
   useEffect(() => {
@@ -177,17 +197,68 @@ export default function MailPage() {
   }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project]);
 
   const handleSelectEmail = useCallback(async (uid: number) => {
+    // Cancel any existing poll
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+
     setSelectedEmailLoading(true);
+    setEmailPending(false);
+    setEmailDownloadError(null);
+    setSelectedEmail(null);
+    setPendingEmailUid(uid);
+
     try {
-      const res = await fetch(
-        `${API_BASE}/emails/${uid}?project=${project}&account=${selectedAccount}&folder=${encodeURIComponent(selectedFolder)}`
-      );
+      const url = `${API_BASE}/emails/${uid}?project=${project}&account=${selectedAccount}&folder=${encodeURIComponent(selectedFolder)}`;
+      const res = await fetch(url);
+
+      if (res.status === 202) {
+        // Email body not cached yet — poll until it is
+        setSelectedEmailLoading(false);
+        setEmailPending(true);
+
+        const pollStart = Date.now();
+        const MAX_POLL_MS = 20000;
+
+        pollRef.current = setInterval(async () => {
+          try {
+            const pollRes = await fetch(url);
+            if (pollRes.ok) {
+              const pollData = await pollRes.json();
+              setSelectedEmail(pollData.data);
+              setEmailPending(false);
+              setPendingEmailUid(null);
+              if (pollRef.current) {
+                clearInterval(pollRef.current);
+                pollRef.current = null;
+              }
+              return;
+            }
+          } catch {
+            // Retry on next tick
+          }
+
+          if (Date.now() - pollStart >= MAX_POLL_MS) {
+            setEmailPending(false);
+            setEmailDownloadError("Could not load this email — try again later");
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+          }
+        }, 1500);
+
+        return;
+      }
+
       if (res.ok) {
         const data = await res.json();
         setSelectedEmail(data.data);
+        setPendingEmailUid(null);
       }
     } catch {
-      // Keep current selection
+      setEmailDownloadError("Could not load this email — try again later");
     } finally {
       setSelectedEmailLoading(false);
     }
@@ -327,7 +398,14 @@ export default function MailPage() {
     setPage(1);
     setSearchQuery("");
     setEmailError(null);
-  }, []);
+
+    // Fire-and-forget cache boost hint — the /sync route calls boostFolder internally
+    fetch(`${API_BASE}/emails/sync?project=${project}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account: selectedAccount, folder }),
+    }).catch(() => {});
+  }, [selectedAccount, project]);
 
   const handleRefresh = useCallback(async () => {
     if (!selectedAccount) return;
@@ -498,6 +576,7 @@ export default function MailPage() {
               onDeleteAccount={handleDeleteAccount}
               folders={folders}
               syncingFolders={syncingFolders}
+              folderSyncStatuses={syncStatus?.folders ?? []}
             />
 
             {/* Email list */}
@@ -530,6 +609,11 @@ export default function MailPage() {
             <EmailReader
               email={selectedEmail}
               loading={selectedEmailLoading}
+              downloading={emailPending}
+              downloadError={emailDownloadError}
+              onRetry={() => {
+                if (pendingEmailUid) handleSelectEmail(pendingEmailUid);
+              }}
               accountId={selectedAccount}
               onReply={handleCompose}
               onForward={handleCompose}
