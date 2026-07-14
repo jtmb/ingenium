@@ -86,7 +86,7 @@ export default function MailPage() {
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [emailPending, setEmailPending] = useState(false);
   const [emailDownloadError, setEmailDownloadError] = useState<string | null>(null);
-  const [pendingEmailUid, setPendingEmailUid] = useState<number | null>(null);
+  const [pendingEmailUid, setPendingEmailUid] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fetch accounts on mount
@@ -197,7 +197,7 @@ export default function MailPage() {
     fetchEmails();
   }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project]);
 
-  const handleSelectEmail = useCallback(async (uid: number) => {
+  const handleSelectEmail = useCallback(async (uid: string) => {
     // Cancel any existing poll
     if (pollRef.current) {
       clearInterval(pollRef.current);

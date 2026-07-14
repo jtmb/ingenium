@@ -313,6 +313,23 @@ export async function exchangeCode(
   throw new Error(`OAuth exchange not supported for provider: ${provider}`);
 }
 
+/**
+ * Convenience helper: get a guaranteed-fresh Gmail access token for the given
+ * account ID. Uses getValidTokens which auto-refreshes if within 60s of expiry.
+ *
+ * Throws if no stored tokens exist (account needs re-authentication).
+ */
+export async function getFreshGmailToken(accountId: string): Promise<string> {
+  const projectId = getGlobalProjectId();
+  const tokens = await getValidTokens(projectId, accountId, "gmail");
+  if (!tokens) {
+    throw new Error(
+      `No stored OAuth tokens for account ${accountId}. Please re-authenticate the account.`,
+    );
+  }
+  return tokens.accessToken;
+}
+
 /** Refresh an expired access token using the refresh token. */
 export async function refreshAccessToken(
   provider: EmailProvider,

@@ -39,7 +39,7 @@ export interface OAuthToken {
 }
 
 export interface EmailMessage {
-  uid: number;
+  uid: string;
   messageId?: string;
   subject: string;
   from: EmailAddress[];
@@ -80,7 +80,7 @@ export interface SearchQuery {
 }
 
 export interface TriageResult {
-  emailUid: number;
+  emailUid: string;
   category: string;
   priority: "high" | "medium" | "low";
   suggestedAction: "reply_now" | "draft" | "review_later" | "ignore";
@@ -89,7 +89,7 @@ export interface TriageResult {
 }
 
 export interface ResponseSuggestion {
-  emailUid: number;
+  emailUid: string;
   originalSender: string;
   subject: string;
   body: string;

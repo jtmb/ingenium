@@ -12,7 +12,7 @@ export default function SmartSuggest({
   accountId,
   apiUrl,
 }: {
-  emailUid?: number;
+  emailUid?: string;
   accountId?: string;
   apiUrl?: string;
 }) {

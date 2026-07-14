@@ -1,28 +1,27 @@
 /**
  * Mail Sync Engine — Outlook Cached-Mode background synchronization.
  *
- * One background engine owns all IMAP I/O with a priority queue:
- *   P0: IDLE/new mail → INBOX header sync immediately
+ * One background engine owns all mailbox I/O via a MailProvider with a priority queue:
+ *   P0: Gmail delta poll (cheap historyId check, 30s interval)
  *   P1: boostFolder'd folders (user is viewing)
- *   P2: INBOX headers if stale
+ *   P2: Full resync (all folders) or INBOX if stale
  *   P3: All folders round-robin headers (skipFresh gate)
  *   P4: Body backfill (newest→oldest, capped)
  *   P5: Deeper history backfill
  *
- * Per-account serialization: one worker connection per account, sequential tasks.
- * Body fetches: batch of 25, 500ms yield between batches.
+ * Per-account serialization: one worker per account, sequential tasks.
+ * Body fetches: batch of 5, 200ms yield between batches (rate limit safe).
+ * Provider is stateless HTTPS — no persistent connection needed.
  *
  * 🔴 Every error is logged before returning (Lesson 14). Silent deaths are invisible.
  * 🔴 Concurrent operations are SERIALIZED per account (Lesson 25).
- * 🔴 Error handlers are on every pooled resource (Lesson 24 — imap.ts already has them).
  * 🔴 `lastSyncedAt` timestamps survive restarts (Lesson 16 — no in-memory booleans).
  */
 
 import { emailCache, logger, settings } from "ingenium-core";
 import { listAccounts, getAccount, getCredentials, getGlobalProjectId } from "./accounts.js";
-import { connectAccount, listFolders } from "./imap.js";
-import { syncFolder, backfillFolderBodies } from "./sync.js";
-import type { ImapFlow } from "imapflow";
+import { GmailProvider } from "./providers/gmail.js";
+import type { MailProvider } from "./providers/mail-provider.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -49,11 +48,11 @@ type TaskPriority = 0 | 1 | 2 | 3 | 4 | 5;
 
 interface EngineTask {
   priority: TaskPriority;
-  type: "sync-folder" | "backfill-bodies" | "inbox-exists-check";
+  type: "sync-folder" | "backfill-bodies";
   accountId: string;
   folder: string;
   /** Specific UID to prioritize for body fetch (from boostBody). */
-  boostUid?: number;
+  boostUid?: string;
 }
 
 // ── Default settings ────────────────────────────────────────────────────────
@@ -61,10 +60,10 @@ interface EngineTask {
 const DEFAULT_OFFLINE_WINDOW = 500;   // max headers per folder
 const DEFAULT_BODY_WINDOW = 200;      // max bodies per folder
 const DEFAULT_SYNC_INTERVAL_MS = 300_000; // 5 min
-const INBOX_POLL_INTERVAL_MS = 60_000;    // 60s fallback poll for new mail
+const GMAIL_POLL_INTERVAL_MS = 30_000;    // 30s delta poll (cheap — empty response when nothing changed)
 const TASK_WATCHDOG_MS = 5 * 60_000;      // 5 min — abort stuck tasks
-const BODY_BATCH_SIZE = 25;               // batch body fetches in groups of 25
-const BODY_BATCH_YIELD_MS = 500;          // yield between batches
+const BODY_BATCH_SIZE = 5;                // batch body fetches in groups of 5 (rate limit safe)
+const BODY_BATCH_YIELD_MS = 200;          // yield between body fetch groups
 const LOOP_YIELD_MS = 1000;               // yield between full account loop ticks
 const TASK_PROCESS_YIELD_MS = 100;        // yield between individual tasks in a loop
 
@@ -75,6 +74,8 @@ interface AccountWorker {
   email: string;
   projectId: string;
   running: boolean;
+  /** The mail provider — GmailProvider (stateless HTTPS, no connection needed). */
+  provider: MailProvider;
   /** Priority-ordered task queue (lowest priority number = highest priority). */
   taskQueue: EngineTask[];
   /** Per-folder engine state. */
@@ -82,9 +83,7 @@ interface AccountWorker {
   /** Folders boosted by boostFolder() — cleared after sync. */
   boostedFolders: Set<string>;
   /** Specific UIDs boosted by boostBody() — front-loaded in body backfill. */
-  boostedBodyUids: Map<string, Set<number>>; // key: folder
-  /** Last known EXISTS count for INBOX (detects new mail). */
-  lastInboxExists: number;
+  boostedBodyUids: Map<string, Set<string>>; // key: folder
   /** The worker's async loop promise (used for stop). */
   loopPromise: Promise<void> | null;
   /** AbortController for stopping the loop. */
@@ -257,28 +256,17 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       return;
     }
 
-    const auth = { password: creds.password, tokens: creds.tokens };
-
-    // Connect once at worker start
-    let client: ImapFlow;
-    try {
-      client = await connectAccount(account, auth);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("sync-engine", `Worker for ${worker.email}: connect failed: ${msg}`);
+    const tokens = creds.tokens;
+    if (!tokens) {
+      logger.warn("sync-engine", `Worker for ${worker.email}: no OAuth tokens, stopping`);
       return;
     }
 
-    // Discover folders for round-robin
+    // Discover folders via provider (already assigned in spawnWorkers)
     let folders: string[] = [];
     try {
-      const folderList = await listFolders(worker.accountId);
-      folders = folderList
-        .filter(f => {
-          const flagStr = f.flags?.join(" ") ?? "";
-          return !(/\\noselect|\\nonexistent/i.test(flagStr)) && f.path !== "[Gmail]";
-        })
-        .map(f => f.path);
+      const folderList = await worker.provider.listFolders(account, tokens);
+      folders = folderList.map(f => f.path);
 
       // Initialize folder states for all discovered folders
       for (const f of folders) {
@@ -297,37 +285,79 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
     }
 
     let roundRobinIndex = 0;
-    let lastInboxCheck = 0;
+    let lastDeltaPoll = 0;
 
     // ── Main loop ──────────────────────────────────────────────────────
     while (worker.running && !worker.abortController?.signal.aborted) {
       tickHeartbeat();
 
-      // ── P0: Check INBOX for new mail (every INBOX_POLL_INTERVAL_MS) ──
-      if (Date.now() - lastInboxCheck >= INBOX_POLL_INTERVAL_MS) {
-        lastInboxCheck = Date.now();
+      // ── P0: Gmail delta poll (every GMAIL_POLL_INTERVAL_MS) ──────────
+      if (Date.now() - lastDeltaPoll >= GMAIL_POLL_INTERVAL_MS) {
+        lastDeltaPoll = Date.now();
         try {
-          // Get cached email count for INBOX
-          const { total: cachedTotal } = emailCache.getCachedEmails(
-            worker.accountId, "INBOX", 1, 1,
-          );
-          // Get actual EXISTS count from IMAP (lightweight — just a mailbox open)
-          await client.mailboxOpen("INBOX");
-          const actualExists = (client.mailbox as { exists: number }).exists;
+          const { historyId } = emailCache.getAccountCursor(worker.accountId);
+          const delta = await worker.provider.changesSince(account, tokens, historyId || null);
 
-          if (actualExists !== worker.lastInboxExists) {
-            worker.lastInboxExists = actualExists;
-            logger.info("sync-engine", `New mail detected in INBOX for ${worker.email}: exists=${actualExists} cached≈${cachedTotal}`);
-            enqueueTask(worker, {
-              priority: 0,
-              type: "sync-folder",
-              accountId: worker.accountId,
-              folder: "INBOX",
-            });
+          if (delta.fullResyncRequired) {
+            logger.info("sync-engine",
+              `Full resync required for ${worker.email} (historyId ${historyId ?? "none"})`,
+            );
+            // Enqueue sync-folder for every folder at P2 priority
+            for (const folder of folders) {
+              enqueueTask(worker, {
+                priority: 2,
+                type: "sync-folder",
+                accountId: worker.accountId,
+                folder,
+              });
+            }
+            // Set the new cursor after resync
+            if (delta.newCursor) {
+              emailCache.setAccountCursor(worker.accountId, delta.newCursor, "gmail");
+            }
+          } else {
+            // Apply upserts to cache
+            if (delta.upserts.length > 0) {
+              for (const msg of delta.upserts) {
+                emailCache.upsertEmailCache(worker.accountId, msg.folder, [{
+                  uid: msg.id,
+                  subject: msg.subject,
+                  from_name: msg.fromName,
+                  from_addr: msg.fromAddr,
+                  date: msg.date,
+                  snippet: msg.snippet,
+                  flags: JSON.stringify(msg.flags),
+                  has_attachments: msg.hasAttachments ? 1 : 0,
+                  envelope_json: msg.envelopeJson,
+                }]);
+                // Trigger body backfill for upserted messages (P4)
+                enqueueTask(worker, {
+                  priority: 4,
+                  type: "backfill-bodies",
+                  accountId: worker.accountId,
+                  folder: msg.folder,
+                });
+              }
+              logger.info("sync-engine",
+                `Delta upserts for ${worker.email}: ${delta.upserts.length} messages`,
+              );
+            }
+
+            // Deletes: log for now — per-UID cache deletion not yet supported
+            if (delta.deletes.length > 0) {
+              logger.info("sync-engine",
+                `Delta deletes for ${worker.email}: ${delta.deletes.length} messages (cache cleanup not yet implemented)`,
+              );
+            }
+
+            // Store new cursor
+            if (delta.newCursor) {
+              emailCache.setAccountCursor(worker.accountId, delta.newCursor, "gmail");
+            }
           }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("sync-engine", `INBOX exists check failed for ${worker.email}: ${msg}`);
+          logger.warn("sync-engine", `Delta poll failed for ${worker.email}: ${msg}`);
           // Non-fatal: continue the loop
         }
       }
@@ -437,10 +467,6 @@ async function executeTask(worker: AccountWorker, task: EngineTask): Promise<voi
       await executeBackfillBodies(worker, accountId, folder, task.boostUid);
       break;
     }
-    case "inbox-exists-check": {
-      // Handled in the main loop — no-op if it somehow appears in the queue
-      break;
-    }
   }
 }
 
@@ -452,33 +478,49 @@ async function executeSyncFolder(
   setFolderState(worker, folder, { state: "syncing-headers", lastError: null });
 
   try {
-    const result = await withWatchdog(
-      syncFolder(worker.projectId, accountId, folder),
-      TASK_WATCHDOG_MS,
-      `syncFolder ${worker.email}/${folder}`,
-    );
-
-    if (result.error) {
-      setFolderState(worker, folder, {
-        state: "error",
-        lastError: result.error,
-      });
-      logger.warn("sync-engine", `syncFolder error for ${worker.email}/${folder}: ${result.error}`);
+    const account = getAccount(worker.projectId, accountId);
+    if (!account) {
+      logger.warn("sync-engine", `executeSyncFolder: account ${accountId} not found`);
+      setFolderState(worker, folder, { state: "error", lastError: "Account not found" });
+      return;
+    }
+    const creds = getCredentials(worker.projectId, accountId);
+    if (!creds?.tokens) {
+      logger.warn("sync-engine", `executeSyncFolder: no tokens for ${worker.email}`);
+      setFolderState(worker, folder, { state: "error", lastError: "No OAuth tokens" });
       return;
     }
 
-    // Update folder state
     const offlineWindow = getOfflineWindow();
-    const bodyWindow = getBodyWindow();
+    const messages = await withWatchdog(
+      worker.provider.listMessages(account, creds.tokens, folder, offlineWindow),
+      TASK_WATCHDOG_MS,
+      `listMessages ${worker.email}/${folder}`,
+    );
 
-    // Count cached emails for this folder
-    const { total: cachedTotal } = emailCache.getCachedEmails(accountId, folder, 1, 1);
-    // Count cached bodies
+    // Upsert each message into the cache
+    for (const msg of messages) {
+      emailCache.upsertEmailCache(accountId, msg.folder, [{
+        uid: msg.id,
+        subject: msg.subject,
+        from_name: msg.fromName,
+        from_addr: msg.fromAddr,
+        date: msg.date,
+        snippet: msg.snippet,
+        flags: JSON.stringify(msg.flags),
+        has_attachments: msg.hasAttachments ? 1 : 0,
+        envelope_json: msg.envelopeJson,
+      }]);
+    }
+
+    // Update folder state
+    const bodyWindow = getBodyWindow();
+    const cachedTotal = messages.length;
     const missingUids = emailCache.getUidsMissingBodies(accountId, folder, 1);
-    const bodyCount = cachedTotal - missingUids.length;
+    const bodyCount = Math.max(0, cachedTotal - missingUids.length);
 
     setFolderState(worker, folder, {
-      state: result.synced === 0 && result.total > 0 ? "complete" : "syncing-headers",
+      state: cachedTotal === 0 ? "complete" : "syncing-headers",
       headersSynced: Math.min(cachedTotal, offlineWindow),
       headersTotal: offlineWindow,
       bodiesCached: bodyCount,
@@ -488,8 +530,7 @@ async function executeSyncFolder(
     });
 
     logger.info("sync-engine",
-      `Synced ${worker.email}/${folder}: ${result.synced} new, ` +
-      `${cachedTotal} cached, ${bodyCount} bodies`,
+      `Synced ${worker.email}/${folder}: ${cachedTotal} headers, ${bodyCount} bodies`,
     );
 
     // If bodies missing and not at window cap, queue body backfill
@@ -512,15 +553,28 @@ async function executeBackfillBodies(
   worker: AccountWorker,
   accountId: string,
   folder: string,
-  boostUid?: number,
+  boostUid?: string,
 ): Promise<void> {
   setFolderState(worker, folder, { state: "backfilling-bodies", lastError: null });
 
   try {
+    const account = getAccount(worker.projectId, accountId);
+    if (!account) {
+      logger.warn("sync-engine", `executeBackfillBodies: account ${accountId} not found`);
+      setFolderState(worker, folder, { state: "error", lastError: "Account not found" });
+      return;
+    }
+    const creds = getCredentials(worker.projectId, accountId);
+    if (!creds?.tokens) {
+      logger.warn("sync-engine", `executeBackfillBodies: no tokens for ${worker.email}`);
+      setFolderState(worker, folder, { state: "error", lastError: "No OAuth tokens" });
+      return;
+    }
+
     const bodyWindow = getBodyWindow();
 
     // Check how many bodies we still need
-    let uidsToFetch: number[];
+    let uidsToFetch: string[];
 
     if (boostUid) {
       // Specific UID boosted — front-load it
@@ -536,7 +590,7 @@ async function executeBackfillBodies(
 
     if (uidsToFetch.length === 0) {
       // Check if we're at complete state
-      const { total: cachedTotal } = emailCache.getCachedEmails(accountId, folder, 1, 1);
+      const cachedTotal = emailCache.getCachedEmails(accountId, folder, 1, 1).total;
       const stillMissing = emailCache.getUidsMissingBodies(accountId, folder, 1);
       if (stillMissing.length === 0 && cachedTotal > 0) {
         setFolderState(worker, folder, { state: "complete" });
@@ -553,27 +607,25 @@ async function executeBackfillBodies(
     let backfilled = 0;
     for (let i = 0; i < uidsToFetch.length; i += BODY_BATCH_SIZE) {
       const batch = uidsToFetch.slice(i, i + BODY_BATCH_SIZE);
-      const batchLimit = batch.length;
 
-      try {
-        const result = await withWatchdog(
-          backfillFolderBodies(worker.projectId, accountId, folder, batchLimit),
-          TASK_WATCHDOG_MS,
-          `backfillFolderBodies ${worker.email}/${folder} batch ${i}`,
-        );
-
-        if (result.error) {
-          logger.warn("sync-engine",
-            `backfill error for ${worker.email}/${folder}: ${result.error}`,
+      // Fetch each body in the batch sequentially (provider.getBody rate-limit safe)
+      for (const uid of batch) {
+        try {
+          const body = await worker.provider.getBody(account, creds.tokens, uid);
+          emailCache.upsertEmailBody(
+            accountId, folder, uid,
+            body.html ?? null,
+            body.text ?? null,
+            JSON.stringify({ attachments: body.attachments }),
           );
+          backfilled++;
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn("sync-engine",
+            `executeBackfillBodies FAILED for ${worker.email}/${folder} uid=${uid}: ${msg}`,
+          );
+          // Continue with next UID instead of aborting all backfill
         }
-        backfilled += result.backfilled;
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn("sync-engine",
-          `executeBackfillBodies batch FAILED for ${worker.email}/${folder}: ${msg}`,
-        );
-        // Continue with next batch instead of aborting all backfill
       }
 
       // Yield between batches
@@ -583,9 +635,9 @@ async function executeBackfillBodies(
     }
 
     // Update state
-    const { total: cachedTotal } = emailCache.getCachedEmails(accountId, folder, 1, 1);
+    const cachedTotal = emailCache.getCachedEmails(accountId, folder, 1, 1).total;
     const stillMissing = emailCache.getUidsMissingBodies(accountId, folder, 1);
-    const bodyCount = cachedTotal - stillMissing.length;
+    const bodyCount = Math.max(0, cachedTotal - stillMissing.length);
 
     const newState: FolderEngineState["state"] =
       stillMissing.length === 0 && cachedTotal > 0
@@ -663,11 +715,11 @@ async function spawnWorkers(projectId: string): Promise<void> {
       email: acct.email,
       projectId,
       running: true,
+      provider: GmailProvider,
       taskQueue: [],
       folderStates: new Map(),
       boostedFolders: new Set(),
       boostedBodyUids: new Map(),
-      lastInboxExists: 0,
       loopPromise: null,
       abortController: new AbortController(),
     };
@@ -735,7 +787,7 @@ export function boostFolder(accountId: string, folder: string): void {
  * backfill queue for that folder.
  * Non-blocking, fire-and-forget.
  */
-export function boostBody(accountId: string, folder: string, uid: number): void {
+export function boostBody(accountId: string, folder: string, uid: string): void {
   const worker = engineState.workers.get(accountId);
   if (!worker) {
     logger.warn("sync-engine", `boostBody: no worker for ${accountId}`);

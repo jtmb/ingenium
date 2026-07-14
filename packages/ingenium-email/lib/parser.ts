@@ -10,7 +10,7 @@ export async function parseRawEmail(raw: string): Promise<EmailMessage> {
   const parsed = await simpleParser(raw);
 
   return {
-    uid: 0, // caller must set real UID
+    uid: "0", // caller must set real UID
     messageId: parsed.messageId,
     subject: parsed.subject ?? "(no subject)",
     from: (parsed.from?.value ?? []).map((a) => ({
