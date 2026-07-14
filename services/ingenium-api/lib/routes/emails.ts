@@ -356,6 +356,14 @@ emailsRouter.get("/folders", async (req, res) => {
         const flagStr = f.flags?.join(" ") ?? "";
         return !(/\\noselect|\\nonexistent/i.test(flagStr)) && f.path !== "[Gmail]";
       });
+      // 🔴 Hide Gmail alias folders (e.g. "Sent") when the real [Gmail]/X version exists
+      const gmailPaths = new Set(folders.map((f: { path: string }) => f.path));
+      folders = folders.filter((f: { path: string }) => {
+        if (f.path.startsWith("[Gmail]/")) return true; // keep real folders
+        const gmailVariant = `[Gmail]/${f.path}`;
+        const gmailVariant2 = `[Gmail]/${f.path} Mail`; // e.g. "Sent" → "[Gmail]/Sent Mail"
+        return !gmailPaths.has(gmailVariant) && !gmailPaths.has(gmailVariant2);
+      });
       // Hint engine this account is active (folders cache may be stale)
       boostFolder(account.id, "INBOX");
       res.json({ data: folders, total: folders.length, source: "cache" });
