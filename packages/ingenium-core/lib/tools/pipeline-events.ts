@@ -15,7 +15,7 @@ export function logEvent(
   sessionId?: string,
   importance?: number,
 ): PipelineEvent {
-  return execTransaction(() => {
+  const event = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
     const now = new Date().toISOString();
     const result = db.prepare(
@@ -33,9 +33,10 @@ export function logEvent(
       importance ?? 5,
       now,
     );
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM pipeline_events WHERE id = ?").get(result.lastInsertRowid) as PipelineEvent;
   });
+  checkpointAfterWrite();
+  return event;
 }
 
 /**

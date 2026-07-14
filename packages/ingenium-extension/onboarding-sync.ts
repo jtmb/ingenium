@@ -162,7 +162,7 @@ async function syncCommands(worktree: string): Promise<UpsertResult> {
         const createRes = await fetch(`${API_BASE}/commands?${encodeProject()}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, file_path: `.opencode/commands/${entry}`, content }),
+          body: JSON.stringify({ name, file_path: entry, content }),
         });
         if (createRes.ok) result.created++;
         else result.errors++;

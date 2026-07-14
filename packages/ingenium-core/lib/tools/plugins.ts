@@ -1,8 +1,8 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { Plugin } from "../schema.js";
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { resolve, relative, isAbsolute } from "node:path";
-import { getPluginsBase, getConfigPath } from "./paths.js";
+import { resolve, relative, isAbsolute, dirname } from "node:path";
+import { getPluginsBase, getConfigPath, isGlobal } from "./paths.js";
 
 function validatePluginPath(filePath: string, projectId?: string): string {
   if (!/^[a-zA-Z0-9_\-./]+$/.test(filePath)) {
@@ -18,7 +18,8 @@ function validatePluginPath(filePath: string, projectId?: string): string {
 }
 
 function addPluginToConfig(filePath: string, projectId?: string): void {
-  const rel = `.opencode/plugins/${filePath}`;
+  const isGlobalProject = isGlobal(projectId);
+  const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
   try {
     const configPath = getConfigPath(projectId);
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
@@ -31,7 +32,8 @@ function addPluginToConfig(filePath: string, projectId?: string): void {
 }
 
 function removePluginFromConfig(filePath: string, projectId?: string): void {
-  const rel = `.opencode/plugins/${filePath}`;
+  const isGlobalProject = isGlobal(projectId);
+  const rel = isGlobalProject ? `plugins/${filePath}` : `.opencode/plugins/${filePath}`;
   try {
     const configPath = getConfigPath(projectId);
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
@@ -61,7 +63,9 @@ export function enablePlugin(projectId: string, name: string): Plugin | undefine
     if (plugin?.source_content) {
       ensurePluginDir(projectId);
       const filePath = validatePluginPath(plugin.file_path, projectId);
-      writeFileSync(resolve(getPluginsBase(projectId), filePath), plugin.source_content);
+      const fullPath = resolve(getPluginsBase(projectId), filePath);
+      mkdirSync(dirname(fullPath), { recursive: true });
+      writeFileSync(fullPath, plugin.source_content);
       addPluginToConfig(plugin.file_path, projectId);
     }
     checkpointAfterWrite();
@@ -124,7 +128,9 @@ export function createPlugin(
 
     ensurePluginDir(projectId);
     if (content) {
-      writeFileSync(resolve(getPluginsBase(projectId), filePath), content);
+      const fullPath = resolve(getPluginsBase(projectId), filePath);
+      mkdirSync(dirname(fullPath), { recursive: true });
+      writeFileSync(fullPath, content);
       addPluginToConfig(filePath, projectId);
     }
 
@@ -183,13 +189,16 @@ export function updatePlugin(
          removePluginFromConfig(existing.file_path, projectId);
          addPluginToConfig(newFilePath, projectId);
        }
-       writeFileSync(resolve(getPluginsBase(projectId), newFilePath), newContent);
+       const writePath = resolve(getPluginsBase(projectId), newFilePath);
+       mkdirSync(dirname(writePath), { recursive: true });
+       writeFileSync(writePath, newContent);
      } else if (updates.file_path && updates.file_path !== existing.file_path) {
        ensurePluginDir(projectId);
        const oldPath = resolve(getPluginsBase(projectId), existing.file_path);
        const newPath = resolve(getPluginsBase(projectId), newFilePath);
        if (existsSync(oldPath)) {
          const content = readFileSync(oldPath, "utf-8");
+         mkdirSync(dirname(newPath), { recursive: true });
          writeFileSync(newPath, content);
          unlinkSync(oldPath);
        }

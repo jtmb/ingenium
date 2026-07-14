@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { skills, synthesis } from "ingenium-core";
+import { skills, synthesis, getSkillsBase } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import fs from "fs";
 import path from "path";
@@ -93,10 +93,7 @@ skillsRouter.post("/sync-all", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const skillsDir = path.resolve(
-    process.env.INGENIUM_CORE_DB_PATH ?? "/app/.ingenium/data",
-    "..", "..", ".opencode", "skills"
-  );
+  const skillsDir = getSkillsBase(projectId);
 
   let fromDisk = 0;
   let toDisk = 0;

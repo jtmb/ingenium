@@ -13,16 +13,17 @@ export function registerServer(projectId: string, name: string, command: string,
   const existing = db.prepare("SELECT * FROM servers WHERE project_id = ? AND name = ?").get(projectId, name) as Server | undefined;
   if (existing) return existing;
 
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const now = new Date().toISOString();
     const id = randomUUID();
     db.prepare(
       `INSERT INTO servers (id, project_id, name, command, args, env, source, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, projectId, name, command, args ?? null, env ?? null, source ?? "opencode", now);
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM servers WHERE id = ?").get(id) as Server;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function updateServer(projectId: string, name: string, fields: { running?: number }): void {
@@ -31,8 +32,8 @@ export function updateServer(projectId: string, name: string, fields: { running?
     if (fields.running !== undefined) {
       db.prepare("UPDATE servers SET running = ? WHERE project_id = ? AND name = ?").run(fields.running, projectId, name);
     }
-    checkpointAfterWrite();
   });
+  checkpointAfterWrite();
 }
 
 export function upsertServer(projectId: string, name: string, command: string, args?: string, env?: string, source?: string): Server {
@@ -44,27 +45,28 @@ export function upsertServer(projectId: string, name: string, command: string, a
       db.prepare(
         `UPDATE servers SET command = ?, args = ?, env = ?, source = ? WHERE project_id = ? AND name = ?`
       ).run(command, args ?? null, env ?? null, source ?? "opencode", projectId, name);
-      checkpointAfterWrite();
     });
+    checkpointAfterWrite();
     return db.prepare("SELECT * FROM servers WHERE project_id = ? AND name = ?").get(projectId, name) as Server;
   }
 
-  return execTransaction(() => {
+  const inserted = execTransaction(() => {
     const now = new Date().toISOString();
     const id = randomUUID();
     db.prepare(
       `INSERT INTO servers (id, project_id, name, command, args, env, source, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, projectId, name, command, args ?? null, env ?? null, source ?? "opencode", now);
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM servers WHERE id = ?").get(id) as Server;
   });
+  checkpointAfterWrite();
+  return inserted;
 }
 
 export function removeServer(projectId: string, name: string): void {
   execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     db.prepare("DELETE FROM servers WHERE project_id = ? AND name = ?").run(projectId, name);
-    checkpointAfterWrite();
   });
+  checkpointAfterWrite();
 }
