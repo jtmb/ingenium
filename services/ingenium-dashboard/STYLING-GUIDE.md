@@ -188,6 +188,58 @@ Every card on every page of the dashboard MUST use `hover:shadow-md transition-s
 | Link Color (hover) | Dark gray | `hover:text-gray-900` |
 | Active Color | Dark | `text-gray-900` |
 
+## Settings Overlay
+
+The Settings panel is a full-screen overlay (not a separate page). It uses the Overlay component pattern with a two-column layout.
+
+### Trigger
+- **Launcher**: Gear icon button in the top navigation bar (`SettingsLauncher.tsx`)
+- **State**: URL-driven via `?settings=<tab>` query parameter; absent = closed
+- **Auto-select**: The `tabForPathname(pathname)` function maps the current route to its settings tab
+
+### Layout
+| Element | Value |
+|---------|-------|
+| Container | `fixed inset-0 z-50` with 16px margin, `rounded-lg shadow-2xl` |
+| Backdrop | `bg-black/50` |
+| Two-column | Sidebar `w-64 shrink-0` + Content `flex-1 overflow-y-auto` |
+| Animation | `animate-fadeIn` 200ms fade + scale 0.95→1 (via `<style jsx>`) |
+
+### Sidebar Tabs
+| Property | Value |
+|----------|-------|
+| Active state | `bg-[var(--color-surface-hover)] border-r-2 border-[var(--color-border)]` |
+| Inactive state | Transparent, hover: `bg-[var(--color-surface-hover)]` |
+| Icon | Inline SVG, 16×16, `text-[var(--color-text-secondary)]` |
+| Label | 14px medium `text-[var(--color-text-primary)]` |
+
+### Setting Rows
+Each setting row uses the `SettingRow` component:
+- Left 65%: label (14px medium) + optional description (12px regular muted)
+- Right 35%: control (dropdown, input, or toggle)
+- Divider: `border-t border-[var(--color-border)]` between rows
+
+### Controls
+| Type | Styling |
+|------|---------|
+| Select | Same mandated pattern as all dashboard selects (border + px-3 py-1.5 + rounded + hover:bg) |
+| Number input | `border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)]` |
+| Text input | Same as number input |
+| Password input | Same as text input + show/hide toggle button |
+
+### Tab Panels
+- **GeneralPanel**: Theme + Archive retention
+- **MailPanel**: OAuth credentials + sync intervals + window sizes
+- **PipelinePanel**: Synthesis LLM configuration (provider/model/key/custom/backup/test)
+- **ConfigPanel**: Link to /config editor
+- All other tabs: `PlaceholderPanel` — centered icon + "No settings for {label} yet"
+
+### Adding a New Settings Tab
+1. Add an entry to `ALL_TABS` in `tabs.ts`
+2. Add a pathname mapping in `tabForPathname()` if routing-based auto-select is desired
+3. Create a panel component following the `SettingRow` pattern
+4. Wire it into `TAB_PANELS` in `SettingsOverlay.tsx`
+
 ## 🔴 Rules That Must Not Be Broken
 
 1. **Card grid is always `md:grid-cols-3`** on desktop. Never change to 2 or 4 without updating this guide.

@@ -73,7 +73,7 @@ services/
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 17 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 overlay):
 
 | Page | Purpose |
 |------|---------|
@@ -93,7 +93,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 route-based pages:
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
-| `/settings` | Settings + Synthesis LLM provider configuration |
+| Settings (overlay) | Full-screen overlay triggered by gear icon in top nav. 14 tabs (General + 13 endpoints), 4 with real settings (General, Mail, Pipeline, Config); others show clean placeholder states. Deep-link via `?settings=<tab>` query param. Auto-selects tab matching current page. |
 
 > The dashboard talks to the API layer only — zero direct DB access. Commands are managed via MCP tools without a dedicated page.
 
