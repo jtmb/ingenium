@@ -218,8 +218,8 @@ export default function EmailReader({
           <div className="flex flex-wrap gap-2">
             {email.attachments.map((att: any, idx: number) => (
               <a
-                key={att.partId || idx}
-                href={`${API_BASE}/emails/${email.uid}/attachments/${att.partId || idx}?account=${accountId}&folder=${email.folder || 'INBOX'}`}
+                key={att.attachmentId || att.partId || idx}
+                href={`${API_BASE}/emails/${email.uid}/attachments/${att.attachmentId || att.partId || idx}?account=${accountId}&folder=${email.folder || 'INBOX'}`}
                 className="flex items-center gap-2 px-3 py-1.5 border border-[var(--color-border)] rounded text-sm text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)]"
                 download={att.filename}
               >
