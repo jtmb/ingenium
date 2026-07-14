@@ -360,6 +360,7 @@ export async function syncAccountFolders(
           const msSince = Date.now() - new Date(st.last_synced_at).getTime();
           if (msSince < freshMs && st.last_uid > 0) {
             logger.info("email", `skip fresh: ${account.email}/${folder.path} (synced ${Math.round(msSince / 1000)}s ago)`);
+            results.push({ folder: folder.path, synced: 0, total: st.last_uid });
             continue;
           }
         }
