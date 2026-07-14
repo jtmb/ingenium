@@ -13,7 +13,7 @@ export interface CachedEmail {
   id: number;
   account_id: string;
   folder: string;
-  uid: number;
+  uid: string;
   subject: string | null;
   from_name: string | null;
   from_addr: string | null;
@@ -29,7 +29,7 @@ export interface CachedEmailBody {
   id: number;
   account_id: string;
   folder: string;
-  uid: number;
+  uid: string;
   html: string | null;
   text: string | null;
   headers_json: string | null;
@@ -37,7 +37,7 @@ export interface CachedEmailBody {
 }
 
 export interface EmailCacheEntry {
-  uid: number;
+  uid: string;
   subject?: string | null;
   from_name?: string | null;
   from_addr?: string | null;
@@ -49,7 +49,7 @@ export interface EmailCacheEntry {
 }
 
 export interface SyncState {
-  last_uid: number;
+  last_uid: string;
   uidvalidity: number;
   last_synced_at: string | null;
 }
@@ -134,7 +134,7 @@ export function getCachedEmails(
 export function getCachedEmail(
   accountId: string,
   folder: string,
-  uid: number,
+  uid: string,
 ): CachedEmail | undefined {
   const db = getDb(dbPath());
   return db.prepare(
@@ -150,7 +150,7 @@ export function getCachedEmail(
 export function getCachedEmailBody(
   accountId: string,
   folder: string,
-  uid: number,
+  uid: string,
 ): CachedEmailBody | undefined {
   const db = getDb(dbPath());
   return db.prepare(
@@ -165,7 +165,7 @@ export function getCachedEmailBody(
 export function upsertEmailBody(
   accountId: string,
   folder: string,
-  uid: number,
+  uid: string,
   html: string | null,
   text: string | null,
   headersJson: string | null,
@@ -193,10 +193,10 @@ export function getSyncState(
   const db = getDb(dbPath());
   const row = db.prepare(
     "SELECT last_uid, uidvalidity, last_synced_at FROM email_sync_state WHERE account_id = ? AND folder = ?",
-  ).get(accountId, folder) as { last_uid: number; uidvalidity: number; last_synced_at: string | null } | undefined;
+  ).get(accountId, folder) as { last_uid: number | string; uidvalidity: number; last_synced_at: string | null } | undefined;
 
   return {
-    last_uid: row?.last_uid ?? 0,
+    last_uid: String(row?.last_uid ?? "0"),
     uidvalidity: row?.uidvalidity ?? 0,
     last_synced_at: row?.last_synced_at ?? null,
   };
@@ -208,7 +208,7 @@ export function getSyncState(
 export function updateSyncState(
   accountId: string,
   folder: string,
-  lastUid: number,
+  lastUid: string,
   uidValidity: number,
 ): void {
   execTransaction(() => {
@@ -277,7 +277,7 @@ export function getUidsMissingBodies(
   accountId: string,
   folder: string,
   limit: number,
-): number[] {
+): string[] {
   const db = getDb(dbPath());
   const rows = db.prepare(
     `SELECT ec.uid FROM email_cache ec
@@ -285,7 +285,7 @@ export function getUidsMissingBodies(
        AND ec.uid NOT IN (SELECT uid FROM email_bodies WHERE account_id = ? AND folder = ?)
      ORDER BY ec.date DESC
      LIMIT ?`,
-  ).all(accountId, folder, accountId, folder, limit) as Array<{ uid: number }>;
+  ).all(accountId, folder, accountId, folder, limit) as Array<{ uid: string }>;
   return rows.map(r => r.uid);
 }
 
@@ -320,4 +320,41 @@ export function clearFolderCache(accountId: string, folder: string): { listings:
   });
   checkpointAfterWrite();
   return result;
+}
+
+// ── Account-level cursor (Gmail historyId / Graph deltaLink) ────────────────
+
+/**
+ * Read the account-level sync cursor (history_id + provider) from email_sync_state.
+ * Uses a special folder key '__account__' to distinguish from per-folder sync state.
+ */
+export function getAccountCursor(accountId: string): { historyId: string | null; provider: string } {
+  const db = getDb(dbPath());
+  const row = db.prepare(
+    "SELECT history_id, provider FROM email_sync_state WHERE account_id = ? AND folder = '__account__'",
+  ).get(accountId) as { history_id: string | null; provider: string | null } | undefined;
+
+  return {
+    historyId: row?.history_id ?? null,
+    provider: row?.provider ?? "imap",
+  };
+}
+
+/**
+ * Store (upsert) the account-level sync cursor in email_sync_state.
+ * Uses a special folder key '__account__' to store per-account (not per-folder) state.
+ */
+export function setAccountCursor(accountId: string, historyId: string, provider: string): void {
+  execTransaction(() => {
+    const db = getDb(dbPath());
+    db.prepare(
+      `INSERT INTO email_sync_state (account_id, folder, last_uid, history_id, provider, last_synced_at)
+       VALUES (?, '__account__', '0', ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder) DO UPDATE SET
+         history_id = excluded.history_id,
+         provider = excluded.provider,
+         last_synced_at = datetime('now')`,
+    ).run(accountId, historyId, provider);
+  });
+  checkpointAfterWrite();
 }

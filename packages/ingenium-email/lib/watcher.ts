@@ -96,7 +96,7 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
         const suggestion = await suggestResponse(
           entry.projectId,
           entry.accountId,
-          triage.emailUid,
+          Number(triage.emailUid),
           "INBOX",
         );
 

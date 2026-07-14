@@ -24,6 +24,7 @@ import {
   getOAuthUrl,
   exchangeCode,
   getValidTokens,
+  getFreshGmailToken,
   // Responder
   suggestResponse,
   // Watcher
@@ -37,6 +38,8 @@ import {
   getEngineStatus,
   // Connection state
   setAccountConnected,
+  // Providers
+  GmailProvider,
 } from "ingenium-email";
 import type {
   EmailAccount,
@@ -448,10 +451,10 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
   const result = await getAccountAuthOrError(res, accountId);
   if (!result) return;
 
-  const uid = parseInt(req.params.uid!, 10);
-  if (isNaN(uid)) {
+  const uid = req.params.uid!;
+  if (!uid || typeof uid !== 'string') {
     res.status(422).json({
-      error: { code: "VALIDATION_ERROR", message: "uid must be a number" },
+      error: { code: "VALIDATION_ERROR", message: "uid is required" },
     });
     return;
   }
@@ -841,6 +844,29 @@ emailsRouter.post("/", async (req, res) => {
   }
 });
 
+/** GET /:id/attachments/:attachmentId?account=&folder= — Download an attachment by its part ID. */
+emailsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
+  const accountId = req.query.account as string;
+  const result = await getAccountAuthOrError(res, accountId);
+  if (!result) return;
+
+  const { account } = result;
+  const id = req.params.id!;
+  const attachmentId = req.params.attachmentId!;
+
+  try {
+    // Get fresh token and fetch attachment via the Gmail REST API provider
+    const freshToken = await getFreshGmailToken(account.id);
+    const att = await GmailProvider.getAttachment(account, { accessToken: freshToken } as any, id, attachmentId);
+    res.setHeader('Content-Type', att.mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${att.filename}"`);
+    res.setHeader('Content-Length', att.data.length);
+    res.send(att.data);
+  } catch (err: any) {
+    res.status(500).json({ error: { code: 'ATTACHMENT_ERROR', message: err.message } });
+  }
+});
+
 // ── UID Parameterized Routes ─────────────────────────────────────────────
 
 /**
@@ -852,10 +878,10 @@ emailsRouter.get("/:uid", async (req, res) => {
   const result = await getAccountAuthOrError(res, accountId);
   if (!result) return;
 
-  const uid = parseInt(req.params.uid!, 10);
-  if (isNaN(uid)) {
+  const uid = req.params.uid!;
+  if (!uid || typeof uid !== 'string') {
     res.status(422).json({
-      error: { code: "VALIDATION_ERROR", message: "uid must be a number" },
+      error: { code: "VALIDATION_ERROR", message: "uid is required" },
     });
     return;
   }
@@ -896,10 +922,10 @@ emailsRouter.patch("/:uid/move", async (req, res) => {
   const result = await getAccountAuthOrError(res, accountId);
   if (!result) return;
 
-  const uid = parseInt(req.params.uid!, 10);
-  if (isNaN(uid)) {
+  const uid = req.params.uid!;
+  if (!uid || typeof uid !== 'string') {
     res.status(422).json({
-      error: { code: "VALIDATION_ERROR", message: "uid must be a number" },
+      error: { code: "VALIDATION_ERROR", message: "uid is required" },
     });
     return;
   }
@@ -930,10 +956,10 @@ emailsRouter.patch("/:uid/flags", async (req, res) => {
   const result = await getAccountAuthOrError(res, accountId);
   if (!result) return;
 
-  const uid = parseInt(req.params.uid!, 10);
-  if (isNaN(uid)) {
+  const uid = req.params.uid!;
+  if (!uid || typeof uid !== 'string') {
     res.status(422).json({
-      error: { code: "VALIDATION_ERROR", message: "uid must be a number" },
+      error: { code: "VALIDATION_ERROR", message: "uid is required" },
     });
     return;
   }
@@ -964,10 +990,10 @@ emailsRouter.delete("/:uid", async (req, res) => {
   const result = await getAccountAuthOrError(res, accountId);
   if (!result) return;
 
-  const uid = parseInt(req.params.uid!, 10);
-  if (isNaN(uid)) {
+  const uid = req.params.uid!;
+  if (!uid || typeof uid !== 'string') {
     res.status(422).json({
-      error: { code: "VALIDATION_ERROR", message: "uid must be a number" },
+      error: { code: "VALIDATION_ERROR", message: "uid is required" },
     });
     return;
   }

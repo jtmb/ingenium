@@ -201,7 +201,7 @@ export async function listEmails(
     for await (const msg of client.fetch(pageUids, { envelope: true, uid: true, flags: true, source: true }, { uid: true })) {
       const raw = msg.source?.toString("utf-8") ?? "";
       const parsed = await parseRawEmail(raw);
-      parsed.uid = msg.uid;
+      parsed.uid = String(msg.uid);
       parsed.flags = msg.flags ? [...msg.flags] : [];
       parsed.folder = folder;
       messages.push(parsed);
@@ -226,7 +226,7 @@ export async function listEmails(
   )) {
     const raw = msg.source?.toString("utf-8") ?? "";
     const parsed = await parseRawEmail(raw);
-    parsed.uid = msg.uid;
+    parsed.uid = String(msg.uid);
     parsed.flags = msg.flags ? [...msg.flags] : [];
     parsed.folder = folder;
     messages.push(parsed);
@@ -246,7 +246,7 @@ export async function listEmails(
 export async function getEmail(
   accountId: string,
   folder: string,
-  uid: number,
+  uid: string | number,
 ): Promise<EmailMessage | null> {
   const client = getConnection(accountId);
   await client.mailboxOpen(folder);
@@ -256,7 +256,7 @@ export async function getEmail(
 
   const raw = fetched.source?.toString("utf-8") ?? "";
   const parsed = await parseRawEmail(raw);
-  parsed.uid = fetched.uid;
+  parsed.uid = String(fetched.uid);
   parsed.flags = fetched.flags ? [...fetched.flags] : [];
   parsed.folder = folder;
   return parsed;
@@ -279,7 +279,7 @@ export async function searchEmails(
 /** Move an email from one folder to another (copy + delete). */
 export async function moveEmail(
   accountId: string,
-  uid: number,
+  uid: string | number,
   fromFolder: string,
   toFolder: string,
 ): Promise<void> {
@@ -297,7 +297,7 @@ export async function moveEmail(
 export async function setFlags(
   accountId: string,
   folder: string,
-  uid: number,
+  uid: string | number,
   flags: string[],
 ): Promise<void> {
   const client = getConnection(accountId);
@@ -309,7 +309,7 @@ export async function setFlags(
 export async function deleteEmail(
   accountId: string,
   folder: string,
-  uid: number,
+  uid: string | number,
 ): Promise<void> {
   const client = getConnection(accountId);
   await client.mailboxOpen(folder);

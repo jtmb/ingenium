@@ -14,7 +14,7 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 
 ### THE REQUESTS:
 
-1. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
+<!-- 1. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
 
 2. Dark mode flashes on every page load when not in dark mode... this is not accceptable. Its very brief you will not capture it with a screenshot so don't bother. Fix root problem.
 
@@ -22,7 +22,7 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 
 4. /mail i clicked starred folder and it started resyncing my entire inbox again. Im tired of going in circles/ All issues persists 
 
-5. Not sure how many times i need to say to do proper testing im not sure how obvious things like tyhis i keep calling out, how they get missed and the tests pass? pretty useless test would you not say?
+5. Not sure how many times i need to say to do proper testing im not sure how obvious things like tyhis i keep calling out, how they get missed and the tests pass? pretty useless test would you not say? -->
 
 <!-- 2. Email should be a global app not tied to a specific project. Also from what i can tell all issues persist with email from pervious ask. It seems deepseek decided the rule about load times and caching was optional and skipped it.Emails content is not even loading. Im not sure what kind of playwright tests are being done and how this being missed.
 

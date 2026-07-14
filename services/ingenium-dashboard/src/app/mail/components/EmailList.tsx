@@ -19,8 +19,8 @@ export default function EmailList({
   source,
 }: {
   emails: any[];
-  selectedUid?: number;
-  onSelect: (uid: number) => void;
+  selectedUid?: string;
+  onSelect: (uid: string) => void;
   onPageChange: (p: number) => void;
   total: number;
   page: number;

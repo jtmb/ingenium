@@ -87,7 +87,7 @@ export async function syncFolder(
         emailCache.clearFolderCache(accountId, folder);
       }
 
-      const lastUid = Number(state.uidvalidity) === uidValidity ? state.last_uid : 0;
+      const lastUid = Number(state.uidvalidity) === uidValidity ? Number(state.last_uid) : 0;
       const total = (client.mailbox as { exists: number }).exists;
 
       // ── Resolve UIDs to sync ──────────────────────────────────────────
@@ -121,7 +121,7 @@ export async function syncFolder(
 
       if (uids.length === 0) {
         // No new emails — still persist sync state so future syncs skip this range
-        emailCache.updateSyncState(accountId, folder, lastUid || 0, uidValidity);
+        emailCache.updateSyncState(accountId, folder, String(lastUid || 0), uidValidity);
         logger.info("email", `Synced ${account.email}/${folder}: 0 new (total ${total})`);
         resolve({ folder, synced: 0, total });
         return;
@@ -145,7 +145,7 @@ export async function syncFolder(
           const parsed = await parseRawEmail(raw);
 
           cacheEntries.push({
-            uid: msg.uid,
+            uid: String(msg.uid),
             subject: parsed.subject,
             from_name: parsed.from[0]?.name ?? null,
             from_addr: parsed.from[0]?.address ?? null,
@@ -190,7 +190,7 @@ export async function syncFolder(
       const synced = emailCache.upsertEmailCache(accountId, folder, cacheEntries);
 
       // Update sync state so next sync only fetches what's newer
-      emailCache.updateSyncState(accountId, folder, maxUid, uidValidity);
+      emailCache.updateSyncState(accountId, folder, String(maxUid), uidValidity);
 
       logger.info("email", `Synced ${account.email}/${folder}: ${synced} new (total ${total}, last_uid=${maxUid})`);
 
@@ -212,7 +212,7 @@ export async function syncFolder(
                 ...(p.attachments?.length ? { attachments: p.attachments } : {}),
               });
               emailCache.upsertEmailBody(
-                accountId, folder, p.uid,
+                accountId, folder, String(p.uid),
                 p.html ?? null,
                 p.text ?? null,
                 headersJson,
@@ -297,7 +297,7 @@ export async function backfillFolderBodies(
     await client.mailboxOpen(folder);
 
     let backfilled = 0;
-    for await (const msg of client.fetch(uids, { source: true, uid: true }, { uid: true })) {
+    for await (const msg of client.fetch(uids.map(Number), { source: true, uid: true }, { uid: true })) {
       try {
         const raw = msg.source?.toString("utf-8") ?? "";
         const parsed = await parseRawEmail(raw);
@@ -311,7 +311,7 @@ export async function backfillFolderBodies(
             ...(parsed.attachments?.length ? { attachments: parsed.attachments } : {}),
           });
           emailCache.upsertEmailBody(
-            accountId, folder, msg.uid,
+            accountId, folder, String(msg.uid),
             parsed.body.html ?? null,
             parsed.body.text ?? null,
             headersJson,
@@ -397,7 +397,7 @@ export async function syncAccountFolders(
           })
           .map(f => {
             const st = emailCache.getSyncState(accountId, f.path);
-            return { folder: f.path, synced: 0, total: st.last_uid > 0 ? 0 : f.totalMessages, skipped: true } as SyncResult & { skipped?: boolean };
+            return { folder: f.path, synced: 0, total: Number(st.last_uid) > 0 ? 0 : f.totalMessages, skipped: true } as SyncResult & { skipped?: boolean };
           });
       }
     }
@@ -415,7 +415,7 @@ export async function syncAccountFolders(
         const freshMs = opts.freshMs ?? 3_600_000; // 1 hour default
         if (st.last_synced_at) {
           const msSince = Date.now() - new Date(st.last_synced_at).getTime();
-          if (msSince < freshMs && st.last_uid > 0) {
+          if (msSince < freshMs && Number(st.last_uid) > 0) {
             logger.info("email", `skip fresh: ${account.email}/${folder.path} (synced ${Math.round(msSince / 1000)}s ago)`);
             // 🔴 Fix: total uses 0 (not st.last_uid which is a UID, not a count).
             //    email_sync_state has no total_emails column; we can't determine

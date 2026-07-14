@@ -2,6 +2,9 @@
 
 export * from "./lib/types.js";
 export * from "./lib/providers.js";
+export * from "./lib/providers/mail-provider.js";
+export * from "./lib/providers/gmail.js";
+export * from "./lib/providers/gmail-api.js";
 export * from "./lib/imap.js";
 export * from "./lib/smtp.js";
 export * from "./lib/parser.js";

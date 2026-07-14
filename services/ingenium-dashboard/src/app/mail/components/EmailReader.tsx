@@ -2,6 +2,8 @@
 
 import SmartSuggest from "./SmartSuggest";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+
 /**
  * EmailReader — full email display with headers, body HTML, attachments, and action buttons.
  */
@@ -215,17 +217,22 @@ export default function EmailReader({
           </p>
           <div className="flex flex-wrap gap-2">
             {email.attachments.map((att: any, idx: number) => (
-              <div
+              <a
                 key={att.partId || idx}
-                className="flex items-center gap-2 px-3 py-1.5 border border-[var(--color-border)] rounded text-sm text-[var(--color-text-secondary)]"
+                href={`${API_BASE}/emails/${email.uid}/attachments/${att.partId || idx}?account=${accountId}&folder=${email.folder || 'INBOX'}`}
+                className="flex items-center gap-2 px-3 py-1.5 border border-[var(--color-border)] rounded text-sm text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)]"
+                download={att.filename}
               >
+                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
                 <span className="text-[var(--color-text-primary)] truncate max-w-[200px]">
                   {att.filename}
                 </span>
                 <span className="text-xs text-[var(--color-text-muted)]">
                   ({att.size ? Math.round(att.size / 1024) : "?"} KB)
                 </span>
-              </div>
+              </a>
             ))}
           </div>
         </div>

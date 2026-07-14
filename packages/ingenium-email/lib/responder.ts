@@ -59,7 +59,7 @@ function calculateConfidence(skill: Skill, email: EmailMessage): number {
 export async function suggestResponse(
   projectId: string,
   accountId: string,
-  uid: number,
+  uid: string | number,
   folder: string = "INBOX",
 ): Promise<ResponseSuggestion | null> {
   const email = await getEmail(accountId, folder, uid);
@@ -103,7 +103,7 @@ export async function suggestResponse(
     : body;
 
   return {
-    emailUid: uid,
+    emailUid: String(uid),
     originalSender: email.from[0]?.address ?? "",
     subject,
     body: bodyWithoutSubject,
