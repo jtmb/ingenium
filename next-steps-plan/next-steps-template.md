@@ -14,6 +14,49 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 
 ### THE REQUESTS:
 
+1. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future. The mail implementation has many bugs. The emails contents themselves do not load on some emails and then do a while later  there might be some kind of background process or sync the user is not aware of, either way its bad practice. All the user sees is emails not loading. Also when i try to open attachments i get: {"error":{"code":"ATTACHMENT_ERROR","message":"Gmail API GET /users/me/messages/66616/attachments/0 returned 400 Bad Request — {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Invalid attachment token\",\n    \"errors\": [\n      {\n        \"message\": \"Invalid attachment token\",\n        \"domain\": \"global\",\n        \"reason\": \"invalidArgument\"\n      }\n    ],\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n"}}
+
+2. please redisign /settings to look like the opencode web s ettings pannel. Please see `/home/brajam/repos/gh-llm-bootstrap/tests/vision/image.png`
+
+I would like a settings pannel like that with categorie tabs. Also the setttings screen should be a full screen overlay. 
+Each ui endpoint should have a settings tab:
+Projects
+Skills
+Tasks
+Jobs
+Plugins
+Mail
+Agents
+MCP
+Config
+Observations
+Personality
+Pipeline
+Logs
+
+When you are in a particular ui page (like projects) for example, if the user opens settings while at /projects, it will open the settings tab for projects automatically.
+
+
+**Documentation references bellow:**
+
+---
+
+### Documentation References
+
+| Resource | Path |
+|----------|------|
+| MCP Tools | [`docs/HOW-TO/mcp-tools.md`](docs/HOW-TO/mcp-tools.md) |
+| Architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| Synthesis | [`docs/HOW-TO/synthesis.md`](docs/HOW-TO/synthesis.md) |
+| Personality | [`docs/HOW-TO/personality.md`](docs/HOW-TO/personality.md) |
+| Conventions | [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) |
+| README | [`README.md`](README.md) |
+| Email | [`docs/HOW-TO/email.md`](docs/HOW-TO/email.md) |
+| Self-Learning Pipeline | [`docs/self-learning-pipeline.md`](docs/self-learning-pipeline.md) |
+
+---
+
+
 <!-- 1. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
 
 2. Dark mode flashes on every page load when not in dark mode... this is not accceptable. Its very brief you will not capture it with a screenshot so don't bother. Fix root problem.
@@ -85,21 +128,3 @@ i NEED THIS TO WORK. I need you to also evalutate the current self learning pipe
 
 Make a plan for the above. I want this working in one shot. I want full mail coverage testing on MY inbox not the demo inbox. -->
 
-**Documentation references bellow:**
-
----
-
-### Documentation References
-
-| Resource | Path |
-|----------|------|
-| MCP Tools | [`docs/HOW-TO/mcp-tools.md`](docs/HOW-TO/mcp-tools.md) |
-| Architecture | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
-| Synthesis | [`docs/HOW-TO/synthesis.md`](docs/HOW-TO/synthesis.md) |
-| Personality | [`docs/HOW-TO/personality.md`](docs/HOW-TO/personality.md) |
-| Conventions | [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) |
-| README | [`README.md`](README.md) |
-| Email | [`docs/HOW-TO/email.md`](docs/HOW-TO/email.md) |
-| Self-Learning Pipeline | [`docs/self-learning-pipeline.md`](docs/self-learning-pipeline.md) |
-
----

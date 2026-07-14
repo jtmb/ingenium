@@ -296,6 +296,46 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 ---
 
+### 29. Store the Exact Opaque Identifier an API Returns — Never a Positional Index
+
+**Failure signature:** An API returns an opaque handle (Gmail attachment token, Stripe payment intent ID, upload session token). You store a positional proxy (array index, MIME part number "0", counter) assuming it maps. Or you capture the real token then drop it in a `.map()`. The API rejects it with "Invalid token."
+
+**Rule:** Persist the opaque identifier verbatim through the entire chain: type → storage → API → UI. If your parsing step captures the real token (`part.body.attachmentId`), wire it all the way through to the storage layer and the UI download link. Never let a `.map()` that keeps "convenient" fields drop the one the API actually needs. Positional indices are not identifiers.
+
+**Detection prompt:** "The value I send back to identify this resource — is it the EXACT opaque token the API gave me, or an index/position I assume maps to it? Did a `.map()` drop the real identifier?"
+
+---
+
+### 30. After a Backend Migration, Delete the Old Backend's Workarounds
+
+**Failure signature:** Migrate IMAP→REST, new code compiles, but every workaround built for the OLD constraints stays intact. A 202/poll/background-fetch dance that existed only because IMAP had connection-pool limits and expensive per-connection costs — now causing late-loading content under stateless REST where a single fetch is ~400ms. Users see spinners and "loading..." where content should be instant.
+
+**Rule:** Migration isn't done at compile. Audit every async queue, polling loop, retry pattern, and cache workaround in the migrated module: "Does the constraint that justified this workaround still exist under the new backend?" If the old constraint is gone (no connection pool limits, no expensive per-connection setup, no rate limit on single requests), delete the workaround and use the direct path. The migration is complete only when the old constraints' crutches are removed.
+
+**Detection prompt:** "This polling/queue/retry workaround — does its justifying constraint still exist under the NEW backend? Can I replace this background fetch with a direct, synchronous call?"
+
+---
+
+### 31. Root-Cause Errors Seen During Verification — Never Rationalize to Stop
+
+**Failure signature:** You observe a concrete error during your own testing — a 400 HTTP response, a stack trace, an empty result, incorrect output. Instead of tracing the root cause, you invent an excuse that lets you stop: "just stale cache from the old backend," "pre-existing issue," "transient, will resolve itself." You ship the broken code. The error was structural. The rationalization was unverified.
+
+**Rule:** A concrete error observed during verification is STOP-THE-LINE. Trace the exact value that caused the error BEFORE labeling it as expected, stale, or pre-existing. If you claim "stale cache," reproduce with FRESH data first. An unverified rationalization is a shipped bug. The rationalization is most tempting when it lets you stop working — which is exactly when it's most dangerous. Always ask: "Would this error still happen with fresh, valid data from the new backend?"
+
+**Detection prompt:** "I'm about to call this error 'stale/pre-existing/transient.' Did I trace the value to PROVE it, or am I rationalizing to stop? Can I reproduce the issue with fresh, valid data?"
+
+---
+
+### 32. Dead Conditionals — If Both Branches Do the Same Thing, the Guard Is Broken
+
+**Failure signature:** `if (x) push("\\Seen"); if (!x) push("\\Seen");` — both paths produce the same observable effect. The condition exists but every input leads to the same output. Every email gets marked read regardless of actual state. The conditional looks intentional, survives code review, and ships undetected until users notice the behavior is always wrong.
+
+**Rule:** After writing any if/else or conditional block, trace ONE true input and ONE false input through it. If both produce identical observable effects (same value pushed, same property set, same function called with same args), the guard does nothing — either the condition is inverted (one branch should do the opposite), a branch was copy-pasted without updating, or the entire block should be deleted. Never assume a conditional works just because it compiles.
+
+**Detection prompt:** "For this if/else, trace a true input and a false input — do the observable effects DIFFER? If they're identical, the conditional is dead and the logic is broken."
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -327,6 +367,10 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 | **External concurrency overload** — Firing N ops at a rate-limited external resource | "Is this async loop serialized, or is it firing N ops at a rate-limited resource?" |
 | **Stale-threshold race** — Route staleness check ≤ scheduler cadence → redundant syncs on every request | "Does the route staleness threshold exceed the scheduler's cadence window?" |
 | **Factory-vs-getter misuse** — Calling the connection factory from an operation context instead of the pool getter | "Is this call site an operation calling the factory, or does it use the pool getter?" |
+| **Opaque token lost** — Storing positional index instead of the API's token | "The value I send back — is it the EXACT token the API gave me, or an index?" |
+| **Undead workarounds** — Keeping old-backend crutches after migrating to a new backend | "Does this workaround's justifying constraint still exist under the new backend?" |
+| **Rationalize-to-stop** — Observing error during testing, inventing excuse, shipping broken | "Did I trace the error value to prove it, or am I rationalizing to stop? Can I reproduce with fresh data?" |
+| **Dead conditional** — Both branches of if/else produce the same effect | "For this if/else, do the true and false inputs produce DIFFERENT effects?" |
 
 ---
 
