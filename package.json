@@ -16,7 +16,8 @@
   "devDependencies": {
     "@opencode-ai/plugin": "^1.17.18",
     "@playwright/test": "^1.61.1",
-    "@tailwindcss/postcss": "^4.3.2"
+    "@tailwindcss/postcss": "^4.3.2",
+    "@types/react-dom": "^19.2.3"
   },
   "dependencies": {
     "pino-pretty": "^13.1.3"
