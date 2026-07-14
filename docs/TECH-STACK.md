@@ -43,3 +43,8 @@
 | 017 | Fix trait FK: rebuild personality_traits FK to current observations table after 015 |
 | 018 | Extraction pipeline events: `extraction_completed`/`extraction_failed` event types |
 | 019 | Trait exemplar FK ON DELETE SET NULL for safe observation deletion |
+| 020 | Kanban board data layer — tasks hierarchy, time tracking, comments, activity, links, notifications, board_config |
+| 021 | Agent job scheduler/runner — jobs, job_runs, and job_run_logs tables |
+| 022 | Email cache for instant inbox loads — caches IMAP listings and bodies |
+| 023 | Fix servers UNIQUE constraint: (project_id, name) instead of (name) |
+| 024 | Fix skills UNIQUE constraint: (project_id, name) instead of (name) |

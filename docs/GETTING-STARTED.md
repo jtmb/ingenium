@@ -104,7 +104,7 @@ docker compose up --build
 
 This starts all services in a single container:
   - **API** on http://localhost:4097 — REST API gateway, sole database authority  
-  - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend (16 pages; `/learnings` redirects to `/observations`)  
+  - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend (17 pages; `/observations`)  
   - **opencode-server** on stdio (port :4096) — Auth-enabled OpenCode web server
   - **opencode-iframe** on port :4098 — No-auth iframe for embedded dashboard use
 
@@ -144,8 +144,8 @@ Run these checks to confirm everything is working:
 Navigate to [http://localhost:3000](http://localhost:3000). You should see these pages in the nav bar:
 - **Home** — dashboard overview with feature cards
 - **OpenCode** — embedded OpenCode web UI iframe
-- **Projects** — manage project configurations (create, rename, archive)
-- **Archive** — archived projects with restore/purge
+- **Projects** — manage project configurations (create, rename, archive, restore)
+- **Jobs** — job queue and background task monitoring
 - **Skills** — browse and search AI agent skills with file tree navigation
 - **Tasks** — Kanban task board (todo → in_progress → review → done)
 - **Plugins** — plugin lifecycle management (create, enable, disable)
@@ -234,7 +234,7 @@ Set how often the synthesis pipeline runs:
 
 Once everything is running:
 
-- **Explore the dashboard** — open [http://localhost:3000](http://localhost:3000) and click through all 16 pages
+- **Explore the dashboard** — open [http://localhost:3000](http://localhost:3000) and click through all 17 pages
 - **Read feature guides** — see `docs/HOW-TO/` for per-feature instructions (projects, skills, synthesis, personality, tasks, plugins, servers, settings)
 - **Initialize a project** — use `/init-project` command or `ingenium_project_init` MCP tool
 - **Understand the architecture** — read `docs/ARCHITECTURE.md` for the full system design, data flow, and component responsibilities

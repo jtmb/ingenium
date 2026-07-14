@@ -24,7 +24,7 @@ Before reading, globbing, or grepping for ANY query, you MUST:
 3. Follow rules 3, 5, and 7 (stop-after-5-reads, no-batch-reading,
    prompt-size-awareness)
 
-You are qwen3.5-9b running locally. Without these constraints you
+You are DeepSeek V4 Flash running via the API. Without these constraints you
 will read too many files and lose context, producing empty results.
 
 # Ingenium Explore
