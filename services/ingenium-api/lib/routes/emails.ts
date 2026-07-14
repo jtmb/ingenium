@@ -250,6 +250,8 @@ emailsRouter.delete("/accounts/:id", (req, res) => {
   }
 
   removeAccount(projectId, accountId);
+  // Also clear all cached emails, bodies, and sync state for this account
+  emailCache.clearCache(accountId);
   res.status(204).send();
 });
 
