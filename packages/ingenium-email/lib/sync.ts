@@ -6,6 +6,14 @@ import { getAccount, getCredentials, getGlobalProjectId } from "./accounts.js";
 import { connectAccount, listFolders } from "./imap.js";
 import { parseRawEmail } from "./parser.js";
 
+/**
+ * 🔴 Single-flight deduplication map — prevents concurrent syncFolder calls
+ * for the same account+ folder within one process. Keyed by `${accountId}\x00${folder}`.
+ * In-memory by design: guards concurrency within a process lifetime, not freshness.
+ * A process restart naturally clears the guard, which is correct — new process, new guards.
+ */
+const inFlightSyncs = new Map<string, Promise<SyncResult>>();
+
 export interface SyncResult {
   folder: string;
   synced: number;
@@ -20,8 +28,11 @@ export interface SyncResult {
  * On first sync (last_uid=0) uses a windowed sequence-range fetch to avoid
  * scanning the entire mailbox. Incremental syncs use UID search capped at maxBatch.
  *
- * For INBOX: after syncing listings, also prefetches bodies for the 50 most
- * recent emails so the common email-open path is instant (no IMAP round-trip).
+ * After syncing listings, also prefetches bodies for the most recent 50 emails
+ * so the common email-open path is instant (no IMAP round-trip).
+ *
+ * 🔴 Single-flight guarded: concurrent calls for the same account+folder return
+ * the same promise. Guards concurrency within one process, not freshness.
  *
  * @param maxBatch Maximum emails to sync per call (default 200). Prevents timeout on 62K+ mailboxes.
  * @returns SyncResult with folder name, count of newly synced, total in mailbox.
@@ -32,6 +43,11 @@ export async function syncFolder(
   folder: string,
   maxBatch: number = 200,
 ): Promise<SyncResult> {
+  const key = `${accountId}\x00${folder}`;
+  const existing = inFlightSyncs.get(key);
+  if (existing) return existing;
+
+  const promise = (async (): Promise<SyncResult> => {
   const projectId = getGlobalProjectId();
   const account = getAccount(projectId, accountId);
   if (!account) {
@@ -102,8 +118,8 @@ export async function syncFolder(
 
     // Fetch and cache each new email
     const cacheEntries: emailCache.EmailCacheEntry[] = [];
-    // Track parsed results for INBOX body prefetch (only last 50 most recent)
-    const inboxParsed: Array<{ uid: number; html: string | undefined; text: string | undefined; messageId: string | undefined; threadId: string | undefined; inReplyTo: string | undefined; references: string | undefined }> = [];
+    // Track parsed results for body prefetch (last 50 most recent across ALL folders)
+    const allParsed: Array<{ uid: number; html: string | undefined; text: string | undefined; messageId: string | undefined; threadId: string | undefined; inReplyTo: string | undefined; references: string | undefined }> = [];
     let maxUid = lastUid;
 
     for await (const msg of client.fetch(uids, {
@@ -139,9 +155,9 @@ export async function syncFolder(
           }),
         });
 
-        // Collect parsed body for INBOX body prefetch
-        if (folder === "INBOX" && (parsed.body.html || parsed.body.text)) {
-          inboxParsed.push({
+        // Collect parsed body for body prefetch (all folders)
+        if (parsed.body.html || parsed.body.text) {
+          allParsed.push({
             uid: msg.uid,
             html: parsed.body.html,
             text: parsed.body.text,
@@ -167,10 +183,10 @@ export async function syncFolder(
 
     logger.info("email", `Synced ${account.email}/${folder}: ${synced} new (total ${total}, last_uid=${maxUid})`);
 
-    // ── INBOX body prefetch: cache bodies for the 50 most recent emails ──
-    if (folder === "INBOX" && inboxParsed.length > 0) {
+    // ── Body prefetch: cache bodies for the 50 most recent emails ──
+    if (allParsed.length > 0) {
       try {
-        const recentParsed = inboxParsed
+        const recentParsed = allParsed
           .sort((a, b) => b.uid - a.uid)
           .slice(0, 50);
 
@@ -195,12 +211,12 @@ export async function syncFolder(
           }
         }
         if (bodiesCached > 0) {
-          logger.info("email", `Prefetched ${bodiesCached} bodies for ${account.email}/INBOX`);
+          logger.info("email", `Prefetched ${bodiesCached} bodies for ${account.email}/${folder}`);
         }
       } catch (err: unknown) {
         // Body prefetch failure is non-fatal — listings are already synced
         const msg = err instanceof Error ? err.message : String(err);
-        logger.warn("email", `Body prefetch failed for ${account.email}/INBOX (non-fatal): ${msg}`);
+        logger.warn("email", `Body prefetch failed for ${account.email}/${folder} (non-fatal): ${msg}`);
       }
     }
 
@@ -209,6 +225,87 @@ export async function syncFolder(
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn("email", `syncFolder FAILED for ${account.email}/${folder}: ${msg}`);
     return { folder, synced: 0, total: 0, error: msg };
+  }
+  })(); // close the single-flight IIFE
+
+  inFlightSyncs.set(key, promise);
+  promise.finally(() => { inFlightSyncs.delete(key); });
+  return promise;
+}
+
+/**
+ * Backfill email bodies for a folder. Fetches UIDs that exist in email_cache
+ * but are missing from email_bodies, then fetches and parses each to populate
+ * the body cache. Useful for warming folders that were synced before body
+ * prefetch was added for all folders.
+ *
+ * @param limit Maximum bodies to backfill (default 50).
+ * @returns Count of bodies backfilled, or an error sentinel (logged before return).
+ */
+export async function backfillFolderBodies(
+  _projectId: string,
+  accountId: string,
+  folder: string,
+  limit: number = 50,
+): Promise<{ folder: string; backfilled: number; error?: string }> {
+  const projectId = getGlobalProjectId();
+  const account = getAccount(projectId, accountId);
+  if (!account) {
+    logger.warn("email", `backfillFolderBodies SKIP: account ${accountId} not found`);
+    return { folder, backfilled: 0, error: `Account ${accountId} not found` };
+  }
+
+  const creds = getCredentials(projectId, accountId);
+  if (!creds) {
+    logger.warn("email", `backfillFolderBodies SKIP: no credentials for ${accountId}`);
+    return { folder, backfilled: 0, error: `No credentials for ${accountId}` };
+  }
+
+  const uids = emailCache.getUidsMissingBodies(accountId, folder, limit);
+  if (uids.length === 0) {
+    logger.info("email", `backfillFolderBodies: no bodies to backfill for ${account.email}/${folder}`);
+    return { folder, backfilled: 0 };
+  }
+
+  const auth = { password: creds.password, tokens: creds.tokens };
+
+  try {
+    const client = await connectAccount(account, auth);
+    await client.mailboxOpen(folder);
+
+    let backfilled = 0;
+    for await (const msg of client.fetch(uids, { source: true, uid: true }, { uid: true })) {
+      try {
+        const raw = msg.source?.toString("utf-8") ?? "";
+        const parsed = await parseRawEmail(raw);
+
+        if (parsed.body.html || parsed.body.text) {
+          const headersJson = parsed.messageId ? JSON.stringify({
+            messageId: parsed.messageId,
+            threadId: parsed.threadId,
+            inReplyTo: parsed.inReplyTo,
+            references: parsed.references,
+          }) : null;
+          emailCache.upsertEmailBody(
+            accountId, folder, msg.uid,
+            parsed.body.html ?? null,
+            parsed.body.text ?? null,
+            headersJson,
+          );
+          backfilled++;
+        }
+      } catch {
+        // Skip individual emails that fail to parse
+        continue;
+      }
+    }
+
+    logger.info("email", `backfillFolderBodies: cached ${backfilled} bodies for ${account.email}/${folder}`);
+    return { folder, backfilled };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn("email", `backfillFolderBodies FAILED for ${account.email}/${folder}: ${msg}`);
+    return { folder, backfilled: 0, error: msg };
   }
 }
 
@@ -250,6 +347,12 @@ export async function syncAccountFolders(
 
     const results: SyncResult[] = [];
     for (const folder of folders) {
+      // 🔴 Skip Noselect / Nonexistent folders — they can't be synced (producer-side filter)
+      const flagStr = folder.flags?.join(" ") ?? "";
+      if (/\\noselect|\\nonexistent/i.test(flagStr)) continue;
+      // 🔴 Skip the [Gmail] container — it's a virtual parent, not a real mailbox
+      if (folder.path === "[Gmail]") continue;
+
       if (opts?.skipFresh) {
         const st = emailCache.getSyncState(accountId, folder.path);
         const freshMs = opts.freshMs ?? 3_600_000; // 1 hour default

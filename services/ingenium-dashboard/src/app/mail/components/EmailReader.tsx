@@ -123,12 +123,45 @@ export default function EmailReader({
       )}
 
       {/* Email body */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col">
         {email.body?.html ? (
-          <div
-            className="text-sm text-[var(--color-text-primary)] prose prose-sm max-w-none [&_img]:max-w-full [&_img]:h-auto"
-            dangerouslySetInnerHTML={{ __html: email.body.html }}
-          />
+          (() => {
+            const html = email.body.html;
+            let srcDoc: string;
+            if (/<html[\s>]/i.test(html) || /<body[\s>]/i.test(html)) {
+              // Already an HTML document — inject base tag for link safety
+              srcDoc = html.replace(/<head[^>]*>/i, '$&<base target="_blank">');
+              // If no <head>, prepend full skeleton
+              if (!/<head/i.test(html)) {
+                srcDoc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:8px;font:14px system-ui;color:#111;background:#fff;color-scheme:light}img{max-width:100%;height:auto}</style></head>' + html.replace(/^<html[^>]*>/i, '').replace(/<\/html>\s*$/i, '');
+              }
+            } else {
+              // Content fragment — wrap in full document
+              srcDoc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:8px;font:14px system-ui;color:#111;background:#fff;color-scheme:light}img{max-width:100%;height:auto}</style></head><body>' + html + '</body></html>';
+            }
+
+            // Size guard — if > 2MB, show text fallback
+            if (html.length > 2_000_000) {
+              return (
+                <p className="text-sm text-[var(--color-text-muted)] italic">
+                  This email is too large to preview ({(html.length / 1_048_576).toFixed(1)} MB).
+                  {email.body?.text && (
+                    <> <button onClick={() => {}} className="underline text-blue-500">View plain text</button></>
+                  )}
+                </p>
+              );
+            }
+
+            return (
+              <iframe
+                srcDoc={srcDoc}
+                sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                className="flex-1 w-full border-0 bg-white min-h-[200px]"
+                title="Email content"
+                data-testid="email-html-iframe"
+              />
+            );
+          })()
         ) : email.body?.text ? (
           <pre className="text-sm text-[var(--color-text-primary)] whitespace-pre-wrap font-sans">
             {email.body.text}

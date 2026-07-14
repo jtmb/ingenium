@@ -38,6 +38,7 @@ import {
   // Sync
   syncFolder,
   syncAccountFolders,
+  backfillFolderBodies,
   // Connection state
   setAccountConnected,
 } from "ingenium-email";
@@ -70,7 +71,7 @@ function getTracker(accountId: string): SyncTracker {
   return t;
 }
 
-function markSyncing(accountId: string, folder: string, active: boolean): void {
+export function markSyncing(accountId: string, folder: string, active: boolean): void {
   const t = getTracker(accountId);
   t.folders.set(folder, active);
   t.syncing = [...t.folders.values()].some(v => v);
@@ -359,7 +360,12 @@ emailsRouter.get("/folders", async (req, res) => {
     const { settings } = await import("ingenium-core");
     const cached = settings.getSetting(projectId, `email_folders_${accountId}`);
     if (cached) {
-      const folders = JSON.parse(cached);
+      let folders = JSON.parse(cached);
+      // 🔴 Filter Noselect at the producer (API response), not just the UI
+      folders = folders.filter((f: { flags?: string[]; path: string }) => {
+        const flagStr = f.flags?.join(" ") ?? "";
+        return !(/\\noselect|\\nonexistent/i.test(flagStr)) && f.path !== "[Gmail]";
+      });
       // Fire background refresh
       withImapConnection(account, auth, async (id) => {
         const fresh = await listFolders(id);
@@ -374,12 +380,17 @@ emailsRouter.get("/folders", async (req, res) => {
 
   try {
     const folders = await withImapConnection(account, auth, (id) => listFolders(id));
+    // 🔴 Filter Noselect at the producer (API response), not just the UI
+    const visibleFolders = folders.filter((f) => {
+      const flagStr = f.flags?.join(" ") ?? "";
+      return !(/\\noselect|\\nonexistent/i.test(flagStr)) && f.path !== "[Gmail]";
+    });
     // Cache folder list for future loads
     try {
       const { settings } = await import("ingenium-core");
       settings.setSetting(projectId, `email_folders_${accountId}`, JSON.stringify(folders));
     } catch { /* non-fatal */ }
-    res.json({ data: folders, total: folders.length });
+    res.json({ data: visibleFolders, total: visibleFolders.length });
   } catch (err: any) {
     logger.error("email", `List folders failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
@@ -1090,12 +1101,53 @@ export async function prefetchAllAccounts(): Promise<void> {
 
         logger.info("email", `Startup prefetch: launching sync for ${acct.email}`);
 
-        // Fire and forget — let the scheduler handle retries
-        trackSync(acct.id, null, () =>
-          syncAccountFolders(projectId, acct.id, { skipFresh: true, onFolder: (f, a) => markSyncing(acct.id, f, a) }),
-        ).catch((err: unknown) => {
+        // 🔴 Sequential orchestration: INBOX first (catch new mail + body prefetch),
+        // then backfill remaining bodies, then fire-and-forget other folders.
+        try {
+          await trackSync(acct.id, "INBOX", () =>
+            syncFolder(projectId, acct.id, "INBOX"),
+          );
+        } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("email", `Startup prefetch failed for account ${acct.id}: ${msg}`);
+          logger.warn("email", `Startup prefetch INBOX sync failed for ${acct.email}: ${msg}`);
+        }
+
+        // Backfill remaining bodies for INBOX
+        try {
+          const bfResult = await backfillFolderBodies(projectId, acct.id, "INBOX", 50);
+          if (bfResult.backfilled > 0) {
+            logger.info("email", `Startup prefetch: backfilled ${bfResult.backfilled} INBOX bodies for ${acct.email}`);
+          } else if (bfResult.error) {
+            logger.warn("email", `Startup prefetch backfill INBOX failed for ${acct.email}: ${bfResult.error}`);
+          }
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn("email", `Startup prefetch backfill INBOX error for ${acct.email}: ${msg}`);
+        }
+
+        // Fire-and-forget: remaining folders with 30-min freshness gate,
+        // then backfill bodies for each synced folder
+        setImmediate(() => {
+          trackSync(acct.id, null, async () => {
+            const results = await syncAccountFolders(projectId, acct.id, {
+              skipFresh: true,
+              freshMs: 30 * 60 * 1000,
+              onFolder: (f, a) => markSyncing(acct.id, f, a),
+            });
+            // Backfill bodies for each completed folder (even if skipFresh made synced=0)
+            for (const r of results) {
+              if (!r.error) {
+                backfillFolderBodies(projectId, acct.id, r.folder, 50).catch((e: unknown) => {
+                  const msg = e instanceof Error ? e.message : String(e);
+                  logger.warn("email", `Startup prefetch backfill ${acct.email}/${r.folder} failed: ${msg}`);
+                });
+              }
+            }
+            return results;
+          }).catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.warn("email", `Startup prefetch failed for account ${acct.id}: ${msg}`);
+          });
         });
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);

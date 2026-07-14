@@ -1,6 +1,7 @@
 import { settings, projects, logger, extraction, synthesis, jobs, checkpointAfterWrite } from "ingenium-core";
 import { executeJobRun } from "./job-runner.js";
-import { listAccounts, syncAccountFolders, getGlobalProjectId } from "ingenium-email";
+import { listAccounts, syncAccountFolders, syncFolder, getGlobalProjectId } from "ingenium-email";
+import { markSyncing } from "./routes/emails.js";
 
 const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
 
@@ -115,7 +116,20 @@ async function triggerMailSyncForAllProjects(): Promise<void> {
 
     for (const acct of accounts) {
       try {
-        const results = await syncAccountFolders(globalId, acct.id);
+        // 🔴 Sync INBOX first — catches new mail quickly, body prefetch is built-in
+        const inboxResult = await syncFolder(globalId, acct.id, "INBOX");
+        if (inboxResult.synced > 0) {
+          logger.info("mail-sync", `INBOX sync: ${inboxResult.synced} new for "${acct.email}"`);
+        } else if (inboxResult.error) {
+          logger.warn("mail-sync", `INBOX sync failed for "${acct.email}": ${inboxResult.error}`);
+        }
+
+        // Then sync remaining folders with 30-min freshness gate
+        const results = await syncAccountFolders(globalId, acct.id, {
+          skipFresh: true,
+          freshMs: 30 * 60 * 1000,
+          onFolder: (f, a) => markSyncing(acct.id, f, a),
+        });
         const synced = results.reduce((sum, r) => sum + r.synced, 0);
         const errors = results.filter((r) => r.error);
         if (synced > 0 || errors.length > 0) {

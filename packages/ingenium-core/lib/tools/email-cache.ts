@@ -269,6 +269,27 @@ export function getAccountFoldersSyncStatus(accountId: string): FolderSyncStatus
 // ── Cache maintenance ──────────────────────────────────────────────────────
 
 /**
+ * Return UIDs from email_cache that are missing corresponding entries in
+ * email_bodies. Used by backfillFolderBodies to find which emails need
+ * body fetching. Returns the most recent UIDs first (date DESC), capped at limit.
+ */
+export function getUidsMissingBodies(
+  accountId: string,
+  folder: string,
+  limit: number,
+): number[] {
+  const db = getDb(dbPath());
+  const rows = db.prepare(
+    `SELECT ec.uid FROM email_cache ec
+     WHERE ec.account_id = ? AND ec.folder = ?
+       AND ec.uid NOT IN (SELECT uid FROM email_bodies WHERE account_id = ? AND folder = ?)
+     ORDER BY ec.date DESC
+     LIMIT ?`,
+  ).all(accountId, folder, accountId, folder, limit) as Array<{ uid: number }>;
+  return rows.map(r => r.uid);
+}
+
+/**
  * Delete all cached data for an account (both email listings and bodies).
  * Call this when an account is removed or the user wants a fresh sync.
  */
