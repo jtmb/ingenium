@@ -15,6 +15,7 @@ export default function FolderSidebar({
   onAddAccount,
   onDeleteAccount,
   folders: folderData,
+  syncingFolders,
 }: {
   accounts: any[];
   selectedAccount: string;
@@ -25,6 +26,7 @@ export default function FolderSidebar({
   onAddAccount: () => void;
   onDeleteAccount?: (accountId: string) => void;
   folders?: any[];
+  syncingFolders?: string[];
 }) {
   const defaultFolders = [
     { name: "INBOX", path: "INBOX", unreadMessages: 0 },
@@ -146,6 +148,7 @@ export default function FolderSidebar({
       <div className="flex flex-col gap-0.5 mt-1">
         {folders.map((folder: any) => {
           const isSelected = selectedFolder === folder.path || selectedFolder === folder.name;
+          const isSyncing = syncingFolders?.includes(folder.path || folder.name);
           return (
             <button
               key={folder.path || folder.name}
@@ -156,7 +159,15 @@ export default function FolderSidebar({
                   : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
               }`}
             >
-              <span className="truncate">{folder.name || folder.path}</span>
+              <span className="flex items-center gap-1.5 truncate">
+                {isSyncing && (
+                  <svg className="animate-spin w-3.5 h-3.5 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                )}
+                <span className="truncate">{folder.name || folder.path}</span>
+              </span>
               {(folder.totalMessages ?? 0) > 0 && (
                 <span className="text-xs text-[var(--color-text-muted)] ml-2">
                   {folder.totalMessages}
