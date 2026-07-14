@@ -152,11 +152,11 @@ export default function FolderSidebar({
       <div className="flex flex-col gap-0.5 mt-1">
         {folders.map((folder: any) => {
           const isSelected = selectedFolder === folder.path || selectedFolder === folder.name;
-          const isSyncing = syncingFolders?.includes(folder.path || folder.name);
           const folderKey = folder.path || folder.name;
           const syncStatus = folderSyncStatuses?.find(
             (fs: any) => fs.folder === folderKey
           );
+          const isSyncing = syncingFolders?.includes(folderKey) && (syncStatus?.cachedCount ?? 0) === 0;
           const engineState = syncStatus?.engineState;
           const showEngineProgress =
             engineState && engineState.bodiesCached < engineState.bodiesWindow;
