@@ -130,7 +130,7 @@ export async function syncFolder(
       // Fetch and cache each new email
       const cacheEntries: emailCache.EmailCacheEntry[] = [];
       // Track parsed results for body prefetch (last 50 most recent across ALL folders)
-      const allParsed: Array<{ uid: number; html: string | undefined; text: string | undefined; messageId: string | undefined; threadId: string | undefined; inReplyTo: string | undefined; references: string | undefined }> = [];
+      const allParsed: Array<{ uid: number; html: string | undefined; text: string | undefined; messageId: string | undefined; threadId: string | undefined; inReplyTo: string | undefined; references: string | undefined; attachments?: { filename: string; size: number; mimeType: string; partId: string }[] }> = [];
       let maxUid = lastUid;
 
       for await (const msg of client.fetch(uids, {
@@ -204,12 +204,13 @@ export async function syncFolder(
           let bodiesCached = 0;
           for (const p of recentParsed) {
             try {
-              const headersJson = p.messageId ? JSON.stringify({
+              const headersJson = JSON.stringify({
                 messageId: p.messageId,
                 threadId: p.threadId,
                 inReplyTo: p.inReplyTo,
                 references: p.references,
-              }) : null;
+                ...(p.attachments?.length ? { attachments: p.attachments } : {}),
+              });
               emailCache.upsertEmailBody(
                 accountId, folder, p.uid,
                 p.html ?? null,
@@ -302,12 +303,13 @@ export async function backfillFolderBodies(
         const parsed = await parseRawEmail(raw);
 
         if (parsed.body.html || parsed.body.text) {
-          const headersJson = parsed.messageId ? JSON.stringify({
+          const headersJson = JSON.stringify({
             messageId: parsed.messageId,
             threadId: parsed.threadId,
             inReplyTo: parsed.inReplyTo,
             references: parsed.references,
-          }) : null;
+            ...(parsed.attachments?.length ? { attachments: parsed.attachments } : {}),
+          });
           emailCache.upsertEmailBody(
             accountId, folder, msg.uid,
             parsed.body.html ?? null,
