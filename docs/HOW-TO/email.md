@@ -372,13 +372,17 @@ Gmail message IDs are **hex strings** (not integers). All cached messages are ke
 
 ### Attachment Downloads
 
-Attachment metadata is discovered during body fetch (`walkParts()` in `gmail.ts`). Attachments are cached in `headers_json` within the `email_bodies` table with Gmail attachment IDs. Downloadable via:
+Attachment metadata is discovered during body fetch (`walkParts()` in `gmail.ts`). Each attachment carries two identifiers:
+- **`partId`** — The MIME part identifier within the message (e.g., `"0"`, `"1"`)
+- **`attachmentId`** — An opaque Gmail API token for retrieving the attachment data
+
+Both are cached in `headers_json` within the `email_bodies` table. The frontend sends the `attachmentId` to the download endpoint:
 
 ```
 GET /api/v1/emails/:id/attachments/:attachmentId
 ```
 
-The attachment data is fetched on-demand from the Gmail API using `users.messages.attachments.get` and decoded from base64url.
+The route handler resolves the real attachment ID by walking the Gmail message parts. This works for both old caches (which stored only `partId`) and new caches (which include the `attachmentId` from the API). The attachment data is fetched on-demand from the Gmail API using `users.messages.attachments.get` and decoded from base64url.
 
 ### Rate Limits
 
@@ -413,7 +417,7 @@ Each worker maintains a priority-ordered task queue with deduplication:
 |----------|-----------|---------|
 | **P0** | Delta poll (history.list) | Every 30s — cheap, empty response when nothing new |
 | **P1** | `sync-folder` (boosted) | User clicks a folder in UI |
-| **P1** | `backfill-bodies` (boosted UID) | GET /:uid returns 202 (body cache miss) |
+| **P1** | `backfill-bodies` (boosted UID) | On-demand body fetch hint after synchronous Gmail API response (user sees body immediately; engine caches it for next read) |
 | **P2** | `sync-folder` (INBOX stale) | INBOX headers older than sync interval (default 5 min) |
 | **P3** | `sync-folder` (round-robin) | All folders cycled, skip-fresh gate (DB `last_synced_at`) |
 | **P4** | `backfill-bodies` (capped) | Headers synced but bodies uncached, up to `mail_body_window` |
@@ -440,19 +444,19 @@ When `changesSince()` returns `fullResyncRequired: true` (initial sync or expire
 3. After headers are cached, P4 body backfill tasks are enqueued automatically
 4. The new `historyId` from Gmail is stored as the cursor for future delta polls
 
-### Route Contract (Cache-Only)
+### Route Contract (Cache-First with Synchronous Fallback)
 
-All read routes are **cache-only — never block on the Gmail API**:
+Read routes serve from cache first. Only `GET /:uid` makes synchronous Gmail API calls on cache-miss for immediate body delivery. All other routes are **cache-only — never block on the Gmail API**:
 
 | Route | Behavior |
 |-------|----------|
 | `GET /` (email list) | Serves from `email_cache`. Cache hit → return instantly with `source: "cache"`. Cache miss → return `source: "pending"` + empty array. `?refresh=true` calls `boostFolder()` (non-blocking hint to engine). |
-| `GET /:uid` (single email) | Serves body from `email_bodies` cache. Body cached → return full email. Body miss → `boostBody()` + `boostFolder()` hints + **202 Accepted** with `retry: true`. Client retries in ~1.5s. |
+| `GET /:uid` (single email) | Serves body from `email_bodies` cache. Body cached → return full email with `source: "cache"`. Body miss → fetches body **synchronously** from Gmail API (~400ms) and returns 200 with `source: "live"`. 202 polling remains only as a timeout/error fallback. Background `boostBody()` hint enqueued to cache for subsequent reads. |
 | `GET /search` | Filters cached emails in-memory. No cached data → returns `source: "pending"` + hints engine. |
 | `GET /folders` | Reads from settings cache (`email_folders_<accountId>`). Empty → hints engine, returns `source: "pending"`. |
 | `GET /triage` | Filters cached INBOX emails for unread items. Empty → hints engine. |
 
-**Key principle**: Routes never call the Gmail API directly. All I/O flows through the engine's priority queue via `boostFolder()` / `boostBody()` hints.
+**Key principle**: All other routes never call the Gmail API directly — I/O flows through the engine's priority queue via `boostFolder()` / `boostBody()` hints. `GET /:uid` is the sole exception, calling the Gmail API synchronously on cache-miss for immediate body delivery and hinting the engine to cache it for subsequent reads.
 
 ### Bounded Windows
 
