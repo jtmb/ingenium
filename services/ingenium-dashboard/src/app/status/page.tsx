@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import ServiceOverlay from "./ServiceOverlay";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,10 @@ interface Service {
   restartCount: number;
   port: number;
   description: string;
+  pid?: number;
+  exitstatus?: number;
+  spawnerr?: string;
+  stop?: number;
 }
 
 interface ApplicationInfo {
@@ -19,6 +24,25 @@ interface ApplicationInfo {
   state: "healthy" | "degraded" | "stopped" | "starting" | "idle" | "disabled" | "error" | "unknown";
   description: string;
   detail?: string;
+}
+
+interface ServiceDetail {
+  name: string;
+  state: string;
+  pid?: number;
+  port?: number;
+  uptime: number;
+  exitstatus?: number;
+  spawnerr?: string;
+  stop?: number;
+  description: string;
+}
+
+interface ServiceLogs {
+  name: string;
+  log: string;
+  offset: number;
+  more: boolean;
 }
 
 interface StatusResponse {
@@ -181,6 +205,11 @@ function healthBanner(
 export default function StatusPage() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedService, setSelectedService] = useState<string | null>(null);
+
+  const handleServiceClick = (name: string) => {
+    setSelectedService(name);
+  };
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -264,7 +293,8 @@ export default function StatusPage() {
           return (
             <div
               key={svc.name}
-              className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 hover:shadow-md transition-shadow"
+              className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 cursor-pointer hover:shadow-lg transition-shadow"
+              onClick={() => handleServiceClick(svc.name)}
             >
               {/* Service name */}
               <h2 className="text-lg font-semibold text-[var(--color-text-primary)] mb-1">
@@ -319,7 +349,8 @@ export default function StatusPage() {
               return (
                 <div
                   key={app.name}
-                  className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-4 hover:shadow-md transition-shadow"
+                  className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-4 cursor-pointer hover:shadow-lg transition-shadow"
+                  onClick={() => handleServiceClick(app.name)}
                 >
                   <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">
                     {app.name}
@@ -358,6 +389,14 @@ export default function StatusPage() {
         <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-4 mt-4">
           <p className="text-[var(--color-error-text)] text-sm">RPC error: {status.data.error}</p>
         </div>
+      )}
+
+      {/* Service detail overlay */}
+      {selectedService && (
+        <ServiceOverlay
+          name={selectedService}
+          onClose={() => setSelectedService(null)}
+        />
       )}
 
       {/* CSS keyframes for status dot animations */}
