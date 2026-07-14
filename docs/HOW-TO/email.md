@@ -1,52 +1,52 @@
 # Email Client — How-To Guide
 
-This document covers setting up and using the Ingenium email client with Gmail and Outlook OAuth2 + IMAP/SMTP support.
+This document covers setting up and using the Ingenium email client with Gmail OAuth2 + REST API and SMTP support.
 
 ## Overview
 
 The Ingenium email client provides:
 - **OAuth2 authentication** for secure access to Gmail and Outlook accounts
-- **IMAP inbox viewing** via imapflow async client
+- **Gmail REST API inbox viewing** via thin `fetch()` client
 - **Email composition** through SMTP (nodemailer)
-- **MIME parsing** with mailparser for message content extraction
+- **MIME parsing** for message content extraction
 - **Search functionality** across email subjects, senders, and bodies
 
 ## Cache-First Architecture (Never-Block)
 
-The email client uses a **cache-first** pattern to ensure the UI never blocks on live IMAP connections:
+The email client uses a **cache-first** pattern to ensure the UI never blocks on live API calls:
 
 ### How It Works
 
 1. **GET emails always serves from cache** — The API (`GET /api/v1/emails/list`) always checks the SQLite email cache first. If cached data exists, it returns immediately (source: `"cache"`) and triggers a background stale-cache refresh. The user sees data instantly.
 
-2. **Cache miss = instant return + background fetch** — If the cache is empty (first request), the API returns immediately with whatever is available and fires a background sync. The UI **never waits** on IMAP.
+2. **Cache miss = instant return + background fetch** — If the cache is empty (first request), the API returns immediately with whatever is available and fires a background sync. The UI **never waits** on the Gmail API.
 
-3. **Body caching** — When an email is opened for reading, the body (HTML + text) is fetched from IMAP and cached via `emailCache.getCachedEmailBody()`. Subsequent reads return from cache with `source: "cache"`.
+3. **Body caching** — When an email is opened for reading, the body (HTML + text) is fetched from the Gmail API and cached via `emailCache.getCachedEmailBody()`. Subsequent reads return from cache with `source: "cache"`.
 
-4. **Startup prefetch** — On API server start, `prefetchAllAccounts()` iterates all connected accounts and triggers a background sync for all folders with `skipFresh: true`, warming only stale caches before any user interaction.
+4. **Startup prefetch** — On API server start, `startEngine()` launches the sync engine workers for all connected accounts. Workers auto-discover folders and begin syncing with the freshness gate preventing full re-syncs.
 
-5. **`skipFresh` option** — `syncAccountFolders()` accepts a `skipFresh` option. When `true`, folders synced within the `freshMs` window (default: 1 hour, based on DB `last_synced_at` timestamp) are skipped. This prevents full resyncs on every restart — the guard is derived from durable DB state, not an ephemeral in-memory Set.
+5. **Freshness gate** — The sync engine uses the durable DB `last_synced_at` timestamp to skip folders synced within the `mail_sync_interval` window. This replaces the old ephemeral in-memory Set pattern.
 
 ### Why Cache-First?
 
-- **IMAP is slow** — Live IMAP LIST operations can take 2-10s depending on folder size and network latency
-- **OAuth2 token refresh** — Expired tokens add latency to every IMAP operation
+- **The Gmail API is rate-limited** — 250 quota units/sec means we must be efficient
+- **Delta sync is cheap** — `history.list()` with no changes returns instantly and costs ~1 unit, but full message fetches cost 5 units each
 - **Multiple folders** — A single inbox view may need to cache INBOX, Sent, Drafts, etc.
 - **Container restarts** — Supervisord autorestart clears in-memory state, but the SQLite cache persists across restarts
 
-> **Note**: The cache is backed by the `email_cache` and `email_bodies` tables in the Ingenium SQLite database. It persists across container restarts. A "force refresh" parameter is available to bypass cache and re-fetch from IMAP.
+> **Note**: The cache is backed by the `email_cache` and `email_bodies` tables in the Ingenium SQLite database. It persists across container restarts. A "force refresh" parameter is available to bypass cache and re-fetch from the Gmail API.
 
 ### 🔴 Per-Folder Cache Invalidation
 
-When an IMAP folder's UIDVALIDITY changes (server renumbered UIDs), only that folder's cache is cleared via `clearFolderCache(accountId, folder)` — NOT the entire account. This prevents cascading full-resync failures when a virtual folder (e.g., Gmail's Starred) changes its UIDVALIDITY while INBOX is perfectly healthy. Previous code used `clearCache(accountId)` which nuked all 12+ folders on any single UIDVALIDITY change.
+Since the Gmail API uses stable message IDs (hex strings, not IMAP UIDs), UIDVALIDITY-based invalidation no longer applies. Cache is cleared per-folder via `clearFolderCache(accountId, folder)` only when explicitly needed (e.g., account re-authentication or user-requested reset). Gmail's `history.list()` handles incremental updates — messages moved between labels are reflected in `labelsAdded`/`labelsRemoved` history entries without cache invalidation.
 
 ### 🔴 Folder List Caching
 
-The IMAP folder list is cached per-account via the settings key `email_folders_<accountId>`. On first load, the list is fetched from live IMAP and cached in settings. Subsequent loads serve from cache immediately while triggering a background refresh. This prevents a 3-5s IMAP LIST call on every folder pane mount.
+The folder list is mapped from Gmail labels via the API and cached per-account via the settings key `email_folders_<accountId>`. On first load, the list is fetched from the Gmail API and cached in settings. Subsequent loads serve from cache immediately while triggering a background refresh.
 
 ### 🔴 No In-Memory Prefetch Guard
 
-The old `prefetchedAccounts` in-memory Set that gated background prefetch has been **removed**. It caused full resync storms on every API restart because the Set was always empty after a deploy. Replaced by the `skipFresh` option on `syncAccountFolders()` which checks the durable DB `last_synced_at` timestamp — persists across restarts.
+The old `prefetchedAccounts` in-memory Set that gated background prefetch has been **removed**. It caused full resync storms on every API restart because the Set was always empty after a deploy. Replaced by the freshness gate which checks the durable DB `last_synced_at` timestamp — persists across restarts.
 
 ## Prerequisites
 
@@ -312,43 +312,137 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 | `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` | Full email display + actions | Frontend |
 | `services/ingenium-dashboard/src/app/components/Overlay.tsx` | Generic modal overlay component | Frontend |
 | `services/ingenium-dashboard/src/app/mail/oauth/callback/page.tsx` | OAuth callback handler + "Go to Mail" | Frontend |
-| `packages/ingenium-email/lib/sync.ts` | `syncAccountFolders()` with `skipFresh` option, `clearFolderCache()` per-folder invalidation | Email client core |
+| `packages/ingenium-email/lib/sync-engine.ts` | Background sync engine with priority queue, Gmail delta poll, body backfill, per-account workers | Email client core |
+| `packages/ingenium-email/lib/providers/gmail.ts` | GmailProvider — MailProvider implementation using Gmail REST API | Email client core |
+| `packages/ingenium-email/lib/providers/mail-provider.ts` | MailProvider interface contract for pluggable backends | Email client core |
+| `packages/ingenium-email/lib/providers/gmail-api.ts` | Thin `fetch()`-based Gmail REST API client | Email client core |
 | `packages/ingenium-core/lib/tools/email-cache.ts` | `clearFolderCache()`, `getSyncState()`, `clearCache()` | Core library |
 
-## Sync Architecture (July 2026)
+## Sync Architecture (Gmail API, July 2026)
+
+### Gmail API Provider
+
+The email client uses **Gmail REST API** (`https://mail.google.com/` scope) instead of IMAP. The `GmailProvider` (`packages/ingenium-email/lib/providers/gmail.ts`) implements the `MailProvider` interface with a thin `fetch()`-based client (`gmail-api.ts`) — no heavy `googleapis` dependency.
+
+Key differences from IMAP:
+- **No connection pool** — Each API call is a stateless HTTPS request. No persistent IMAP connections to manage.
+- **No UIDVALIDITY** — Gmail message IDs are stable hex strings. Cache invalidation due to UID renumbering does not occur.
+- **No `[Gmail]/` folder aliases** — Gmail labels map directly to flat folder names. No Noselect filtering needed.
+- **No IDLE watch** — Delta polling via `history.list()` replaces IMAP IDLE for new mail detection.
+
+### Delta Sync (history.list)
+
+The sync engine uses Gmail's **history API** for incremental delta sync:
+
+```
+history.list(startHistoryId) → { history: [...], historyId }
+```
+
+- Returns only **what changed** since the last poll: messages added, messages deleted, label changes.
+- **Empty response** when nothing new — the `historyId` cursor advances without any data transfer.
+- Initial sync (no cursor) triggers a **full resync** — `listMessages()` batches metadata gets.
+- If the `historyId` expires (Gmail retains history for ~7 days), the provider returns `fullResyncRequired: true` and the engine re-syncs all folders.
+
+The delta poll runs every **30 seconds** (P0 priority) — cheap because empty responses cost ~1 quota unit.
+
+### Label → Folder Mapping
+
+Gmail labels are mapped to folder names for the cache layer:
+
+| Label ID | Folder Name | Notes |
+|----------|-------------|-------|
+| `INBOX` | INBOX | Primary inbox |
+| `SENT` | Sent | Sent messages |
+| `DRAFT` | _(skipped)_ | Not exposed as a folder in the provider |
+| `SPAM` | Spam | Junk/spam |
+| `TRASH` | Trash | Deleted messages |
+| `STARRED` | Starred | Starred/flagged messages |
+| `IMPORTANT` | Important | Gmail's automatic importance |
+| `CATEGORY_*` | _(skipped)_ | Gmail category labels are filtered out |
+| `CHAT` | _(skipped)_ | Chat messages excluded |
+| Custom (`type=user`) | Label display name | User-created labels use their name as folder |
+
+### Message IDs
+
+Gmail message IDs are **hex strings** (not integers). All cached messages are keyed by string ID throughout the `email_cache` and `email_bodies` tables. The migration `025_email_string_ids.sql` rebuilds the `uid` columns from INTEGER to TEXT.
+
+### Token Refresh
+
+`getFreshGmailToken()` in `oauth.ts` auto-refreshes OAuth tokens **60 seconds before expiry** using `google-auth-library`. The refresh is transparent — every provider method calls `getFreshGmailToken()` at the top, regardless of the `tokens` parameter passed in.
+
+### Attachment Downloads
+
+Attachment metadata is discovered during body fetch (`walkParts()` in `gmail.ts`). Attachments are cached in `headers_json` within the `email_bodies` table with Gmail attachment IDs. Downloadable via:
+
+```
+GET /api/v1/emails/:id/attachments/:attachmentId
+```
+
+The attachment data is fetched on-demand from the Gmail API using `users.messages.attachments.get` and decoded from base64url.
+
+### Rate Limits
+
+The Gmail API enforces a **250 quota units per second** per user. Cost breakdown:
+
+| Operation | Cost |
+|-----------|------|
+| `history.list` (empty response) | ~1 unit (free if nothing changed) |
+| `messages.list` (search/query) | 1 unit |
+| `messages.get` (metadata) | 5 units |
+| `messages.get` (full body) | 5 units |
+| `messages.send` | 100 units |
+| `messages.modify` (labels) | 5 units |
+| `users.attachments.get` | 5 units |
+| `users.labels.list` | 1 unit |
+
+**Mitigations:**
+- Delta poll (30s) costs ~1 unit because empty responses are free
+- Body fetches are batched in groups of 5 with **200ms yield** between batches
+- Initial sync uses `batchGetMessages()` to fetch metadata in parallel (stays under quota)
+- The offline window (`mail_offline_window`, default 500) caps metadata per folder
 
 ### Background Sync Engine
 
-The email client uses a **singleton background sync engine** (`packages/ingenium-email/lib/sync-engine.ts`) that owns **all IMAP I/O**. One engine per container launches one worker per connected email account. Workers are serialized per-account — no concurrent IMAP connections for the same account.
+The email client uses a **singleton background sync engine** (`packages/ingenium-email/lib/sync-engine.ts`) that owns **all Gmail API I/O**. One engine per container launches one worker per connected email account. Workers are serialized per-account — no concurrent API calls for the same account.
 
 #### Priority Queue
 
-Each worker maintains a priority-ordered task queue. Tasks are deduplicated (same account + folder + type at equal or higher priority prevents duplicates):
+Each worker maintains a priority-ordered task queue with deduplication:
 
 | Priority | Task Type | Trigger |
 |----------|-----------|---------|
-| **P0** | `sync-folder` (INBOX) | IDLE watch / new mail detected via EXISTS count change |
+| **P0** | Delta poll (history.list) | Every 30s — cheap, empty response when nothing new |
 | **P1** | `sync-folder` (boosted) | User clicks a folder in UI |
 | **P1** | `backfill-bodies` (boosted UID) | GET /:uid returns 202 (body cache miss) |
 | **P2** | `sync-folder` (INBOX stale) | INBOX headers older than sync interval (default 5 min) |
 | **P3** | `sync-folder` (round-robin) | All folders cycled, skip-fresh gate (DB `last_synced_at`) |
-| **P4** | `backfill-bodies` (capped) | Headers synced but bodies remain uncached, up to `mail_body_window` |
-| **P5** | `backfill-bodies` (deeper) | Body window already full but folder is boosted and more bodies exist |
+| **P4** | `backfill-bodies` (capped) | Headers synced but bodies uncached, up to `mail_body_window` |
+| **P5** | `backfill-bodies` (deeper) | Body window full but boosted folder has more bodies |
 
-**Per-account serialization**: One worker connection per account, sequential task execution. Body fetches batch in groups of 25 with 500ms yield between batches. The entire loop yields 1s between full account ticks.
+**Per-account serialization**: One worker per account, sequential task execution. Body fetches batch in groups of 5 with 200ms yield between batches. The entire loop yields 1s between full account ticks.
 
 **Heartbeat**: `engineState.heartbeatAt` is updated on every loop tick (even on errors). The dashboard / status page checks heartbeat age to detect stuck workers.
 
 #### Task Lifecycle
 
-1. **INBOX exists check** (every 60s) — lightweight `mailboxOpen` + compare EXISTS count. If changed, enqueues a P0 INBOX sync.
+1. **Delta poll** (every 30s) — calls `provider.changesSince(historyId)`. Applies upserts/deletes to cache, advances cursor.
 2. **Maintenance tick** (when queue empty) — generates P1 boosted folders, P2 stale INBOX, P3 round-robin, P4 body backfill, P5 deep backfill.
-3. **Task execution** — `sync-folder` fetches headers (capped at `mail_offline_window`), updates folder state. `backfill-bodies` fetches raw IMAP content, parses, stores to `email_bodies` table.
+3. **Task execution** — `sync-folder` calls `provider.listMessages()` (fetches metadata headers, capped at `mail_offline_window`), updates folder state.
+
+   `backfill-bodies` calls `provider.getBody()` for each missing UID, stores HTML/text/attachments to `email_bodies` table.
 4. **Watchdog** — Each task has a 5-minute watchdog timer. Stuck tasks are aborted with an error.
+
+#### Full Resync Flow
+
+When `changesSince()` returns `fullResyncRequired: true` (initial sync or expired historyId):
+1. Engine enqueues P2 `sync-folder` tasks for **all** folders
+2. Each folder's `listMessages()` fetches metadata headers (capped at `mail_offline_window`)
+3. After headers are cached, P4 body backfill tasks are enqueued automatically
+4. The new `historyId` from Gmail is stored as the cursor for future delta polls
 
 ### Route Contract (Cache-Only)
 
-All read routes are **cache-only — never block on live IMAP**:
+All read routes are **cache-only — never block on the Gmail API**:
 
 | Route | Behavior |
 |-------|----------|
@@ -358,11 +452,11 @@ All read routes are **cache-only — never block on live IMAP**:
 | `GET /folders` | Reads from settings cache (`email_folders_<accountId>`). Empty → hints engine, returns `source: "pending"`. |
 | `GET /triage` | Filters cached INBOX emails for unread items. Empty → hints engine. |
 
-**Key difference from previous architecture**: Routes never call `syncFolder()` or `backfillFolderBodies()` directly. All IMAP I/O flows through the engine's priority queue via `boostFolder()` / `boostBody()` hints.
+**Key principle**: Routes never call the Gmail API directly. All I/O flows through the engine's priority queue via `boostFolder()` / `boostBody()` hints.
 
 ### Bounded Windows
 
-Two configurable caps prevent unbounded sync across all folders:
+Two configurable caps prevent unbounded sync:
 
 | Setting Key | Default | Purpose |
 |-------------|---------|---------|
@@ -410,13 +504,9 @@ interface EngineStatus {
 
 The folder state machine progresses: `idle → syncing-headers → backfilling-bodies → complete`. Error state is set on failures; the next successful task transitions out of error. The `GET /sync-status` API endpoint returns both a backward-compatible summary and the raw `engine` object.
 
-### Noselect Filtering
-
-Folders with the IMAP `\Noselect` or `\Nonexistent` flag (e.g., `[Gmail]` bare container) are filtered out at the engine worker startup in `listFolders()` and at the API response layer in `GET /folders` (both cached and fresh paths). The dashboard also applies a flag‑based belt‑and‑braces filter.
-
 ### Engine Lifecycle
 
-- **Start**: `startEngine(projectId)` — idempotent, launches workers for all connected accounts. Workers connect to IMAP once and reuse the connection.
+- **Start**: `startEngine(projectId)` — idempotent, launches workers for all connected accounts via `GmailProvider`.
 - **Stop**: `stopEngine()` — aborts all workers via AbortController, waits for graceful shutdown.
 - **Restart safety**: Workers survive container restarts because the email cache is SQLite-backed (persistent). On restart, `startEngine()` re-launches workers; the freshness gate (`last_synced_at` in DB) prevents full re-syncs.
 - **Migration path**: `prefetchAllAccounts()` is deprecated — delegates to `startEngine()` for backward compatibility.
@@ -427,4 +517,4 @@ Emails with HTML bodies render in a **sandboxed `<iframe>`** (`sandbox="allow-sa
 
 ---
 
-*Last updated: July 14, 2026 — Background sync engine with priority queue, cache-only routes, bounded windows, per-folder state machine.*
+*Last updated: July 14, 2026 — Gmail API provider with delta sync, priority queue, cache-only routes, bounded windows.*
