@@ -7,6 +7,21 @@ import { ALL_TABS, tabForPathname } from "./tabs";
 import type { SettingsTab } from "./tabs";
 import SettingsSidebar from "./SettingsSidebar";
 import PlaceholderPanel from "./PlaceholderPanel";
+import { GeneralPanel, MailPanel, PipelinePanel, ConfigPanel } from "./panels";
+import type { ComponentType } from "react";
+
+/** Registry mapping tab IDs to their real panel components. */
+const TAB_PANELS: Record<string, ComponentType> = {
+  general: GeneralPanel,
+  mail: MailPanel,
+  pipeline: PipelinePanel,
+  config: ConfigPanel,
+};
+
+function TabPanel({ tabId, activeTab }: { tabId: string; activeTab: SettingsTab }) {
+  const Panel = TAB_PANELS[tabId];
+  return Panel ? <Panel /> : <PlaceholderPanel tab={activeTab} />;
+}
 
 export default function SettingsOverlay() {
   const pathname = usePathname();
@@ -83,7 +98,7 @@ export default function SettingsOverlay() {
 
           {/* Body */}
           <div className="flex-1 overflow-y-auto">
-            <PlaceholderPanel tab={activeTab} />
+            <TabPanel tabId={activeTab.id} activeTab={activeTab} />
           </div>
         </div>
       </div>

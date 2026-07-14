@@ -61,6 +61,9 @@ function getFolderEngineState(accountId: string, folder: string): FolderEngineSt
   return acct.folders.find(f => f.folder === folder) ?? null;
 }
 
+/** Promise-based sleep helper for timeout races. */
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
 export const emailsRouter = Router();
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -871,7 +874,11 @@ emailsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
 
 /**
  * GET /:uid?project=&account=&folder= — Get a single email by UID.
- * CACHE-ONLY. Body miss → boostBody hint + 202 Accepted. NO live IMAP.
+ *
+ * Fast path: body and listing cached → 200 "cache".
+ * On-demand: listing cached, body NOT cached → live Gmail getBody (12s timeout)
+ *   → persist → 200 "live". Fallback: 202 only on timeout/error.
+ * Cold miss: neither cached → 202 (engine hint).
  */
 emailsRouter.get("/:uid", async (req, res) => {
   const accountId = req.query.account as string | undefined;
@@ -889,7 +896,7 @@ emailsRouter.get("/:uid", async (req, res) => {
   const folder = (req.query.folder as string) ?? "INBOX";
   const { account } = result;
 
-  // ── Check body cache first ─────────────────────────────────────────
+  // ── 1. Fast path: both body and listing cached ─────────────────────
   const cachedBody = emailCache.getCachedEmailBody(account.id, folder, uid);
   const cachedListing = emailCache.getCachedEmail(account.id, folder, uid);
 
@@ -904,8 +911,64 @@ emailsRouter.get("/:uid", async (req, res) => {
     return;
   }
 
-  // ── Cache miss — hint engine, return 202, NO live IMAP ────────────
-  // The engine will prioritize body fetch for this UID and the listing.
+  // ── 2. On-demand body fetch: listing cached, body missing ──────────
+  if (cachedListing) {
+    try {
+      const freshToken = await getFreshGmailToken(account.id);
+      const body = await Promise.race([
+        GmailProvider.getBody(account, { accessToken: freshToken } as any, uid),
+        sleep(12000).then(() => null),
+      ]);
+
+      if (body) {
+        // Persist body to cache
+        emailCache.upsertEmailBody(
+          account.id, folder, uid,
+          body.html ?? null,
+          body.text ?? null,
+          JSON.stringify({ attachments: body.attachments }),
+        );
+
+        // Re-read from cache and construct full email
+        const freshCachedBody = emailCache.getCachedEmailBody(account.id, folder, uid);
+        const email = cachedToEmailMessage(cachedListing);
+        email.body = {
+          text: freshCachedBody?.text ?? body.text ?? email.body?.text,
+          html: freshCachedBody?.html ?? body.html ?? email.body?.html,
+        };
+        // 🔴 Explicitly set from fresh response (not cached headers_json)
+        // to ensure the NEW attachmentId field is correct
+        email.attachments = body.attachments;
+
+        res.json({ data: email, source: "live" });
+        return;
+      }
+
+      // Timeout — fall through to 202
+      logger.warn("email",
+        `On-demand body fetch timed out for ${account.email}/${folder}/${uid} (12s)`,
+      );
+    } catch (err: unknown) {
+      // 🔴 Lesson 14: log before returning error sentinel
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("email",
+        `On-demand body fetch FAILED for ${account.email}/${folder}/${uid}: ${msg}`,
+      );
+    }
+
+    // Timeout or error — fall back to engine hints + 202
+    boostBody(account.id, folder, uid);
+    boostFolder(account.id, folder);
+    res.status(202).json({
+      pending: true,
+      message: "Body being fetched — retry in 1.5s",
+      retry: true,
+    });
+    return;
+  }
+
+  // ── 3. Cold miss: neither listing nor body cached ─────────────────
+  // No listing to display — hint engine, return 202
   boostBody(account.id, folder, uid);
   boostFolder(account.id, folder);
 
