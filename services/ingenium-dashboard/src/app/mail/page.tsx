@@ -497,8 +497,8 @@ export default function MailPage() {
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
 
-      {/* If any folder has zero data (excluding errors), show progress view */}
-      {syncStatus && syncStatus.folders?.some((f: any) => (f.bodyCount ?? 0) === 0 && (f.engineState?.headersSynced ?? 0) === 0 && f.engineState?.state !== "error") ? (
+      {/* Show progress view until cache has data, then show mail UI */}
+      {syncStatus && syncStatus.totalCached === 0 ? (
         <SyncProgress
           folders={syncStatus.folders.map((f: any) => ({
             folder: f.folder,
