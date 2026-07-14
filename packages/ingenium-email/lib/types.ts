@@ -11,6 +11,7 @@ export interface EmailAddress {
 
 export interface EmailAttachment {
   partId: string;
+  attachmentId?: string;   // opaque Gmail token from part.body.attachmentId
   filename: string;
   size: number;
   mimeType: string;

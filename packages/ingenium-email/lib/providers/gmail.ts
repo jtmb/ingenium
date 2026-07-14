@@ -150,13 +150,13 @@ function mapMetadataToCachedEmail(
   // Flags from labelIds
   const labelIds: string[] = msg.labelIds ?? [];
   const flags: string[] = [];
-  if (labelIds.includes("UNREAD")) flags.push("\\Seen"); // inverted: we track seen
   if (!labelIds.includes("UNREAD")) flags.push("\\Seen");
   if (labelIds.includes("STARRED")) flags.push("\\Flagged");
 
-  // Attachment detection — check payload.mimeType for multipart/*
+  // Attachment detection — only multipart/mixed carries real attachments.
+  // multipart/related (inline images) and multipart/alternative (text+HTML) are false positives.
   const mimeType = msg.payload?.mimeType ?? "";
-  const hasAttachments = mimeType.startsWith("multipart/") && !mimeType.includes("alternative");
+  const hasAttachments = mimeType.startsWith("multipart/mixed");
 
   // envelopeJson from headers
   let envelopeJson: string | null = null;
@@ -192,10 +192,10 @@ function mapMetadataToCachedEmail(
  */
 function walkParts(
   parts: any[],
-): { text?: string; html?: string; attachments: Array<{ partId: string; filename: string; mimeType: string; size: number; body: any }> } {
+): { text?: string; html?: string; attachments: Array<{ partId: string; attachmentId?: string; filename: string; mimeType: string; size: number; body: any }> } {
   let text: string | undefined;
   let html: string | undefined;
-  const attachments: Array<{ partId: string; filename: string; mimeType: string; size: number; body: any }> = [];
+  const attachments: Array<{ partId: string; attachmentId?: string; filename: string; mimeType: string; size: number; body: any }> = [];
 
   function walk(partList: any[]): void {
     for (const part of partList) {
@@ -220,6 +220,7 @@ function walkParts(
       if (part.filename && part.body?.attachmentId) {
         attachments.push({
           partId: part.partId ?? part.body.attachmentId,
+          attachmentId: part.body.attachmentId,
           filename: part.filename,
           mimeType: part.mimeType ?? "application/octet-stream",
           size: Number(part.body.size) || 0,
@@ -415,6 +416,7 @@ export const GmailProvider: MailProvider = {
 
     const emailAttachments: EmailAttachment[] = result.attachments.map(a => ({
       partId: a.partId,
+      attachmentId: a.attachmentId,
       filename: a.filename,
       size: a.size,
       mimeType: a.mimeType,
@@ -436,27 +438,30 @@ export const GmailProvider: MailProvider = {
   ): Promise<{ data: Buffer; mimeType: string; filename: string }> {
     const token = await getFreshGmailToken(account.id);
 
-    const att = await apiGetAttachment(token, id, attachmentId);
+    // Re-fetch the full message and walk its parts to find the matching
+    // attachment by attachmentId OR partId (handles both old and new caches).
+    const msg = await getMessage(token, id, "full");
+    const parts = msg.payload?.parts ?? (msg.payload ? [msg.payload] : []);
+    const result = walkParts(parts);
+    const found = result.attachments.find(
+      a => a.attachmentId === attachmentId || a.partId === attachmentId,
+    );
+
+    // Use the real body.attachmentId if found, otherwise fall back to the
+    // parameter as a last resort (handles edge cases and legacy data).
+    let att: { data: string; size: number };
+    if (found?.body?.attachmentId) {
+      att = await apiGetAttachment(token, id, found.body.attachmentId);
+    } else {
+      att = await apiGetAttachment(token, id, attachmentId);
+    }
 
     // Decode base64url data to Buffer
     const data = Buffer.from(att.data, "base64url");
 
-    // Get mimeType + filename from the parent message metadata
-    let mimeType = "application/octet-stream";
-    let filename = attachmentId;
-
-    try {
-      const msg = await getMessage(token, id, "full");
-      const parts = msg.payload?.parts ?? (msg.payload ? [msg.payload] : []);
-      const result = walkParts(parts);
-      const found = result.attachments.find(a => a.partId === attachmentId);
-      if (found) {
-        mimeType = found.mimeType;
-        filename = found.filename;
-      }
-    } catch {
-      // Non-fatal — use defaults
-    }
+    // Get mimeType + filename from found attachment metadata
+    const mimeType = found?.mimeType ?? "application/octet-stream";
+    const filename = found?.filename ?? attachmentId;
 
     return { data, mimeType, filename };
   },
