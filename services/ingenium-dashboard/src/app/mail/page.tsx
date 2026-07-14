@@ -6,6 +6,7 @@ import EmailList from "./components/EmailList";
 import EmailReader from "./components/EmailReader";
 import EmptyState from "./components/EmptyState";
 import AccountSetup from "./components/AccountSetup";
+import SyncProgress from "./components/SyncProgress";
 import Overlay from "../components/Overlay";
 import EmailComposer from "./components/EmailComposer";
 
@@ -496,71 +497,23 @@ export default function MailPage() {
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
 
-      {/* Sync progress banner — only for selected folder or cold cache */}
-      {syncStatus && syncStatus.overall === "syncing" && (
-        syncStatus.folders?.some((f: any) => f.folder === selectedFolder && f.syncing) || syncStatus.totalCached === 0
-      ) && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-          <svg className="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-          <span>
-            Syncing {syncStatus.syncingFolders} of {syncStatus.totalFolders} folders...
-          </span>
-          <span className="text-blue-500">
-            ({syncStatus.totalCached} messages cached so far)
-          </span>
-        </div>
-      )}
-
-      {/* Sync complete banner (transient — only when just finished and cache has data) */}
-      {syncStatus && syncStatus.overall === "done" && syncStatus.totalCached > 0 && syncStatus.syncingFolders === 0 && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded text-sm text-green-800">
-          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          <span>
-            Cache ready — {syncStatus.totalCached} messages across {syncStatus.totalFolders} folders
-            {syncStatus.totalBodies > 0 && ` (${syncStatus.totalBodies} bodies precached)`}
-          </span>
-        </div>
-      )}
-
-      {isInboxCold ? (
-        <div data-testid="mail-gating-cold" className="flex flex-col items-center justify-center h-[calc(100vh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] gap-6">
-          {/* Large spinner */}
-          <svg className="animate-spin w-12 h-12 text-blue-500" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-          <h2 className="text-2xl font-semibold text-[var(--color-text-primary)]">Preparing your mailbox…</h2>
-          <p className="text-sm text-[var(--color-text-muted)]">
-            Syncing {syncStatus.syncingFolders} of {syncStatus.totalFolders} folders
-          </p>
-          {/* Per-folder progress list */}
-          <div className="w-full max-w-md space-y-2 mt-2">
-            {syncStatus.folders?.filter((f: any) => f.syncing || f.cachedCount > 0).map((f: any) => (
-              <div key={f.folder} className="flex items-center gap-3 px-4 py-2 bg-gray-50 dark:bg-gray-800 rounded text-sm">
-                {f.syncing && (
-                  <svg className="animate-spin w-4 h-4 text-blue-500 shrink-0" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                )}
-                {!f.syncing && (
-                  <svg className="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                )}
-                <span className="flex-1 truncate text-[var(--color-text-primary)]">{f.folder}</span>
-                <span className="text-[var(--color-text-muted)] shrink-0">
-                  {f.cachedCount} cached
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* If any folder has zero cached headers, show progress view instead of mail UI */}
+      {syncStatus && syncStatus.folders?.some((f: any) => f.cachedCount === 0) ? (
+        <SyncProgress
+          folders={syncStatus.folders.map((f: any) => ({
+            folder: f.folder,
+            cachedCount: f.cachedCount,
+            bodyCount: f.bodyCount,
+            syncing: f.syncing,
+            headersTotal: f.engineState?.headersTotal ?? f.cachedCount,
+            headersSynced: f.engineState?.headersSynced ?? f.cachedCount,
+            bodiesCached: f.engineState?.bodiesCached ?? f.bodyCount,
+            bodiesWindow: f.engineState?.bodiesWindow ?? 200,
+            state: f.engineState?.state ?? (f.syncing ? "syncing-headers" : "idle"),
+          }))}
+          syncingFolders={syncStatus.syncingFolders}
+          totalCached={syncStatus.totalCached}
+        />
       ) : (
         <>
           <div className="flex h-[calc(100vh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
@@ -580,30 +533,19 @@ export default function MailPage() {
             />
 
             {/* Email list */}
-            {isColdFolder ? (
-              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[var(--color-text-muted)]">
-                <svg className="animate-spin w-8 h-8 text-blue-500" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <p className="text-sm">Syncing {selectedFolder}…</p>
-                <p className="text-xs">({syncStatus?.totalCached ?? 0} messages cached total so far)</p>
-              </div>
-            ) : (
-              <EmailList
-                emails={emails}
-                selectedUid={selectedEmail?.uid}
-                onSelect={handleSelectEmail}
-                onPageChange={setPage}
-                total={total}
-                page={page}
-                loading={loading}
-                onSearch={handleSearch}
-                error={emailError}
-                onRefresh={handleRefresh}
-                source={emailSource}
-              />
-            )}
+            <EmailList
+              emails={emails}
+              selectedUid={selectedEmail?.uid}
+              onSelect={handleSelectEmail}
+              onPageChange={setPage}
+              total={total}
+              page={page}
+              loading={loading}
+              onSearch={handleSearch}
+              error={emailError}
+              onRefresh={handleRefresh}
+              source={emailSource}
+            />
 
             {/* Email reader */}
             <EmailReader
