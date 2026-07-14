@@ -136,6 +136,9 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 | `017_fix_trait_fk.sql` | Rebuilds `personality_traits` to refresh the FK reference to the current `observations` table after 015's rename cycle. Comment marker `-- 017_rebuilt` in the CREATE TABLE prevents re-application. | Runs inside `PRAGMA foreign_keys = OFF/ON` to prevent cascading FTS trigger errors |
 | `018_extraction_events.sql` | Adds `extraction_completed` and `extraction_failed` to the `pipeline_events` event_type CHECK constraint. | Minimal — just expands CHECK constraint |
 | `019_trait_fk_set_null.sql` | Changes `personality_traits.exemplar_observation_id` FK to `ON DELETE SET NULL` so observation deletes never fail on FK constraints. | Runs inside `PRAGMA foreign_keys = OFF/ON`; safe |
+| `024_skills_unique_per_project.sql` | Rebuilds `skills` table to change `UNIQUE(name)` → `UNIQUE(project_id, name)`. Uses same safe pattern as 015/017 (PRAGMA foreign_keys OFF/ON, rename→recreate→restore, FTS rebuild). Comment marker `-- 024_rebuilt`. | Medium — FTS trigger recreation must be verified; same corruption risk as 015/017 if interrupted |
+
+> 🔴 **Dockerfile note**: The Dockerfile runtime stage does not copy `data/migrations/`. New migration `.sql` files must be manually placed (bind-mounted or copied) into the container for incremental DBs.
 
 **Anti-corruption guard (db.ts lines 183–213):**
 1. After migration 015 runs, `observationsCreateSql` is **re-read** so migration 017's condition (`observationsCreateSql.sql.includes("auto-observer")`) triggers correctly

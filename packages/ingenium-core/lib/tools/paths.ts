@@ -20,16 +20,31 @@ export function resolveProjectBase(projectId?: string): string {
   return resolve(process.env.INGENIUM_CORE_DB_PATH ?? "./data", "..", "..");
 }
 
+export function isGlobal(projectId?: string): boolean {
+  if (!projectId) return false;
+  try {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const project = db.prepare("SELECT is_global FROM projects WHERE id = ?").get(projectId) as { is_global: number } | undefined;
+    return project?.is_global === 1;
+  } catch { return false; }
+}
+
 export function getSkillsBase(projectId?: string): string {
-  return resolve(resolveProjectBase(projectId), ".opencode", "skills");
+  const base = resolveProjectBase(projectId);
+  if (isGlobal(projectId)) return resolve(base, "skills");
+  return resolve(base, ".opencode", "skills");
 }
 
 export function getPluginsBase(projectId?: string): string {
-  return resolve(resolveProjectBase(projectId), ".opencode", "plugins");
+  const base = resolveProjectBase(projectId);
+  if (isGlobal(projectId)) return resolve(base, "plugins");
+  return resolve(base, ".opencode", "plugins");
 }
 
 export function getCommandsBase(projectId?: string): string {
-  return resolve(resolveProjectBase(projectId), ".opencode", "commands");
+  const base = resolveProjectBase(projectId);
+  if (isGlobal(projectId)) return resolve(base, "commands");
+  return resolve(base, ".opencode", "commands");
 }
 
 export function getConfigPath(projectId?: string): string {

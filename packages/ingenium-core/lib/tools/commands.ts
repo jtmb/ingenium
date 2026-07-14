@@ -1,15 +1,21 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { Command } from "../schema.js";
 import { writeFileSync, unlinkSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { resolve, relative, isAbsolute } from "node:path";
+import { resolve, relative, isAbsolute, dirname } from "node:path";
 import { getCommandsBase } from "./paths.js";
+
+function resolveCommandFile(projectId: string | undefined, filePath: string): string {
+  // Strip leading .opencode/commands/ or .opencode/ prefix — the base dir already includes them
+  const cleanPath = filePath.replace(/^\.?opencode\/commands\//, "").replace(/^\.?opencode\//, "");
+  return resolve(getCommandsBase(projectId), cleanPath);
+}
 
 function validateCommandPath(filePath: string, projectId?: string): string {
   if (!/^[a-zA-Z0-9_\-./]+$/.test(filePath)) {
     throw new Error(`Invalid command file path: ${filePath}`);
   }
+  const resolved = resolveCommandFile(projectId, filePath);
   const baseDir = getCommandsBase(projectId);
-  const resolved = resolve(baseDir, filePath);
   const rel = relative(baseDir, resolved);
   if (rel.startsWith("..") || isAbsolute(rel)) {
     throw new Error(`Command path escapes base directory: ${filePath}`);
@@ -53,7 +59,9 @@ export function createCommand(
 
     ensureCommandDir(projectId);
     if (body) {
-      writeFileSync(resolve(getCommandsBase(projectId), filePath), body);
+      const cmdPath = resolveCommandFile(projectId, filePath);
+      mkdirSync(dirname(cmdPath), { recursive: true });
+      writeFileSync(cmdPath, body);
     }
 
     checkpointAfterWrite();
@@ -69,7 +77,7 @@ export function deleteCommand(projectId: string, name: string): boolean {
     if (!cmd) return false;
 
     try {
-      const resolvedPath = resolve(getCommandsBase(projectId), validateCommandPath(cmd.file_path, projectId));
+      const resolvedPath = resolveCommandFile(projectId, cmd.file_path);
       if (existsSync(resolvedPath)) unlinkSync(resolvedPath);
     } catch { /* file may already be gone */ }
 
@@ -104,17 +112,20 @@ export function updateCommand(
       ensureCommandDir(projectId);
       if (updates.file_path && updates.file_path !== existing.file_path) {
         try {
-          const oldPath = resolve(getCommandsBase(projectId), existing.file_path);
+          const oldPath = resolveCommandFile(projectId, existing.file_path);
           if (existsSync(oldPath)) unlinkSync(oldPath);
         } catch { /* ignore */ }
       }
-      writeFileSync(resolve(getCommandsBase(projectId), newFilePath), newContent);
+      const writePath = resolveCommandFile(projectId, newFilePath);
+      mkdirSync(dirname(writePath), { recursive: true });
+      writeFileSync(writePath, newContent);
     } else if (updates.file_path && updates.file_path !== existing.file_path) {
       ensureCommandDir(projectId);
-      const oldPath = resolve(getCommandsBase(projectId), existing.file_path);
-      const newPath = resolve(getCommandsBase(projectId), newFilePath);
+      const oldPath = resolveCommandFile(projectId, existing.file_path);
+      const newPath = resolveCommandFile(projectId, newFilePath);
       if (existsSync(oldPath)) {
         const body = readFileSync(oldPath, "utf-8");
+        mkdirSync(dirname(newPath), { recursive: true });
         writeFileSync(newPath, body);
         unlinkSync(oldPath);
       }

@@ -111,19 +111,28 @@ function removeSkillFromDisk(name, projectId) {
     catch { }
 }
 export function createSkill(projectId, name, description, content, category, tags, alwaysApply, fileTree) {
-    return execTransaction(() => {
+    const skill = execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
         const now = new Date().toISOString();
         const id = randomUUID();
         const result = db.prepare(`INSERT INTO skills (id, project_id, name, description, content, category, tags, always_apply, file_tree, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, name, description, content, category ?? null, tags ?? null, alwaysApply ?? 0, fileTree ?? null, now, now);
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(project_id, name) DO UPDATE SET
+         description = excluded.description,
+         content = excluded.content,
+         category = excluded.category,
+         tags = excluded.tags,
+         always_apply = excluded.always_apply,
+         file_tree = excluded.file_tree,
+         updated_at = excluded.updated_at`).run(id, projectId, name, description, content, category ?? null, tags ?? null, alwaysApply ?? 0, fileTree ?? null, now, now);
         // Sync FTS5 index: use lastInsertRowid (integer) for FTS5 rowid
         db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
             .run(result.lastInsertRowid, content, description);
-        checkpointAfterWrite();
         // 🔴 writeSkillToDisk DISABLED to stop frontmatter amplification
         return getSkill(projectId, name);
     });
+    checkpointAfterWrite();
+    return skill;
 }
 export function updateSkill(projectId, name, content, description, tags, alwaysApply, fileTree) {
     return execTransaction(() => {
@@ -190,7 +199,7 @@ export function disableSkill(projectId, name) {
     });
 }
 export function syncSkillFromDisk(projectId, name) {
-    return execTransaction(() => {
+    const result = execTransaction(() => {
         // Find the file on disk
         const skillsBase = getSkillsBase(projectId);
         const filePath = resolve(skillsBase, name, "SKILL.md");
@@ -252,7 +261,14 @@ export function syncSkillFromDisk(projectId, name) {
             const now = new Date().toISOString();
             const id = randomUUID();
             db.prepare(`INSERT INTO skills (id, project_id, name, description, content, tags, always_apply, file_tree, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, projectId, diskName, description, content, diskTags, diskAlwaysApply, fileTree, now, now);
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(project_id, name) DO UPDATE SET
+           description = excluded.description,
+           content = excluded.content,
+           tags = excluded.tags,
+           always_apply = excluded.always_apply,
+           file_tree = excluded.file_tree,
+           updated_at = excluded.updated_at`).run(id, projectId, diskName, description, content, diskTags, diskAlwaysApply, fileTree, now, now);
             // Sync FTS5
             const inserted = db.prepare("SELECT rowid FROM skills WHERE id = ?").get(id);
             db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
@@ -273,10 +289,11 @@ export function syncSkillFromDisk(projectId, name) {
                 .run(row.rowid, content, description);
             logger.info("skills", "Skill synced from disk", { name: diskName });
         }
-        checkpointAfterWrite();
         return db.prepare("SELECT * FROM skills WHERE project_id = ? AND name = ?")
             .get(projectId, diskName);
     });
+    checkpointAfterWrite();
+    return result;
 }
 export function syncAllSkills(projectId, db) {
     const database = db ?? getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");

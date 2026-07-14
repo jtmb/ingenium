@@ -286,6 +286,16 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 ---
 
+### 28. Schema Constraints Must Match the Code's Lookup Key
+
+**Failure signature:** The database schema has `UNIQUE(name)` enforcing global uniqueness, but every lookup query in the code uses `WHERE project_id = ? AND name = ?` — checking per-project scope. The constraint and the lookup key disagree. Every sync cycle: the code finds no record for `(project_B, "skill-foo")`, tries to INSERT, and hits the UNIQUE constraint because `"skill-foo"` already exists in `project_A`. 25 skills × 2+ projects = 60+ identical errors every 15 minutes, forever.
+
+**Rule:** Whenever you write a UNIQUE constraint on a table, check: does every INSERT/UPDATE query that hits this table use the SAME columns in its WHERE clause as the constraint? If the code filters by `(project_id, name)` but the constraint is only on `name`, you have a mismatch that will cause silent failures. The constraint becomes a global bottleneck that prevents per-project isolation. If the data model is multi-tenant (project-scoped), the constraint must include the tenant key.
+
+**Detection prompt:** "Do the UNIQUE constraint columns match the lookup key used in all INSERT/UPDATE queries? If code checks `WHERE project_id = ? AND name = ?` but the constraint is `UNIQUE(name)`, the constraint will fail whenever two projects share a skill name."
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
