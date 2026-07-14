@@ -7,10 +7,7 @@ import "./hljs-dark.css";
 import MainContainer from "./components/MainContainer";
 import OpenCodeFrame from "./components/OpenCodeFrame";
 import { SettingsLauncher, SettingsOverlay } from "./components/settings";
-import ProjectSelector from "./components/ProjectSelector";
 import ThemeProvider from "./components/ThemeProvider";
-import ThemeToggle from "./components/ThemeToggle";
-
 /** Global metadata for the Ingenium Dashboard app. */
 export const metadata: Metadata = {
   title: "Ingenium Dashboard",
@@ -51,12 +48,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <a href="/personality" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">Personality</a>
           <a href="/pipeline" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">Pipeline</a>
           <a href="/logs" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">Logs</a>
-          <Suspense><SettingsLauncher /></Suspense>
           <span className="text-gray-300">|</span>
           <a href="/status" className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] dark:hover:text-gray-100">Status</a>
           <div className="ml-auto flex items-center gap-3">
-            <ThemeToggle />
-            <Suspense><ProjectSelector /></Suspense>
+            <Suspense><SettingsLauncher /></Suspense>
           </div>
         </nav>
         <MainContainer>
