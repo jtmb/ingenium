@@ -77,6 +77,12 @@ export function markSyncing(accountId: string, folder: string, active: boolean):
   t.syncing = [...t.folders.values()].some(v => v);
 }
 
+/** Check if a folder is currently being synced (in-flight guard). */
+function isSyncing(accountId: string, folder: string): boolean {
+  const t = syncTrackers.get(accountId);
+  return t?.folders.get(folder) === true;
+}
+
 async function trackSync<T>(
   accountId: string,
   folder: string | null,
@@ -701,8 +707,8 @@ emailsRouter.get("/", async (req, res) => {
     // Cache hit — return immediately, trigger background refresh if stale
     const state = emailCache.getSyncState(account.id, folder);
     const lastSynced = state.last_synced_at ? new Date(state.last_synced_at).getTime() : 0;
-    const staleThresholdMs = 30 * 60 * 1000; // 30 min — matches scheduler skipFresh window
-    if (Date.now() - lastSynced > staleThresholdMs) {
+    const staleThresholdMs = 5 * 60 * 1000; // 5 min — refresh if older than one scheduler cycle
+    if (Date.now() - lastSynced > staleThresholdMs && !isSyncing(account.id, folder)) {
       setImmediate(() => {
         trackSync(account.id, folder, () =>
           syncFolder(projectId, account.id, folder),
@@ -839,11 +845,16 @@ emailsRouter.get("/:uid", async (req, res) => {
     return;
   }
 
-  // ── Cache miss — fetch from IMAP and cache the body ────────────────
+  // ── Cache miss — fetch from IMAP with a 15s timeout. If IMAP is busy/hung,
+  //     return 504 immediately and fire a background fetch so the next request
+  //     hits the cache (preventing 30s hangs for every uncached email). ──
   try {
-    const email = await withImapConnection(account, auth, (id) =>
-      getEmail(id, folder, uid),
-    );
+    const email = await Promise.race([
+      withImapConnection(account, auth, (id) => getEmail(id, folder, uid)),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("IMAP fetch timed out")), 15000),
+      ),
+    ]);
     if (!email) {
       res.status(404).json({
         error: { code: "NOT_FOUND", message: `Email with UID ${uid} not found in ${folder}` },
@@ -871,6 +882,28 @@ emailsRouter.get("/:uid", async (req, res) => {
 
     res.json({ data: email, source: "imap" });
   } catch (err: any) {
+    const isTimeout = err.message?.includes("timed out");
+    if (isTimeout) {
+      // Fire a background body fetch so the NEXT request hits cache
+      logger.warn("email", `IMAP body fetch timed out for ${account.id}/${folder}/${uid}, queuing background fetch`);
+      setImmediate(() => {
+        import("./emails.js").then(() => {
+          withImapConnection(account, auth, (id) => getEmail(id, folder, uid))
+            .then((email) => {
+              if (email?.body) {
+                emailCache.upsertEmailBody(account.id, folder, uid,
+                  email.body.html ?? null, email.body.text ?? null, null);
+              }
+            })
+            .catch(() => {});
+        });
+      });
+      res.status(504).json({
+        error: { code: "GATEWAY_TIMEOUT", message: "Email body fetch timed out. Body is being fetched in the background — retry in a few seconds." },
+        retry: true,
+      });
+      return;
+    }
     logger.error("email", `Get email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
   }
