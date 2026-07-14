@@ -216,6 +216,36 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 ---
 
+### 21. Fix Every Call Site, Not Just the File You're Editing
+
+**Failure signature:** Adding new options to a function's contract (e.g., `{ skipFresh, onFolder }` on `syncAccountFolders`) and updating 2 of 3 call sites — the startup prefetch got the options, the manual sync route got the options, but the scheduler (`scheduler.ts:118`) called the bare function with zero options. Every 5 minutes, all 11 folder IMAP connections reopened, creating a full-resync loop and exhausting Gmail's 15-connection limit.
+
+**Rule:** After changing a function's contract — adding a parameter, option bag, return type, or behavioral flag — grep the ENTIRE repo (all packages, all services) for callers of that function. Evaluate every single one against the new contract. Fixing most is not fixing all; the unfixed caller silently reverts to old/wrong behavior.
+
+**Detection prompt:** "Did I grep for every caller of the function I just changed, across all packages and services? Is there a caller that still passes the old signature/behavior?"
+
+---
+
+### 22. Patch the Producer, Not the Consumer
+
+**Failure signature:** The `[Gmail]` IMAP container folder has the `\Noselect` flag — it cannot be opened or synced. Every sync cycle tried to SELECT it, logged an error, and moved on. The dashboard client hid it with a string match (`f.name !== "[Gmail]"`), but the sync layer kept producing errors on every cycle. The consumer was clean; the producer was broken.
+
+**Rule:** When filtering bad data, filter at the SOURCE (the producer) using the semantic property that means the thing — not a name string at the consumer. In this case: filter folders by the `\Noselect` IMAP flag, not by URL‑encoding a name and comparing strings. The producer fix eliminates the error entirely; the consumer fix only hides the symptom.
+
+**Detection prompt:** "Am I hiding bad data at the consumer while the producer keeps churning on it? Am I matching a name string instead of the semantic flag that means this category of data should be excluded?"
+
+---
+
+### 23. Don't Silently Narrow a General Requirement to Its Most Common Case
+
+**Failure signature:** "Caching should happen in the background and do that initial cache on each folder ... I need a proper implementation." The sync engine prefetched bodies only for INBOX (comment: "For INBOX: after syncing listings, also prefetches bodies for the 50 most recent emails"). Every other folder — Starred, Sent, Drafts, All Mail — got zero bodies cached. Opening an email in Starred = live IMAP round-trip every time. The requirement said "each folder"; the implementation said "if (folder === 'INBOX')".
+
+**Rule:** When a requirement covers a domain (all folders, all accounts, all projects, all environment variables), enumerate the full domain and confirm every member is covered. If there's a legitimate reason to only cover a subset, make it a parameter or clearly document the limitation. A silent `if` narrowing in implementation code is not discoverable.
+
+**Detection prompt:** "Does my implementation cover every item in the requirement's domain, or did I silently narrow it to the most common instance? Where's the list of instances I checked against?"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -240,6 +270,9 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 | **Scoped invalidation** — Clearing more data than what actually changed | "Does my invalidation touch more data than what changed?" |
 | **Exact-condition testing** — Testing in a different environment than the user's | "Did I reproduce the user's exact starting conditions?" |
 | **Silent-empty pipeline** — Producing zero output with no diagnostic context | "Will the logs show WHY this pipeline produced zero output?" |
+| **Call-site omission** — Updating function contract but missing a caller | "Did I grep for every caller of the function I just changed?" |
+| **Symptom consumer** — Hiding bad data at the UI while the source keeps producing errors | "Am I filtering at the consumer with a name string instead of the producer with the semantic flag?" |
+| **Silent scope narrowing** — Implementing the most common case as the only case | "Does this cover the full domain, or just the most common instance?" |
 
 ---
 

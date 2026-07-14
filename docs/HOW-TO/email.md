@@ -315,6 +315,29 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 | `packages/ingenium-email/lib/sync.ts` | `syncAccountFolders()` with `skipFresh` option, `clearFolderCache()` per-folder invalidation | Email client core |
 | `packages/ingenium-core/lib/tools/email-cache.ts` | `clearFolderCache()`, `getSyncState()`, `clearCache()` | Core library |
 
+## Sync Architecture (July 2026)
+
+### Warm Orchestration
+On API startup, `prefetchAllAccounts()` runs a sequential warm-up for each account:
+1. **INBOX first** — sync listings + body prefetch (50 newest) using `syncFolder("INBOX")`
+2. **INBOX backfill** — `backfillFolderBodies("INBOX", 50)` fetches bodies for the next 50 newest messages that had listings but no cached body
+3. **Remaining folders** — fire-and-forget via `setImmediate`: `syncAccountFolders` with `skipFresh: true, freshMs: 30min`, then `backfillFolderBodies` for every completed folder (regardless of whether new messages were synced)
+
+### Single-Flight Deduplication
+`syncFolder` uses an in-memory `Map<string, Promise>` keyed by `accountId\x00folder`. If a sync for the same folder is already in-flight, the caller joins the existing promise instead of starting a duplicate. This is in-memory (not DB-backed) because it guards concurrency within a single process, not freshness across restarts.
+
+### Body Backfill
+`backfillFolderBodies(projectId, accountId, folder, limit=50)` queries `email_cache` for UIDs that lack a row in `email_bodies` (newest first), fetches their raw content from IMAP, parses it, and stores the body. Capped at `limit` to prevent timeout on large folders.
+
+### Noselect Filtering
+Folders with the IMAP `\Noselect` or `\Nonexistent` flag (e.g., `[Gmail]` bare container) are filtered out at the sync layer in `syncAccountFolders` and at the API response layer in `GET /folders` (both cached and fresh paths). The dashboard also applies a flag‑based belt‑and‑braces filter.
+
+### Scheduler Cadence
+The 5-minute scheduler syncs `INBOX` immediately via `syncFolder` (bypasses freshness gate for new mail), then syncs other folders with `skipFresh: true, freshMs: 30min`.
+
+### HTML Rendering
+Emails with HTML bodies render in a **sandboxed `<iframe>`** (`sandbox="allow-same-origin allow-popups"`, no `allow-scripts`). CSS from the email cannot leak into the dashboard. Emails > 2MB show a text-only fallback. An `EmailErrorBoundary` catches render exceptions to prevent full-page crashes.
+
 ---
 
 *Last updated: July 13, 2026 — Email client with OAuth2 + IMAP/SMTP, compose overlay, account setup, per-folder cache invalidation, skipFresh option, folder-list caching.*
