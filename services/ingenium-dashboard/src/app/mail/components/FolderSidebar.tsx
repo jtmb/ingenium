@@ -91,11 +91,13 @@ export default function FolderSidebar({
         </button>
 
         {isOpen && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg z-50">
+          <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg z-50 overflow-hidden">
             {accounts.length === 0 && (
               <div className="px-3 py-2 text-sm text-[var(--color-text-muted)]">No accounts</div>
             )}
-            {accounts.map((acct: any) => (
+            {accounts.filter((acct: any, i: number, arr: any[]) =>
+              arr.findIndex((a: any) => a.email === acct.email) === i
+            ).map((acct: any) => (
               <div key={acct.id} className="flex items-center">
                 <button
                   type="button"
