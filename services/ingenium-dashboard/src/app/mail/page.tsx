@@ -497,19 +497,19 @@ export default function MailPage() {
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
 
-      {/* If any folder has zero cached headers, show progress view instead of mail UI */}
-      {syncStatus && syncStatus.folders?.some((f: any) => f.cachedCount === 0) ? (
+      {/* If any folder has zero data, show progress view instead of mail UI */}
+      {syncStatus && syncStatus.folders?.some((f: any) => (f.bodyCount ?? 0) === 0 && (f.engineState?.headersSynced ?? 0) === 0) ? (
         <SyncProgress
           folders={syncStatus.folders.map((f: any) => ({
             folder: f.folder,
-            cachedCount: f.cachedCount,
-            bodyCount: f.bodyCount,
+            cachedCount: f.engineState?.headersSynced ?? f.cachedCount ?? 0,
+            bodyCount: f.engineState?.bodiesCached ?? f.bodyCount ?? 0,
             syncing: f.syncing,
-            headersTotal: f.engineState?.headersTotal ?? f.cachedCount,
-            headersSynced: f.engineState?.headersSynced ?? f.cachedCount,
-            bodiesCached: f.engineState?.bodiesCached ?? f.bodyCount,
+            headersTotal: f.engineState?.headersTotal ?? f.engineState?.headersSynced ?? f.cachedCount ?? 0,
+            headersSynced: f.engineState?.headersSynced ?? f.cachedCount ?? 0,
+            bodiesCached: f.engineState?.bodiesCached ?? f.bodyCount ?? 0,
             bodiesWindow: f.engineState?.bodiesWindow ?? 200,
-            state: f.engineState?.state ?? (f.syncing ? "syncing-headers" : "idle"),
+            state: f.engineState?.state ?? (f.syncing ? "syncing-headers" : (f.bodyCount > 0 ? "complete" : "idle")),
           }))}
           syncingFolders={syncStatus.syncingFolders}
           totalCached={syncStatus.totalCached}
