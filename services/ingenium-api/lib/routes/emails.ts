@@ -693,7 +693,7 @@ function cachedToEmailMessage(c: emailCache.CachedEmail): Partial<EmailMessage> 
       text: cachedBody?.text ?? c.snippet ?? undefined,
       html: cachedBody?.html ?? undefined,
     },
-    attachments: c.has_attachments ? [] : [],
+    attachments: c.has_attachments ? [{ filename: "View in full message", size: 0, mimeType: "application/octet-stream", partId: "0" }] : [],
     flags: ((): string[] => { try { return JSON.parse(c.flags) as string[]; } catch { return []; } })(),
     folder: c.folder,
     messageId: (envelope.messageId as string) ?? undefined,
