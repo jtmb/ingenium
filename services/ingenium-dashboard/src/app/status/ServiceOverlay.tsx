@@ -1,5 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -140,7 +141,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
 
   const badge = stateBadgeStyle(detail?.state ?? "");
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={onClose}
@@ -363,6 +364,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
           }
         }
       `}</style>
-    </div>
+    </div>,
+    document.body
   );
 }
