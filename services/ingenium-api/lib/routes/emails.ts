@@ -154,7 +154,9 @@ async function getAccountAuthOrError(
 }
 
 /** Wrapper that connects, runs the callback, marks account as connected.
- *  Only disconnects on errors — let the pool manage connections normally. */
+ *  Never disconnects — the shared connection pool and ImapFlow error handlers
+ *  manage connection lifecycle. Disconnecting on per-request errors would kill
+ *  the pool for all concurrent users. */
 async function withImapConnection<T>(
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
@@ -169,7 +171,9 @@ async function withImapConnection<T>(
     } catch { /* non-fatal */ }
     return result;
   } catch (err) {
-    await disconnectAccount(account.id).catch(() => {});
+    // DO NOT disconnect — the error handler on ImapFlow cleans up dead connections.
+    // Disconnecting here kills the shared pool for all concurrent requests.
+    console.error(`[email] IMAP error for ${account.email}:`, (err as Error).message);
     throw err;
   }
 }
@@ -697,7 +701,7 @@ emailsRouter.get("/", async (req, res) => {
     // Cache hit — return immediately, trigger background refresh if stale
     const state = emailCache.getSyncState(account.id, folder);
     const lastSynced = state.last_synced_at ? new Date(state.last_synced_at).getTime() : 0;
-    const staleThresholdMs = 5 * 60 * 1000; // 5 minutes
+    const staleThresholdMs = 30 * 60 * 1000; // 30 min — matches scheduler skipFresh window
     if (Date.now() - lastSynced > staleThresholdMs) {
       setImmediate(() => {
         trackSync(account.id, folder, () =>
@@ -1134,15 +1138,21 @@ export async function prefetchAllAccounts(): Promise<void> {
               freshMs: 30 * 60 * 1000,
               onFolder: (f, a) => markSyncing(acct.id, f, a),
             });
-            // Backfill bodies for each completed folder (even if skipFresh made synced=0)
+            // Backfill bodies sequentially to avoid exhausting Gmail's 15-connection limit
+            logger.info("email", `Backfilling bodies for ${results.length} folders...`);
+            let backfilled = 0;
             for (const r of results) {
               if (!r.error) {
-                backfillFolderBodies(projectId, acct.id, r.folder, 50).catch((e: unknown) => {
+                try {
+                  const bf = await backfillFolderBodies(projectId, acct.id, r.folder, 50);
+                  if (bf.backfilled > 0) backfilled += bf.backfilled;
+                } catch (e: unknown) {
                   const msg = e instanceof Error ? e.message : String(e);
                   logger.warn("email", `Startup prefetch backfill ${acct.email}/${r.folder} failed: ${msg}`);
-                });
+                }
               }
             }
+            logger.info("email", `Body backfill complete: ${backfilled} bodies across ${results.length} folders`);
             return results;
           }).catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);

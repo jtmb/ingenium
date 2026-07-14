@@ -15,6 +15,12 @@ import type { ProviderConfig } from "./providers.js";
 // ── Connection pool ──────────────────────────────────────────────────────
 const pool = new Map<string, ImapFlow>();
 
+/** In-flight connect promises — deduplicates concurrent connectAccount()
+ *  calls for the same account to prevent TOCTOU race (two callers both see
+ *  pool.get(id) as null, both create ImapFlow clients, second pool.set
+ *  overwrites the first — leaking a connection with no error handler). */
+const connectingLocks = new Map<string, Promise<ImapFlow>>();
+
 /** Resolve the provider configuration for an account. */
 function getProviderConfig(account: EmailAccount): ProviderConfig {
   return PROVIDERS[account.provider];
@@ -59,6 +65,17 @@ export async function connectAccount(
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
 ): Promise<ImapFlow> {
+  // ── Deduplicate concurrent connects (Lesson 27: TOCTOU race guard) ──
+  // If another caller is already connecting this account, await its promise.
+  const connecting = connectingLocks.get(account.id);
+  if (connecting) {
+    try {
+      return await connecting;
+    } catch {
+      // Previous connect failed — fall through to retry
+    }
+  }
+
   // Reuse existing if already connected
   const existing = pool.get(account.id);
   if (existing && existing.usable) {
@@ -70,28 +87,49 @@ export async function connectAccount(
     try { await existing.logout(); } catch { /* ignore */ }
   }
 
-  const config = getProviderConfig(account);
-  const host = account.imapHost || config.imap.host;
-  const port = account.imapPort || config.imap.port;
+  // ── Create connection with mutex guard ────────────────────────────
+  const connectPromise = (async () => {
+    const config = getProviderConfig(account);
+    const host = account.imapHost || config.imap.host;
+    const port = account.imapPort || config.imap.port;
 
-  let client: ImapFlow;
+    let client: ImapFlow;
+    try {
+      client = new ImapFlow({
+        host,
+        port,
+        secure: config.imap.tls,
+        auth: buildAuth(account, auth),
+        logger: false,
+        connectionTimeout: 15000,   // 15s connect timeout
+        socketTimeout: 30000,      // 30s socket inactivity timeout
+      });
+      // 🔴 Attach error/close handlers BEFORE connect() to prevent
+      //    unhandled error events from crashing the process (Lesson 24).
+      client.on("error", (err: Error) => {
+        console.error(`[imap] pool error for ${account.email}:`, err.message);
+        pool.delete(account.id);
+      });
+      client.on("close", () => {
+        pool.delete(account.id);
+      });
+      await client.connect();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `IMAP connection failed for account "${account.email}" (${host}:${port}): ${msg}`,
+      );
+    }
+    pool.set(account.id, client);
+    return client;
+  })();
+
+  connectingLocks.set(account.id, connectPromise);
   try {
-    client = new ImapFlow({
-      host,
-      port,
-      secure: config.imap.tls,
-      auth: buildAuth(account, auth),
-      logger: false,
-    });
-    await client.connect();
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(
-      `IMAP connection failed for account "${account.email}" (${host}:${port}): ${msg}`,
-    );
+    return await connectPromise;
+  } finally {
+    connectingLocks.delete(account.id);
   }
-  pool.set(account.id, client);
-  return client;
 }
 
 /** Disconnect and remove an account from the connection pool. */
