@@ -2,7 +2,7 @@
 
 ## What It Does
 
-Manages project configurations. Each project has its own SQLite database containing skills, learnings, tasks, and servers. The dashboard provides Active/Archived tab views with rename, archive, restore, and purge actions.
+Manages project configurations. Each project has its own SQLite database containing skills, observations, tasks, and servers. The dashboard provides Active/Archived tab views with rename, archive, restore, and purge actions.
 
 ## How to Use
 
