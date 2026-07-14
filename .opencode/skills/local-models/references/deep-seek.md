@@ -246,6 +246,46 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 ---
 
+### 24. Persistent Pools Without Error Handlers = Silent Crash Loop
+
+**Failure signature:** Creating a persistent resource (ImapFlow, DB connection, HTTP agent) and inserting it into a connection pool without attaching an `error` event listener. The initial `try/catch` around `connect()` only guards the handshake — any socket error, timeout, or protocol error after connection emits an unhandled `error` event → Node.js throws → uncaughtException → process crash → restart → the startup handler fires expensive operations → exhausts external resources → crash → loop.
+
+**Rule:** Every persistent resource entering a pool MUST have `.on("error", cleanup)` and `.on("close", cleanup)` attached BEFORE pool insertion. Add `process.on("uncaughtException", graceful)` and `process.on("unhandledRejection", log)` at module scope as defense-in-depth. The `try/catch` around connect is NOT sufficient — it only covers the handshake, not the connection's lifetime.
+
+**Detection prompt:** "Before considering any pooled resource 'ready', verify it has error and close event handlers attached. Search for `new XxxClient(` near `pool.set(` — if no `.on(\"error\")` between them, flag as crash risk."
+
+---
+
+### 25. Concurrent Operations Against Rate-Limited External Resources Must Be Serialized
+
+**Failure signature:** Firing N concurrent operations at an external service with a known hard limit (Gmail's 15 IMAP connections, API rate limits, DB connection pools). The local concurrency model assumes the external resource is infinite. When the limit is hit, operations hang, timeout, or fail — and the startup/background handler that fired them all crashes the process that spawned them.
+
+**Rule:** When the bottleneck is external and rate-limited, use sequential `for...of` + `await` (not `Promise.all` or fire-and-forget). Per-item error isolation with `try/catch` inside the loop. Validate the warm path end-to-end with the real external service — if you can't prove it works with real connections, assume it's broken. Concurrency doesn't help when the limit is external; it guarantees M of N operations will fail.
+
+**Detection prompt:** "When you see `for` loops that fire async operations without `await`, check whether the target resource has a concurrency limit (IMAP connections, API rate limits, DB pools). If it does, serialize or use a bounded semaphore."
+
+---
+
+### 26. Stale Thresholds Must Exceed Orchestration Cadence
+
+**Failure signature:** A scheduler syncs data every N minutes. A user-facing route checks staleness against the same N minutes and triggers its own sync. Every request landing in the gap between scheduler cycles triggers a redundant sync. Users see "Syncing..." banners on every page load because the cache is always just past the threshold. Combined with an unstable backend, the tracker gets stuck → banner shows indefinitely.
+
+**Rule:** Route-level staleness thresholds must be ≥ the scheduler's cadence window. If the scheduler syncs every 5 minutes with a 30-minute freshness gate, the route should check at 30+ minutes — or better, remove route-triggered sync entirely and let the scheduler handle it. Checking whether a sync is already in-flight (via the tracker) is more reliable than checking wall-clock time.
+
+**Detection prompt:** "When you see `Date.now() - lastSynced > X` in a route handler, search for scheduler code syncing at interval Y. If X ≤ Y, every request between cycles triggers a redundant sync. X must be > Y."
+
+---
+
+### 27. Pooled Resources Must Be Accessed Through the Pool Getter, Not the Factory
+
+**Failure signature:** A function that needs a connection calls the factory (`connectAccount`) instead of the pool getter (`getConnection`). The factory creates a new connection, overwrites the pool entry (leaking the old one), and the old connection has no error handler (Lesson 24) → eventual crash. The factory also has side effects (OAuth token refresh, TLS handshake) that are unnecessary when a live connection already exists.
+
+**Rule:** Split pool access into two functions with clear contracts: `connectXxx` (factory — create or reuse, used at initialization/startup) and `getXxx` (getter — assert exists, throw if not, used for all operations). Operations must use the getter. If the getter throws, the caller handles the failure gracefully. Never call the factory from an operation context.
+
+**Detection prompt:** "When you see a function calling the connection factory (`connectAccount`, `createClient`) but the call site is an operation (sync, fetch, search), flag it. Operations should use the pool getter. The factory is for setup; the getter is for use."
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -273,6 +313,10 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 | **Call-site omission** — Updating function contract but missing a caller | "Did I grep for every caller of the function I just changed?" |
 | **Symptom consumer** — Hiding bad data at the UI while the source keeps producing errors | "Am I filtering at the consumer with a name string instead of the producer with the semantic flag?" |
 | **Silent scope narrowing** — Implementing the most common case as the only case | "Does this cover the full domain, or just the most common instance?" |
+| **Pool without error handlers** — Creating persistent resources without error listeners → silent crash loop | "Does every pooled resource have `on('error')` and `on('close')` handlers before pool insertion?" |
+| **External concurrency overload** — Firing N ops at a rate-limited external resource | "Is this async loop serialized, or is it firing N ops at a rate-limited resource?" |
+| **Stale-threshold race** — Route staleness check ≤ scheduler cadence → redundant syncs on every request | "Does the route staleness threshold exceed the scheduler's cadence window?" |
+| **Factory-vs-getter misuse** — Calling the connection factory from an operation context instead of the pool getter | "Is this call site an operation calling the factory, or does it use the pool getter?" |
 
 ---
 
