@@ -345,6 +345,19 @@ emailsRouter.get("/folders", async (req, res) => {
   const { account } = result;
   const projectId = resolveEmailProject();
 
+  // Read folders from the sync engine (source of truth now)
+  try {
+    const engineStatus = getEngineStatus();
+    const acct = engineStatus.accounts.find(a => a.accountId === account.id);
+    if (acct && acct.folders.length > 0) {
+      const folders = acct.folders
+        .filter(f => f.state !== "error")
+        .map(f => ({ name: f.folder, path: f.folder }));
+      res.json({ data: folders, total: folders.length, source: "engine" });
+      return;
+    }
+  } catch { /* fall through to settings cache */ }
+
   // Cache-only — check settings cache
   try {
     const { settings } = await import("ingenium-core");
