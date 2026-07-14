@@ -40,10 +40,11 @@ import {
 } from "ingenium-email";
 import type {
   EmailAccount,
+  EmailAttachment,
+  EmailMessage,
   OAuthToken,
   SendOptions,
   EmailProvider,
-  EmailMessage,
   FolderEngineState,
 } from "ingenium-email";
 
@@ -682,6 +683,24 @@ function cachedToEmailMessage(c: emailCache.CachedEmail): Partial<EmailMessage> 
   // Check body cache for full HTML/text content
   const cachedBody = emailCache.getCachedEmailBody(c.account_id, c.folder, c.uid);
 
+  // Extract attachment metadata from body cache or envelope
+  let attachments: EmailAttachment[] = [];
+  if (c.has_attachments) {
+    // Try body cache headers_json first (has full attachment metadata from parser)
+    if (cachedBody?.headers_json) {
+      try {
+        const headers = JSON.parse(cachedBody.headers_json);
+        if (Array.isArray(headers.attachments)) {
+          attachments = headers.attachments;
+        }
+      } catch { /* ignore */ }
+    }
+    // Fallback: show placeholder
+    if (attachments.length === 0) {
+      attachments = [{ filename: "Open in full view to see attachments", size: 0, mimeType: "text/plain", partId: "0" }];
+    }
+  }
+
   return {
     uid: c.uid,
     subject: c.subject ?? "(no subject)",
@@ -693,7 +712,7 @@ function cachedToEmailMessage(c: emailCache.CachedEmail): Partial<EmailMessage> 
       text: cachedBody?.text ?? c.snippet ?? undefined,
       html: cachedBody?.html ?? undefined,
     },
-    attachments: c.has_attachments ? [{ filename: "View in full message", size: 0, mimeType: "application/octet-stream", partId: "0" }] : [],
+    attachments,
     flags: ((): string[] => { try { return JSON.parse(c.flags) as string[]; } catch { return []; } })(),
     folder: c.folder,
     messageId: (envelope.messageId as string) ?? undefined,
