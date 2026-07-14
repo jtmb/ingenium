@@ -315,7 +315,7 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
           await client.mailboxOpen("INBOX");
           const actualExists = (client.mailbox as { exists: number }).exists;
 
-          if (actualExists !== worker.lastInboxExists || cachedTotal < actualExists) {
+          if (actualExists !== worker.lastInboxExists) {
             worker.lastInboxExists = actualExists;
             logger.info("sync-engine", `New mail detected in INBOX for ${worker.email}: exists=${actualExists} cached≈${cachedTotal}`);
             enqueueTask(worker, {
