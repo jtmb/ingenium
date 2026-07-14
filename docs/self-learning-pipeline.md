@@ -1310,7 +1310,7 @@ curl -X POST http://localhost:4097/api/v1/skills/sync-all?project=gh-llm-bootstr
 
 **Solutions:**
 1. Run database migration: `npm run migrate`
-2. Check FTS5 table exists: `.opencode/skills/learnings.md` should have content
+2. Check FTS5 table exists: `.opencode/skills/observations.md` should have content
 3. Verify triggers are active in SQLite
 4. Increase observation content length
 
