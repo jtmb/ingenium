@@ -60,7 +60,7 @@ These are not optional. Skip none of them.
 ```
 packages/
 ├── ingenium-core/        # Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed)
-├── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser). OAuth2 for Gmail/Outlook. No DB access.
+├── ingenium-email/       # IMAP/SMTP email client (imapflow, nodemailer, mailparser) + sync-engine.ts background mail sync with priority queue. OAuth2 for Gmail/Outlook. No DB access.
 └── ingenium-extension/   # Client-side OpenCode package — MCP server, observer plugin, skill-sync plugin, auto-observer. Installable via `npx -y @ingenium/extension`.
 
 services/
@@ -652,4 +652,8 @@ See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrato
 | `OAUTH_REDIRECT_URI` | `http://localhost:3000/mail/oauth/callback` | ingenium-email | OAuth2 callback URL |
 | `INGENIUM_OPENCODE_DB_PATH` | `/var/opencode/opencode.db` | ingenium-api | OpenCode SQLite DB path for extraction engine. The DB is mounted read-write in Docker. |
 
-> **Per-project settings**: `extraction_watermark` and `extraction_seen_hashes` settings track which OpenCode messages have been processed, preventing duplicate extraction across scheduler cycles.
+> **Per-project mail settings** (configurable via `ingenium_setting_set` or Settings page):
+> - `mail_offline_window` (default: 500) — max email headers to sync per folder
+> - `mail_body_window` (default: 200) — max email bodies to cache per folder
+> - `mail_sync_interval_ms` (default: 300000) — round-robin cadence between folder syncs
+> - `synthesis_interval_ms` (default: 900000) — synthesis pipeline interval (0 = disabled)

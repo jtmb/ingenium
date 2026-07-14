@@ -1,7 +1,6 @@
 import { settings, projects, logger, extraction, synthesis, jobs, checkpointAfterWrite } from "ingenium-core";
 import { executeJobRun } from "./job-runner.js";
-import { listAccounts, syncAccountFolders, syncFolder, getGlobalProjectId } from "ingenium-email";
-import { markSyncing } from "./routes/emails.js";
+import { listAccounts, startEngine, getEngineStatus, getGlobalProjectId } from "ingenium-email";
 
 const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
 
@@ -108,40 +107,34 @@ function getMailSyncInterval(): number {
   return MAIL_SYNC_DEFAULT_MS;
 }
 
-/** Sync mail for the global project only — accounts are always global. */
+/** Verify the sync engine is alive — the engine handles all IMAP sync autonomously. */
 async function triggerMailSyncForAllProjects(): Promise<void> {
   try {
+    const engineStatus = getEngineStatus();
     const globalId = getGlobalProjectId();
     const accounts = listAccounts(globalId);
 
-    for (const acct of accounts) {
-      try {
-        // 🔴 Sync INBOX first — catches new mail quickly, body prefetch is built-in
-        const inboxResult = await syncFolder(globalId, acct.id, "INBOX");
-        if (inboxResult.synced > 0) {
-          logger.info("mail-sync", `INBOX sync: ${inboxResult.synced} new for "${acct.email}"`);
-        } else if (inboxResult.error) {
-          logger.warn("mail-sync", `INBOX sync failed for "${acct.email}": ${inboxResult.error}`);
-        }
+    if (!engineStatus.running || !engineStatus.heartbeatAt) {
+      logger.warn("mail-sync", `Engine not running (running=${engineStatus.running}, heartbeat=${engineStatus.heartbeatAt}), restarting`);
+      startEngine(globalId);
+      return;
+    }
 
-        // Then sync remaining folders with 30-min freshness gate
-        const results = await syncAccountFolders(globalId, acct.id, {
-          skipFresh: true,
-          freshMs: 30 * 60 * 1000,
-          onFolder: (f, a) => markSyncing(acct.id, f, a),
-        });
-        const synced = results.reduce((sum, r) => sum + r.synced, 0);
-        const errors = results.filter((r) => r.error);
-        if (synced > 0 || errors.length > 0) {
-          logger.info("mail-sync", `Synced ${synced} emails across ${results.length} folders for "${acct.email}"${errors.length > 0 ? ` (${errors.length} errors)` : ""}`);
-        }
-      } catch (err: any) {
-        logger.warn("mail-sync", `Sync failed for "${acct.email}": ${err.message}`);
-      }
+    // Check heartbeat staleness (>2 minutes without a tick)
+    const msSince = Date.now() - new Date(engineStatus.heartbeatAt).getTime();
+    if (msSince > 120_000) {
+      logger.warn("mail-sync", `Engine heartbeat stale (${Math.round(msSince / 1000)}s since last tick), restarting`);
+      startEngine(globalId);
+      return;
+    }
+
+    if (accounts.length > 0) {
+      const engineAccounts = engineStatus.accounts.length;
+      logger.info("mail-sync", `Engine healthy: ${engineAccounts}/${accounts.length} workers, heartbeat=${Math.round(msSince / 1000)}s ago`);
     }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("mail-sync", `Global project lookup failed: ${msg}`);
+    logger.warn("mail-sync", `Engine health check failed: ${msg}`);
   }
 }
 

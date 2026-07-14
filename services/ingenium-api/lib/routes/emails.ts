@@ -10,12 +10,9 @@ import {
   storeCredentials,
   storeTokens,
   getGlobalProjectId,
-  // IMAP
+  // IMAP (write ops only — move, flags, delete)
   connectAccount,
   disconnectAccount,
-  listEmails,
-  getEmail,
-  searchEmails,
   moveEmail,
   setFlags,
   deleteEmail,
@@ -27,86 +24,37 @@ import {
   getOAuthUrl,
   exchangeCode,
   getValidTokens,
-  // Triage
-  triageEmails,
   // Responder
   suggestResponse,
   // Watcher
   startWatcher,
   getWatcherStatus,
   stopWatcher,
-  // Sync
-  syncFolder,
-  syncAccountFolders,
-  backfillFolderBodies,
+  // Sync engine (replaces route-triggered syncs)
+  startEngine,
+  boostFolder,
+  boostBody,
+  getEngineStatus,
   // Connection state
   setAccountConnected,
 } from "ingenium-email";
 import type {
   EmailAccount,
   OAuthToken,
-  SearchQuery,
   SendOptions,
   EmailProvider,
   EmailMessage,
+  FolderEngineState,
 } from "ingenium-email";
 
-// ── Sync tracking ──────────────────────────────────────────────────────────
-// Tracks which accounts+folders are currently being synced so the
-// /sync-status endpoint can report progress to the dashboard.
+// ── Engine-backed helpers (no in-memory sync trackers) ──────────────────────
 
-interface SyncTracker {
-  syncing: boolean;
-  folders: Map<string, boolean>; // folder -> syncing
-}
-
-const syncTrackers = new Map<string, SyncTracker>();
-
-function getTracker(accountId: string): SyncTracker {
-  let t = syncTrackers.get(accountId);
-  if (!t) {
-    t = { syncing: false, folders: new Map() };
-    syncTrackers.set(accountId, t);
-  }
-  return t;
-}
-
-export function markSyncing(accountId: string, folder: string, active: boolean): void {
-  const t = getTracker(accountId);
-  t.folders.set(folder, active);
-  t.syncing = [...t.folders.values()].some(v => v);
-}
-
-/** Check if a folder is currently being synced (in-flight guard). */
-function isSyncing(accountId: string, folder: string): boolean {
-  const t = syncTrackers.get(accountId);
-  return t?.folders.get(folder) === true;
-}
-
-async function trackSync<T>(
-  accountId: string,
-  folder: string | null,
-  fn: () => Promise<T>,
-): Promise<T> {
-  if (folder) {
-    markSyncing(accountId, folder, true);
-  } else {
-    // Full account sync — mark all tracked folders
-    const t = getTracker(accountId);
-    t.syncing = true;
-  }
-
-  try {
-    return await fn();
-  } finally {
-    if (folder) {
-      markSyncing(accountId, folder, false);
-    } else {
-      const t = getTracker(accountId);
-      t.syncing = false;
-      t.folders.clear();
-    }
-  }
+/** Get folder engine state from the sync engine for a given account+folder. */
+function getFolderEngineState(accountId: string, folder: string): FolderEngineState | null {
+  const status = getEngineStatus();
+  const acct = status.accounts.find(a => a.accountId === accountId);
+  if (!acct) return null;
+  return acct.folders.find(f => f.folder === folder) ?? null;
 }
 
 export const emailsRouter = Router();
@@ -160,6 +108,7 @@ async function getAccountAuthOrError(
 }
 
 /** Wrapper that connects, runs the callback, marks account as connected.
+ *  🔴 WRITE PATHS ONLY — read paths use the engine via boostFolder/boostBody.
  *  Never disconnects — the shared connection pool and ImapFlow error handlers
  *  manage connection lifecycle. Disconnecting on per-request errors would kill
  *  the pool for all concurrent users. */
@@ -328,44 +277,73 @@ emailsRouter.post("/accounts/:id/test", async (req, res) => {
 
 // ── Email Operations (fixed paths before /:uid) ──────────────────────────
 
-/** GET /search?project=&account=&folder=&q=&from=&to=&subject=&since=&before= — Search emails. */
+/** GET /search?project=&account=&folder=&q=&from=&to=&subject=&since=&before= — Search emails (cache-only). */
 emailsRouter.get("/search", async (req, res) => {
   const accountId = req.query.account as string | undefined;
   const result = await getAccountAuthOrError(res, accountId);
   if (!result) return;
 
   const folder = (req.query.folder as string) ?? "INBOX";
-  const { account, auth } = result;
+  const { account } = result;
 
-  const query: SearchQuery = {};
-  if (req.query.q) query.query = req.query.q as string;
-  if (req.query.from) query.from = req.query.from as string;
-  if (req.query.to) query.to = req.query.to as string;
-  if (req.query.subject) query.subject = req.query.subject as string;
-  if (req.query.since) query.since = req.query.since as string;
-  if (req.query.before) query.before = req.query.before as string;
+  // Cache-only — check if we have cached listings for this folder
+  const { emails: cached, total: cachedTotal } = emailCache.getCachedEmails(
+    account.id, folder, 1, 1000, // fetch up to 1000 cached emails for filtering
+  );
 
-  try {
-    const uids = await withImapConnection(account, auth, (id) =>
-      searchEmails(id, folder, query),
-    );
-    res.json({ data: uids, total: uids.length });
-  } catch (err: any) {
-    logger.error("email", `Search failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+  if (cached.length === 0) {
+    // No cached data — hint engine to sync this folder
+    boostFolder(account.id, folder);
+    res.json({
+      data: [],
+      total: 0,
+      source: "pending",
+      message: "No cached data for search. Folder is being synced — retry shortly.",
+    });
+    return;
   }
+
+  // Filter cached emails by query params
+  const q = (req.query.q as string)?.toLowerCase();
+  const fromFilter = (req.query.from as string)?.toLowerCase();
+  const toFilter = (req.query.to as string)?.toLowerCase();
+  const subjFilter = (req.query.subject as string)?.toLowerCase();
+  const since = req.query.since as string | undefined;
+  const before = req.query.before as string | undefined;
+
+  const filtered = cached.filter((e) => {
+    if (q) {
+      const snippet = (e.snippet ?? "").toLowerCase();
+      const subject = (e.subject ?? "").toLowerCase();
+      const from = (e.from_addr ?? "").toLowerCase();
+      if (!snippet.includes(q) && !subject.includes(q) && !from.includes(q)) return false;
+    }
+    if (fromFilter && !(e.from_addr ?? "").toLowerCase().includes(fromFilter)) return false;
+    if (toFilter) return false; // cached emails don't have to_addr — skip to filter
+    if (subjFilter && !(e.subject ?? "").toLowerCase().includes(subjFilter)) return false;
+    if (since && e.date && e.date < since) return false;
+    if (before && e.date && e.date > before) return false;
+    return true;
+  });
+
+  res.json({
+    data: filtered.map(cachedToEmailMessage),
+    total: filtered.length,
+    source: "cache",
+    totalCached: cachedTotal,
+  });
 });
 
-/** GET /folders?project=&account= — List IMAP folders. */
+/** GET /folders?project=&account= — List IMAP folders (cache-only). */
 emailsRouter.get("/folders", async (req, res) => {
   const accountId = req.query.account as string | undefined;
   const result = await getAccountAuthOrError(res, accountId);
   if (!result) return;
 
-  const { account, auth } = result;
+  const { account } = result;
   const projectId = resolveEmailProject();
 
-  // Check cache first
+  // Cache-only — check settings cache
   try {
     const { settings } = await import("ingenium-core");
     const cached = settings.getSetting(projectId, `email_folders_${accountId}`);
@@ -376,59 +354,71 @@ emailsRouter.get("/folders", async (req, res) => {
         const flagStr = f.flags?.join(" ") ?? "";
         return !(/\\noselect|\\nonexistent/i.test(flagStr)) && f.path !== "[Gmail]";
       });
-      // Fire background refresh
-      withImapConnection(account, auth, async (id) => {
-        const fresh = await listFolders(id);
-        try {
-          settings.setSetting(projectId, `email_folders_${accountId}`, JSON.stringify(fresh));
-        } catch { /* non-fatal */ }
-      }).catch(() => {});
+      // Hint engine this account is active (folders cache may be stale)
+      boostFolder(account.id, "INBOX");
       res.json({ data: folders, total: folders.length, source: "cache" });
       return;
     }
-  } catch { /* non-fatal — fall through to live IMAP */ }
+  } catch { /* non-fatal — fall through to empty response */ }
 
-  try {
-    const folders = await withImapConnection(account, auth, (id) => listFolders(id));
-    // 🔴 Filter Noselect at the producer (API response), not just the UI
-    const visibleFolders = folders.filter((f) => {
-      const flagStr = f.flags?.join(" ") ?? "";
-      return !(/\\noselect|\\nonexistent/i.test(flagStr)) && f.path !== "[Gmail]";
-    });
-    // Cache folder list for future loads
-    try {
-      const { settings } = await import("ingenium-core");
-      settings.setSetting(projectId, `email_folders_${accountId}`, JSON.stringify(folders));
-    } catch { /* non-fatal */ }
-    res.json({ data: visibleFolders, total: visibleFolders.length });
-  } catch (err: any) {
-    logger.error("email", `List folders failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
-  }
+  // No cached folders — hint engine
+  boostFolder(account.id, "INBOX");
+  res.json({
+    data: [],
+    total: 0,
+    source: "pending",
+    message: "No cached folder list. Sync is in progress — retry shortly.",
+  });
 });
 
-/** GET /triage?project=&account=&limit= — Triage unread emails. */
+/** GET /triage?project=&account=&limit= — Triage unread emails (cache-only). */
 emailsRouter.get("/triage", async (req, res) => {
   const accountId = req.query.account as string | undefined;
   const result = await getAccountAuthOrError(res, accountId);
   if (!result) return;
 
-  const { account, auth } = result;
+  const { account } = result;
   const limit = parseInt((req.query.limit as string) ?? "20", 10) || 20;
-  const projectId = resolveEmailProject();
 
-  try {
-    const triageResults = await withImapConnection(account, auth, (id) =>
-      triageEmails(projectId, id, limit),
-    );
-    res.json({ data: triageResults, total: triageResults.length });
-  } catch (err: any) {
-    logger.error("email", `Triage failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+  // Cache-only — get cached INBOX emails and return unread ones
+  const { emails: cached } = emailCache.getCachedEmails(
+    account.id, "INBOX", 1, 200,
+  );
+
+  if (cached.length === 0) {
+    boostFolder(account.id, "INBOX");
+    res.json({
+      data: [],
+      total: 0,
+      source: "pending",
+      message: "No cached data for triage. Sync is in progress — retry shortly.",
+    });
+    return;
   }
+
+  // Filter unread, return at most `limit` items with basic priority
+  const unread = cached
+    .filter(e => {
+      try {
+        const flags: string[] = JSON.parse(e.flags);
+        return !flags.includes("\\Seen");
+      } catch { return true; }
+    })
+    .slice(0, limit)
+    .map(e => {
+      const email = cachedToEmailMessage(e);
+      // Basic triage without AI: assign "new" priority
+      return {
+        priority: "medium" as const,
+        reason: "Unread message",
+        email,
+      };
+    });
+
+  res.json({ data: unread, total: unread.length, source: "cache" });
 });
 
-/** GET /suggest/:uid?project=&account=&folder= — Suggest a response for an email. */
+/** GET /suggest/:uid?project=&account=&folder= — Suggest a response for an email (cache-only). */
 emailsRouter.get("/suggest/:uid", async (req, res) => {
   const accountId = req.query.account as string | undefined;
   const result = await getAccountAuthOrError(res, accountId);
@@ -443,12 +433,28 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
   }
 
   const folder = (req.query.folder as string) ?? "INBOX";
-  const { account, auth } = result;
-  const projectId = resolveEmailProject();
+  const { account } = result;
 
+  // Check if body is cached (required for suggestion)
+  const cachedBody = emailCache.getCachedEmailBody(account.id, folder, uid);
+  if (!cachedBody) {
+    // Body not cached — hint engine to fetch it
+    boostBody(account.id, folder, uid);
+    boostFolder(account.id, folder);
+    res.status(202).json({
+      pending: true,
+      message: "Email body being fetched — retry in 1.5s",
+      retry: true,
+    });
+    return;
+  }
+
+  // Body available — we can generate a suggestion
+  // (suggestResponse uses the cached email content via the responder module)
   try {
+    const { auth } = result;
     const suggestion = await withImapConnection(account, auth, (id) =>
-      suggestResponse(projectId, id, uid, folder),
+      suggestResponse(resolveEmailProject(), id, uid, folder),
     );
     if (!suggestion) {
       res.status(404).json({
@@ -520,13 +526,13 @@ emailsRouter.get("/watch/status", (_req, res) => {
 
 // ── Root Email Routes ────────────────────────────────────────────────────
 
-/** POST /sync?project=&account=&folder= — Trigger DB-backed email sync.
- *  POST /emails/sync?account=<id>            — sync all folders
- *  POST /emails/sync?account=<id>&folder=X   — sync single folder */
+/**
+ * POST /sync?project=&account=&folder= — Trigger engine-backed sync hint.
+ * Does NOT perform live IMAP — just hints the sync engine to prioritize this folder.
+ * POST /emails/sync?account=<id>            — boost all folders
+ * POST /emails/sync?account=<id>&folder=X   — boost single folder
+ */
 emailsRouter.post("/sync", async (req, res) => {
-  const projectId = resolveEmailProject();
-
-  // Support both query params and body for account/folder
   const accountId = (req.query.account as string) ?? req.body.account;
   if (!accountId) {
     res.status(422).json({
@@ -535,42 +541,35 @@ emailsRouter.post("/sync", async (req, res) => {
     return;
   }
 
-  const folder = (req.query.folder as string) ?? null;
+  const folder = (req.query.folder as string) ?? req.body.folder ?? null;
 
   try {
     if (folder) {
-      const result = await trackSync(accountId, folder, () =>
-        syncFolder(projectId, accountId, folder),
-      );
-      if (result.error) {
-        res.status(500).json({ error: { code: "SYNC_ERROR", message: result.error } });
-        return;
-      }
-      res.json({ data: { folder, synced: result.synced, total: result.total } });
+      boostFolder(accountId, folder);
     } else {
-      const results = await trackSync(accountId, null, () =>
-        syncAccountFolders(projectId, accountId, { skipFresh: false, onFolder: (f, a) => markSyncing(accountId, f, a) }),
-      );
-      const totalSynced = results.reduce((sum, r) => sum + r.synced, 0);
-      const errors = results.filter((r) => r.error).map((r) => ({ folder: r.folder, error: r.error }));
-      res.json({
-        data: {
-          account: accountId,
-          folders: results.length,
-          totalSynced,
-          results: results.map((r) => ({ folder: r.folder, synced: r.synced, total: r.total })),
-          errors: errors.length > 0 ? errors : undefined,
-        },
-      });
+      // Boost all folders marked in engine state for this account
+      const engineStatus = getEngineStatus();
+      const acct = engineStatus.accounts.find(a => a.accountId === accountId);
+      if (acct) {
+        for (const fs of acct.folders) {
+          boostFolder(accountId, fs.folder);
+        }
+      } else {
+        // Account not in engine yet — boost INBOX to kickstart
+        boostFolder(accountId, "INBOX");
+      }
     }
+    res.json({ data: { accepted: true, account: accountId, folder } });
   } catch (err: any) {
-    logger.error("email", `Sync failed for account ${accountId}`, { error: err.message, name: err.name, method: req.method, path: req.originalUrl });
+    logger.error("email", `Sync hint failed for account ${accountId}`, { error: err.message, name: err.name, method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "SYNC_ERROR", message: err.message } });
   }
 });
 
-/** GET /sync-status?project=&account= — Return per-folder sync and cache status.
- *  Includes overall sync state (idle/syncing/done) and per-folder counts. */
+/**
+ * GET /sync-status?project=&account= — Return per-folder sync status from the engine.
+ * Backward-compatible response shape with new `engine` key for raw EngineStatus.
+ */
 emailsRouter.get("/sync-status", (req, res) => {
   const accountId = req.query.account as string | undefined;
   if (!accountId) {
@@ -581,24 +580,55 @@ emailsRouter.get("/sync-status", (req, res) => {
   }
 
   try {
-    const tracker = getTracker(accountId);
-    const folders = emailCache.getAccountFoldersSyncStatus(accountId);
+    const engineStatus = getEngineStatus();
+    const acct = engineStatus.accounts.find(a => a.accountId === accountId);
 
-    // Count currently syncing folders
-    const syncingFolders = folders.filter((f: { folder: string; cachedCount: number }) => tracker.folders.get(f.folder) === true);
+    if (!acct) {
+      // Account not in engine — return idle state
+      res.json({
+        data: {
+          overall: "idle" as const,
+          account: accountId,
+          totalFolders: 0,
+          syncingFolders: 0,
+          totalCached: 0,
+          totalBodies: 0,
+          folders: [],
+          engine: engineStatus,
+        },
+      });
+      return;
+    }
+
+    // Map engine folder states to backward-compatible shape
+    const folders = acct.folders.map((fs) => {
+      const { total: cachedTotal } = emailCache.getCachedEmails(
+        accountId, fs.folder, 1, 1,
+      );
+      return {
+        folder: fs.folder,
+        cachedCount: cachedTotal,
+        bodyCount: fs.bodiesCached,
+        lastSyncedAt: fs.lastSyncedAt,
+        syncing: fs.state === "syncing-headers" || fs.state === "backfilling-bodies",
+        engineState: fs.state,
+      };
+    });
+
+    const syncingFolders = folders.filter(f => f.syncing);
     const syncingCount = syncingFolders.length;
 
     let overall: "idle" | "syncing" | "done";
     if (syncingCount > 0) {
       overall = "syncing";
-    } else if (folders.length > 0 && folders.some((f: { cachedCount: number }) => f.cachedCount > 0)) {
+    } else if (folders.length > 0 && folders.some(f => f.cachedCount > 0)) {
       overall = "done";
     } else {
       overall = "idle";
     }
 
-    const totalCached = folders.reduce((sum: number, f: { cachedCount: number }) => sum + f.cachedCount, 0);
-    const totalBodies = folders.reduce((sum: number, f: { bodyCount: number }) => sum + f.bodyCount, 0);
+    const totalCached = folders.reduce((sum, f) => sum + f.cachedCount, 0);
+    const totalBodies = folders.reduce((sum, f) => sum + f.bodyCount, 0);
 
     res.json({
       data: {
@@ -608,10 +638,8 @@ emailsRouter.get("/sync-status", (req, res) => {
         syncingFolders: syncingCount,
         totalCached,
         totalBodies,
-        folders: folders.map((f: { folder: string; cachedCount: number; bodyCount: number; lastSyncedAt: string | null }) => ({
-          ...f,
-          syncing: tracker.folders.get(f.folder) === true,
-        })),
+        folders,
+        engine: engineStatus,
       },
     });
   } catch (err: any) {
@@ -654,12 +682,12 @@ function cachedToEmailMessage(c: emailCache.CachedEmail): Partial<EmailMessage> 
 
 /**
  * 🔴 GET /?project=&account=&folder=&page=&limit=&refresh=
- * CACHE-FIRST — NEVER BLOCK ON LIVE IMAP.
+ * CACHE-ONLY — NEVER BLOCK ON LIVE IMAP.
  *
  * - Always check cache first. Serve instantly if cached.
- * - If cache is empty: return immediately with a "pending" status,
- *   fire a background sync. NEVER wait on IMAP.
- * - ?refresh=true triggers a live IMAP fetch (manual refresh button).
+ * - If cache is empty: return immediately with "pending" status.
+ * - ?refresh=true calls boostFolder (non-blocking hint to engine) then returns cache.
+ * - The sync engine owns ALL IMAP I/O.
  */
 emailsRouter.get("/", async (req, res) => {
   const accountId = req.query.account as string | undefined;
@@ -671,78 +699,39 @@ emailsRouter.get("/", async (req, res) => {
   const limit = parseInt((req.query.limit as string) ?? "50", 10) || 50;
   const refresh = req.query.refresh === "true";
 
-  const { account, auth } = result;
-  const projectId = resolveEmailProject();
+  const { account } = result;
 
-  // ── Force refresh: skip cache, fetch from IMAP, populate cache ──────
+  // ── ?refresh=true — hint the engine, then serve cache ──────────────
   if (refresh) {
-    try {
-      const { messages, total } = await withImapConnection(account, auth, (id) =>
-        listEmails(id, folder, page, limit),
-      );
-      // Populate cache in background (fire-and-forget)
-      setImmediate(() => {
-        trackSync(account.id, folder, () =>
-          syncFolder(projectId, account.id, folder),
-        ).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("email", `Background folder sync failed for account ${account.id}/${folder}: ${msg}`);
-        });
-      });
-      res.json({ data: messages, total, source: "imap" });
-      return;
-    } catch (err: any) {
-      logger.error("email", `List emails (refresh) failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-      res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
-      return;
-    }
+    boostFolder(account.id, folder);
   }
 
-  // ── Check DB cache first ───────────────────────────────────────────
+  // ── Check DB cache ─────────────────────────────────────────────────
   const { emails: cached, total: cachedTotal } = emailCache.getCachedEmails(
     account.id, folder, page, limit,
   );
 
   if (cached.length > 0) {
-    // Cache hit — return immediately, trigger background refresh if stale
-    const state = emailCache.getSyncState(account.id, folder);
-    const lastSynced = state.last_synced_at ? new Date(state.last_synced_at).getTime() : 0;
-    const staleThresholdMs = 5 * 60 * 1000; // 5 min — refresh if older than one scheduler cycle
-    if (Date.now() - lastSynced > staleThresholdMs && !isSyncing(account.id, folder)) {
-      setImmediate(() => {
-        trackSync(account.id, folder, () =>
-          syncFolder(projectId, account.id, folder),
-        ).catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("email", `Background stale-cache sync failed for account ${account.id}/${folder}: ${msg}`);
-        });
-      });
-    }
-
+    // Cache hit — return immediately
+    const folderState = getFolderEngineState(account.id, folder);
     res.json({
       data: cached.map(cachedToEmailMessage),
       total: cachedTotal,
       source: "cache",
+      engineState: folderState,
     });
     return;
   }
 
-  // ── 🔴 Cache miss — NEVER block on live IMAP. Return immediately. ──
-  // Fire a background sync so the cache is populated for the next request.
-  setImmediate(() => {
-    trackSync(account.id, folder, () =>
-      syncFolder(projectId, account.id, folder),
-    ).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("email", `Background cache-populate sync failed for account ${account.id}/${folder}: ${msg}`);
-    });
-  });
-
+  // ── Cache miss — return empty, let engine populate asynchronously ──
+  // No live IMAP, no setImmediate, no background sync from this route.
+  const folderState = getFolderEngineState(account.id, folder);
   res.json({
     data: [],
     total: 0,
     source: "pending",
     message: "Syncing this folder. Data will appear shortly — click Refresh to retry, or check back in a few seconds.",
+    engineState: folderState,
   });
 });
 
@@ -812,8 +801,10 @@ emailsRouter.post("/", async (req, res) => {
 
 // ── UID Parameterized Routes ─────────────────────────────────────────────
 
-/** GET /:uid?project=&account=&folder= — Get a single email by UID.
- *  Checks body cache first; falls back to IMAP and caches the result. */
+/**
+ * GET /:uid?project=&account=&folder= — Get a single email by UID.
+ * CACHE-ONLY. Body miss → boostBody hint + 202 Accepted. NO live IMAP.
+ */
 emailsRouter.get("/:uid", async (req, res) => {
   const accountId = req.query.account as string | undefined;
   const result = await getAccountAuthOrError(res, accountId);
@@ -828,7 +819,7 @@ emailsRouter.get("/:uid", async (req, res) => {
   }
 
   const folder = (req.query.folder as string) ?? "INBOX";
-  const { account, auth } = result;
+  const { account } = result;
 
   // ── Check body cache first ─────────────────────────────────────────
   const cachedBody = emailCache.getCachedEmailBody(account.id, folder, uid);
@@ -845,71 +836,19 @@ emailsRouter.get("/:uid", async (req, res) => {
     return;
   }
 
-  // ── Cache miss — fetch from IMAP with a 15s timeout. If IMAP is busy/hung,
-  //     return 504 immediately and fire a background fetch so the next request
-  //     hits the cache (preventing 30s hangs for every uncached email). ──
-  try {
-    const email = await Promise.race([
-      withImapConnection(account, auth, (id) => getEmail(id, folder, uid)),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("IMAP fetch timed out")), 15000),
-      ),
-    ]);
-    if (!email) {
-      res.status(404).json({
-        error: { code: "NOT_FOUND", message: `Email with UID ${uid} not found in ${folder}` },
-      });
-      return;
-    }
+  // ── Cache miss — hint engine, return 202, NO live IMAP ────────────
+  // The engine will prioritize body fetch for this UID and the listing.
+  boostBody(account.id, folder, uid);
+  boostFolder(account.id, folder);
 
-    // Cache the body so future reads skip IMAP
-    try {
-      const headersJson = email.messageId ? JSON.stringify({
-        messageId: email.messageId,
-        threadId: email.threadId,
-        inReplyTo: email.inReplyTo,
-        references: email.references,
-      }) : null;
-      emailCache.upsertEmailBody(
-        account.id,
-        folder,
-        uid,
-        email.body.html ?? null,
-        email.body.text ?? null,
-        headersJson,
-      );
-    } catch { /* non-fatal — body cache is best-effort */ }
-
-    res.json({ data: email, source: "imap" });
-  } catch (err: any) {
-    const isTimeout = err.message?.includes("timed out");
-    if (isTimeout) {
-      // Fire a background body fetch so the NEXT request hits cache
-      logger.warn("email", `IMAP body fetch timed out for ${account.id}/${folder}/${uid}, queuing background fetch`);
-      setImmediate(() => {
-        import("./emails.js").then(() => {
-          withImapConnection(account, auth, (id) => getEmail(id, folder, uid))
-            .then((email) => {
-              if (email?.body) {
-                emailCache.upsertEmailBody(account.id, folder, uid,
-                  email.body.html ?? null, email.body.text ?? null, null);
-              }
-            })
-            .catch(() => {});
-        });
-      });
-      res.status(504).json({
-        error: { code: "GATEWAY_TIMEOUT", message: "Email body fetch timed out. Body is being fetched in the background — retry in a few seconds." },
-        retry: true,
-      });
-      return;
-    }
-    logger.error("email", `Get email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
-  }
+  res.status(202).json({
+    pending: true,
+    message: "Body being fetched — retry in 1.5s",
+    retry: true,
+  });
 });
 
-/** PATCH /:uid/move?project= — Move an email to another folder. */
+/** PATCH /:uid/move?project= — Move an email to another folder. (WRITE op — uses IMAP) */
 emailsRouter.patch("/:uid/move", async (req, res) => {
   const accountId = req.body.account;
   const result = await getAccountAuthOrError(res, accountId);
@@ -943,7 +882,7 @@ emailsRouter.patch("/:uid/move", async (req, res) => {
   }
 });
 
-/** PATCH /:uid/flags?project= — Set flags on an email. */
+/** PATCH /:uid/flags?project= — Set flags on an email. (WRITE op — uses IMAP) */
 emailsRouter.patch("/:uid/flags", async (req, res) => {
   const accountId = req.body.account;
   const result = await getAccountAuthOrError(res, accountId);
@@ -977,7 +916,7 @@ emailsRouter.patch("/:uid/flags", async (req, res) => {
   }
 });
 
-/** DELETE /:uid?project= — Delete an email. */
+/** DELETE /:uid?project= — Delete an email. (WRITE op — uses IMAP) */
 emailsRouter.delete("/:uid", async (req, res) => {
   const accountId = req.body.account;
   const result = await getAccountAuthOrError(res, accountId);
@@ -1005,7 +944,7 @@ emailsRouter.delete("/:uid", async (req, res) => {
   }
 });
 
-// ── Startup: account migration & prefetch ──────────────────────────────────
+// ── Startup: account migration & engine initialization ──────────────────────
 
 /**
  * 🔴 Migration: copy email accounts from any non-global project to global-default.
@@ -1111,94 +1050,12 @@ export async function migrateEmailAccountsToGlobal(): Promise<number> {
 }
 
 /**
- * 🔴 Prefetch: trigger background sync for all connected accounts.
- * Call this after the API starts to warm the cache without any user interaction.
- * Each folder is capped at ~200 messages and folders are synced sequentially.
+ * 🔴 DEPRECATED — use startEngine(projectId) instead.
+ * The sync engine now owns all IMAP I/O via its priority-queue background workers.
+ * Kept for backward compatibility: just delegates to startEngine.
  */
 export async function prefetchAllAccounts(): Promise<void> {
-  try {
-    const projectId = resolveEmailProject();
-    const accounts = listAccounts(projectId);
-
-    if (accounts.length === 0) {
-      logger.info("email", "Startup prefetch: no accounts configured, skipping");
-      return;
-    }
-
-    logger.info("email", `Startup prefetch: beginning sync for ${accounts.length} account(s)`);
-
-    for (const acct of accounts) {
-      try {
-        // Connect the account (this also handles auth/token refresh)
-        const creds = getCredentials(projectId, acct.id);
-        if (!creds) {
-          logger.warn("email", `Startup prefetch SKIP: no credentials for ${acct.email}`);
-          continue;
-        }
-
-        logger.info("email", `Startup prefetch: launching sync for ${acct.email}`);
-
-        // 🔴 Sequential orchestration: INBOX first (catch new mail + body prefetch),
-        // then backfill remaining bodies, then fire-and-forget other folders.
-        try {
-          await trackSync(acct.id, "INBOX", () =>
-            syncFolder(projectId, acct.id, "INBOX"),
-          );
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("email", `Startup prefetch INBOX sync failed for ${acct.email}: ${msg}`);
-        }
-
-        // Backfill remaining bodies for INBOX
-        try {
-          const bfResult = await backfillFolderBodies(projectId, acct.id, "INBOX", 50);
-          if (bfResult.backfilled > 0) {
-            logger.info("email", `Startup prefetch: backfilled ${bfResult.backfilled} INBOX bodies for ${acct.email}`);
-          } else if (bfResult.error) {
-            logger.warn("email", `Startup prefetch backfill INBOX failed for ${acct.email}: ${bfResult.error}`);
-          }
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("email", `Startup prefetch backfill INBOX error for ${acct.email}: ${msg}`);
-        }
-
-        // Fire-and-forget: remaining folders with 30-min freshness gate,
-        // then backfill bodies for each synced folder
-        setImmediate(() => {
-          trackSync(acct.id, null, async () => {
-            const results = await syncAccountFolders(projectId, acct.id, {
-              skipFresh: true,
-              freshMs: 30 * 60 * 1000,
-              onFolder: (f, a) => markSyncing(acct.id, f, a),
-            });
-            // Backfill bodies sequentially to avoid exhausting Gmail's 15-connection limit
-            logger.info("email", `Backfilling bodies for ${results.length} folders...`);
-            let backfilled = 0;
-            for (const r of results) {
-              if (!r.error) {
-                try {
-                  const bf = await backfillFolderBodies(projectId, acct.id, r.folder, 50);
-                  if (bf.backfilled > 0) backfilled += bf.backfilled;
-                } catch (e: unknown) {
-                  const msg = e instanceof Error ? e.message : String(e);
-                  logger.warn("email", `Startup prefetch backfill ${acct.email}/${r.folder} failed: ${msg}`);
-                }
-              }
-            }
-            logger.info("email", `Body backfill complete: ${backfilled} bodies across ${results.length} folders`);
-            return results;
-          }).catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            logger.warn("email", `Startup prefetch failed for account ${acct.id}: ${msg}`);
-          });
-        });
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.warn("email", `Startup prefetch error for account ${acct.email}: ${msg}`);
-      }
-    }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("email", `Startup prefetch failed: ${msg}`);
-  }
+  const projectId = resolveEmailProject();
+  logger.info("email", "DEPRECATED: prefetchAllAccounts called — delegating to startEngine");
+  startEngine(projectId);
 }

@@ -61,4 +61,11 @@ export declare function skillSync(project: string, name: string): Promise<{
         text: string;
     }[];
 }>;
+/** Trigger LLM-driven skill audit — merges redundant skills to ≤20 total. */
+export declare function skillConsolidate(project: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=skills.d.ts.map

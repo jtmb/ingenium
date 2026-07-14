@@ -11,3 +11,4 @@ export * from "./lib/triage.js";
 export * from "./lib/responder.js";
 export * from "./lib/watcher.js";
 export * from "./lib/sync.js";
+export * from "./lib/sync-engine.js";

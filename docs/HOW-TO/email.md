@@ -317,27 +317,114 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 
 ## Sync Architecture (July 2026)
 
-### Warm Orchestration
-On API startup, `prefetchAllAccounts()` runs a sequential warm-up for each account:
-1. **INBOX first** — sync listings + body prefetch (50 newest) using `syncFolder("INBOX")`
-2. **INBOX backfill** — `backfillFolderBodies("INBOX", 50)` fetches bodies for the next 50 newest messages that had listings but no cached body
-3. **Remaining folders** — fire-and-forget via `setImmediate`: `syncAccountFolders` with `skipFresh: true, freshMs: 30min`, then `backfillFolderBodies` for every completed folder (regardless of whether new messages were synced)
+### Background Sync Engine
 
-### Single-Flight Deduplication
-`syncFolder` uses an in-memory `Map<string, Promise>` keyed by `accountId\x00folder`. If a sync for the same folder is already in-flight, the caller joins the existing promise instead of starting a duplicate. This is in-memory (not DB-backed) because it guards concurrency within a single process, not freshness across restarts.
+The email client uses a **singleton background sync engine** (`packages/ingenium-email/lib/sync-engine.ts`) that owns **all IMAP I/O**. One engine per container launches one worker per connected email account. Workers are serialized per-account — no concurrent IMAP connections for the same account.
 
-### Body Backfill
-`backfillFolderBodies(projectId, accountId, folder, limit=50)` queries `email_cache` for UIDs that lack a row in `email_bodies` (newest first), fetches their raw content from IMAP, parses it, and stores the body. Capped at `limit` to prevent timeout on large folders.
+#### Priority Queue
+
+Each worker maintains a priority-ordered task queue. Tasks are deduplicated (same account + folder + type at equal or higher priority prevents duplicates):
+
+| Priority | Task Type | Trigger |
+|----------|-----------|---------|
+| **P0** | `sync-folder` (INBOX) | IDLE watch / new mail detected via EXISTS count change |
+| **P1** | `sync-folder` (boosted) | User clicks a folder in UI |
+| **P1** | `backfill-bodies` (boosted UID) | GET /:uid returns 202 (body cache miss) |
+| **P2** | `sync-folder` (INBOX stale) | INBOX headers older than sync interval (default 5 min) |
+| **P3** | `sync-folder` (round-robin) | All folders cycled, skip-fresh gate (DB `last_synced_at`) |
+| **P4** | `backfill-bodies` (capped) | Headers synced but bodies remain uncached, up to `mail_body_window` |
+| **P5** | `backfill-bodies` (deeper) | Body window already full but folder is boosted and more bodies exist |
+
+**Per-account serialization**: One worker connection per account, sequential task execution. Body fetches batch in groups of 25 with 500ms yield between batches. The entire loop yields 1s between full account ticks.
+
+**Heartbeat**: `engineState.heartbeatAt` is updated on every loop tick (even on errors). The dashboard / status page checks heartbeat age to detect stuck workers.
+
+#### Task Lifecycle
+
+1. **INBOX exists check** (every 60s) — lightweight `mailboxOpen` + compare EXISTS count. If changed, enqueues a P0 INBOX sync.
+2. **Maintenance tick** (when queue empty) — generates P1 boosted folders, P2 stale INBOX, P3 round-robin, P4 body backfill, P5 deep backfill.
+3. **Task execution** — `sync-folder` fetches headers (capped at `mail_offline_window`), updates folder state. `backfill-bodies` fetches raw IMAP content, parses, stores to `email_bodies` table.
+4. **Watchdog** — Each task has a 5-minute watchdog timer. Stuck tasks are aborted with an error.
+
+### Route Contract (Cache-Only)
+
+All read routes are **cache-only — never block on live IMAP**:
+
+| Route | Behavior |
+|-------|----------|
+| `GET /` (email list) | Serves from `email_cache`. Cache hit → return instantly with `source: "cache"`. Cache miss → return `source: "pending"` + empty array. `?refresh=true` calls `boostFolder()` (non-blocking hint to engine). |
+| `GET /:uid` (single email) | Serves body from `email_bodies` cache. Body cached → return full email. Body miss → `boostBody()` + `boostFolder()` hints + **202 Accepted** with `retry: true`. Client retries in ~1.5s. |
+| `GET /search` | Filters cached emails in-memory. No cached data → returns `source: "pending"` + hints engine. |
+| `GET /folders` | Reads from settings cache (`email_folders_<accountId>`). Empty → hints engine, returns `source: "pending"`. |
+| `GET /triage` | Filters cached INBOX emails for unread items. Empty → hints engine. |
+
+**Key difference from previous architecture**: Routes never call `syncFolder()` or `backfillFolderBodies()` directly. All IMAP I/O flows through the engine's priority queue via `boostFolder()` / `boostBody()` hints.
+
+### Bounded Windows
+
+Two configurable caps prevent unbounded sync across all folders:
+
+| Setting Key | Default | Purpose |
+|-------------|---------|---------|
+| `mail_offline_window` | 500 | Max headers (email listings) to cache per folder |
+| `mail_body_window` | 200 | Max email bodies to cache per folder |
+
+Configure via dashboard Settings page or MCP tools:
+```typescript
+await ingenium_setting_set({
+  project: "global-default",
+  key: "mail_offline_window",
+  value: "500"
+});
+await ingenium_setting_set({
+  project: "global-default",
+  key: "mail_body_window",
+  value: "200"
+});
+```
+
+Also configurable: `mail_sync_interval_ms` (default 300,000 = 5 min) controls the freshness gate for header re-sync.
+
+### Engine Status
+
+`getEngineStatus()` exposes the engine state for dashboard / status page monitoring:
+
+```typescript
+interface FolderEngineState {
+  folder: string;
+  state: "idle" | "syncing-headers" | "backfilling-bodies" | "complete" | "error";
+  headersSynced: number;
+  headersTotal: number;
+  bodiesCached: number;
+  bodiesWindow: number;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+}
+
+interface EngineStatus {
+  running: boolean;
+  heartbeatAt: string | null;
+  accounts: { accountId: string; email: string; folders: FolderEngineState[] }[];
+}
+```
+
+The folder state machine progresses: `idle → syncing-headers → backfilling-bodies → complete`. Error state is set on failures; the next successful task transitions out of error. The `GET /sync-status` API endpoint returns both a backward-compatible summary and the raw `engine` object.
 
 ### Noselect Filtering
-Folders with the IMAP `\Noselect` or `\Nonexistent` flag (e.g., `[Gmail]` bare container) are filtered out at the sync layer in `syncAccountFolders` and at the API response layer in `GET /folders` (both cached and fresh paths). The dashboard also applies a flag‑based belt‑and‑braces filter.
 
-### Scheduler Cadence
-The 5-minute scheduler syncs `INBOX` immediately via `syncFolder` (bypasses freshness gate for new mail), then syncs other folders with `skipFresh: true, freshMs: 30min`.
+Folders with the IMAP `\Noselect` or `\Nonexistent` flag (e.g., `[Gmail]` bare container) are filtered out at the engine worker startup in `listFolders()` and at the API response layer in `GET /folders` (both cached and fresh paths). The dashboard also applies a flag‑based belt‑and‑braces filter.
+
+### Engine Lifecycle
+
+- **Start**: `startEngine(projectId)` — idempotent, launches workers for all connected accounts. Workers connect to IMAP once and reuse the connection.
+- **Stop**: `stopEngine()` — aborts all workers via AbortController, waits for graceful shutdown.
+- **Restart safety**: Workers survive container restarts because the email cache is SQLite-backed (persistent). On restart, `startEngine()` re-launches workers; the freshness gate (`last_synced_at` in DB) prevents full re-syncs.
+- **Migration path**: `prefetchAllAccounts()` is deprecated — delegates to `startEngine()` for backward compatibility.
 
 ### HTML Rendering
+
 Emails with HTML bodies render in a **sandboxed `<iframe>`** (`sandbox="allow-same-origin allow-popups"`, no `allow-scripts`). CSS from the email cannot leak into the dashboard. Emails > 2MB show a text-only fallback. An `EmailErrorBoundary` catches render exceptions to prevent full-page crashes.
 
 ---
 
-*Last updated: July 13, 2026 — Email client with OAuth2 + IMAP/SMTP, compose overlay, account setup, per-folder cache invalidation, skipFresh option, folder-list caching.*
+*Last updated: July 14, 2026 — Background sync engine with priority queue, cache-only routes, bounded windows, per-folder state machine.*
