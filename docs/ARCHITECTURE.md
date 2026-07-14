@@ -32,12 +32,34 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 ```
 Dashboard → HTTP → API → Core → SQLite
 MCP Server → HTTP → API → Core → SQLite
-Email Client → OAuth2 + IMAP/SMTP → Mail Providers (Gmail, Outlook)
+Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
 - `ingenium-server` runs as an MCP stdio transport with **73 tools**. It talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **16 pages**. It talks to the API over HTTP.
+
+## Provider Adapter Layer
+
+The email client uses a **provider adapter** pattern to decouple sync logic from backend specifics:
+
+```
+Engine → MailProvider interface → GmailProvider (REST API)
+                                   ImapProvider (future — IMAP fallback)
+```
+
+### Architecture
+
+- **`MailProvider` interface** (`packages/ingenium-email/lib/providers/mail-provider.ts`) — defines the contract: `listFolders()`, `listMessages()`, `changesSince()`, `getBody()`, `getAttachment()`, `send()`, `modifyFolders()`.
+- **`GmailProvider`** (`packages/ingenium-email/lib/providers/gmail.ts`) — implements the interface via the Gmail REST API using a thin `fetch()` client (`gmail-api.ts`). No heavy `googleapis` dependency.
+- **`ImapProvider`** (future) — planned IMAP fallback for non-Gmail accounts.
+
+### Key Properties
+
+- **Stateless** — The provider is stateless HTTPS. No persistent connections, no connection pools, no IDLE watchers. The sync engine calls provider methods as needed.
+- **Delta sync via cursor** — `changesSince(cursor)` returns only what changed since the last poll. For Gmail this uses `history.list(startHistoryId)`. Empty response when nothing new.
+- **Pluggable** — Adding a new provider (e.g., Microsoft Graph API) requires only implementing the `MailProvider` interface. The sync engine, cache layer, and routes remain unchanged.
+- **Token refresh** — `getFreshGmailToken()` auto-refreshes OAuth tokens 60s before expiry via `google-auth-library`. Called at the top of every provider method.
 
 ## Skill System
 
@@ -190,7 +212,7 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
 | `services/ingenium-server/` | MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access. | No |
 | `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 16 pages. Calls API via HTTP. Zero DB access. | No |
-| `packages/ingenium-email/` | IMAP/SMTP + OAuth2 email engine (imapflow, nodemailer, mailparser). DB Access: No. | No |
+| `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
 ## Dashboard Pages
 
