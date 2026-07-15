@@ -6,6 +6,7 @@
  */
 
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { logger } from "../logger.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -269,7 +270,10 @@ export function upsertEmailSuggestions(
     const parent = db.prepare(
       "SELECT 1 FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?"
     ).get(accountId, folder, uid);
-    if (!parent) return;
+    if (!parent) {
+      logger.warn("email-cache", "upsertEmailSuggestions skipped — parent row not found", { accountId, folder, uid });
+      return;
+    }
     db.prepare(
       `INSERT OR REPLACE INTO email_suggestions
          (account_id, folder, uid, suggestions_json, model, generated_at)
