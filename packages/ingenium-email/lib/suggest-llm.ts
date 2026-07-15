@@ -100,14 +100,14 @@ export async function generateSmartReplies(
           { role: "user", content: prompt },
         ],
         temperature: 0.7,
-        max_tokens: 2048,
+        max_tokens: 8192,
       }),
     });
 
     if (!response.ok) return [];
 
     const json = await response.json();
-    const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.message?.reasoning_content;
+    const content = json.choices?.[0]?.message?.content;
     if (!content) return [];
 
     const parsed = tryParseJSON(content);
@@ -222,14 +222,14 @@ ${emailBody}`;
           { role: "user", content: prompt },
         ],
         temperature: 0.3,
-        max_tokens: 512,
+        max_tokens: 8192,
       }),
     });
 
     if (!response.ok) return "";
 
     const json = await response.json();
-    const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.message?.reasoning_content;
+    const content = json.choices?.[0]?.message?.content;
     if (!content) return "";
 
     // Strip any markdown fences or JSON wrapping from the response
@@ -285,14 +285,14 @@ ${text}`;
           { role: "user", content: prompt },
         ],
         temperature: 0.4,
-        max_tokens: 2048,
+        max_tokens: 8192,
       }),
     });
 
     if (!response.ok) return "";
 
     const json = await response.json();
-    const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.message?.reasoning_content;
+    const content = json.choices?.[0]?.message?.content;
     if (!content) return "";
 
     // Strip any markdown fences from the response
