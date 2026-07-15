@@ -156,7 +156,7 @@ export default function EmailReader({
       {/* Smart suggestion */}
       {accountId && email?.uid && (
         <div className="px-4 py-2 border-b border-[var(--color-border)]">
-          <SmartSuggest emailUid={email.uid} accountId={accountId} />
+          <SmartSuggest emailUid={email.uid} accountId={accountId} isUnread={isUnread} />
         </div>
       )}
 
