@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useCallback, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Task } from "../../lib/api";
@@ -12,6 +12,7 @@ import TimelineView from "./components/TimelineView";
 import SpotlightSearch from "./components/SpotlightSearch";
 import NotificationBell from "./components/NotificationBell";
 import TaskDetail from "./components/TaskDetail";
+import TaskCreateModal from "./components/TaskCreateModal";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -56,8 +57,10 @@ function TasksContent() {
   );
 
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [title, setTitle] = useState("");
-  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+
+  // Create modal state
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Spotlight / detail overlay state
   const [detailTask, setDetailTask] = useState<Task | null>(null);
@@ -78,23 +81,16 @@ function TasksContent() {
     [searchParams, router]
   );
 
-  // Create new task
-  const create = async () => {
-    if (!title.trim()) return;
-    if (!project || project === "undefined" || project === "null") {
-      console.error("Tasks: cannot create — invalid project:", project);
-      setError("No project selected. Please select a project first.");
-      return;
-    }
-    try {
-      setError("");
-      const res = await api.tasks.create(title.trim(), project);
-      setTasks((prev) => [res.data, ...prev]);
-      setTitle("");
-    } catch (err: any) {
-      setError(err.message || "Failed to create task.");
-    }
-  };
+  // Client-side search filter — case-insensitive substring match on title + description
+  const filteredTasks = useMemo(() => {
+    if (!search.trim()) return tasks;
+    const q = search.toLowerCase();
+    return tasks.filter(
+      (t) =>
+        t.title.toLowerCase().includes(q) ||
+        (t.description ?? "").toLowerCase().includes(q)
+    );
+  }, [tasks, search]);
 
   // Handle task selection from spotlight search
   const handleSpotlightSelect = useCallback((task: Task) => {
@@ -123,23 +119,21 @@ function TasksContent() {
           </div>
         </div>
 
-        {/* Create task inline row */}
+        {/* Search bar + Add Task button */}
         <div className="flex gap-2">
           <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && create()}
-            placeholder="Task title (Ctrl+K to search)"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tasks..."
             className="border border-[var(--color-border)] rounded px-3 py-2 flex-1 text-sm"
           />
           <button
-            onClick={create}
+            onClick={() => setIsModalOpen(true)}
             className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700"
           >
-            Add
+            + Add Task
           </button>
         </div>
-        {error && <div className="text-[var(--color-error-text)] text-sm">{error}</div>}
       </div>
 
       {/* View switcher */}
@@ -163,27 +157,37 @@ function TasksContent() {
       {view === "board" && (
         <BoardView
           project={project}
-          tasks={tasks}
+          tasks={filteredTasks}
           onTasksChange={setTasks}
         />
       )}
       {view === "list" && (
         <ListView
           project={project}
-          tasks={tasks}
+          tasks={filteredTasks}
           onTasksChange={setTasks}
         />
       )}
       {view === "timeline" && (
         <TimelineView
           project={project}
-          tasks={tasks}
+          tasks={filteredTasks}
           onTasksChange={setTasks}
         />
       )}
 
       {/* Spotlight search (Ctrl+K) */}
       <SpotlightSearch project={project} onTaskSelect={handleSpotlightSelect} />
+
+      {/* Task Create modal */}
+      <TaskCreateModal
+        isOpen={isModalOpen}
+        project={project}
+        onClose={() => setIsModalOpen(false)}
+        onCreated={(newTask) => {
+          setTasks((prev) => [newTask, ...prev]);
+        }}
+      />
 
       {/* Task detail overlay (from spotlight or notification) */}
       {detailTask && (
