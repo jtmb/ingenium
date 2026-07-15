@@ -2,12 +2,18 @@
 
 import { useState, useEffect } from "react";
 import SmartSuggest from "./SmartSuggest";
+import EmailComposer from "./EmailComposer";
 import { api } from "../../../lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 
+function buildReplySubject(subject?: string) {
+  return subject?.match(/^re:/i) ? subject : `Re: ${subject || ""}`;
+}
+
 /**
  * EmailReader — full email display with headers, body HTML, attachments, and action buttons.
+ * Supports inline reply (Gmail-style embedded composer) and AI summarise.
  */
 export default function EmailReader({
   email,
@@ -22,6 +28,10 @@ export default function EmailReader({
   onDelete,
   onArchive,
   onDraft,
+  accounts,
+  selectedAccount,
+  onComposeSend,
+  onComposeSave,
 }: {
   email: any;
   loading: boolean;
@@ -30,14 +40,28 @@ export default function EmailReader({
   onRetry?: () => void;
   accountId?: string;
   project?: string;
-  onReply: () => void;
+  onReply?: () => void;
   onForward: () => void;
   onDelete: () => void;
   onArchive: () => void;
   onDraft?: (draft: { tone: string; subject: string; body: string }) => void;
+  accounts?: { id: string; email: string; name?: string }[];
+  selectedAccount?: string;
+  onComposeSend?: (data: any) => void;
+  onComposeSave?: (data: any) => void;
 }) {
   const [smartRepliesEnabled, setSmartRepliesEnabled] = useState<boolean | null>(null);
   const [smartRepliesMode, setSmartRepliesMode] = useState<"auto" | "manual">("auto");
+
+  // Inline reply state (FIX 2)
+  const [isReplying, setIsReplying] = useState(false);
+  const [replyPrefill, setReplyPrefill] = useState<{ to?: string; subject?: string; body?: string }>({});
+
+  // Summarise state (FIX 4)
+  const [summariseLoading, setSummariseLoading] = useState(false);
+  const [summariseError, setSummariseError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryConfigured, setSummaryConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
     const mailProject = project || "global-default";
@@ -116,6 +140,53 @@ export default function EmailReader({
     );
   }
 
+  // --- Local handlers (FIX 2) ---
+  const handleReplyClick = () => {
+    const toAddr = email.from?.[0]?.address;
+    setReplyPrefill({
+      to: toAddr,
+      subject: buildReplySubject(email.subject),
+      body: "",
+    });
+    setIsReplying(true);
+  };
+
+  const handleDraftClick = (draft: { tone: string; subject: string; body: string }) => {
+    const toAddr = email.from?.[0]?.address;
+    setReplyPrefill({
+      to: toAddr,
+      subject: buildReplySubject(email.subject),
+      body: draft.body,
+    });
+    setIsReplying(true);
+  };
+
+  const handleSummarise = async () => {
+    if (!email?.uid || !accountId) return;
+    setSummariseLoading(true);
+    setSummariseError(null);
+    setSummary(null);
+    setSummaryConfigured(null);
+    try {
+      const url = `${API_BASE}/emails/summarize/${email.uid}?project=${project || "global-default"}&account=${accountId}&folder=${encodeURIComponent(email.folder || "INBOX")}`;
+      const res = await fetch(url);
+      const data = await res.json().catch(() => ({ data: null }));
+      const d = data.data || data;
+      if (d && d.configured === false) {
+        setSummaryConfigured(false);
+      } else if (d?.summary) {
+        setSummary(d.summary);
+        setSummaryConfigured(true);
+      } else {
+        setSummariseError("No summary available");
+      }
+    } catch {
+      setSummariseError("Summarise failed");
+    } finally {
+      setSummariseLoading(false);
+    }
+  };
+
   const isUnread = !email.flags?.includes("\\Seen");
   const fromAddress = email.from?.[0];
   const toList = email.to?.map((t: any) => t.address).join(", ") || "";
@@ -156,7 +227,7 @@ export default function EmailReader({
       {/* Action bar */}
       <div className="flex gap-1 px-4 py-2 border-b border-[var(--color-border)]">
         <button
-          onClick={onReply}
+          onClick={handleReplyClick}
           className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
         >
           Reply
@@ -181,16 +252,62 @@ export default function EmailReader({
         </button>
       </div>
 
+      {/* Summarise button + panel (FIX 4) */}
+      {accountId && email?.uid && (
+        <div className="px-4 py-2 border-b border-[var(--color-border)]">
+          {!summariseLoading && summary === null && summaryConfigured === null && !summariseError && (
+            <button
+              onClick={handleSummarise}
+              className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+            >
+              Summarise this email
+            </button>
+          )}
+          {summariseLoading && (
+            <p className="text-xs text-[var(--color-text-muted)] animate-pulse">Summarising…</p>
+          )}
+          {summariseError && (
+            <p className="text-xs text-[var(--color-text-muted)]">{summariseError}</p>
+          )}
+          {summaryConfigured === false && (
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Configure a <a href="/?settings=general" className="text-[var(--color-text-link)] hover:underline">Synthesis LLM</a> in Settings to enable AI summaries.
+            </p>
+          )}
+          {summary && (
+            <div className="border border-[var(--color-border)] rounded p-3 bg-[var(--color-surface)]">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-[var(--color-text-primary)]">AI Summary</p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSummarise}
+                    className="text-xs text-[var(--color-text-link)] hover:underline"
+                  >
+                    ↺ Regenerate
+                  </button>
+                  <button
+                    onClick={() => { setSummary(null); setSummaryConfigured(null); }}
+                    className="text-xs text-[var(--color-text-link)] hover:underline"
+                  >
+                    Collapse
+                  </button>
+                </div>
+              </div>
+              <p className="text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap">{summary}</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Smart suggestion — gated by enabled setting & folder prop for backend */}
       {accountId && email?.uid && smartRepliesEnabled !== false && (
         <div className="px-4 py-2 border-b border-[var(--color-border)]">
           <SmartSuggest
             emailUid={email.uid}
             accountId={accountId}
-            isUnread={isUnread}
             folder={email.folder}
             mode={smartRepliesMode}
-            onDraft={onDraft}
+            onDraft={handleDraftClick}
           />
         </div>
       )}
@@ -270,6 +387,33 @@ export default function EmailReader({
               </a>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Inline Reply/Draft composer (FIX 2) */}
+      {isReplying && (
+        <div className="border-t border-[var(--color-border)] px-4 py-3">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-xs font-semibold text-[var(--color-text-primary)]">
+              {replyPrefill.body ? "Draft" : "Reply"}
+            </span>
+          </div>
+          <EmailComposer
+            inline
+            initialData={replyPrefill}
+            initialAccountId={selectedAccount}
+            accounts={accounts}
+            onSend={(data) => {
+              onComposeSend?.(data);
+              setIsReplying(false);
+            }}
+            onSave={(data) => {
+              onComposeSave?.(data);
+              setIsReplying(false);
+            }}
+            onCancel={() => setIsReplying(false)}
+            project={project}
+          />
         </div>
       )}
     </div>
