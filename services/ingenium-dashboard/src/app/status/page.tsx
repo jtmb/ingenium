@@ -207,8 +207,16 @@ export default function StatusPage() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<string | null>(null);
+  const [selectedCardType, setSelectedCardType] = useState<"service" | "application" | null>(null);
 
   const handleServiceClick = (name: string) => {
+    // Determine whether this card is a supervisord service or an in-process application.
+    // Check the services array first (supervisord processes), then applications.
+    const isService = services.some((svc) => svc.name === name);
+    const isApp = applications.some((app) => app.name === name);
+    // Default to "service" if not found in either list (edge case: stale state).
+    const cardType: "service" | "application" = isService ? "service" : isApp ? "application" : "service";
+    setSelectedCardType(cardType);
     setSelectedService(name);
   };
 
@@ -393,10 +401,11 @@ export default function StatusPage() {
       )}
 
       {/* Service detail overlay */}
-      {selectedService && (
+      {selectedService && selectedCardType && (
         <ServiceOverlay
           name={selectedService}
-          onClose={() => setSelectedService(null)}
+          type={selectedCardType}
+          onClose={() => { setSelectedService(null); setSelectedCardType(null); }}
         />
       )}
 
