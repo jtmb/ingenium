@@ -21,6 +21,7 @@ export default function EmailReader({
   onForward,
   onDelete,
   onArchive,
+  onDraft,
 }: {
   email: any;
   loading: boolean;
@@ -33,6 +34,7 @@ export default function EmailReader({
   onForward: () => void;
   onDelete: () => void;
   onArchive: () => void;
+  onDraft?: (draft: { tone: string; subject: string; body: string }) => void;
 }) {
   const [smartRepliesEnabled, setSmartRepliesEnabled] = useState<boolean | null>(null);
   const [smartRepliesMode, setSmartRepliesMode] = useState<"auto" | "manual">("auto");
@@ -188,6 +190,7 @@ export default function EmailReader({
             isUnread={isUnread}
             folder={email.folder}
             mode={smartRepliesMode}
+            onDraft={onDraft}
           />
         </div>
       )}

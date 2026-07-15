@@ -78,6 +78,7 @@ export default function MailPage() {
   const [showAccountSetup, setShowAccountSetup] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
   const [sending, setSending] = useState(false);
+  const [composeInitialData, setComposeInitialData] = useState<{ to?: string; subject?: string; body?: string } | undefined>(undefined);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [folders, setFolders] = useState<any[]>([]);
@@ -198,6 +199,9 @@ export default function MailPage() {
   }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project]);
 
   const handleSelectEmail = useCallback(async (uid: string) => {
+    // DP#32: guard — re-clicking the already-open email must not reset state
+    if (selectedEmail?.uid === uid) return;
+
     // Cancel any existing poll
     if (pollRef.current) {
       clearInterval(pollRef.current);
@@ -265,9 +269,32 @@ export default function MailPage() {
     }
   }, [selectedAccount, selectedFolder, project]);
 
+  const buildReplySubject = (subject?: string) =>
+    subject?.match(/^re:/i) ? subject : `Re: ${subject || ""}`;
+
   const handleCompose = useCallback(() => {
     setShowCompose(true);
   }, []);
+
+  const handleReply = useCallback(() => {
+    if (!selectedEmail) return;
+    setComposeInitialData({
+      to: selectedEmail.from?.[0]?.address,
+      subject: buildReplySubject(selectedEmail.subject),
+      body: "",
+    });
+    setShowCompose(true);
+  }, [selectedEmail]);
+
+  const handleDraft = useCallback((draft: { tone: string; subject: string; body: string }) => {
+    if (!selectedEmail) return;
+    setComposeInitialData({
+      to: selectedEmail.from?.[0]?.address,
+      subject: buildReplySubject(selectedEmail.subject),
+      body: draft.body,
+    });
+    setShowCompose(true);
+  }, [selectedEmail]);
 
   const handleComposeSend = useCallback(async (data: any) => {
     setSending(true);
@@ -324,6 +351,7 @@ export default function MailPage() {
 
   const handleComposeCancel = useCallback(() => {
     setShowCompose(false);
+    setComposeInitialData(undefined);
   }, []);
 
   const handleDelete = useCallback(async () => {
@@ -559,10 +587,11 @@ export default function MailPage() {
               }}
               accountId={selectedAccount}
               project={project}
-              onReply={handleCompose}
+              onReply={handleReply}
               onForward={handleCompose}
               onDelete={handleDelete}
               onArchive={handleArchive}
+              onDraft={handleDraft}
             />
           </div>
 
@@ -575,6 +604,7 @@ export default function MailPage() {
             <EmailComposer
               accounts={accounts}
               initialAccountId={selectedAccount}
+              initialData={composeInitialData}
               onSend={handleComposeSend}
               onSave={handleComposeSave}
               onCancel={handleComposeCancel}
