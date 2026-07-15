@@ -264,7 +264,12 @@ export function getComments(_projectId, taskId) {
 // ============================================================================
 export function getTaskActivity(_projectId, taskId, limit = 50) {
     const db = getDb(dbPath());
-    return db.prepare("SELECT * FROM task_activity WHERE task_id = ? ORDER BY created_at DESC LIMIT ?").all(taskId, limit);
+    const rows = db.prepare("SELECT * FROM task_activity WHERE task_id = ? ORDER BY created_at DESC LIMIT ?").all(taskId, limit);
+    // Map DB column "event_type" to the frontend-facing "action" field
+    return rows.map((r) => ({
+        ...r,
+        action: r.event_type || "",
+    }));
 }
 // ============================================================================
 // Links
