@@ -1,6 +1,33 @@
-import { Router } from "express";
+import { Router, Response } from "express";
 import { tasks, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+
+// ============================================================================
+// CHECK constraint error helper for the tasks table
+// ============================================================================
+
+/** Known CHECK constraints on the `tasks` table — maps error substring to 422 message */
+const TASK_CHECK_CONSTRAINTS: Array<{ match: string; message: string }> = [
+  { match: "issue_type", message: "issue_type must be one of: epic, story, task, subtask" },
+];
+
+function handleCheckConstraintError(err: unknown, res: Response): boolean {
+  const msg = (err as Error)?.message || "";
+  if (!msg.includes("CHECK constraint failed")) return false;
+
+  for (const c of TASK_CHECK_CONSTRAINTS) {
+    if (msg.includes(c.match)) {
+      res.status(422).json({ error: { code: "VALIDATION_ERROR", message: c.message } });
+      return true;
+    }
+  }
+
+  // Fallback for any future CHECK constraint
+  const match = msg.match(/CHECK constraint failed:\s*(\w+)/);
+  const field = match ? match[1] : "field";
+  res.status(422).json({ error: { code: "VALIDATION_ERROR", message: `Validation constraint violated on ${field}` } });
+  return true;
+}
 
 export const tasksRouter = Router();
 
@@ -95,8 +122,22 @@ tasksRouter.post("/bulk", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "at least one field to update is required" } });
     return;
   }
-  const count = tasks.bulkUpdateTasks(projectId, task_ids, cleanFields as any);
-  res.json({ data: { updated: count } });
+  try {
+    const count = tasks.bulkUpdateTasks(projectId, task_ids, cleanFields as any);
+    res.json({ data: { updated: count } });
+  } catch (err: unknown) {
+    if (handleCheckConstraintError(err, res)) {
+      logger.error("tasks", `CHECK constraint failed on POST /bulk: ${(err as Error).message}`, {
+        error: (err as Error).message,
+        name: (err as Error).name,
+        stack: (err as Error).stack?.split("\n").slice(0, 5).join("\n"),
+        method: "POST",
+        path: req.originalUrl,
+      });
+      return;
+    }
+    throw err;
+  }
 });
 
 // GET /next — must be before /:id
@@ -133,16 +174,30 @@ tasksRouter.post("/", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "title is required" } });
     return;
   }
-  const task = tasks.createTask(projectId, title, description, assigned_to, {
-    parent_id,
-    issue_type,
-    priority,
-    due_date,
-    start_date,
-    estimate_minutes,
-    custom_fields: custom_fields !== undefined ? (typeof custom_fields === "string" ? custom_fields : JSON.stringify(custom_fields)) : undefined,
-  });
-  res.status(201).json({ data: task });
+  try {
+    const task = tasks.createTask(projectId, title, description, assigned_to, {
+      parent_id,
+      issue_type,
+      priority,
+      due_date,
+      start_date,
+      estimate_minutes,
+      custom_fields: custom_fields !== undefined ? (typeof custom_fields === "string" ? custom_fields : JSON.stringify(custom_fields)) : undefined,
+    });
+    res.status(201).json({ data: task });
+  } catch (err: unknown) {
+    if (handleCheckConstraintError(err, res)) {
+      logger.error("tasks", `CHECK constraint failed on POST /: ${(err as Error).message}`, {
+        error: (err as Error).message,
+        name: (err as Error).name,
+        stack: (err as Error).stack?.split("\n").slice(0, 5).join("\n"),
+        method: "POST",
+        path: req.originalUrl,
+      });
+      return;
+    }
+    throw err;
+  }
 });
 
 // ============================================================================
@@ -193,12 +248,27 @@ tasksRouter.patch("/:id", (req, res) => {
       : JSON.stringify(fields.custom_fields);
   }
 
-  const updated = tasks.updateTask(projectId, req.params.id!, updateFields as any, actor);
-  if (!updated) {
-    res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
-    return;
+  try {
+    const updated = tasks.updateTask(projectId, req.params.id!, updateFields as any, actor);
+    if (!updated) {
+      res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
+      return;
+    }
+    res.json({ data: updated });
+  } catch (err: unknown) {
+    if (handleCheckConstraintError(err, res)) {
+      logger.error("tasks", `CHECK constraint failed on PATCH /:id: ${(err as Error).message}`, {
+        error: (err as Error).message,
+        name: (err as Error).name,
+        stack: (err as Error).stack?.split("\n").slice(0, 5).join("\n"),
+        taskId: req.params.id,
+        method: "PATCH",
+        path: req.originalUrl,
+      });
+      return;
+    }
+    throw err;
   }
-  res.json({ data: updated });
 });
 
 // DELETE /:id
