@@ -124,8 +124,11 @@ OpenCode plugin lifecycle management — enable, disable, configure plugins that
 
 <p align="center"><img src="docs/assets/screenshot-plugins.png" alt="Plugins" width="600" /></p>
 
+### ⚡ Jobs
+Scheduled and triggered agent job runner — create, edit, and monitor background agent tasks. The create/edit modal features a 2-column responsive layout (metadata fields left, prompt_template right) with a magic-wand button that derives job configuration (prompt_template, schedule_cron, trigger_event) from a natural-language description using the Synthesis LLM. Supports manual run, cancel, and real-time log streaming per job run.
+
 ### 📧 Mail
-Full email client with inbox, compose, search, and AI auto-responses. Gmail/Outlook OAuth2 + IMAP/SMTP. 13 MCP tools for agents. Self-learning auto-draft from user patterns.
+Full email client with inbox, compose, search, and AI auto-responses. Smart replies are integrated directly into the reply composer (not a standalone panel) for a seamless workflow. Resizable email panel with adjustable column widths. Gmail/Outlook OAuth2 + IMAP/SMTP. 13 MCP tools for agents. Self-learning auto-draft from user patterns.
 
 <p align="center"><img src="docs/assets/screenshot-mail.png" alt="Mail" width="600" /></p>
 

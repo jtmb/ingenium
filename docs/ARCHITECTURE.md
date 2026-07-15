@@ -139,6 +139,12 @@ Dashboard /config page  ──HTTP──▶  API (PUT /api/v1/config)
 | POST | `/api/v1/config/sync` | Sync project config from disk to DB |
 | POST | `/api/v1/config/global/sync` | Sync global config from disk to DB |
 
+## Jobs API
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/v1/jobs/suggest` | Derive job config (prompt_template, schedule_cron, trigger_event) from a natural-language description using the Synthesis LLM. Returns `{ prompt_template, schedule_cron, trigger_event, configured }`. Requires a configured Synthesis LLM in Settings. |
+
 ## Pipeline Observability Architecture
 
 Every pipeline event is logged to the `pipeline_events` table and displayed at `/pipeline` in the dashboard:
@@ -228,7 +234,7 @@ The detail overlay (`ServiceOverlay.tsx`) switches its data fetching and diagnos
 
 ## Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
 
 | Page | Purpose |
 |------|---------|
@@ -242,6 +248,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
 | `/mcp-servers` | MCP servers + Tool Manager (Servers/Tools tabs, per-tool enable/disable toggles) |
+| `/jobs` | Job queue and background task monitoring — create/edit modal with 2-column responsive layout (metadata left, prompt_template right) and magic-wand button for AI job config generation from description |
 | `/mail` | Mail (inbox, compose, reader, auto-responses) — email client interface |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
@@ -320,11 +327,13 @@ services:
 
 Inside the container, **supervisord** manages four processes:
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
-2. **Dashboard** (Next.js on :3000) — 15 route-based pages with highlight.js syntax highlighting in Preview/Source modes
+2. **Dashboard** (Next.js on :3000) — 16 route-based pages with highlight.js syntax highlighting in Preview/Source modes
 3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
 4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded dashboard use
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
+
+> 🔴 **Docker git**: The Dockerfile installs the `git` package to support OpenCode repository creation inside the container. Without git, OpenCode fails to initialize new repos for code editing.
 
 Start with:
 ```bash

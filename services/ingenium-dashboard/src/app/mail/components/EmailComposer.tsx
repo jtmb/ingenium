@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import SmartSuggest from "./SmartSuggest";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 
@@ -21,6 +22,10 @@ export default function EmailComposer({
   onCancel,
   inline,
   project,
+  emailUid,
+  accountId,
+  folder,
+  emailFrom,
 }: {
   initialData?: { to?: string; subject?: string; body?: string };
   initialAccountId?: string;
@@ -30,6 +35,10 @@ export default function EmailComposer({
   onCancel: () => void;
   inline?: boolean;
   project?: string;
+  emailUid?: string;
+  accountId?: string;
+  folder?: string;
+  emailFrom?: string;
 }) {
   const [to, setTo] = useState(initialData?.to || "");
   const [cc, setCc] = useState("");
@@ -179,6 +188,21 @@ export default function EmailComposer({
             className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] min-h-[150px] resize-y"
           />
         </div>
+
+        {/* Smart Suggestions — inline in composer */}
+        {emailUid && accountId && (
+          <SmartSuggest
+            emailUid={emailUid}
+            accountId={accountId}
+            folder={folder}
+            mode="auto"
+            onDraft={(draft) => {
+              setSubject(draft.subject);
+              setBody(draft.body);
+            }}
+            compact={true}
+          />
+        )}
 
         {/* Review with AI button + panel (shared between variants) */}
         {!reviewLoading && !reviewResult && !reviewError && (

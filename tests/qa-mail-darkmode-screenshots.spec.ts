@@ -352,8 +352,17 @@ test.describe("Mail dark-mode visual QA", () => {
     await emailRows.first().click();
     await page.waitForTimeout(800);
 
-    // Wait for the SmartSuggest component to render (it auto-fetches on mount)
-    // Wait for suggestion cards to appear
+    // Wait for reader pane
+    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    await expect(readerPane).toBeVisible({ timeout: 5000 });
+
+    // Click Reply to open the inline composer — SmartSuggest renders inside it
+    const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
+    await expect(replyBtn).toBeVisible();
+    await replyBtn.click();
+    await page.waitForTimeout(500);
+
+    // Wait for SmartSuggest to auto-fetch and render suggestion chips in the composer
     await page.waitForTimeout(1500);
 
     fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
@@ -409,21 +418,28 @@ test.describe("Mail dark-mode visual QA", () => {
     const emailRows = page.locator("div.cursor-pointer");
     await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
 
-    // Click the first email — this triggers SmartSuggest auto-fetch
+    // Click the first email
     await emailRows.first().click();
+    await page.waitForTimeout(800);
+
+    // Click Reply to open the inline composer — SmartSuggest renders inside it
+    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    await expect(readerPane).toBeVisible({ timeout: 5000 });
+    const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
+    await expect(replyBtn).toBeVisible();
+    await replyBtn.click();
+    await page.waitForTimeout(500);
+
+    // Wait for SmartSuggest to auto-fetch and render suggestions in composer
     await page.waitForTimeout(2000);
 
-    // Verify Smart Suggestions appeared (from cache)
-    const smartRepliesHeading = page.getByText("Smart Replies").first();
+    // Verify Smart Suggestions appeared as compact chips (from cache)
+    // In compact mode, tone labels appear as text in suggestion chips
+    const toneChip = page.getByText("professional").first();
 
-    if (await smartRepliesHeading.isVisible().catch(() => false)) {
-      // Cache hit — suggestions rendered immediately
-      console.log("✅ Smart Replies heading visible — cache hit confirmed");
-
-      // Verify all 3 suggestion cards rendered
-      const cards = page.locator("text=professional", "text=friendly", "text=brief");
-      const cardCount = await page.locator('text=professional').count();
-      console.log(`📊 Suggestion cards visible: ${cardCount}`);
+    if (await toneChip.isVisible().catch(() => false)) {
+      // Cache hit — suggestions rendered immediately as compact chips
+      console.log("✅ Suggestion chip 'professional' visible — cache hit confirmed");
 
       // Verify the suggest endpoint was called
       expect(suggestCallCount).toBeGreaterThanOrEqual(1);

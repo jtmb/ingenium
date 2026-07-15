@@ -17,6 +17,7 @@ export default function EmailList({
   error,
   onRefresh,
   source,
+  width,
 }: {
   emails: any[];
   selectedUid?: string;
@@ -29,6 +30,7 @@ export default function EmailList({
   error?: string | null;
   onRefresh?: () => void;
   source?: string;
+  width?: number;
 }) {
   const pageSize = 50;
   const totalPages = Math.ceil(total / pageSize);
@@ -47,7 +49,7 @@ export default function EmailList({
   };
 
   return (
-    <div className="w-[350px] min-w-[300px] flex-shrink-0 flex flex-col border-r border-[var(--color-border)]">
+    <div className="flex-shrink-0 flex flex-col border-r border-[var(--color-border)]" style={{ width: width ?? 350 }}>
       {/* Search bar */}
       <div className="px-4 py-2 border-b border-[var(--color-border)] flex items-center gap-2">
         <input

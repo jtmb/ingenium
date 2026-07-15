@@ -191,7 +191,9 @@ This pattern is used in `upsertEmailBody()` and the email suggestions cache. It 
 
 > 🔴 **Noreply-sender gate — smart replies are never cached for automated senders.** Before any cache lookup or generation, the `/api/v1/emails/:id/suggest` route (at `services/ingenium-api/lib/routes/emails.ts` lines 482–490) checks both `from_addr` and `from_name` against the regex `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i`. If either matches, the route returns `{ suggestions: [], source: "noreply", configured: true }` immediately — no cache read, no LLM invocation. This gate runs BEFORE the cache check so that stale suggestions from before a sender was classified as noreply are never returned. Any code path that generates suggestions must implement this gate.
 
-> 🔴 **Reasoning model compatibility — never fall back to `reasoning_content`.** The `content || reasoning_content` fallback pattern surfaces the model's internal scratchpad to end users and has been REMOVED from all suggest-llm.ts functions. The correct fix: set `max_tokens` high enough (8192) for the model to complete its thinking and output clean `content`; if `content` is still empty, return `[]` or `""` (empty/error) — never expose the thinking trace. See `packages/ingenium-email/lib/suggest-llm.ts` lines 103, 225, 288 for the correct pattern (`max_tokens: 8192`, no `reasoning_content` fallback). ⚠️ The extraction engine (`packages/ingenium-core/lib/tools/extraction.ts` line 205) still uses the old fallback and must also be fixed.
+> 🔴 **Reasoning model compatibility — never fall back to `reasoning_content`.** The `content || reasoning_content` fallback pattern surfaces the model's internal scratchpad to end users and has been REMOVED from all suggest-llm.ts functions. The correct fix: set `max_tokens` high enough (8192) for the model to complete its thinking and output clean `content`; if `content` is still empty, return `[]` or `""` (empty/error) — never expose the thinking trace. See `packages/ingenium-email/lib/suggest-llm.ts` lines 103, 225, 288 and `packages/ingenium-core/lib/tools/extraction.ts` for the correct pattern (`max_tokens: 8192`, no `reasoning_content` fallback).
+
+> 🔴 **Smart-reply cache persistence — use `ON CONFLICT DO UPDATE`, not `INSERT OR REPLACE`.** When upserting into `email_cache`, `INSERT OR REPLACE` deletes the old row before inserting, which cascades to delete child rows in FK-constrained tables (`email_bodies`, `email_suggestions`, `email_summaries`). Always use `ON CONFLICT(account_id, folder, uid) DO UPDATE SET ...` to preserve child data. This pattern is used in the email cache layer to prevent cascade deletion of cached suggestions, bodies, and summaries.
 
 > 🔴 **Never hand-write RFC 2822 address-parsing regexes — always use a tested library (`mailparser`, `addressparser`, `simpleParser`).** The Gmail provider previously had a hand-rolled regex `^(?:"?([^"]*)"?\s*)?<?([^>]+)>?$` that appeared to work for quoted display names but catastrophically backtracked for unquoted names, corrupting `from_addr` in the cache to a single character ('m') for most emails.
 
@@ -240,6 +242,8 @@ docker compose exec ingenium npm run check
 | `4098` | OpenCode Iframe | No-auth iframe for embedded use |
 
 > 🔴 **Note**: Dockerfile `EXPOSE` only covers ports 3000, 4096, 4097. Port 4098 (opencode-iframe) is mapped in docker-compose.yml but not in Dockerfile `EXPOSE`.
+
+> 🔴 **Docker git**: The Dockerfile now installs the `git` package to support OpenCode repository creation inside the container. Without git, OpenCode fails to initialize new repos for code editing.
 
 ### Volume Configurations
 

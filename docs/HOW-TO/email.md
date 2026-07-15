@@ -142,6 +142,8 @@ The inbox displays in a 3-pane layout:
 2. **Middle pane** — email list with subject, sender, date preview
 3. **Right pane** — full message content when an email is selected
 
+**Resizable EmailList**: The email list pane (middle pane) is resizable — a 2px draggable handle sits between the list and reader panes. Drag it horizontally (or use ArrowLeft/ArrowRight keys when focused) to resize. The width defaults to 350px, with bounds of 280px (min) and 500px (max). Width is persisted in `localStorage` under the key `mail-list-width` — it survives page refreshes and browser restarts.
+
 Click any email to view its complete headers and body in the right pane.
 
 > **Note**: Re-clicking the already-open email no longer triggers a visible reload. A same-UID guard (`selectedEmail?.uid === uid` at `mail/page.tsx:202-203`) prevents redundant fetch + state reset when the user clicks the same email row again.
@@ -169,13 +171,15 @@ Each email reader pane includes action buttons for quick responses. The compose 
 - **Subject**: Prefixed with `"Re: "` — the `buildReplySubject()` helper (`mail/page.tsx:272-273`) checks the original subject against `/^re:/i` before adding the prefix, so double `"Re: Re:"` never occurs (dedup-guarded)
 - **Body**: Empty — compose your response from scratch
 
-**Draft (from smart-reply suggestion)** — The "Draft" button inside each smart-reply suggestion card opens an inline compose box prefilled with the selected suggestion's exact body text (`draft.body` from `SmartSuggest.tsx:174`). Same To/Subject prefill as Reply. This lets you review, tweak, and send an AI-drafted reply without leaving the reading pane.
+**Draft (from smart-reply suggestion)** — When you click Reply, the inline composer opens with the empty Reply prefill (To/Subject). Compact suggestion chips render inside the composer below the textarea. Clicking a chip fills the subject and body with the selected suggestion's content immediately. This lets you review, tweak, and send an AI-drafted reply without leaving the reading pane.
 
 **Forward** — Located in the action bar. Opens the full modal overlay (`EmailComposer`) with the original message content prefilled.
 
 **Compose New** — Click "Compose" in the left sidebar. Opens the full modal overlay (`EmailComposer`) with a blank message.
 
 Both inline compose and modal overlay include the **"Review with AI"** button below the message textarea. See the Review with AI section below for details.
+
+**Inline reply with smart suggestions**: When replying (Reply or Draft from suggestion), the inline composer renders `<SmartSuggest compact>` chips between the message textarea and the Review with AI button. These auto-fetch on mount (in `auto` mode) and appear as compact pill/chip buttons showing tone + truncated body preview. Clicking a chip fills the composer's subject and body fields immediately. The composer passes `emailUid`, `accountId`, and `folder` directly from EmailReader — no defaulting of folder to `"INBOX"`.
 
 Source reference: `handleReply` at `mail/page.tsx:279-287`, `handleDraft` at `mail/page.tsx:289-297`.
 
@@ -274,7 +278,7 @@ await ingenium_email_send({
 
 ## Smart Reply Learning
 
-The email client can learn your response style and draft 3 reply options when you open new emails — similar to Gmail's Smart Reply.
+The email client can learn your response style and draft 3 reply options when you reply to emails — similar to Gmail's Smart Reply Suggestions appear **inside the inline reply composer** (not as a standalone block above the email body). When you click Reply, the compact inline composer mounts, auto-fetches suggestions, and renders them as pill/chip buttons below the message textarea.
 
 ### How It Works
 
@@ -284,7 +288,9 @@ The email client can learn your response style and draft 3 reply options when yo
 
 3. **Caching**: Generated suggestions are cached in the `email_suggestions` database table (keyed by account + folder + UID). Subsequent opens of the same email return instantly from cache — no repeat LLM calls.
 
-4. **Folder-matching fix**: The suggest endpoint (`GET /suggest/:uid`) now sends the **actual `email.folder` value** from the request query parameter (`req.query.folder`) instead of always defaulting to `"INBOX"`. The `SmartSuggest.tsx` component encodes the folder via `encodeURIComponent(folder || "INBOX")`. This means caching now works correctly for all folders — suggestions generated in Sent, Starred, Archive, etc. are cached and returned by folder key, not lumped under INBOX.
+   > 🔴 **Cache persistence fix**: `upsertEmailCache()` (`packages/ingenium-core/lib/tools/email-cache.ts:87`) uses `INSERT ... ON CONFLICT(account_id, folder, uid) DO UPDATE SET` instead of the old `INSERT OR REPLACE`. The old pattern deleted the old row before inserting, which triggered `ON DELETE CASCADE` on child tables (`email_bodies`, `email_suggestions`, `email_summaries`) — destroying cached suggestions, bodies, and summaries on every re-sync cycle. `ON CONFLICT DO UPDATE` preserves child data across re-syncs. Cached suggestions now survive parent email re-syncs indefinitely.
+
+4. **Folder handling**: The suggest endpoint (`GET /suggest/:uid`) sends the **actual `email.folder` value** from the request query parameter — no defaulting to `"INBOX"`. The inline SmartSuggest component encodes the folder via `encodeURIComponent(folder ?? "")` with no fallback. The `EmailComposer` passes `folder` exactly as received from `email.folder`. This means caching works correctly for all folders — suggestions generated in Sent, Starred, Archive, etc. are cached and returned by folder key, not lumped under INBOX.
 
 5. **Noreply-sender skip gate**: Before any cache or LLM call, the endpoint checks sender fields against `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i` (case-insensitive regex applied to both `from_addr` and `from_name`). If matched, it returns `source: "noreply"` immediately with empty suggestions and **no UI rendering** — the `SmartSuggest.tsx` component returns `null` for the `"noreply"` source. This prevents LLM calls on automated/transactional emails.
 
@@ -380,6 +386,7 @@ A **"Summarize this email"** button appears near the top of every email reading 
 | Search returns no results | Query syntax incompatible with FTS5 | Use simpler queries first: `subject:test` or just keywords without operators |
 | SMTP send fails (timeout) | Mail provider blocking local connections | Verify Docker network allows outbound SMTP, check mail server accepts relay from your IP range |
 | Smart replies show "Configure LLM" note | Synthesis LLM not set up | Go to Settings → Synthesis LLM, select a model and enter API key |
+| Smart replies disappeared after re-sync | Old `INSERT OR REPLACE` bug (pre-fix) | If a re-sync occurred before the `ON CONFLICT DO UPDATE` fix was deployed, cached suggestions were cascade-deleted. Re-open the email and click Reply — suggestions regenerate on the next suggestion fetch (the new cache is now persistent). |
 | Old emails show no suggestions | Noreply sender or settings disabled | Check if sender matches the noreply regex or verify `mail_smart_replies_enabled` is `"true"` in Settings → Mail |
 | Noreply/automated emails show no "Smart Replies" section | Noreply sender skip gate — senders matching `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i` are suppressed with `source: "noreply"` and render no Smart Replies UI | This is intentional; smart reply LLM calls are not wasted on automated/transactional emails. The "Summarize this email" button still works for these emails. |
 

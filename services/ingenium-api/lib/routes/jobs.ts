@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { jobs } from "ingenium-core";
+import { jobs, synthesisLlm, jobSuggestLlm } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { executeJobRun, killRunProcess } from "../job-runner.js";
 
@@ -82,6 +82,41 @@ jobsRouter.get("/runs/:runId/logs", (req, res) => {
 
   const logs = jobs.getRunLogs(runId, afterSeq);
   res.json({ data: logs, total: logs.length });
+});
+
+// ============================================================================
+// 2b. Suggest route — MUST be registered BEFORE /:id to avoid Express
+//     capturing "suggest" as an :id parameter.
+// ============================================================================
+
+// POST /suggest — derive job config from description using Synthesis LLM
+jobsRouter.post("/suggest", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+
+  const { description } = req.body;
+  if (!description || typeof description !== "string" || description.trim().length === 0) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "description is required" } });
+    return;
+  }
+
+  const llmConfig = synthesisLlm.resolveLLMConfig(projectId);
+  if (!llmConfig || !llmConfig.model) {
+    res.json({ data: { prompt_template: null, schedule_cron: null, trigger_event: null, configured: false } });
+    return;
+  }
+
+  jobSuggestLlm.generateJobConfig(llmConfig, description.trim())
+    .then((result) => {
+      res.json({ data: { ...result, configured: true } });
+    })
+    .catch((err: Error) => {
+      (async () => {
+        const { logger } = await import("ingenium-core");
+        logger.error("jobs-suggest", `LLM generation failed: ${err.message}`, { error: err.message });
+      })();
+      res.status(500).json({ error: { code: "LLM_ERROR", message: "Job suggestion generation failed" } });
+    });
 });
 
 // ============================================================================

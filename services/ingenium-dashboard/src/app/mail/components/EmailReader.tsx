@@ -1,9 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import SmartSuggest from "./SmartSuggest";
 import EmailComposer from "./EmailComposer";
-import { api } from "../../../lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 
@@ -27,7 +25,6 @@ export default function EmailReader({
   onForward,
   onDelete,
   onArchive,
-  onDraft,
   accounts,
   selectedAccount,
   onComposeSend,
@@ -44,15 +41,11 @@ export default function EmailReader({
   onForward: () => void;
   onDelete: () => void;
   onArchive: () => void;
-  onDraft?: (draft: { tone: string; subject: string; body: string }) => void;
   accounts?: { id: string; email: string; name?: string }[];
   selectedAccount?: string;
   onComposeSend?: (data: any) => void;
   onComposeSave?: (data: any) => void;
 }) {
-  const [smartRepliesEnabled, setSmartRepliesEnabled] = useState<boolean | null>(null);
-  const [smartRepliesMode, setSmartRepliesMode] = useState<"auto" | "manual">("auto");
-
   // Inline reply state (FIX 2)
   const [isReplying, setIsReplying] = useState(false);
   const [replyPrefill, setReplyPrefill] = useState<{ to?: string; subject?: string; body?: string }>({});
@@ -62,25 +55,6 @@ export default function EmailReader({
   const [summariseError, setSummariseError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryConfigured, setSummaryConfigured] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const mailProject = project || "global-default";
-    Promise.all([
-      api.settings.get("mail_smart_replies_enabled", mailProject),
-      api.settings.get("mail_smart_replies_mode", mailProject),
-    ])
-      .then(([enabledRes, modeRes]) => {
-        const val = enabledRes.data?.value;
-        // Default to enabled when setting is absent
-        setSmartRepliesEnabled(val !== "false");
-        setSmartRepliesMode(modeRes.data?.value === "manual" ? "manual" : "auto");
-      })
-      .catch(() => {
-        // Default to enabled on error
-        setSmartRepliesEnabled(true);
-        setSmartRepliesMode("auto");
-      });
-  }, [project]);
 
   // FIX 1 — Reset reply/summary state when switching to a different email
   // DP#32: dependency is `email?.uid` (primitive, stable per email).
@@ -160,16 +134,6 @@ export default function EmailReader({
       to: toAddr,
       subject: buildReplySubject(email.subject),
       body: "",
-    });
-    setIsReplying(true);
-  };
-
-  const handleDraftClick = (draft: { tone: string; subject: string; body: string }) => {
-    const toAddr = email.from?.[0]?.address;
-    setReplyPrefill({
-      to: toAddr,
-      subject: buildReplySubject(email.subject),
-      body: draft.body,
     });
     setIsReplying(true);
   };
@@ -312,19 +276,6 @@ export default function EmailReader({
         </div>
       )}
 
-      {/* Smart suggestion — gated by enabled setting & folder prop for backend */}
-      {accountId && email?.uid && smartRepliesEnabled !== false && (
-        <div className="px-4 py-2 border-b border-[var(--color-border)]">
-          <SmartSuggest
-            emailUid={email.uid}
-            accountId={accountId}
-            folder={email.folder}
-            mode={smartRepliesMode}
-            onDraft={handleDraftClick}
-          />
-        </div>
-      )}
-
       {/* Email body */}
       <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col">
         {email.body?.html ? (
@@ -416,6 +367,10 @@ export default function EmailReader({
             initialData={replyPrefill}
             initialAccountId={selectedAccount}
             accounts={accounts}
+            emailUid={email?.uid}
+            accountId={accountId}
+            folder={email.folder}
+            emailFrom={email.from?.[0]?.address}
             onSend={(data) => {
               onComposeSend?.(data);
               setIsReplying(false);

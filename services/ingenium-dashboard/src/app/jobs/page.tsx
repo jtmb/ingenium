@@ -7,6 +7,8 @@ import Overlay from "../components/Overlay";
 import { api, Job, JobRun, JobRunLog, Agent } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
 /* ------------------------------------------------------------------ */
@@ -203,8 +205,17 @@ function JobFormOverlay({
   const [form, setForm] = useState<JobFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [wandLoading, setWandLoading] = useState(false);
+  const [wandError, setWandError] = useState<string | null>(null);
+  const [llmConfigured, setLlmConfigured] = useState<boolean | null>(null);
 
   // Escape + body scroll lock handled by Overlay component
+
+  useEffect(() => {
+    api.settings.get("synthesis_model", project).then(res => {
+      setLlmConfigured(!!res?.data?.value);
+    }).catch(() => setLlmConfigured(false));
+  }, [project]);
 
   useEffect(() => {
     if (initial) {
@@ -265,98 +276,157 @@ function JobFormOverlay({
       title={initial ? `Edit Job: ${initial.name}` : "Create Job"}
       subtitle="Configure a scheduled or triggered agent job"
     >
-      <div className="max-w-2xl mx-auto space-y-4">
+      <div className="space-y-4">
         {error && (
           <div className="text-[var(--color-error-text)] text-sm bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3">{error}</div>
         )}
 
-        {/* Name */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Name *</label>
-          <input
-            value={form.name}
-            onChange={(e) => update("name", e.target.value)}
-            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
-            placeholder="e.g., Nightly Security Scan"
-          />
-        </div>
+        {/* 2-column layout: metadata left, prompt right */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Left column — metadata */}
+          <div className="space-y-4">
+            {/* Name */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Name *</label>
+              <input
+                value={form.name}
+                onChange={(e) => update("name", e.target.value)}
+                className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
+                placeholder="e.g., Nightly Security Scan"
+              />
+            </div>
 
-        {/* Description */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Description</label>
-          <textarea
-            value={form.description}
-            onChange={(e) => update("description", e.target.value)}
-            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm min-h-[60px]"
-            placeholder="Optional description of what this job does"
-          />
-        </div>
+            {/* Description with wand */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-sm font-medium">Description</label>
+                {llmConfigured && (
+                  <button
+                    onClick={async () => {
+                      if (!form.description.trim()) return;
+                      setWandLoading(true);
+                      setWandError(null);
+                      try {
+                        const res = await fetch(`${API_BASE}/jobs/suggest?project=${project}`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ description: form.description.trim() }),
+                        });
+                        const data = await res.json().catch(() => ({ data: null }));
+                        const d = data.data || data;
+                        if (d?.configured === false) {
+                          setWandError("Configure a Synthesis LLM in Settings to enable AI suggestions");
+                        } else if (d?.prompt_template || d?.schedule_cron || d?.trigger_event) {
+                          const updates: Partial<JobFormData> = {};
+                          if (d.prompt_template) updates.prompt_template = d.prompt_template;
+                          if (d.schedule_cron) updates.schedule_cron = d.schedule_cron;
+                          if (d.trigger_event) updates.trigger_event = d.trigger_event;
+                          setForm(prev => ({ ...prev, ...updates }));
+                        } else {
+                          setWandError("AI could not derive job settings from this description");
+                        }
+                      } catch {
+                        setWandError("AI generation failed — try again later");
+                      } finally {
+                        setWandLoading(false);
+                      }
+                    }}
+                    disabled={wandLoading || !form.description.trim()}
+                    title="Auto-generate job config from description"
+                    className="flex items-center gap-1 text-xs text-[var(--color-text-link)] hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {wandLoading ? (
+                      <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                      </svg>
+                    )}
+                    <span>Auto-generate</span>
+                  </button>
+                )}
+              </div>
+              <textarea
+                value={form.description}
+                onChange={(e) => update("description", e.target.value)}
+                className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm min-h-[60px]"
+                placeholder="Describe what this job should do (e.g., 'Run a security scan every night at 2am')"
+              />
+              {wandError && (
+                <p className="text-xs text-[var(--color-error-text)] mt-1">{wandError}</p>
+              )}
+            </div>
 
-        {/* Agent dropdown */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Agent *</label>
-          <select
-            value={form.agent}
-            onChange={(e) => update("agent", e.target.value)}
-            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
-          >
-            <option value="">— Select agent —</option>
-            {agents.map((a) => (
-              <option key={a.name} value={a.name}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-        </div>
+            {/* Agent dropdown */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Agent *</label>
+              <select
+                value={form.agent}
+                onChange={(e) => update("agent", e.target.value)}
+                className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+              >
+                <option value="">— Select agent —</option>
+                {agents.map((a) => (
+                  <option key={a.name} value={a.name}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        {/* Prompt Template */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Prompt Template *</label>
-          <textarea
-            value={form.prompt_template}
-            onChange={(e) => update("prompt_template", e.target.value)}
-            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm font-mono min-h-[200px]"
-            placeholder={`Write the prompt template. Use {{variable}} for dynamic values.`}
-            rows={6}
-          />
-        </div>
+            {/* 2-col row: Cron + Timeout */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Schedule (cron)</label>
+                <input
+                  value={form.schedule_cron}
+                  onChange={(e) => update("schedule_cron", e.target.value)}
+                  className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm font-mono"
+                  placeholder="*/15 * * * *"
+                />
+                {form.schedule_cron.trim() && (
+                  <div className="mt-1"><CronPreview cron={form.schedule_cron} /></div>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Timeout (minutes)</label>
+                <input
+                  type="number"
+                  value={form.timeout_minutes}
+                  onChange={(e) => update("timeout_minutes", parseInt(e.target.value) || 30)}
+                  className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
+                  min={1}
+                  max={1440}
+                />
+              </div>
+            </div>
 
-        {/* 2-col row: Cron + Timeout */}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Schedule (cron)</label>
-            <input
-              value={form.schedule_cron}
-              onChange={(e) => update("schedule_cron", e.target.value)}
-              className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm font-mono"
-              placeholder="*/15 * * * *"
-            />
-            {form.schedule_cron.trim() && (
-              <div className="mt-1"><CronPreview cron={form.schedule_cron} /></div>
-            )}
+            {/* Trigger Event */}
+            <div>
+              <label className="block text-sm font-medium mb-1">Trigger Event (optional)</label>
+              <input
+                value={form.trigger_event}
+                onChange={(e) => update("trigger_event", e.target.value)}
+                className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
+                placeholder="e.g., push, pr_opened"
+              />
+            </div>
           </div>
+
+          {/* Right column — prompt */}
           <div>
-            <label className="block text-sm font-medium mb-1">Timeout (minutes)</label>
-            <input
-              type="number"
-              value={form.timeout_minutes}
-              onChange={(e) => update("timeout_minutes", parseInt(e.target.value) || 30)}
-              className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
-              min={1}
-              max={1440}
+            <label className="block text-sm font-medium mb-1">Prompt Template *</label>
+            <textarea
+              value={form.prompt_template}
+              onChange={(e) => update("prompt_template", e.target.value)}
+              className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm font-mono min-h-[320px]"
+              placeholder={`Write the prompt template. Use {{variable}} for dynamic values.`}
+              rows={12}
             />
           </div>
-        </div>
-
-        {/* Trigger Event */}
-        <div>
-          <label className="block text-sm font-medium mb-1">Trigger Event (optional)</label>
-          <input
-            value={form.trigger_event}
-            onChange={(e) => update("trigger_event", e.target.value)}
-            className="w-full border border-[var(--color-border)] rounded px-3 py-1.5 text-sm"
-            placeholder="e.g., push, pr_opened"
-          />
         </div>
 
         {/* Buttons */}

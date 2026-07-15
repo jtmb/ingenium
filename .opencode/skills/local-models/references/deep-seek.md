@@ -176,13 +176,30 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 ---
 
-### 17. Fix Every Occurrence of a Pattern
+### 17. Fix Every Occurrence of a Pattern — Including Across Files
 
-**Failure signature:** Applying a fix to one occurrence of a bug pattern but missing a sibling occurrence in the same function. Example: adding `Number()` coercion to uidvalidity comparison at line 59 of sync.ts but leaving the identical comparison at line 64 with strict `===` — causing the bug to persist undetected.
+**Failure signature:** Applying a fix to one occurrence of a bug pattern
+but missing a sibling occurrence in the same function. Or: fixing a
+pattern in one module while an identical pattern in a sibling module —
+both calling the same external API or sharing the same response schema —
+is left unchanged. The fix passes code review in the first module but the
+bug persists system-wide.
 
-**Rule:** After applying a targeted fix (Number() coercion, null guard, type cast), grep the same function/file for sibling occurrences of the SAME pattern. Fixing one instance while leaving another is self-defeating — it looks fixed but isn't.
+**Rule:** After applying a targeted fix (Number() coercion, null guard,
+type cast, property access, API response handling), grep not just the
+same function/file BUT ALL files across all packages that interact with
+the same dependency or external API. Fixing-most-but-not-all is
+self-defeating — the unfixed occurrence silently reverts the system to
+the broken state.
 
-**Detection prompt:** "Did I grep for sibling occurrences of this exact pattern in the same function/file? Am I sure there isn't a second identical comparison that needs the same fix?"
+Ask specifically: "Which other modules call the same external API
+(endpoint, library, data format) I just fixed? Do they have the identical
+pattern?" If the answer is yes and you didn't check, the gap is guaranteed.
+
+**Detection prompt:** "Did I grep for sibling occurrences of this exact
+pattern across ALL related files and packages that interact with the same
+dependency/API, or just the file I was editing? Is there a second module
+making the identical API call with the same incorrect handling?"
 
 ---
 
@@ -396,7 +413,7 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 | **Silent-error returns** — Returning error sentinels without logging them | "Does this function log the error BEFORE returning its sentinel?" |
 | **Blank-void loading** — Showing nothing while async work is in flight | "Does the cold/loading state show a visible progress indicator?" |
 | **Ephemeral guards** — In-memory state reset causing expensive operations after restart | "Does this guard survive a process restart?" |
-| **Sibling-omission** — Fixing one occurrence but missing another identical pattern | "Did I grep for sibling occurrences of this pattern?" |
+| **Sibling-omission** — Fixing one occurrence but missing another identical pattern in the same or different file | "Did I grep for sibling occurrences across ALL files that interact with this API?" |
 | **Scoped invalidation** — Clearing more data than what actually changed | "Does my invalidation touch more data than what changed?" |
 | **Exact-condition testing** — Testing in a different environment than the user's | "Did I reproduce the user's exact starting conditions?" |
 | **Silent-empty pipeline** — Producing zero output with no diagnostic context | "Will the logs show WHY this pipeline produced zero output?" |
