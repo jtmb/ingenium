@@ -27,6 +27,7 @@ import {
   getProfile,
 } from "./gmail-api.js";
 import { getFreshGmailToken } from "../oauth.js";
+import { simpleParser } from "mailparser";
 
 // ── Label ↔ Folder mapping ──────────────────────────────────────────────────
 
@@ -112,10 +113,10 @@ async function findLabelIds(
  * Extracts subject, from, date, snippet, flags, and attachment detection
  * from the standard Gmail message metadata format.
  */
-function mapMetadataToCachedEmail(
+async function mapMetadataToCachedEmail(
   msg: any,
   folder: string,
-): CachedEmailWrite | null {
+): Promise<CachedEmailWrite | null> {
   if (!msg.id) return null;
 
   const headers = msg.payload?.headers as Array<{ name: string; value: string }> | undefined;
@@ -132,15 +133,18 @@ function mapMetadataToCachedEmail(
     ? new Date(Number(msg.internalDate)).toISOString()
     : null;
 
-  // Parse From: "Name" <email> or just email
+  // Parse From header using mailparser (same library the IMAP sync path uses).
+  // Handles both quoted and unquoted display names per RFC 2822.
   let fromName: string | null = null;
   let fromAddr: string | null = null;
   if (fromRaw) {
-    const match = fromRaw.match(/^(?:"?([^"]*)"?\s*)?<?([^>]+)>?$/);
-    if (match) {
-      fromName = (match[1]?.trim() || null) ?? null;
-      fromAddr = (match[2]?.trim() || null) ?? null;
-    } else {
+    try {
+      const parsed = await simpleParser(`From: ${fromRaw}\r\n\r\n`);
+      const fromValue = parsed.from?.value?.[0];
+      fromName = fromValue?.name?.trim() || null;
+      fromAddr = fromValue?.address?.trim() || null;
+    } catch {
+      // Fallback: use raw string as-is
       fromAddr = fromRaw.trim();
     }
   }
@@ -288,7 +292,7 @@ export const GmailProvider: MailProvider = {
     // Map to CachedEmailWrite
     const cached: CachedEmailWrite[] = [];
     for (const msg of messages) {
-      const mapped = mapMetadataToCachedEmail(msg, folder);
+      const mapped = await mapMetadataToCachedEmail(msg, folder);
       if (mapped) cached.push(mapped);
     }
 
@@ -347,7 +351,7 @@ export const GmailProvider: MailProvider = {
               const info = labelMap.get(lid);
               if (info) { folder = info.folder; break; }
             }
-            const cached = mapMetadataToCachedEmail(msg, folder);
+            const cached = await mapMetadataToCachedEmail(msg, folder);
             if (cached) upserts.push(cached);
           } catch (err: unknown) {
             const emsg = err instanceof Error ? err.message : String(err);
@@ -386,7 +390,7 @@ export const GmailProvider: MailProvider = {
               const info = labelMap.get(lid);
               if (info) { folder = info.folder; break; }
             }
-            const cached = mapMetadataToCachedEmail(msg, folder);
+            const cached = await mapMetadataToCachedEmail(msg, folder);
             if (cached) upserts.push(cached);
           } catch (err: unknown) {
             const emsg = err instanceof Error ? err.message : String(err);
