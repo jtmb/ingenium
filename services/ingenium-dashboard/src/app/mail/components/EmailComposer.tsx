@@ -80,9 +80,11 @@ export default function EmailComposer({
 
   // ———— INLINE VARIANT (compact, Gmail-inspired reply box) ————
   // [DP#32] Trace: `inline=true` enters this branch → compact layout
+  // FIX 2 — Visual distinction: bg, padding, rounded so the inline reply
+  // box reads as a self-contained card distinct from the page background.
   if (inline) {
     return (
-      <div className="space-y-2">
+      <div className="space-y-2 bg-[var(--color-surface-muted)] p-3 rounded">
         {/* From — compact single-line */}
         <div className="flex items-center gap-2">
           <span className="text-xs text-[var(--color-text-muted)] w-8 shrink-0">From</span>
