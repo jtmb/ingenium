@@ -144,6 +144,8 @@ The inbox displays in a 3-pane layout:
 
 Click any email to view its complete headers and body in the right pane.
 
+> **Note**: Re-clicking the already-open email no longer triggers a visible reload. A same-UID guard (`selectedEmail?.uid === uid` at `mail/page.tsx:202-203`) prevents redundant fetch + state reset when the user clicks the same email row again.
+
 ### Composing Messages
 
 1. Click "Compose" button in the left sidebar
@@ -151,6 +153,19 @@ Click any email to view its complete headers and body in the right pane.
 3. The **From** dropdown auto-selects the currently selected account in the sidebar (via `initialAccountId={selectedAccount}` passed from the mail page). Fill in To, CC/BCC (optional), Subject, and Message body.
 4. Click "Send" — uses SMTP via nodemailer to deliver through Gmail/Outlook servers
 5. Click "Save Draft" to save without sending, or "Discard" to cancel
+
+### Reply and Draft Actions
+
+Each email reader pane includes action buttons for quick responses. Both actions open the same Compose overlay (`EmailComposer`) with `initialAccountId={selectedAccount}`, so the **From** field auto-selects the account currently being viewed in the sidebar.
+
+**Reply** — Located in the action bar below the email header. Opens the compose dialog prefilled with:
+- **To**: The original sender's address (`selectedEmail.from[0].address`)
+- **Subject**: Prefixed with `"Re: "` — the `buildReplySubject()` helper (`mail/page.tsx:272-273`) checks the original subject against `/^re:/i` before adding the prefix, so double `"Re: Re:"` never occurs (dedup-guarded)
+- **Body**: Empty — compose your response from scratch
+
+**Draft** — Located inside each smart-reply suggestion card, next to the **Copy** button. Opens the compose dialog with the same To/Subject as Reply, but with **Body** prefilled with the selected suggestion's exact body text (`draft.body` from `SmartSuggest.tsx:174`). This lets you review, tweak, and send an AI-drafted reply.
+
+Source reference: `handleReply` at `mail/page.tsx:279-287`, `handleDraft` at `mail/page.tsx:289-297`.
 
 ### Searching Emails
 

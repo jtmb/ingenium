@@ -469,24 +469,24 @@ Forms with multiple fields (Server Add, Learnings Log, Settings) use a stacked c
 
 ## Select / Dropdown Styling
 
-All `<select>` elements must include a hover state consistent with the universal card styling.
+All `<select>` elements must use theme-aware token classes — never hardcoded white/light backgrounds that break in dark mode.
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
-| Frame | 1px light gray border, white background, rounded | `border border-gray-200 rounded bg-white` |
+| Frame | 1px border, surface background, rounded | `border border-[var(--color-border)] rounded bg-[var(--color-surface)]` |
 | Padding | 8px horizontal, 6px vertical | `px-3 py-1.5` or `p-2` |
 | Text | 14px | `text-sm` |
-| Hover Background | Light gray | `hover:bg-gray-50` |
+| Hover Background | Surface hover tone | `hover:bg-[var(--color-surface-hover)]` |
 | Cursor | Pointer | `cursor-pointer` |
 
-> 🔴 **Rule**: Every `<select>` element MUST have `hover:bg-gray-50 cursor-pointer`. No exceptions. This applies to sort dropdowns, filter selects, provider/model pickers, and any other select across all pages.
+> 🔴 **Rule**: Every `<select>` element MUST use `bg-[var(--color-surface)]` (never `bg-white`) and `hover:bg-[var(--color-surface-hover)]` (never `hover:bg-gray-50`). Hardcoded white backgrounds break in dark mode because the `bg-white` stays fixed while text color inherits from the theme-aware body class — producing light text on a white surface. This has been fixed on the tasks page (Status, Priority, Issue-Type selects) — use those as the reference implementation.
 
 **Minimum required classes:**
 ```
-border border-gray-200 rounded text-sm bg-white hover:bg-gray-50 cursor-pointer
+border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer
 ```
 
-**Pages with selects:** MCP (category filter), Observations (status + type filters), Personality (sort), Skills (sort), Agents (category + mode), Settings (provider + model + interval + backup), Mail (composer + sidebar).
+**Pages with selects:** Tasks (Status, Priority, Issue-Type), MCP (category filter), Observations (status + type filters), Personality (sort), Skills (sort), Agents (category + mode), Settings (provider + model + interval + backup), Mail (composer + sidebar).
 
 ---
 

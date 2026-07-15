@@ -26,9 +26,11 @@ Columns are fetched from the API's `boardConfig` endpoint and can be customized 
 | Assignee | No | Text input | Free-text; shown as colored initial avatar on cards |
 | Priority | No | Select dropdown | Options: `—` (none), Critical, High, Medium, Low |
 | Due Date | No | Date picker | Rendered on card; overdue dates turn red |
-| Issue Type | No | Text input | Labels shown on card (e.g. "bug", "feature", "task") |
+| Issue Type | No | Select dropdown | Options: Task (default), Epic, Story, Subtask. Matches DB CHECK constraint `issue_type IN ('epic', 'story', 'task', 'subtask')`. |
 | Estimate (minutes) | No | Number input | Rendered as time-remaining pie chart on cards |
 | Description | No | Textarea | Full-width field below the grid |
+
+> **Theme-aware selects**: All `<select>` elements in the task UI (`TaskCreateModal.tsx`, `TaskDetail.tsx`, `BoardView.tsx`) use CSS variable-based theming (`bg-[var(--color-surface)]`, `text-[var(--color-text-primary)]`, `hover:bg-[var(--color-surface-hover)]`) instead of hardcoded `bg-white`, ensuring correct rendering in dark mode.
 
 2. Click **Create Task** to submit. The modal calls `api.tasks.create()` first, then conditionally calls `api.tasks.move()` if the chosen status is not the default "todo".
 3. On success, the new task is prepended to the task list and the modal closes.

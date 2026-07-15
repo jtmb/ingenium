@@ -190,6 +190,8 @@ This pattern is used in `upsertEmailBody()` and the email suggestions cache. It 
 
 > 🔴 **Noreply-sender gate — smart replies are never cached for automated senders.** Before any cache lookup or generation, the `/api/v1/emails/:id/suggest` route (at `services/ingenium-api/lib/routes/emails.ts` lines 482–490) checks both `from_addr` and `from_name` against the regex `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i`. If either matches, the route returns `{ suggestions: [], source: "noreply", configured: true }` immediately — no cache read, no LLM invocation. This gate runs BEFORE the cache check so that stale suggestions from before a sender was classified as noreply are never returned. Any code path that generates suggestions must implement this gate.
 
+> 🔴 **Zod schemas are NOT runtime enforcement gates.** The Zod schemas in `packages/ingenium-core/lib/schema.ts` are used for validation at API boundaries, but SQL CHECK constraints are the actual gate for fields like `tasks.issue_type`. Any UI or API path accepting input for a CHECK-constrained column must either validate client-side against the same allowed values or wrap the write in a `try/catch` that translates constraint violations into clean error messages. Do NOT rely on the Zod schema alone — if the schema allows a value that the CHECK constraint rejects, the DB will throw `SQLITE_CONSTRAINT_CHECK` and the user will see a raw error. Example: if `tasks.issue_type` has a CHECK constraint `IN ('bug', 'feature', 'improvement')`, the client-side form or API route must enforce the same list, or handle `SQLITE_CONSTRAINT` gracefully.
+
 ---
 
 ## Docker Deployment
