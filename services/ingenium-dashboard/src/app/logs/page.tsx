@@ -39,7 +39,7 @@ const LEVEL_DOT: Record<string, string> = {
 
 const LEVEL_BADGE: Record<string, string> = {
   debug: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]",
-  info: "bg-[var(--color-surface-selected)] text-blue-700 border-blue-200",
+  info: "bg-[var(--color-surface-selected)] text-blue-700 border-[var(--color-info-border)]",
   warn: "bg-[var(--color-warning-bg)] text-amber-700 border-[var(--color-warning-border)]",
   error: "bg-[var(--color-error-bg)] text-[var(--color-error-text)] border-[var(--color-error-border)]",
 };
@@ -386,7 +386,7 @@ export default function LogsPage() {
                 const levelDot = LEVEL_DOT[entry.level] ?? "bg-gray-400";
                 const levelBadge =
                   LEVEL_BADGE[entry.level] ??
-                  "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-gray-300";
+                  "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]";
                 return (
                   <tr
                     key={`${entry.timestamp}-${idx}`}
