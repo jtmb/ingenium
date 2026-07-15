@@ -19,7 +19,10 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 
 ### Resolution & Switching
 - The **dashboard** resolves the default project dynamically by fetching the `is_global=1` project from the API (`GET /api/v1/projects` with `is_global` filter)
-- Users can switch projects via the **ProjectSelector** dropdown on the `/projects` page or through MCP tools like `ingenium_project_init` and `ingenium_project_set_global`
+- Users can switch projects via:
+  - The **ProjectDropdown** (folder icon + chevron) in the nav bar, positioned before the settings gear — available on all pages except `/mail` and `/opencode`, where it is disabled (`opacity-50 cursor-not-allowed`)
+  - The `/projects` page, which shows an ACTIVE badge on the current project and a "Set Active" button on others
+  - MCP tools like `ingenium_project_init` and `ingenium_project_set_global`
 - When writing shared resources (skills, plugins, configs, settings), use `global-default`. When working from an external session, the `INGENIUM_PROJECT` env var determines the target
 
 ### Key Rule

@@ -95,7 +95,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
 | Settings (overlay) | Full-screen overlay triggered by gear icon in top nav. 14 tabs (General + 13 endpoints), 4 with real settings (General, Mail, Pipeline, Config); others show clean placeholder states. Deep-link via `?settings=<tab>` query param. Auto-selects tab matching current page. The old `/settings` route now redirects to the overlay via `?settings=` — the overlay is the sole entry point for settings. |
 
-> **Nav bar layout**: The settings gear icon is positioned far-right in the top bar. Project switching: the `/projects` page shows an ACTIVE badge on the current project and a 'Set Active' button on others. No per-page project selector. The old ThemeToggle has been removed from the nav bar.
+> **Nav bar layout**: The settings gear icon is positioned far-right in the top bar. A **ProjectDropdown** (folder icon + chevron) sits to the right before the settings gear, enabling project switching from any page. It is disabled (`opacity-50 cursor-not-allowed`) on `/mail` and `/opencode` pages. Project switching: the `/projects` page shows an ACTIVE badge on the current project and a 'Set Active' button on others. The old ThemeToggle has been removed from the nav bar.
 >
 > The dashboard talks to the API layer only — zero direct DB access. Commands are managed via MCP tools without a dedicated page.
 
@@ -140,6 +140,7 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 | `019_trait_fk_set_null.sql` | Changes `personality_traits.exemplar_observation_id` FK to `ON DELETE SET NULL` so observation deletes never fail on FK constraints. | Runs inside `PRAGMA foreign_keys = OFF/ON`; safe |
 | `024_skills_unique_per_project.sql` | Rebuilds `skills` table to change `UNIQUE(name)` → `UNIQUE(project_id, name)`. Uses same safe pattern as 015/017 (PRAGMA foreign_keys OFF/ON, rename→recreate→restore, FTS rebuild). Comment marker `-- 024_rebuilt`. | Medium — FTS trigger recreation must be verified; same corruption risk as 015/017 if interrupted |
 | `025_email_string_ids.sql` | Rebuilds `email_cache` + `email_bodies` with `uid TEXT` (was INTEGER). Adds `labels_json` to email_cache, `history_id` + `provider` to email_sync_state. Same safe FK off/on rename→recreate pattern. | Medium — FK recreation must be verified; all cached emails keyed by string ID from Gmail API |
+| `026_email_suggestions.sql` | Creates `email_suggestions` table for LLM-generated email reply suggestions, cached per `(account_id, folder, uid)` with FK to `email_cache ON DELETE CASCADE`. Uses same defensive parent-existence check pattern as `email_bodies`. | Low — defensive pattern prevents FK failures during concurrent account deletion |
 
 > 🔴 **Dockerfile note**: The Dockerfile runtime stage does not copy `data/migrations/`. New migration `.sql` files must be manually placed (bind-mounted or copied) into the container for incremental DBs.
 
@@ -165,6 +166,25 @@ return result;
 ```
 
 > 🔴 **Violation detection**: If you see `SQLITE_LOCKED` errors, the first thing to check is whether `checkpointAfterWrite()` is being called inside an `execTransaction()` callback. It must always follow the transaction, never be inside it.
+
+### 🔴 Email FK Defensive Pattern — Parent-Existence Check
+
+Any upsert function that writes to a FK-constrained child table must check for the parent row **before** inserting. This avoids `FOREIGN KEY constraint failed` errors when the parent is deleted concurrently (e.g., account removal mid-backfill).
+
+**Pattern** (from `email-cache.ts`):
+
+```typescript
+// Defensive: check parent row exists before inserting into FK-constrained child table.
+const parent = db.prepare(
+  "SELECT 1 FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?",
+).get(accountId, folder, uid);
+if (!parent) {
+  return; // parent removed — skip silently
+}
+// Safe to upsert into FK-constrained child table
+```
+
+This pattern is used in `upsertEmailBody()` and the email suggestions cache. It must be followed for any new FK-constrained child table writes to prevent silent DB corruption from concurrent deletions.
 
 ---
 

@@ -194,15 +194,46 @@ Every card on every page of the dashboard MUST use `hover:shadow-md transition-s
 
 ### Nav Layout
 
-The nav bar uses a three-zone layout:
+The nav bar uses a four-zone layout:
 1. **Left**: Logo / branding
 2. **Center**: Page navigation links
-3. **Right**: Settings gear icon (⚙️) positioned with `ml-auto` as the sole far-right element
+3. **Right (inner)**: ProjectDropdown (folder icon + chevron)
+4. **Right (outer)**: Settings gear icon (⚙️)
 
 ### Removed from Nav
 
 - **Theme toggle** — Removed from the nav bar. Dark/light mode switching is now in Settings → General tab only.
-- **ProjectSelector** — Removed from the nav bar entirely. Project switching is done on the `/projects` page — each project card has an ACTIVE badge and Set Active button. No project selector appears in the nav or on other pages.
+
+## ProjectDropdown — Icon-Based Dropdown Pattern
+
+The `ProjectDropdown` component (`components/ProjectDropdown.tsx`) is the canonical pattern for icon-based dropdowns in the nav bar.
+
+### Anatomy
+
+| Element | Implementation | Notes |
+|---------|---------------|-------|
+| Trigger button | Folder SVG icon + chevron SVG | 20x20 folder icon, 12x12 chevron |
+| Active hover | `hover:bg-[var(--color-surface-hover)]` | Only when not disabled |
+| Disabled state | `opacity-50 cursor-not-allowed` | On `/mail` and `/opencode` pages |
+| Title tooltip | Shows `Active project: {name}` or disabled message | Dynamic per state |
+| Dropdown panel | `absolute right-0 top-full mt-1 w-64` | `z-50`, `shadow-xl`, `rounded-lg` |
+| Dropdown item | `w-full text-left px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)]` | Active item gets `font-semibold` + checkmark |
+
+### Key Patterns
+
+1. **Suspense wrapper in layout.tsx**: The component is wrapped in `<Suspense fallback={null}>` to avoid blocking nav bar render while `ProjectContext` resolves:
+   ```tsx
+   <Suspense fallback={null}><ProjectDropdown /></Suspense>
+   ```
+2. **Outside-click close**: Uses `useRef<HTMLDivElement>` + `mousedown` event listener on `document` — if the click target is outside the ref, closes the dropdown.
+3. **Page-aware disabled state**: Reads `usePathname()` and disables the dropdown when `pathname` starts with `/mail` or `/opencode` — project context doesn't apply to these pages.
+4. **Lazy data fetch**: Projects list is fetched only when the dropdown opens (`useEffect` on `open` state), avoiding an initial API call on every page load.
+
+### Usage Rules
+
+- Any new icon-based dropdown added to the nav bar MUST follow this pattern (Suspense wrapper, outside-click close, disabled state where applicable).
+- Never use a select element or persistent picker for project switching — the icon-dropdown is the standard.
+- The dropdown panel MUST use `z-50` to overlay the nav bar and `shadow-xl` for visual separation.
 
 ## Settings Overlay
 
@@ -306,6 +337,8 @@ Each hue generates: `bg-{hue}-100 text-{hue}-700 dark:bg-{hue}-500/20 dark:text-
 6. **Page max-width is `max-w-6xl`**. No full-width layouts beyond navigation.
 7. **Every card on every page must have `hover:shadow-md transition-shadow`**. This includes settings cards, MCP server rows, MCP category cards, observations, pipeline events, and any other card-based element. If a new page adds cards, they MUST follow this rule.
 8. **Always use explicit border colors for critical borders**. Never use bare `border`/`border-t`/`divide-y` without an explicit border-color utility for visually important separators. The global default covers minor borders.
+9. **Must pair every `ring-offset-{n}` with `ring-offset-[var(--color-surface)]`**. Tailwind's default `--tw-ring-offset-color` is `#fff`, which creates a white halo in dark mode. This was fixed on the logs and pipeline pages and must be followed for any new `ring-offset` usage.
+10. **Icon-based dropdowns must follow the ProjectDropdown pattern**: folder icon button + chevron, `opacity-50 cursor-not-allowed` disabled state, `Suspense` wrapper in layout.tsx, outside-click close via `useRef` + `mousedown` listener, absolute positioned dropdown panel with `z-50` and `shadow-xl`.
 
 ### Tailwind v4 Border Color Default
 Tailwind v4 uses `currentColor` as the default border color (not gray-200 as in v3). 
