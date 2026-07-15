@@ -149,23 +149,50 @@ Click any email to view its complete headers and body in the right pane.
 ### Composing Messages
 
 1. Click "Compose" button in the left sidebar
-2. The compose dialog opens as an overlay modal with "New Message" header
+2. The compose dialog opens as an overlay modal with "New Message" header (this modal is unchanged for Compose New and Forward)
 3. The **From** dropdown auto-selects the currently selected account in the sidebar (via `initialAccountId={selectedAccount}` passed from the mail page). Fill in To, CC/BCC (optional), Subject, and Message body.
 4. Click "Send" — uses SMTP via nodemailer to deliver through Gmail/Outlook servers
 5. Click "Save Draft" to save without sending, or "Discard" to cancel
+6. **Review with AI** — A "Review with AI" button appears below the message textarea in both inline compose and modal compose. Clicking it sends your draft to the AI and shows an Original vs Improved comparison with Apply/Dismiss options. See "Review with AI" below for details.
 
-### Reply and Draft Actions
+### Reply, Draft, Forward, and Compose New
 
-Each email reader pane includes action buttons for quick responses. Both actions open the same Compose overlay (`EmailComposer`) with `initialAccountId={selectedAccount}`, so the **From** field auto-selects the account currently being viewed in the sidebar.
+Each email reader pane includes action buttons for quick responses. The compose mode determines the UI:
 
-**Reply** — Located in the action bar below the email header. Opens the compose dialog prefilled with:
+- **Reply** and **Draft (from smart-reply suggestion)** — Open an **embedded inline compose box** at the bottom of the reading pane (Gmail-inspired compact design), keeping the email visible while you compose. The **From** field auto-selects the account currently being viewed in the sidebar.
+- **Forward** and **Compose New** — Use the full-screen modal overlay (`EmailComposer`), unchanged from previous behavior.
+
+**Reply** — Located in the action bar below the email header. Opens the inline compose box prefilled with:
 - **To**: The original sender's address (`selectedEmail.from[0].address`)
 - **Subject**: Prefixed with `"Re: "` — the `buildReplySubject()` helper (`mail/page.tsx:272-273`) checks the original subject against `/^re:/i` before adding the prefix, so double `"Re: Re:"` never occurs (dedup-guarded)
 - **Body**: Empty — compose your response from scratch
 
-**Draft** — Located inside each smart-reply suggestion card, next to the **Copy** button. Opens the compose dialog with the same To/Subject as Reply, but with **Body** prefilled with the selected suggestion's exact body text (`draft.body` from `SmartSuggest.tsx:174`). This lets you review, tweak, and send an AI-drafted reply.
+**Draft (from smart-reply suggestion)** — The "Draft" button inside each smart-reply suggestion card opens an inline compose box prefilled with the selected suggestion's exact body text (`draft.body` from `SmartSuggest.tsx:174`). Same To/Subject prefill as Reply. This lets you review, tweak, and send an AI-drafted reply without leaving the reading pane.
+
+**Forward** — Located in the action bar. Opens the full modal overlay (`EmailComposer`) with the original message content prefilled.
+
+**Compose New** — Click "Compose" in the left sidebar. Opens the full modal overlay (`EmailComposer`) with a blank message.
+
+Both inline compose and modal overlay include the **"Review with AI"** button below the message textarea. See the Review with AI section below for details.
 
 Source reference: `handleReply` at `mail/page.tsx:279-287`, `handleDraft` at `mail/page.tsx:289-297`.
+
+### Review with AI
+
+A **"Review with AI"** button appears below the message textarea in both the inline compose box (Reply/Draft) and the full modal overlay (Compose New/Forward).
+
+**How it works:**
+1. Write your draft as usual
+2. Click "Review with AI" — sends your draft to the configured Synthesis LLM for tone, grammar, and clarity suggestions
+3. The response shows an **Original vs Improved** side-by-side comparison with highlighted changes
+4. Click **Apply** to replace your draft body with the AI-improved version
+5. Click **Dismiss** to discard the suggestion and keep your original draft
+
+**Key details:**
+- **Not cached** — Every review is on-demand since each draft is unique
+- **Uses the Synthesis LLM** — Same model configured for smart replies (Settings → Synthesis LLM)
+- **Independent of smart reply settings** — The Review with AI button is always visible and functional regardless of `mail_smart_replies_enabled` or noreply checks
+- The comparison view stays open until you Apply or Dismiss — you can edit your draft further before re-reviewing
 
 ### Searching Emails
 
@@ -254,7 +281,7 @@ The email client can learn your response style and draft 3 reply options when yo
 
 5. **Noreply-sender skip gate**: Before any cache or LLM call, the endpoint checks sender fields against `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i` (case-insensitive regex applied to both `from_addr` and `from_name`). If matched, it returns `source: "noreply"` immediately with empty suggestions and **no UI rendering** — the `SmartSuggest.tsx` component returns `null` for the `"noreply"` source. This prevents LLM calls on automated/transactional emails.
 
-6. **Smart gating**: Suggestions are only generated for **new, unread emails** that haven't been suggested before. Once an email is read or already has cached suggestions, no LLM call is made. This prevents "blowing up your LLM" usage.
+6. **Smart gating**: Suggestions are generated for all emails (read or unread) — the read-status restriction has been removed. The noreply-sender check, settings toggles (`mail_smart_replies_enabled`), and auto/manual mode still apply. Each email only gets one LLM generation; subsequent opens return cached suggestions (`source: "cache"`). This prevents "blowing up your LLM" usage.
 
 7. **Graceful fallback**: If no Synthesis LLM is configured (Settings → Synthesis LLM), the system falls back to template-based keyword matching against manually-created email skills. The UI shows a note directing you to configure an LLM for full AI drafting.
 
@@ -294,14 +321,13 @@ await ingenium_setting_set({
     { "tone": "warm",     "subject": "Re: ...", "body": "..." },
     { "tone": "formal",   "subject": "Re: ...", "body": "..." }
   ],
-  "source": "generated",  // or "cache", "heuristic", "not-new"
+  "source": "generated",  // or "cache", "heuristic"
   "configured": true
 }
 ```
 
 - `source: "generated"` — fresh LLM generation
 - `source: "cache"` — instant from cache, no LLM call
-- `source: "not-new"` — email already read, skipped
 - `source: "heuristic"` — LLM not configured, template fallback
 - `source: "noreply"` — sender matched the noreply regex pattern; no UI shown
 - `source: "disabled"` — `mail_smart_replies_enabled` setting is `"false"`; no UI shown
@@ -313,6 +339,22 @@ await ingenium_setting_set({
 |-------|---------|
 | `email_suggestions` | Caches suggestions per account/folder/UID with FK cascade to `email_cache` |
 | `email_cache` | Parent table — suggestions deleted automatically when account is removed |
+
+### Summarize This Email
+
+A **"Summarize this email"** button appears near the top of every email reading pane (in the action bar, above the email body).
+
+**How it works:**
+1. Click "Summarize this email" — sends the email body (HTML stripped to text, truncated to 8000 chars) to the configured Synthesis LLM
+2. The LLM returns a concise 2–3 sentence summary of the email's key points
+3. The summary is cached per `(account_id, folder, uid)` in the `email_suggestions` table (same cache as smart replies), so subsequent views of the same email return the summary instantly
+4. A "Show full email" toggle lets you expand back to the original body after viewing the summary
+
+**Key differences from smart replies:**
+- **Not gated by noreply checks** — Summaries work for automated/transactional emails too
+- **Not gated by settings** — The summarizer is always enabled regardless of `mail_smart_replies_enabled` or `mail_smart_replies_mode`
+- **Not gated by read status** — Works for any email (read, unread, sent, archived, spam)
+- **Always cached** — First summary per email triggers an LLM call; all subsequent views serve from cache with `source: "cache"`
 
 ## Troubleshooting
 
@@ -326,8 +368,8 @@ await ingenium_setting_set({
 | Search returns no results | Query syntax incompatible with FTS5 | Use simpler queries first: `subject:test` or just keywords without operators |
 | SMTP send fails (timeout) | Mail provider blocking local connections | Verify Docker network allows outbound SMTP, check mail server accepts relay from your IP range |
 | Smart replies show "Configure LLM" note | Synthesis LLM not set up | Go to Settings → Synthesis LLM, select a model and enter API key |
-| Old emails show no suggestions | Correct — suggestions are gated to new/unread emails only | Open a new unread email to see suggestions; this prevents excessive LLM usage |
-| Noreply/automated emails show no "Smart Replies" section | Noreply sender skip gate — senders matching `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i` are suppressed with `source: "noreply"` and render no UI | This is intentional; LLM calls are not wasted on automated/transactional emails |
+| Old emails show no suggestions | Noreply sender or settings disabled | Check if sender matches the noreply regex or verify `mail_smart_replies_enabled` is `"true"` in Settings → Mail |
+| Noreply/automated emails show no "Smart Replies" section | Noreply sender skip gate — senders matching `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i` are suppressed with `source: "noreply"` and render no Smart Replies UI | This is intentional; smart reply LLM calls are not wasted on automated/transactional emails. The "Summarize this email" button still works for these emails. |
 
 ## Security Notes
 
@@ -567,4 +609,4 @@ Emails with HTML bodies render in a **sandboxed `<iframe>`** (`sandbox="allow-sa
 
 ---
 
-*Last updated: July 15, 2026 — Smart Reply Learning (LLM-powered suggest + draft response), replaced stale self-learning integration section, cache-first Gmail API with delta sync, priority queue, bounded windows.*
+*Last updated: July 15, 2026 — Smart replies work for all emails (read-status restriction removed), inline compose for Reply/Draft (Gmail-inspired), Summarize This Email button (cached AI summaries for any email), Review with AI button (on-demand draft review in inline and modal compose), Smart Reply Learning (LLM-powered suggest + draft response), cache-first Gmail API with delta sync, priority queue, bounded windows.*
