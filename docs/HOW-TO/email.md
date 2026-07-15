@@ -146,6 +146,8 @@ Click any email to view its complete headers and body in the right pane.
 
 > **Note**: Re-clicking the already-open email no longer triggers a visible reload. A same-UID guard (`selectedEmail?.uid === uid` at `mail/page.tsx:202-203`) prevents redundant fetch + state reset when the user clicks the same email row again.
 
+> 🔴 **Email-switch auto-clear**: When switching to a different email (clicking a different row), any open inline reply box and any displayed AI summary automatically clear. This is handled by a single `useEffect` at `EmailReader.tsx:86-96` that resets both `isReplying`/`replyPrefill` and all `summary`/`summariseLoading`/`summariseError`/`summariseConfigured` state on `email?.uid` change. The same-UID guard (above) ensures re-clicking the same email does NOT trigger the reset — only genuinely switching to a different email clears the state.
+
 ### Composing Messages
 
 1. Click "Compose" button in the left sidebar
@@ -193,6 +195,11 @@ A **"Review with AI"** button appears below the message textarea in both the inl
 - **Uses the Synthesis LLM** — Same model configured for smart replies (Settings → Synthesis LLM)
 - **Independent of smart reply settings** — The Review with AI button is always visible and functional regardless of `mail_smart_replies_enabled` or noreply checks
 - The comparison view stays open until you Apply or Dismiss — you can edit your draft further before re-reviewing
+
+**🔴 Reasoning model compatibility (suggest-llm.ts line 288):**
+- `max_tokens: 8192` ensures reasoning models (DeepSeek, Qwen, etc.) have enough budget to complete their thinking and output clean content
+- `reasoning_content` is **NEVER surfaced to users** — only the `content` field from the LLM response is shown. The old `content || reasoning_content` fallback pattern (which leaked the model's internal scratchpad to users) was removed. If `content` is empty after the model's thinking completes, an empty string is returned — the thinking trace is never exposed.
+- Accurate as of: `packages/ingenium-email/lib/suggest-llm.ts` lines 254–307
 
 ### Searching Emails
 
@@ -356,6 +363,11 @@ A **"Summarize this email"** button appears near the top of every email reading 
 - **Not gated by read status** — Works for any email (read, unread, sent, archived, spam)
 - **Always cached** — First summary per email triggers an LLM call; all subsequent views serve from cache with `source: "cache"`
 
+**🔴 Reasoning model compatibility (suggest-llm.ts line 225):**
+- `max_tokens: 8192` ensures reasoning models have enough budget to complete their thinking and output clean summary text
+- `reasoning_content` is **NEVER surfaced to users** — only clean `content` from the LLM response is shown. The old `content || reasoning_content` fallback pattern was removed from all suggest-llm.ts functions. If the model's response has empty `content` after thinking, an empty string is returned — the thinking trace is never exposed.
+- ⚠️ **Pre-fix cached summaries**: Summaries generated before this fix (when the old fallback was in place) may contain leaked thinking-process text in their cache entries. Re-triggering the summarize action on the same email will overwrite the cached entry with a clean summary — the LLM is called fresh, and the new output uses `content` only. See `packages/ingenium-email/lib/suggest-llm.ts` lines 188–245.
+
 ## Troubleshooting
 
 | Problem | Likely Cause | Fix |
@@ -417,6 +429,21 @@ Key differences from IMAP:
 - **No UIDVALIDITY** — Gmail message IDs are stable hex strings. Cache invalidation due to UID renumbering does not occur.
 - **No `[Gmail]/` folder aliases** — Gmail labels map directly to flat folder names. No Noselect filtering needed.
 - **No IDLE watch** — Delta polling via `history.list()` replaces IMAP IDLE for new mail detection.
+
+#### 🔴 Sender Address Parsing Fix (`gmail.ts` line 142)
+
+The Gmail provider previously used a hand-written regex (`^(?:"?([^"]*)"?\s*)?<?([^>]+)>?$`) to parse the `From` header for sender display names and addresses. This regex appeared to work for quoted display names but **catastrophically backtracked** for unquoted names, corrupting the `from_addr` field in the email cache — frequently reducing it to a single character (e.g., `'m'`) for most emails.
+
+**Fix**: The hand-written regex was replaced with `mailparser`'s `simpleParser` — the same library already used by the IMAP sync path (`packages/ingenium-email/lib/parser.ts` line 10). The fix at `packages/ingenium-email/lib/providers/gmail.ts` line 142:
+```typescript
+const parsed = await simpleParser(`From: ${fromRaw}\r\n\r\n`);
+const fromValue = parsed.from?.value?.[0];
+fromName = fromValue?.name?.trim() || null;
+fromAddr = fromValue?.address?.trim() || null;
+```
+This correctly handles both quoted and unquoted display names per RFC 2822.
+
+**Repair**: All previously-corrupted cached email sender addresses have been repaired. If you see any remaining garbled sender names, clearing the email cache (`clearFolderCache()`) and re-syncing will regenerate them with correct addresses.
 
 ### Delta Sync (history.list)
 
