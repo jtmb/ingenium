@@ -198,8 +198,8 @@ The email client registers these 13 tools with the Ingenium MCP server:
 | `ingenium_email_list` | List emails in folder | `project`, `account` (optional: `folder`, `page`) | Paginated email list |
 | `ingenium_email_folders` | List IMAP folders | `project`, `account` | Array of folder names |
 | `ingenium_email_draft` | Save a draft | `project`, `account`, `to`, `subject`, `html` | Draft saved confirmation |
-| `ingenium_email_draft_response` | Auto-draft a response | `project`, `account`, `uid` (optional: `folder`) | Draft saved to Drafts folder |
-| `ingenium_email_suggest` | Suggest a response | `project`, `account`, `uid`, `folder` | AI-generated response suggestion |
+| `ingenium_email_draft_response` | Auto-saves the first AI-drafted reply as a Drafts-folder draft in Gmail | `project`, `account`, `uid` (optional: `folder`) | Draft saved to Drafts folder |
+| `ingenium_email_suggest` | Returns 3 AI-drafted reply options with different tones, based on your past sent-email patterns | `project`, `account`, `uid`, `folder` | AI-generated response suggestion |
 | `ingenium_email_triage` | Triage inbox | `project`, `account` (optional: `limit`) | Priority-categorized emails |
 | `ingenium_email_patterns` | List learned patterns | `project` | Email-related skills |
 | `ingenium_email_watch_start` | Start IMAP IDLE watcher | `project`, `account` | Watcher started confirmation |
@@ -223,53 +223,54 @@ await ingenium_email_send({
 });
 ```
 
-## Self-Learning Integration
+## Smart Reply Learning
 
-The email client integrates with Ingenium's self-learning pipeline through several mechanisms:
+The email client can learn your response style and draft 3 reply options when you open new emails — similar to Gmail's Smart Reply.
 
-### Automatic Observations
+### How It Works
 
-During account setup and usage, the Observer plugin automatically logs observations:
-- **OAuth2 flow completion** → logged as `preference` observation about authentication preferences
-- **Folder navigation patterns** → detected as workflow patterns for inbox management
-- **Search query types** → analyzed to understand common email search needs
+1. **Voice sampling**: When generating suggestions, the system reads your recent Sent-folder emails (up to 15 most recent with cached bodies) to capture your tone, sign-offs, and reply style. This happens on-demand, not continuously.
 
-### Manual Logging (Recommended)
+2. **LLM-powered drafting**: The system sends the target email (sender, subject, body snippet) along with your voice samples to the configured Synthesis LLM, asking for exactly 3 distinct draft replies with different tones (concise, warm, formal).
 
-After discovering useful workflows, log them manually:
+3. **Caching**: Generated suggestions are cached in the `email_suggestions` database table (keyed by account + folder + UID). Subsequent opens of the same email return instantly from cache — no repeat LLM calls.
 
-```typescript
-// After setting up Gmail account successfully
-await ingenium_observe({
-  observation_type: "preference",
-  content: "User prefers Gmail over Outlook for OAuth2 integration — completed setup in <5 minutes",
-  importance: 7
-});
+4. **Smart gating**: Suggestions are only generated for **new, unread emails** that haven't been suggested before. Once an email is read or already has cached suggestions, no LLM call is made. This prevents "blowing up your LLM" usage.
 
-// After discovering effective search patterns  
-await ingenium_observe({
-  observation_type: "pattern", 
-  content: "User searches emails by combining subject keywords with date ranges (e.g., 'invoice AND month:june')",
-  importance: 6
-});
+5. **Graceful fallback**: If no Synthesis LLM is configured (Settings → Synthesis LLM), the system falls back to template-based keyword matching against manually-created email skills. The UI shows a note directing you to configure an LLM for full AI drafting.
 
-// After composing first email via SMTP
-await ingenium_observe({
-  observation_type: "insight",
-  content: "Email composition works seamlessly through nodemailer — no additional configuration needed after OAuth2 setup",
-  importance: 8
-});
+### Configuration
+
+Uses the **existing Synthesis LLM** settings (`synthesis_model`, `synthesis_api_key`, `synthesis_endpoint`). No separate email-specific LLM configuration needed. Configure in Settings → Synthesis LLM.
+
+### API Response Shape
+
+`GET /api/v1/emails/suggest/:uid?project=&account=&folder=`
+
+```json
+{
+  "suggestions": [
+    { "tone": "concise",  "subject": "Re: ...", "body": "..." },
+    { "tone": "warm",     "subject": "Re: ...", "body": "..." },
+    { "tone": "formal",   "subject": "Re: ...", "body": "..." }
+  ],
+  "source": "generated",  // or "cache", "heuristic", "not-new"
+  "configured": true
+}
 ```
 
-### Triggering Synthesis Pipeline
+- `source: "generated"` — fresh LLM generation
+- `source: "cache"` — instant from cache, no LLM call
+- `source: "not-new"` — email already read, skipped
+- `source: "heuristic"` — LLM not configured, template fallback
+- `configured: false` — LLM not available, using heuristic
 
-After configuring multiple accounts or discovering email workflows, trigger synthesis to process observations into personality traits and skills:
+### Database
 
-1. Run `/synthesize` command in OpenCode
-2. Check status with `ingenium_synthesis_status()`  
-3. View results on dashboard at `/personality` and `/skills`
-
-The pipeline may auto-create an "email-client" skill or update existing communication-related skills based on your usage patterns.
+| Table | Purpose |
+|-------|---------|
+| `email_suggestions` | Caches suggestions per account/folder/UID with FK cascade to `email_cache` |
+| `email_cache` | Parent table — suggestions deleted automatically when account is removed |
 
 ## Troubleshooting
 
@@ -282,6 +283,8 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 | Compose dialog has box-within-a-box layout | CSS nesting issue | Ensure EmailComposer is rendered directly inside Overlay's `children`, not wrapped in an extra `<div>` with border |
 | Search returns no results | Query syntax incompatible with FTS5 | Use simpler queries first: `subject:test` or just keywords without operators |
 | SMTP send fails (timeout) | Mail provider blocking local connections | Verify Docker network allows outbound SMTP, check mail server accepts relay from your IP range |
+| Smart replies show "Configure LLM" note | Synthesis LLM not set up | Go to Settings → Synthesis LLM, select a model and enter API key |
+| Old emails show no suggestions | Correct — suggestions are gated to new/unread emails only | Open a new unread email to see suggestions; this prevents excessive LLM usage |
 
 ## Security Notes
 
@@ -295,7 +298,7 @@ The pipeline may auto-create an "email-client" skill or update existing communic
 |-----|---------|
 | `docs/VARIABLES.md` | Email environment variables reference |
 | `AGENTS.md` section "Email Client Environment Variables" | OAuth2 setup instructions and security warnings |
-| `docs/self-learning-pipeline.md` Section 6 | MCP tools for observations (including email-specific patterns) |
+| `docs/self-learning-pipeline.md` Section 6 | MCP tools reference (observation + email tools) |
 
 ## Files Reference
 
@@ -521,4 +524,4 @@ Emails with HTML bodies render in a **sandboxed `<iframe>`** (`sandbox="allow-sa
 
 ---
 
-*Last updated: July 14, 2026 — Gmail API provider with delta sync, priority queue, cache-only routes, bounded windows.*
+*Last updated: July 15, 2026 — Smart Reply Learning (LLM-powered suggest + draft response), replaced stale self-learning integration section, cache-first Gmail API with delta sync, priority queue, bounded windows.*

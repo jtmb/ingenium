@@ -176,8 +176,8 @@
 | `ingenium_email_folders` | Lists all email folders for an account. |
 | `ingenium_email_accounts` | Lists connected email accounts. |
 | `ingenium_email_triage` | Sorts your inbox by priority and suggests actions. |
-| `ingenium_email_suggest` | Suggests how to reply based on past behavior. |
-| `ingenium_email_draft_response` | Auto-writes a draft reply and saves to Drafts. |
+| `ingenium_email_suggest` | Suggests 3 AI-drafted reply options (concise, warm, formal) based on past sent-email patterns. Gated to new/unread emails only. Falls back to template-based suggestions if no LLM is configured. |
+| `ingenium_email_draft_response` | Auto-drafts a response to an email based on learned patterns and saves it to Drafts folder. Uses same LLM-driven or template fallback as suggest. |
 | `ingenium_email_patterns` | Shows learned email reply styles (skills with category 'email'). |
 | `ingenium_email_watch_start` | Starts live email monitoring (IMAP IDLE) for auto-drafting. |
 | `ingenium_email_watch_status` | Checks if the email watcher is running. |
