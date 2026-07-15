@@ -476,7 +476,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
 
   // --- Render ---
   return (
-    <Overlay isOpen={true} onClose={onClose} title={task.title} subtitle={`Created ${new Date(task.created_at).toLocaleString()}`} fullScreen>
+    <Overlay isOpen={true} onClose={onClose} title={task.title} subtitle={`Created ${new Date(task.created_at).toLocaleString()}`}>
       <div className="flex h-full gap-0">
         {/* Main content area */}
         <div className="flex-1 overflow-y-auto pr-4 space-y-6">
