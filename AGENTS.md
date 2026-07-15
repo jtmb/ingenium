@@ -95,7 +95,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
 | Settings (overlay) | Full-screen overlay triggered by gear icon in top nav. 14 tabs (General + 13 endpoints), 4 with real settings (General, Mail, Pipeline, Config); others show clean placeholder states. Deep-link via `?settings=<tab>` query param. Auto-selects tab matching current page. The old `/settings` route now redirects to the overlay via `?settings=` — the overlay is the sole entry point for settings. |
 
-> **Nav bar layout**: The settings gear icon is positioned far-right in the top bar. The ProjectSelector renders per-page (not global). The old ThemeToggle has been removed from the nav bar.
+> **Nav bar layout**: The settings gear icon is positioned far-right in the top bar. Project switching: the `/projects` page shows an ACTIVE badge on the current project and a 'Set Active' button on others. No per-page project selector. The old ThemeToggle has been removed from the nav bar.
 >
 > The dashboard talks to the API layer only — zero direct DB access. Commands are managed via MCP tools without a dedicated page.
 
@@ -109,7 +109,7 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 
   The container entrypoint script sets `INGENIUM_PROJECT=global-default` in `opencode.jsonc`, ensuring container processes always target the server project.
 
-The dashboard resolves the default project dynamically by fetching the `is_global=1` project from the API. Users can switch projects via the **ProjectSelector** dropdown on the `/projects` page or through MCP tools.
+The dashboard resolves the default project dynamically by fetching the `is_global=1` project from the API. Users switch projects via the `/projects` page — each project card shows an ACTIVE badge for the current project and a 'Set Active' button on others — or through MCP tools.
 
 **Key rule**: When writing shared resources (skills, plugins, configs, settings) from within the container's OpenCode web UI or from dashboard operations, use the `global-default` project. When working from an external OpenCode session (like this repo's worktree-derived project), the `INGENIUM_PROJECT` env var in the MCP server config determines the target. See the `INGENIUM_PROJECT` entry in the Environment Variables table below.
 

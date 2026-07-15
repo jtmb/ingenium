@@ -202,7 +202,7 @@ The nav bar uses a three-zone layout:
 ### Removed from Nav
 
 - **Theme toggle** — Removed from the nav bar. Dark/light mode switching is now in Settings → General tab only.
-- **ProjectSelector** — Removed from the nav bar. Per-page `<PageProjectBar>` component is used instead at the top of applicable pages, showing the current project context inline.
+- **ProjectSelector** — Removed from the nav bar entirely. Project switching is done on the `/projects` page — each project card has an ACTIVE badge and Set Active button. No project selector appears in the nav or on other pages.
 
 ## Settings Overlay
 
@@ -305,6 +305,14 @@ Each hue generates: `bg-{hue}-100 text-{hue}-700 dark:bg-{hue}-500/20 dark:text-
 5. **Cards never have shadows** by default — only on hover via `hover:shadow-md transition-shadow`. Both classes must always appear together. No exceptions.
 6. **Page max-width is `max-w-6xl`**. No full-width layouts beyond navigation.
 7. **Every card on every page must have `hover:shadow-md transition-shadow`**. This includes settings cards, MCP server rows, MCP category cards, observations, pipeline events, and any other card-based element. If a new page adds cards, they MUST follow this rule.
+8. **Always use explicit border colors for critical borders**. Never use bare `border`/`border-t`/`divide-y` without an explicit border-color utility for visually important separators. The global default covers minor borders.
+
+### Tailwind v4 Border Color Default
+Tailwind v4 uses `currentColor` as the default border color (not gray-200 as in v3). 
+The `globals.css` @layer base rule sets `*, ::before, ::after { border-color: var(--color-border); }` 
+so bare `border`/`border-t`/`divide-y` resolve to dark gray in dark mode.
+Always use explicit border colors (`border-[var(--color-border)]`) for critical borders rather than 
+relying on the global default. Never use hardcoded `border-gray-200` — it won't adapt.
 
 ---
 
