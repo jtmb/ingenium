@@ -264,7 +264,6 @@ function JobFormOverlay({
       onClose={onClose}
       title={initial ? `Edit Job: ${initial.name}` : "Create Job"}
       subtitle="Configure a scheduled or triggered agent job"
-      fullScreen
     >
       <div className="max-w-2xl mx-auto space-y-4">
         {error && (

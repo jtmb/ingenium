@@ -39,7 +39,7 @@ export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, 
       <div className={`relative bg-[var(--color-surface)] rounded-lg shadow-2xl flex flex-col ${
         fullScreen
           ? "w-[calc(100%-32px)] h-[calc(100%-32px)] m-4 max-w-none"
-          : "mt-8 mb-8 w-11/12 max-w-5xl max-h-[90vh]"
+          : "mt-8 mb-8 w-11/12 max-w-7xl max-h-[90vh]"
       }`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
