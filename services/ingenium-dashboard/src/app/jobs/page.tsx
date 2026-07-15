@@ -232,6 +232,8 @@ function JobFormOverlay({
       setForm(EMPTY_FORM);
     }
     setError("");
+    setWandError(null);
+    setWandLoading(false);
   }, [initial, isOpen]);
 
   const update = (field: keyof JobFormData, value: string | number) => {
@@ -312,6 +314,11 @@ function JobFormOverlay({
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ description: form.description.trim() }),
                         });
+                        if (!res.ok) {
+                          setWandError("AI generation failed — try again later");
+                          setWandLoading(false);
+                          return;
+                        }
                         const data = await res.json().catch(() => ({ data: null }));
                         const d = data.data || data;
                         if (d?.configured === false) {
