@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import ServiceOverlay from "./ServiceOverlay";
+import { badgeTones } from "../../lib/badgeTones";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -133,8 +134,8 @@ function appStateBadge(state: ApplicationInfo["state"]): {
     case "stopped":
       return {
         label: "Stopped",
-        bg: "bg-red-50",
-        text: "text-red-700",
+        bg: badgeTones('error'),
+        text: "",
         dotClass: "status-dot-red",
       };
     case "starting":
@@ -147,29 +148,29 @@ function appStateBadge(state: ApplicationInfo["state"]): {
     case "idle":
       return {
         label: "Idle",
-        bg: "bg-gray-50",
-        text: "text-gray-600",
+        bg: badgeTones('muted'),
+        text: "",
         dotClass: "status-dot-gray",
       };
     case "disabled":
       return {
         label: "Disabled",
-        bg: "bg-gray-50",
-        text: "text-gray-500",
+        bg: badgeTones('muted'),
+        text: "",
         dotClass: "status-dot-gray",
       };
     case "error":
       return {
         label: "Error",
-        bg: "bg-red-50",
-        text: "text-red-700",
+        bg: badgeTones('error'),
+        text: "",
         dotClass: "status-dot-red",
       };
     default:
       return {
         label: "Unknown",
-        bg: "bg-gray-50",
-        text: "text-gray-500",
+        bg: badgeTones('muted'),
+        text: "",
         dotClass: "status-dot-gray",
       };
   }
@@ -293,7 +294,7 @@ export default function StatusPage() {
           return (
             <div
               key={svc.name}
-              className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 cursor-pointer hover:shadow-lg transition-shadow"
+              className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-6 cursor-pointer hover:shadow-md transition-shadow"
               onClick={() => handleServiceClick(svc.name)}
             >
               {/* Service name */}
@@ -349,7 +350,7 @@ export default function StatusPage() {
               return (
                 <div
                   key={app.name}
-                  className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-4 cursor-pointer hover:shadow-lg transition-shadow"
+                  className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] p-4 cursor-pointer hover:shadow-md transition-shadow"
                   onClick={() => handleServiceClick(app.name)}
                 >
                   <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-1">

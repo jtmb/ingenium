@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback } from "react";
 import { api, Task } from "../../../lib/api";
+import { badgeTones } from "../../../lib/badgeTones";
 import TaskDetail from "./TaskDetail";
 
 /* ------------------------------------------------------------------ */
@@ -223,12 +224,12 @@ export default function ListView({ project, tasks, onTasksChange }: ListViewProp
               <td className="px-3 py-2">
                 <span className={`text-xs px-1.5 py-0.5 rounded ${
                   t.column_id === "done"
-                    ? "bg-green-100 text-green-700"
+                    ? badgeTones("green")
                     : t.column_id === "in_progress"
-                      ? "bg-blue-100 text-blue-700"
+                      ? badgeTones("blue")
                       : t.column_id === "review"
-                        ? "bg-amber-100 text-amber-700"
-                        : "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
+                        ? badgeTones("amber")
+                        : badgeTones("slate")
                 }`}>
                   {COLUMN_LABELS[t.column_id] || t.column_id || "todo"}
                 </span>

@@ -5,6 +5,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
 import { api, Job, JobRun, JobRunLog, Agent } from "../../lib/api";
+import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import PageProjectBar from "../components/PageProjectBar";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -73,32 +75,30 @@ function shortId(id: string): string {
   return id.substring(0, 8);
 }
 
-/** Agent category color mapping for the agent badge. */
-const AGENT_COLORS: Record<string, string> = {
-  orchestrator: "bg-purple-100 text-purple-700",
-  execution: "bg-blue-100 text-blue-700",
-  research: "bg-[var(--color-success-bg)] text-green-700",
-  security: "bg-red-100 text-[var(--color-error-text)]",
-  primary: "bg-purple-100 text-purple-700",
-  qa: "bg-[var(--color-success-bg)] text-green-700",
-  docs: "bg-amber-100 text-amber-700",
-  scout: "bg-blue-100 text-blue-700",
-  explore: "bg-teal-100 text-teal-700",
-};
-
 function agentBadgeColor(category: string): string {
-  return AGENT_COLORS[category] ?? "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]";
+  const hues: Record<string, string> = {
+    orchestrator: "purple",
+    execution: "blue",
+    research: "green",
+    security: "red",
+    primary: "purple",
+    qa: "green",
+    docs: "amber",
+    scout: "blue",
+    explore: "teal",
+  };
+  return badgeTones(hues[category] ?? "gray");
 }
 
 /** Status dot + label for a run. */
 function RunStatusDot({ status }: { status: JobRun["status"] }) {
   const map: Record<string, string> = {
-    queued: "bg-gray-400",
-    running: "bg-blue-500 animate-pulse",
+    queued: "bg-gray-400 dark:bg-gray-500",
+    running: "bg-blue-500 animate-pulse dark:bg-blue-400",
     success: "bg-green-500",
     failed: "bg-red-500",
     timeout: "bg-red-500",
-    cancelled: "bg-yellow-500",
+    cancelled: "bg-yellow-500 dark:bg-amber-400",
   };
   const label: Record<string, string> = {
     queued: "Queued",
@@ -119,12 +119,12 @@ function RunStatusDot({ status }: { status: JobRun["status"] }) {
 /** Status badge for run table. */
 function RunStatusBadge({ status }: { status: JobRun["status"] }) {
   const colors: Record<string, string> = {
-    queued: "bg-gray-200 text-[var(--color-text-primary)]",
-    running: "bg-blue-100 text-blue-700",
-    success: "bg-[var(--color-success-bg)] text-green-700",
-    failed: "bg-red-100 text-[var(--color-error-text)]",
-    timeout: "bg-red-100 text-[var(--color-error-text)]",
-    cancelled: "bg-yellow-100 text-yellow-700",
+    queued: badgeTones("gray"),
+    running: badgeTones("blue"),
+    success: badgeTones("success"),
+    failed: badgeTones("error"),
+    timeout: badgeTones("error"),
+    cancelled: badgeTones("amber"),
   };
   const label: Record<string, string> = {
     queued: "Queued",
@@ -135,7 +135,7 @@ function RunStatusBadge({ status }: { status: JobRun["status"] }) {
     cancelled: "Cancelled",
   };
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? "bg-gray-200 text-[var(--color-text-primary)]"}`}>
+    <span className={`${BADGE_BASE} ${colors[status] ?? badgeTones("gray")}`}>
       {label[status] ?? status}
     </span>
   );
@@ -851,6 +851,8 @@ export default function JobsPage() {
         </button>
       </div>
 
+      <PageProjectBar />
+
       {error && (
         <div className="text-[var(--color-error-text)] text-sm bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3">{error}</div>
       )}
@@ -918,12 +920,12 @@ function JobCard({
   }, [job.id, getLastRunStatus]);
 
   const statusDotColor: Record<string, string> = {
-    running: "bg-blue-500 animate-pulse",
+    running: "bg-blue-500 animate-pulse dark:bg-blue-400",
     success: "bg-green-500",
     failed: "bg-red-500",
     timeout: "bg-red-500",
-    cancelled: "bg-yellow-500",
-    queued: "bg-gray-400",
+    cancelled: "bg-yellow-500 dark:bg-amber-400",
+    queued: "bg-gray-400 dark:bg-gray-500",
   };
 
   return (

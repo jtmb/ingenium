@@ -479,13 +479,10 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     return;
   }
 
-  // Body available — we can generate a suggestion
-  // (suggestResponse uses the cached email content via the responder module)
+  // Body available — generate suggestion from cache.
+  // No IMAP needed — suggestResponse now uses the email DB cache directly.
   try {
-    const { auth } = result;
-    const suggestion = await withImapConnection(account, auth, (id) =>
-      suggestResponse(resolveEmailProject(), id, uid, folder),
-    );
+    const suggestion = await suggestResponse(resolveEmailProject(), account.id, uid, folder);
     if (!suggestion) {
       res.status(404).json({
         error: { code: "NOT_FOUND", message: `No response suggestion for UID ${uid}` },
@@ -749,9 +746,46 @@ emailsRouter.get("/", async (req, res) => {
 
   const { account } = result;
 
-  // ── ?refresh=true — hint the engine, then serve cache ──────────────
+  // ── ?refresh=true — synchronous fetch so the refresh button actually works ─
+  // 🔴 L30: boostFolder() was fire-and-forget (IMAP connection-pool workaround)
+  // that returned stale cached data immediately.  The Gmail REST API has no
+  // connection pool constraint — replace with a direct synchronous call.
   if (refresh) {
-    boostFolder(account.id, folder);
+    try {
+      const freshToken = await getFreshGmailToken(account.id);
+      const REFRESH_WINDOW = 50; // reasonable batch for a UI refresh
+      const messages = await Promise.race([
+        GmailProvider.listMessages(
+          account,
+          { accessToken: freshToken } as OAuthToken,
+          folder,
+          REFRESH_WINDOW,
+        ),
+        sleep(10000).then(() => null),
+      ]);
+
+      if (messages && messages.length > 0) {
+        for (const msg of messages) {
+          emailCache.upsertEmailCache(account.id, msg.folder, [{
+            uid: msg.id,
+            subject: msg.subject,
+            from_name: msg.fromName,
+            from_addr: msg.fromAddr,
+            date: msg.date,
+            snippet: msg.snippet,
+            flags: JSON.stringify(msg.flags),
+            has_attachments: msg.hasAttachments ? 1 : 0,
+            envelope_json: msg.envelopeJson,
+          }]);
+        }
+        // Also boost the folder so the engine does deeper backfill
+        boostFolder(account.id, folder);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("email", `Refresh fetch failed for ${account.email}/${folder}: ${msg}`);
+      // Fall through to cache — serve stale rather than nothing
+    }
   }
 
   // ── Check DB cache ─────────────────────────────────────────────────
@@ -856,13 +890,40 @@ emailsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
   const { account } = result;
   const id = req.params.id!;
   const attachmentId = req.params.attachmentId!;
+  const folder = (req.query.folder as string) ?? "INBOX";
+
+  // 🔴 L29: The Gmail REST API re-fetched full message in getAttachment()
+  // may have a different structure than the original cached message.  When
+  // walkParts() can't find the attachment, it falls back to the opaque
+  // Gmail attachmentId token (e.g. "ANGjdJ_...") as the filename.
+  //
+  // Fix: resolve the real filename from the cached email body BEFORE the
+  // API call, and use it to override whatever the provider returns.
+  let cachedFilename: string | null = null;
+  const cachedBody = emailCache.getCachedEmailBody(account.id, folder, id);
+  if (cachedBody?.headers_json) {
+    try {
+      const headers = JSON.parse(cachedBody.headers_json);
+      if (Array.isArray(headers.attachments)) {
+        const found = headers.attachments.find(
+          (a: { partId?: string; attachmentId?: string }) =>
+            a.attachmentId === attachmentId || a.partId === attachmentId,
+        );
+        if (found?.filename) cachedFilename = found.filename;
+      }
+    } catch { /* ignore parse errors — fall through to provider */ }
+  }
 
   try {
     // Get fresh token and fetch attachment via the Gmail REST API provider
     const freshToken = await getFreshGmailToken(account.id);
     const att = await GmailProvider.getAttachment(account, { accessToken: freshToken } as any, id, attachmentId);
+
+    // ✅ Use the cached filename when available — it's the EXACT filename
+    // the Gmail API originally returned, not a fallback token.
+    const filename = cachedFilename ?? att.filename;
     res.setHeader('Content-Type', att.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${att.filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', att.data.length);
     res.send(att.data);
   } catch (err: any) {

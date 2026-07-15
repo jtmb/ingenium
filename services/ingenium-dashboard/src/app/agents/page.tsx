@@ -6,6 +6,8 @@ import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
 import { api, type Agent } from "@/lib/api";
+import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import PageProjectBar from "@/app/components/PageProjectBar";
 
 /**
  * Agent management page.
@@ -113,6 +115,7 @@ export default function AgentsPage() {
 
   return (
     <div className="space-y-8">
+      <PageProjectBar />
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Agents</h1>
         <button
@@ -242,10 +245,10 @@ export default function AgentsPage() {
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <span className="font-semibold text-lg">{agent.name}</span>
-                        <span className={`ml-2 text-xs px-2 py-0.5 rounded ${agent.mode === 'primary' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}`}>
+                        <span className={`ml-2 ${BADGE_BASE} ${agent.mode === 'primary' ? badgeTones('purple') : badgeTones('blue')}`}>
                           {agent.mode}
                         </span>
-                        <span className={`ml-2 text-xs px-2 py-0.5 rounded ${agent.enabled ? 'bg-[var(--color-success-bg)] text-green-800' : 'bg-gray-200 text-[var(--color-text-secondary)]'}`}>
+                        <span className={`ml-2 ${BADGE_BASE} ${agent.enabled ? badgeTones('success') : badgeTones('muted')}`}>
                           {agent.enabled ? 'Enabled' : 'Disabled'}
                         </span>
                       </div>

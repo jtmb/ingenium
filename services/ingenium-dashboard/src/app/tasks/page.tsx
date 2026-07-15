@@ -6,6 +6,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Task } from "../../lib/api";
 
+import PageProjectBar from "@/app/components/PageProjectBar";
 import BoardView from "./components/BoardView";
 import ListView from "./components/ListView";
 import TimelineView from "./components/TimelineView";
@@ -69,13 +70,18 @@ export default function TasksPage() {
   // Create new task
   const create = async () => {
     if (!title.trim()) return;
+    if (!project || project === "undefined" || project === "null") {
+      console.error("Tasks: cannot create — invalid project:", project);
+      setError("No project selected. Please select a project first.");
+      return;
+    }
     try {
       setError("");
       const res = await api.tasks.create(title.trim(), project);
       setTasks((prev) => [res.data, ...prev]);
       setTitle("");
-    } catch {
-      setError("Failed to create task. Please check that a project exists.");
+    } catch (err: any) {
+      setError(err.message || "Failed to create task.");
     }
   };
 
@@ -97,6 +103,8 @@ export default function TasksPage() {
 
   return (
     <div className="space-y-6">
+      <PageProjectBar />
+
       {/* Header + create form */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">

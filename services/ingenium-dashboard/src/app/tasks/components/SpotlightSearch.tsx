@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api, Task } from "../../../lib/api";
+import { badgeTones } from "../../../lib/badgeTones";
 
 type SpotlightSearchProps = {
   project: string;
@@ -131,10 +132,10 @@ export default function SpotlightSearch({ project, onTaskSelect }: SpotlightSear
                 {highlightMatch(t.title, query)}
               </span>
               <span className={`text-xs px-1.5 py-0.5 rounded font-medium shrink-0 ${
-                t.column_id === "done" ? "bg-green-100 text-green-700" :
-                t.column_id === "in_progress" ? "bg-blue-100 text-blue-700" :
-                t.column_id === "review" ? "bg-amber-100 text-amber-700" :
-                "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
+                t.column_id === "done" ? badgeTones("green") :
+                t.column_id === "in_progress" ? badgeTones("blue") :
+                t.column_id === "review" ? badgeTones("amber") :
+                badgeTones("slate")
               }`}>
                 {t.column_id}
               </span>

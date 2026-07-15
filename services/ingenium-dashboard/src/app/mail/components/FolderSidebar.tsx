@@ -1,5 +1,6 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
+import { badgeTones } from '@/lib/badgeTones';
 
 /**
  * FolderSidebar — account selector + folder tree with unread counts.
@@ -80,7 +81,7 @@ export default function FolderSidebar({
                 {(selectedAccountData.email || selectedAccountData.id)[0].toUpperCase()}
               </span>
               <span className="flex-1 truncate text-left">{selectedAccountData.email}</span>
-              <span className={`w-2 h-2 rounded-full shrink-0 ${selectedAccountData.connected ? "bg-green-500" : "bg-gray-400"}`} />
+              <span className={`w-2 h-2 rounded-full shrink-0 ${selectedAccountData.connected ? badgeTones('green') : badgeTones('gray')}`} />
             </>
           ) : (
             <span className="flex-1 text-left text-[var(--color-text-muted)]">Select account</span>
@@ -113,7 +114,7 @@ export default function FolderSidebar({
                     {acct.email[0].toUpperCase()}
                   </span>
                   <span className="flex-1 truncate">{acct.email}</span>
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${acct.connected ? "bg-green-500" : "bg-gray-400"}`} />
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${acct.connected ? badgeTones('green') : badgeTones('gray')}`} />
                   {!acct.connected && (
                     <span className="text-xs text-[var(--color-text-muted)]">(not connected)</span>
                   )}

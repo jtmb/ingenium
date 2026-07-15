@@ -1,5 +1,7 @@
 "use client";
 
+import { badgeTones, BADGE_BASE } from '@/lib/badgeTones';
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface FolderProgress {
@@ -52,34 +54,34 @@ function ProgressBar({
 function StateBadge({ state }: { state: string }) {
   if (state === "complete") {
     return (
-      <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+      <span className={`${BADGE_BASE} ${badgeTones('emerald')}`}>
         Complete
       </span>
     );
   }
   if (state === "syncing-headers") {
     return (
-      <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+      <span className={`${BADGE_BASE} ${badgeTones('blue')}`}>
         Syncing headers
       </span>
     );
   }
   if (state === "backfilling-bodies") {
     return (
-      <span className="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+      <span className={`${BADGE_BASE} ${badgeTones('amber')}`}>
         Caching bodies
       </span>
     );
   }
   if (state === "error") {
     return (
-      <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-full">
+      <span className={`${BADGE_BASE} ${badgeTones('red')}`}>
         Error
       </span>
     );
   }
   return (
-    <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">
+    <span className={`${BADGE_BASE} ${badgeTones('gray')}`}>
       Queued
     </span>
   );
