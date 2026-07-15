@@ -309,8 +309,8 @@ export const api = {
   },
   tasks: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Task[] }>(`/tasks?project=${project}`),
-    create: (title: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Task }>(`/tasks?project=${project}`, { method: "POST", body: JSON.stringify({ title }) }),
+    create: (title: string, project = DEFAULT_PROJECT, fields?: Partial<Task>) =>
+      request<{ data: Task }>(`/tasks?project=${project}`, { method: "POST", body: JSON.stringify({ title, ...fields }) }),
     move: (id: string, column_id: string, project = DEFAULT_PROJECT) =>
       request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: JSON.stringify({ column_id }) }),
     update: (id: string, fields: Partial<Task>, project = DEFAULT_PROJECT) =>
