@@ -769,9 +769,9 @@ function EventRow({
           <div className={`w-0.5 flex-1 ${lineColor}`} />
           {/* Dot / icon */}
           <div
-            className={`shrink-0 z-10 flex items-center justify-center rounded-full border-2 border-white ${
+             className={`shrink-0 z-10 flex items-center justify-center rounded-full border-2 border-[var(--color-border)] ${
               isChild ? "w-2 h-2" : "w-3 h-3"
-            } ${dotColor} ${countBadge ? "cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-gray-300" : ""}`}
+            } ${dotColor} ${countBadge ? "cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-gray-300 dark:ring-gray-600" : ""}`}
             onClick={onToggle}
             title={iconLabel}
           >

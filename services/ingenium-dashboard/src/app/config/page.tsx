@@ -52,7 +52,7 @@ export default function ConfigPage() {
         <button
           onClick={() => setTab("project")}
           className={`px-4 py-2 text-sm font-medium rounded-t ${
-            tab === "project" ? "bg-[var(--color-surface)] text-blue-700 border border-b-white border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+            tab === "project" ? "bg-[var(--color-surface)] text-blue-700 border border-b-[var(--color-border)] border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
           }`}
         >
           Project Config
@@ -60,7 +60,7 @@ export default function ConfigPage() {
         <button
           onClick={() => setTab("global")}
           className={`px-4 py-2 text-sm font-medium rounded-t ${
-            tab === "global" ? "bg-[var(--color-surface)] text-blue-700 border border-b-white border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+            tab === "global" ? "bg-[var(--color-surface)] text-blue-700 border border-b-[var(--color-border)] border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
           }`}
         >
           Global Config
