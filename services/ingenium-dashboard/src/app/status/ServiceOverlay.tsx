@@ -25,8 +25,53 @@ interface ServiceLogs {
   more: boolean;
 }
 
+interface FolderInfo {
+  folder: string;
+  state: string;
+  headersSynced: number;
+  headersTotal: number;
+  bodiesCached: number;
+  bodiesWindow: number;
+  lastSyncedAt: string | null;
+  lastError: string | null;
+}
+
+interface AccountInfo {
+  accountId: string;
+  email: string;
+  folders: FolderInfo[];
+}
+
+interface AppEngine {
+  running: boolean;
+  heartbeatAt: string | null;
+  accounts: AccountInfo[];
+}
+
+interface AppStats {
+  totalObservations: number;
+  pendingCount: number;
+  processedCount: number;
+  traitCount: number;
+}
+
+interface AppDetail {
+  name: string;
+  state: string;
+  description: string;
+  detail?: string;
+  // synthesis-engine fields
+  intervalMs?: number;
+  lastRunAt?: string | null;
+  nextEstimate?: string | null;
+  stats?: AppStats | null;
+  // email-client fields
+  engine?: AppEngine | null;
+}
+
 interface ServiceOverlayProps {
   name: string;
+  type: "service" | "application";
   onClose: () => void;
 }
 
@@ -35,12 +80,14 @@ interface ServiceOverlayProps {
 function stateBadgeStyle(state: string) {
   switch (state) {
     case "running":
+    case "healthy":
       return {
         bg: "bg-[var(--color-success-bg)]",
         text: "text-[var(--color-success-text)]",
         dot: "bg-[var(--color-success-text)]",
       };
     case "starting":
+    case "degraded":
       return {
         bg: "bg-[var(--color-warning-bg)]",
         text: "text-[var(--color-warning-text)]",
@@ -53,10 +100,17 @@ function stateBadgeStyle(state: string) {
         dot: "bg-[var(--color-error-text)]",
       };
     case "stopped":
+    case "disabled":
       return {
         bg: "bg-[var(--color-error-bg)]",
         text: "text-[var(--color-error-text)]",
         dot: "bg-[var(--color-error-text)]",
+      };
+    case "idle":
+      return {
+        bg: "bg-gray-100 dark:bg-gray-800",
+        text: "text-gray-600 dark:text-gray-400",
+        dot: "bg-gray-400",
       };
     default:
       return {
@@ -84,16 +138,23 @@ function formatTimestamp(seconds?: number): string {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
+export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayProps) {
+  // Service-specific state
   const [detail, setDetail] = useState<ServiceDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+
+  // Logs (service-type only)
   const [logs, setLogs] = useState<ServiceLogs | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
 
+  // Application-specific state
+  const [appDetail, setAppDetail] = useState<AppDetail | null>(null);
+  const [appDetailError, setAppDetailError] = useState<string | null>(null);
+
   // ── Data fetching ───────────────────────────────────────────────────────────
 
-  const fetchDetail = useCallback(async () => {
+  const fetchServiceDetail = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/services/${encodeURIComponent(name)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -105,7 +166,20 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
     }
   }, [name]);
 
+  const fetchAppDetail = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/services/applications/${encodeURIComponent(name)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      setAppDetail(d.data);
+      setAppDetailError(null);
+    } catch (err: any) {
+      setAppDetailError(err.message);
+    }
+  }, [name]);
+
   const fetchLogs = useCallback(async () => {
+    if (type !== "service") return;
     setLogsLoading(true);
     setLogsError(null);
     try {
@@ -120,12 +194,16 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
     } finally {
       setLogsLoading(false);
     }
-  }, [name]);
+  }, [name, type]);
 
   useEffect(() => {
-    fetchDetail();
-    fetchLogs();
-  }, [fetchDetail, fetchLogs]);
+    if (type === "service") {
+      fetchServiceDetail();
+      fetchLogs();
+    } else {
+      fetchAppDetail();
+    }
+  }, [type, fetchServiceDetail, fetchAppDetail, fetchLogs]);
 
   // ── Escape key dismiss ───────────────────────────────────────────────────
 
@@ -137,9 +215,21 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Determine what to render ──────────────────────────────────────────────
 
-  const badge = stateBadgeStyle(detail?.state ?? "");
+  const isLoading = type === "service" ? !detail && !detailError : !appDetail && !appDetailError;
+  const error = type === "service" ? detailError : appDetailError;
+  const displayName = name;
+  const displayDesc = type === "service"
+    ? detail?.description
+    : appDetail?.description;
+  const displayState = type === "service"
+    ? detail?.state ?? ""
+    : appDetail?.state ?? "";
+
+  const badge = stateBadgeStyle(displayState);
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return createPortal(
     <div
@@ -162,13 +252,13 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
 
         <div className="p-6 sm:p-8">
           {/* ── Error state ─────────────────────────────────────────────── */}
-          {detailError && (
+          {error && (
             <div className="mb-6 bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded-lg p-4">
               <p className="text-[var(--color-error-text)] text-sm font-medium">
-                Failed to load service details
+                Failed to load {type === "service" ? "service" : "application"} details
               </p>
               <p className="text-[var(--color-error-text)] text-xs mt-1">
-                {detailError}
+                {error}
               </p>
             </div>
           )}
@@ -176,14 +266,14 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
           {/* ── Header ──────────────────────────────────────────────────── */}
           <div className="mb-6 pr-8">
             <h2 className="text-2xl font-bold text-[var(--color-text-primary)]">
-              {name}
+              {displayName}
             </h2>
-            {detail && (
+            {displayDesc && (
               <p className="text-sm text-[var(--color-text-muted)] mt-1">
-                {detail.description}
+                {displayDesc}
               </p>
             )}
-            {!detail && !detailError && (
+            {isLoading && (
               <p className="text-sm text-[var(--color-text-muted)] mt-1 animate-pulse">
                 Loading…
               </p>
@@ -191,7 +281,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
           </div>
 
           {/* ── State badge ─────────────────────────────────────────────── */}
-          {detail && (
+          {!isLoading && (
             <div className="flex items-center gap-3 mb-6">
               <div
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full ${badge.bg} ${badge.text} text-sm font-medium`}
@@ -199,9 +289,9 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
                 <span
                   className={`inline-block w-2.5 h-2.5 rounded-full ${badge.dot}`}
                 />
-                {detail.state}
+                {displayState}
               </div>
-              {detail.spawnerr && (
+              {type === "service" && detail?.spawnerr && (
                 <span className="text-xs text-[var(--color-error-text)] font-medium">
                   Spawn error
                 </span>
@@ -209,8 +299,8 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
             </div>
           )}
 
-          {/* ── Diagnostics grid ────────────────────────────────────────── */}
-          {detail && (
+          {/* ── Service diagnostics grid (supervisord) ─────────────────── */}
+          {type === "service" && detail && (
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
                 <span className="text-xs text-[var(--color-text-muted)] block mb-1">
@@ -277,8 +367,168 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
             </div>
           )}
 
+          {/* ── Application diagnostics grid ────────────────────────────── */}
+          {type === "application" && appDetail && (
+            <>
+              {/* General fields */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                {appDetail.intervalMs != null && (
+                  <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">
+                      Interval
+                    </span>
+                    <span className="text-sm font-mono text-[var(--color-text-primary)]">
+                      {appDetail.intervalMs === 0
+                        ? "Disabled"
+                        : `${Math.round(appDetail.intervalMs / 60000)}m`}
+                    </span>
+                  </div>
+                )}
+                {appDetail.lastRunAt !== undefined && (
+                  <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">
+                      Last Run
+                    </span>
+                    <span className="text-sm font-mono text-[var(--color-text-primary)]">
+                      {appDetail.lastRunAt
+                        ? new Date(appDetail.lastRunAt).toLocaleString()
+                        : "—"}
+                    </span>
+                  </div>
+                )}
+                {appDetail.nextEstimate != null && (
+                  <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">
+                      Next Run (est.)
+                    </span>
+                    <span className="text-sm font-mono text-[var(--color-text-primary)]">
+                      {new Date(appDetail.nextEstimate).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+                {appDetail.detail && (
+                  <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">
+                      Detail
+                    </span>
+                    <span className="text-sm font-mono text-[var(--color-text-primary)]">
+                      {appDetail.detail}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Synthesis stats */}
+              {appDetail.stats && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
+                    Pipeline Stats
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">
+                        Total Observations
+                      </span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">
+                        {appDetail.stats.totalObservations}
+                      </span>
+                    </div>
+                    <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">
+                        Pending
+                      </span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">
+                        {appDetail.stats.pendingCount}
+                      </span>
+                    </div>
+                    <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">
+                        Processed
+                      </span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">
+                        {appDetail.stats.processedCount}
+                      </span>
+                    </div>
+                    <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">
+                        Traits
+                      </span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">
+                        {appDetail.stats.traitCount}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Email-client engine accounts */}
+              {appDetail.engine && appDetail.engine.accounts.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
+                    Accounts ({appDetail.engine.accounts.length})
+                  </h3>
+                  {appDetail.engine.accounts.map((acct) => (
+                    <div key={acct.accountId} className="mb-4 bg-[var(--color-surface-muted)] rounded-lg p-3">
+                      <p className="text-sm font-medium text-[var(--color-text-primary)] mb-1">
+                        {acct.email}
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        {acct.folders.map((folder) => {
+                          const folderColor =
+                            folder.state === "synced"
+                              ? "text-[var(--color-success-text)]"
+                              : folder.state === "error"
+                                ? "text-[var(--color-error-text)]"
+                                : "text-[var(--color-text-muted)]";
+                          return (
+                            <div
+                              key={folder.folder}
+                              className="bg-[var(--color-surface)] rounded p-2"
+                            >
+                              <span className="text-xs font-medium text-[var(--color-text-primary)]">
+                                {folder.folder}
+                              </span>
+                              <span className={`text-xs ml-1.5 ${folderColor}`}>
+                                {folder.state}
+                              </span>
+                              <div className="text-xs text-[var(--color-text-muted)] mt-1 space-y-0.5">
+                                {folder.headersSynced > 0 && (
+                                  <div>Headers: {folder.headersSynced}/{folder.headersTotal}</div>
+                                )}
+                                {folder.bodiesCached > 0 && (
+                                  <div>Bodies: {folder.bodiesCached}/{folder.bodiesWindow}</div>
+                                )}
+                                {folder.lastSyncedAt && (
+                                  <div>Synced: {new Date(folder.lastSyncedAt).toLocaleString()}</div>
+                                )}
+                                {folder.lastError && (
+                                  <div className="text-[var(--color-error-text)]">
+                                    Error: {folder.lastError}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Email-client engine running but no accounts */}
+              {appDetail.engine && appDetail.engine.accounts.length === 0 && (
+                <div className="mb-6 bg-[var(--color-surface-muted)] rounded-lg p-4 text-center">
+                  <p className="text-sm text-[var(--color-text-muted)]">
+                    Engine running — add an email account to begin syncing
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+
           {/* ── Spawn error detail ──────────────────────────────────────── */}
-          {detail?.spawnerr && (
+          {type === "service" && detail?.spawnerr && (
             <div className="mb-6">
               <span className="text-xs font-semibold text-[var(--color-error-text)] block mb-1">
                 Spawn Error
@@ -289,62 +539,64 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
             </div>
           )}
 
-          {/* ── Process Logs ────────────────────────────────────────────── */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
-                Process Logs (stderr)
-              </h3>
-              <button
-                onClick={fetchLogs}
-                className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                aria-label="Refresh logs"
-              >
-                ↻ Refresh
-              </button>
-            </div>
-
-            {logsLoading ? (
-              <div className="flex items-center justify-center py-8 bg-[var(--color-surface-muted)] rounded-lg">
-                <div className="w-6 h-6 border-2 border-[var(--color-primary,#3b82f6)] border-t-transparent rounded-full animate-spin" />
-                <span className="ml-2 text-sm text-[var(--color-text-muted)]">
-                  Loading logs…
-                </span>
-              </div>
-            ) : logsError ? (
-              <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded-lg p-4">
-                <p className="text-[var(--color-error-text)] text-sm">
-                  Failed to load logs
-                </p>
-                <p className="text-[var(--color-error-text)] text-xs mt-1">
-                  {logsError}
-                </p>
-              </div>
-            ) : logs && logs.log ? (
-              <>
-                <pre
-                  className="bg-gray-900 text-gray-100 text-xs leading-relaxed rounded-lg p-4 overflow-auto font-mono whitespace-pre-wrap"
-                  style={{ maxHeight: "40vh" }}
+          {/* ── Process Logs (service-type only) ────────────────────────── */}
+          {type === "service" && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
+                  Process Logs (stderr)
+                </h3>
+                <button
+                  onClick={fetchLogs}
+                  className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
+                  aria-label="Refresh logs"
                 >
-                  {logs.log}
-                </pre>
-                {logs.more && (
-                  <button
-                    onClick={fetchLogs}
-                    className="mt-2 text-xs text-[var(--color-primary,#3b82f6)] hover:underline"
-                  >
-                    ← Load older entries
-                  </button>
-                )}
-              </>
-            ) : (
-              <div className="bg-[var(--color-surface-muted)] rounded-lg p-6 text-center">
-                <p className="text-sm text-[var(--color-text-muted)]">
-                  No log output yet — process may have just started.
-                </p>
+                  ↻ Refresh
+                </button>
               </div>
-            )}
-          </div>
+
+              {logsLoading ? (
+                <div className="flex items-center justify-center py-8 bg-[var(--color-surface-muted)] rounded-lg">
+                  <div className="w-6 h-6 border-2 border-[var(--color-primary,#3b82f6)] border-t-transparent rounded-full animate-spin" />
+                  <span className="ml-2 text-sm text-[var(--color-text-muted)]">
+                    Loading logs…
+                  </span>
+                </div>
+              ) : logsError ? (
+                <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded-lg p-4">
+                  <p className="text-[var(--color-error-text)] text-sm">
+                    Failed to load logs
+                  </p>
+                  <p className="text-[var(--color-error-text)] text-xs mt-1">
+                    {logsError}
+                  </p>
+                </div>
+              ) : logs && logs.log ? (
+                <>
+                  <pre
+                    className="bg-gray-900 text-gray-100 text-xs leading-relaxed rounded-lg p-4 overflow-auto font-mono whitespace-pre-wrap"
+                    style={{ maxHeight: "40vh" }}
+                  >
+                    {logs.log}
+                  </pre>
+                  {logs.more && (
+                    <button
+                      onClick={fetchLogs}
+                      className="mt-2 text-xs text-[var(--color-primary,#3b82f6)] hover:underline"
+                    >
+                      ← Load older entries
+                    </button>
+                  )}
+                </>
+              ) : (
+                <div className="bg-[var(--color-surface-muted)] rounded-lg p-6 text-center">
+                  <p className="text-sm text-[var(--color-text-muted)]">
+                    No log output yet — process may have just started.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
