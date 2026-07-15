@@ -78,7 +78,7 @@ export default function MailPage() {
   const [showAccountSetup, setShowAccountSetup] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
   const [sending, setSending] = useState(false);
-  const [composeInitialData, setComposeInitialData] = useState<{ to?: string; subject?: string; body?: string } | undefined>(undefined);
+  const [composeInitialData] = useState<{ to?: string; subject?: string; body?: string } | undefined>(undefined);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [folders, setFolders] = useState<any[]>([]);
@@ -269,32 +269,12 @@ export default function MailPage() {
     }
   }, [selectedAccount, selectedFolder, project]);
 
-  const buildReplySubject = (subject?: string) =>
-    subject?.match(/^re:/i) ? subject : `Re: ${subject || ""}`;
-
   const handleCompose = useCallback(() => {
     setShowCompose(true);
   }, []);
 
-  const handleReply = useCallback(() => {
-    if (!selectedEmail) return;
-    setComposeInitialData({
-      to: selectedEmail.from?.[0]?.address,
-      subject: buildReplySubject(selectedEmail.subject),
-      body: "",
-    });
-    setShowCompose(true);
-  }, [selectedEmail]);
-
-  const handleDraft = useCallback((draft: { tone: string; subject: string; body: string }) => {
-    if (!selectedEmail) return;
-    setComposeInitialData({
-      to: selectedEmail.from?.[0]?.address,
-      subject: buildReplySubject(selectedEmail.subject),
-      body: draft.body,
-    });
-    setShowCompose(true);
-  }, [selectedEmail]);
+  // handleReply and handleDraft removed — EmailReader now handles reply/draft inline (FIX 2)
+  // composeInitialData stays undefined (always; kept for modal JXS identity but unused)
 
   const handleComposeSend = useCallback(async (data: any) => {
     setSending(true);
@@ -351,7 +331,6 @@ export default function MailPage() {
 
   const handleComposeCancel = useCallback(() => {
     setShowCompose(false);
-    setComposeInitialData(undefined);
   }, []);
 
   const handleDelete = useCallback(async () => {
@@ -576,7 +555,7 @@ export default function MailPage() {
               source={emailSource}
             />
 
-            {/* Email reader */}
+            {/* Email reader — inline reply/draft + summarise (FIX 2/3/4) */}
             <EmailReader
               email={selectedEmail}
               loading={selectedEmailLoading}
@@ -587,15 +566,17 @@ export default function MailPage() {
               }}
               accountId={selectedAccount}
               project={project}
-              onReply={handleReply}
               onForward={handleCompose}
               onDelete={handleDelete}
               onArchive={handleArchive}
-              onDraft={handleDraft}
+              accounts={accounts}
+              selectedAccount={selectedAccount}
+              onComposeSend={handleComposeSend}
+              onComposeSave={handleComposeSave}
             />
           </div>
 
-          {/* Compose overlay */}
+          {/* Compose overlay — for New/Forward ONLY (Reply/Draft now inline in EmailReader) */}
           <Overlay
             isOpen={showCompose}
             onClose={handleComposeCancel}
@@ -608,6 +589,7 @@ export default function MailPage() {
               onSend={handleComposeSend}
               onSave={handleComposeSave}
               onCancel={handleComposeCancel}
+              project={project}
             />
             {sending && (
               <p className="text-sm text-[var(--color-text-muted)] text-center mt-4">Sending...</p>

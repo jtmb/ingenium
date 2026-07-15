@@ -10,12 +10,11 @@ import { useProject } from "../../../lib/ProjectContext";
  * API response shape:
  *   { data: { suggestions: Array<{ tone: string; subject: string; body: string }>,
  *             configured: boolean,
- *             source: "generated" | "cache" | "heuristic" | "not-new" } }
+ *             source: "generated" | "cache" | "heuristic" } }
  */
 export default function SmartSuggest({
   emailUid,
   accountId,
-  isUnread,
   folder,
   mode,
   apiUrl,
@@ -23,7 +22,6 @@ export default function SmartSuggest({
 }: {
   emailUid?: string;
   accountId?: string;
-  isUnread?: boolean;
   folder?: string;
   mode?: "auto" | "manual";
   apiUrl?: string;
@@ -102,8 +100,9 @@ export default function SmartSuggest({
 
   if (!emailUid) return null;
 
-  // Noreply/disabled/not-new sources — never show any UI
-  const nullSources = new Set(["not-new", "disabled", "noreply"]);
+  // Noreply/disabled sources — never show any UI
+  // "not-new" removed per FIX 6 — backend no longer returns it
+  const nullSources = new Set(["disabled", "noreply"]);
   if (nullSources.has(source)) return null;
 
   // Manual mode — show generate button when idle
