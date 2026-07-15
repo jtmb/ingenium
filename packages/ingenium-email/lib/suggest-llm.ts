@@ -20,7 +20,7 @@ export interface SmartReply {
 
 export interface LLMConfig {
   model: string;
-  endpoint: string;
+  endpoint?: string;
   apiKey?: string;
 }
 
@@ -107,7 +107,7 @@ export async function generateSmartReplies(
     if (!response.ok) return [];
 
     const json = await response.json();
-    const content = json.choices?.[0]?.message?.content;
+    const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.message?.reasoning_content;
     if (!content) return [];
 
     const parsed = tryParseJSON(content);
@@ -181,6 +181,130 @@ Compose EXACTLY 3 distinct reply drafts. Each draft should:
 ]
 
 IMPORTANT: Return ONLY the JSON array. No explanation, no markdown fences.`;
+}
+
+// ── JSON parse (same multi-strategy as synthesis-llm.ts) ────────────────────
+
+// ── generateEmailSummary ──────────────────────────────────────────────────────
+
+/**
+ * Call the configured LLM to generate a 2-3 sentence summary of an email.
+ *
+ * Returns the raw summary text. Never throws — returns empty string on any failure.
+ */
+export async function generateEmailSummary(
+  emailBody: string,
+  subject: string,
+  llmConfig: LLMConfig,
+): Promise<string> {
+  if (!llmConfig.endpoint || !llmConfig.model) return "";
+
+  const prompt = `Summarize the following email in 2-3 concise sentences, capturing the key points and any action items. Return ONLY the summary text, no preamble.
+
+Subject: ${subject}
+
+${emailBody}`;
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (llmConfig.apiKey) headers["Authorization"] = `Bearer ${llmConfig.apiKey}`;
+
+  // Normalize endpoint: strip trailing /v1 if present to avoid double /v1
+  const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
+
+  try {
+    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: llmConfig.model,
+        messages: [
+          { role: "system", content: "You are an email summarizer that outputs only the summary text, no preamble, no markdown." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.3,
+        max_tokens: 512,
+      }),
+    });
+
+    if (!response.ok) return "";
+
+    const json = await response.json();
+    const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.message?.reasoning_content;
+    if (!content) return "";
+
+    // Strip any markdown fences or JSON wrapping from the response
+    let cleaned = content.trim();
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```(?:text)?\s*/i, "").replace(/\s*```$/i, "");
+    }
+
+    return cleaned;
+  } catch {
+    return "";
+  }
+}
+
+// ── reviewDraft ──────────────────────────────────────────────────────────────
+
+/**
+ * Call the configured LLM to review and improve a draft email.
+ *
+ * Returns the improved text. Never throws — returns empty string on any failure.
+ */
+export async function reviewDraft(
+  text: string,
+  subject: string | undefined,
+  llmConfig: LLMConfig,
+): Promise<string> {
+  if (!llmConfig.endpoint || !llmConfig.model) return "";
+
+  const prompt = subject
+    ? `You are an email writing coach. Rewrite the following draft email to improve clarity, tone, grammar, and professionalism, while preserving the original meaning, facts, and intent. Return ONLY the improved text, no explanation, no markdown fences.
+
+Subject: ${subject}
+
+${text}`
+    : `You are an email writing coach. Rewrite the following draft email to improve clarity, tone, grammar, and professionalism, while preserving the original meaning, facts, and intent. Return ONLY the improved text, no explanation, no markdown fences.
+
+${text}`;
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (llmConfig.apiKey) headers["Authorization"] = `Bearer ${llmConfig.apiKey}`;
+
+  // Normalize endpoint: strip trailing /v1 if present to avoid double /v1
+  const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
+
+  try {
+    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: llmConfig.model,
+        messages: [
+          { role: "system", content: "You are an email writing coach that outputs only improved text, no explanation, no markdown." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.4,
+        max_tokens: 2048,
+      }),
+    });
+
+    if (!response.ok) return "";
+
+    const json = await response.json();
+    const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.message?.reasoning_content;
+    if (!content) return "";
+
+    // Strip any markdown fences from the response
+    let cleaned = content.trim();
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```(?:text|markdown)?\s*/i, "").replace(/\s*```$/i, "");
+    }
+
+    return cleaned;
+  } catch {
+    return "";
+  }
 }
 
 // ── JSON parse (same multi-strategy as synthesis-llm.ts) ────────────────────

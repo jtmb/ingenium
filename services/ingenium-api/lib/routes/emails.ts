@@ -30,6 +30,10 @@ import {
   // LLM smart-reply
   getVoiceSamples,
   generateSmartReplies,
+  // LLM email summary
+  generateEmailSummary,
+  // LLM draft review
+  reviewDraft,
   // Watcher
   startWatcher,
   getWatcherStatus,
@@ -453,7 +457,7 @@ emailsRouter.get("/triage", async (req, res) => {
 
 /** GET /suggest/:uid?project=&account=&folder= — Smart-reply suggestions for an email.
  *  Cache-first: returns cached suggestions instantly.
- *  If unread + no cache + LLM configured → generates via voice-sample LLM.
+ *  If no cache + LLM configured → generates via voice-sample LLM.
  *  Falls back to heuristic pattern-matching if no LLM configured. */
 emailsRouter.get("/suggest/:uid", async (req, res) => {
   const accountId = req.query.account as string | undefined;
@@ -514,22 +518,10 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     return;
   }
 
-  // ── 3. Determine "new" status from flags ─────────────────────────────────
-  // flags stored as JSON array string, e.g. '["\\\\Seen"]'
+  // cachedListing is used below to build targetEmail
   const cachedListing = emailCache.getCachedEmail(account.id, folder, uid);
-  let isRead = false;
-  if (cachedListing?.flags) {
-    try {
-      const flags: string[] = JSON.parse(cachedListing.flags);
-      isRead = flags.includes("\\Seen");
-    } catch { /* treat as unread */ }
-  }
-  if (isRead) {
-    res.json({ suggestions: [], source: "not-new", configured: true });
-    return;
-  }
 
-  // ── 4. Unread, no cache, body available → generate ──────────────────────
+  // ── 3. No cache, body available → generate ──────────────────────────────
   const configured = synthesisLlm.isLLMSynthesisConfigured(projectId);
   if (!configured) {
     // No LLM — fall back to heuristic pattern-matching
@@ -595,6 +587,126 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     res.json({ suggestions, source: "generated", configured: true });
   } catch (err: any) {
     logger.error("email", `Smart-reply generation failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
+    res.status(500).json({ error: { code: "LLM_ERROR", message: err.message } });
+  }
+});
+
+/** GET /summarize/:uid?project=&account=&folder= — LLM-generated email summary.
+ *  Cache-first: returns cached summary instantly.
+ *  If miss + body cached + LLM configured → generates via LLM.
+ *  No noreply gate — summarization works for ALL emails regardless of sender. */
+emailsRouter.get("/summarize/:uid", async (req, res) => {
+  const accountId = req.query.account as string | undefined;
+  const result = await getAccountAuthOrError(res, accountId);
+  if (!result) return;
+
+  const uid = req.params.uid!;
+  if (!uid || typeof uid !== 'string') {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "uid is required" },
+    });
+    return;
+  }
+
+  const folder = (req.query.folder as string) ?? "INBOX";
+  const { account } = result;
+  const projectId = resolveEmailProject();
+
+  // ── Check LLM is configured ────────────────────────────────────────────
+  const configured = synthesisLlm.isLLMSynthesisConfigured(projectId);
+  if (!configured) {
+    res.json({ summary: null, source: "not-configured", configured: false });
+    return;
+  }
+
+  // ── 1. Check cached summary (instant return) ───────────────────────────
+  const cached = emailCache.getCachedSummary(account.id, folder, uid);
+  if (cached) {
+    res.json({ summary: cached.summary_text, source: "cache", configured: true });
+    return;
+  }
+
+  // ── 2. Check body cache (required for generation) ──────────────────────
+  const cachedBody = emailCache.getCachedEmailBody(account.id, folder, uid);
+  if (!cachedBody?.text && !cachedBody?.html) {
+    // Body not yet cached — get listing snippet as a fallback
+    const listing = emailCache.getCachedEmail(account.id, folder, uid);
+    if (!listing?.snippet) {
+      boostBody(account.id, folder, uid);
+      boostFolder(account.id, folder);
+      res.status(202).json({
+        pending: true,
+        message: "Email body being fetched — retry in 1.5s",
+        configured: true,
+      });
+      return;
+    }
+    // Use snippet as fallback for summary
+    const bodyText = listing.snippet;
+    const llmConfig = synthesisLlm.resolveLLMConfig(projectId);
+    const summary = await generateEmailSummary(bodyText, listing.subject ?? "", llmConfig!);
+    if (summary) {
+      emailCache.upsertEmailSummary(account.id, folder, uid, summary, llmConfig?.model ?? null);
+    }
+    res.json({ summary: summary || null, source: summary ? "generated" : "failed", configured: true });
+    return;
+  }
+
+  // ── 3. Body cached — generate summary via LLM ──────────────────────────
+  const llmConfig = synthesisLlm.resolveLLMConfig(projectId);
+  if (!llmConfig?.model || !llmConfig?.endpoint) {
+    res.json({ summary: null, source: "incomplete-config", configured: true });
+    return;
+  }
+
+  const bodyText = cachedBody.text ?? cachedBody.html ?? "";
+  try {
+    const summary = await generateEmailSummary(bodyText, "(from email)", llmConfig);
+
+    // Persist to cache
+    if (summary) {
+      emailCache.upsertEmailSummary(account.id, folder, uid, summary, llmConfig.model ?? null);
+    }
+
+    res.json({ summary: summary || null, source: summary ? "generated" : "failed", configured: true });
+  } catch (err: any) {
+    logger.error("email", `Email summary generation failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
+    res.status(500).json({ error: { code: "LLM_ERROR", message: err.message } });
+  }
+});
+
+/** POST /review-draft — LLM-powered draft review and improvement.
+ *  Accepts {text, subject?} and returns improved text.
+ *  No caching — every call is a fresh LLM invocation (user-initiated). */
+emailsRouter.post("/review-draft", async (req, res) => {
+  const projectId = resolveEmailProject();
+
+  // ── Check LLM is configured ────────────────────────────────────────────
+  const configured = synthesisLlm.isLLMSynthesisConfigured(projectId);
+  if (!configured) {
+    res.json({ improved: null, configured: false });
+    return;
+  }
+
+  const { text, subject } = req.body;
+  if (!text || typeof text !== 'string') {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "text (string) is required in body" },
+    });
+    return;
+  }
+
+  const llmConfig = synthesisLlm.resolveLLMConfig(projectId);
+  if (!llmConfig?.model || !llmConfig?.endpoint) {
+    res.json({ improved: null, configured: true });
+    return;
+  }
+
+  try {
+    const improved = await reviewDraft(text, subject, llmConfig);
+    res.json({ improved: improved || null, configured: true });
+  } catch (err: any) {
+    logger.error("email", `Draft review failed`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(500).json({ error: { code: "LLM_ERROR", message: err.message } });
   }
 });

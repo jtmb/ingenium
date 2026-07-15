@@ -283,6 +283,54 @@ export function upsertEmailSuggestions(
   checkpointAfterWrite();
 }
 
+// ── Email summary cache ──────────────────────────────────────────────────────
+
+export interface CachedEmailSummary {
+  account_id: string; folder: string; uid: string;
+  summary_text: string; model: string | null; generated_at: string;
+}
+
+/**
+ * Retrieve cached AI-generated email summary for an email.
+ * Returns undefined if no summary has been generated yet.
+ */
+export function getCachedSummary(
+  accountId: string, folder: string, uid: string
+): CachedEmailSummary | undefined {
+  const db = getDb(dbPath());
+  return db.prepare(
+    "SELECT * FROM email_summaries WHERE account_id = ? AND folder = ? AND uid = ?"
+  ).get(accountId, folder, uid) as CachedEmailSummary | undefined;
+}
+
+/**
+ * Upsert an AI-generated summary for an email.
+ * Uses the same defensive parent-check pattern as upsertEmailSuggestions:
+ * verifies the email_cache row exists before inserting to avoid FK violations.
+ */
+export function upsertEmailSummary(
+  accountId: string, folder: string, uid: string,
+  summaryText: string,
+  model: string | null,
+): void {
+  execTransaction(() => {
+    const db = getDb(dbPath());
+    const parent = db.prepare(
+      "SELECT 1 FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?"
+    ).get(accountId, folder, uid);
+    if (!parent) {
+      logger.warn("email-cache", "upsertEmailSummary skipped — parent row not found", { accountId, folder, uid });
+      return;
+    }
+    db.prepare(
+      `INSERT OR REPLACE INTO email_summaries
+         (account_id, folder, uid, summary_text, model, generated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`
+    ).run(accountId, folder, uid, summaryText, model);
+  });
+  checkpointAfterWrite();
+}
+
 // ── Sync status queries ────────────────────────────────────────────────────
 
 export interface FolderSyncStatus {
