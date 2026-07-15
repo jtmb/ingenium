@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Server } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
-import PageProjectBar from "@/app/components/PageProjectBar";
 
 interface CategorizedTool {
   category: string;
@@ -84,7 +83,6 @@ export default function MCPServersPage() {
 
   return (
     <div className="space-y-6">
-      <PageProjectBar />
       {/* Tab bar */}
       <div className="flex items-center gap-1 border-b border-[var(--color-border)]">
         <h1 className="text-2xl font-bold mr-6">MCP</h1>

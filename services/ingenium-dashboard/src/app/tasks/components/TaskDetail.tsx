@@ -465,24 +465,24 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Title</label>
               <input value={title} onChange={(e) => setTitle(e.target.value)}
-                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" />
+                className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
               <select value={columnId} onChange={(e) => setColumnId(e.target.value)}
-                className="w-full border border-gray-200 rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
+                className="w-full border border-[var(--color-border)] rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
                 {COLUMN_OPTIONS.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
               </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Assignee</label>
               <input value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}
-                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" placeholder="Unassigned" />
+                className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" placeholder="Unassigned" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Priority</label>
               <select value={priority} onChange={(e) => setPriority(e.target.value)}
-                className="w-full border border-gray-200 rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
+                className="w-full border border-[var(--color-border)] rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
                 <option value="">—</option>
                 {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
               </select>
@@ -490,12 +490,12 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Due Date</label>
               <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
-                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" />
+                className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Issue Type</label>
               <input value={issueType} onChange={(e) => setIssueType(e.target.value)}
-                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" placeholder="bug, feature, task..." />
+                className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" placeholder="bug, feature, task..." />
             </div>
           </div>
 
@@ -512,17 +512,17 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                 <div>
                   <label className="block text-xs text-gray-400 mb-0.5">Estimate</label>
                   <input type="number" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)}
-                    className="w-full border border-gray-200 rounded px-2 py-1 text-sm" placeholder="min" min="0" />
+                    className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-sm" placeholder="min" min="0" />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-400 mb-0.5">Spent</label>
                   <input type="number" value={spentMin} onChange={(e) => setSpentMin(e.target.value)}
-                    className="w-full border border-gray-200 rounded px-2 py-1 text-sm" placeholder="min" min="0" />
+                    className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-sm" placeholder="min" min="0" />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-400 mb-0.5">Remaining</label>
                   <input type="number" value={remainingMin} onChange={(e) => setRemainingMin(e.target.value)}
-                    className="w-full border border-gray-200 rounded px-2 py-1 text-sm" placeholder="min" min="0" />
+                    className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-sm" placeholder="min" min="0" />
                 </div>
               </div>
             </div>
@@ -539,7 +539,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                     return (
                       <div key={def.name}>
                         <label className="block text-xs text-gray-400 mb-0.5">{def.name}</label>
-                        <div className="text-sm text-gray-600 border border-gray-100 rounded px-2 py-1.5 bg-gray-50">{computed}</div>
+                        <div className="text-sm text-gray-600 border border-[var(--color-border-muted)] rounded px-2 py-1.5 bg-gray-50">{computed}</div>
                       </div>
                     );
                   }
@@ -550,33 +550,33 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                       <label className="block text-xs text-gray-400 mb-0.5">{def.name}</label>
                       {def.type === "text" && (
                         <input type="text" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
-                          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" />
+                          className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "paragraph" && (
                         <textarea value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
-                          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm min-h-[60px]" />
+                          className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm min-h-[60px]" />
                       )}
                       {def.type === "number" && (
                         <input type="number" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
-                          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" />
+                          className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "date" && (
                         <input type="date" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
-                          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" />
+                          className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "datetime" && (
                         <input type="datetime-local" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
-                          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" />
+                          className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "single_select" && (
                         <select value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
-                          className="w-full border border-gray-200 rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
+                          className="w-full border border-[var(--color-border)] rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
                           <option value="">—</option>
                           {(def.options ?? []).map((o) => (<option key={o} value={o}>{o}</option>))}
                         </select>
                       )}
                       {def.type === "multi_select" && (
-                        <div className="space-y-1 max-h-28 overflow-y-auto border border-gray-200 rounded p-1.5">
+                        <div className="space-y-1 max-h-28 overflow-y-auto border border-[var(--color-border)] rounded p-1.5">
                           {(def.options ?? []).map((o) => {
                             const selected = Array.isArray(val) ? (val as string[]).includes(o) : false;
                             return (
@@ -596,7 +596,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                         </div>
                       )}
                       {def.type === "checkboxes" && (
-                        <div className="space-y-1 max-h-28 overflow-y-auto border border-gray-200 rounded p-1.5">
+                        <div className="space-y-1 max-h-28 overflow-y-auto border border-[var(--color-border)] rounded p-1.5">
                           {(def.options ?? []).map((o) => {
                             const selected = Array.isArray(val) ? (val as string[]).includes(o) : false;
                             return (
@@ -616,7 +616,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                         </div>
                       )}
                       {def.type === "radio" && (
-                        <div className="space-y-1 max-h-28 overflow-y-auto border border-gray-200 rounded p-1.5">
+                        <div className="space-y-1 max-h-28 overflow-y-auto border border-[var(--color-border)] rounded p-1.5">
                           {(def.options ?? []).map((o) => (
                             <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
                               <input type="radio" name={`cf-${def.name}`} checked={val === o} onChange={() => handleCustomFieldChange(def.name, o)} />
@@ -627,7 +627,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                       )}
                       {def.type === "url" && (
                         <input type="url" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
-                          className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm" placeholder="https://..." />
+                          className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" placeholder="https://..." />
                       )}
                     </div>
                   );
@@ -656,10 +656,10 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                 <textarea ref={textareaRef} value={description}
                   onChange={(e) => handleDescChange(e.target.value)}
                   onKeyDown={handleMentionKey}
-                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm min-h-[120px] font-mono"
+                  className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm min-h-[120px] font-mono"
                   placeholder="Task description... Supports **bold**, *italic*, `code`, ```blocks```, - [ ] checklists, @mentions" />
                 {showMentions && filteredAgents.length > 0 && (
-                  <div className="absolute z-10 bg-white border border-gray-200 rounded shadow-lg max-h-40 overflow-y-auto w-48"
+                  <div className="absolute z-10 bg-white border border-[var(--color-border)] rounded shadow-lg max-h-40 overflow-y-auto w-48"
                     style={{ top: mentionAnchor.top, left: mentionAnchor.left }}>
                     {filteredAgents.map((a, i) => (
                       <button key={a.name} onClick={() => insertMention(a.name)}
@@ -671,7 +671,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                 )}
               </div>
             ) : (
-              <div className="border border-gray-200 rounded p-3 min-h-[80px] bg-gray-50 text-sm">
+              <div className="border border-[var(--color-border)] rounded p-3 min-h-[80px] bg-gray-50 text-sm">
                 {description ? <MarkdownViewer content={description} isMarkdown /> : (
                   <p className="text-gray-400 italic">No description.</p>
                 )}
@@ -745,7 +745,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             {/* Add dependency */}
             <div className="mt-2 flex gap-2">
               <select value={depType} onChange={(e) => setDepType(e.target.value as "blocks" | "blocked_by")}
-                className="border border-gray-200 rounded text-xs bg-white px-2 py-1 hover:bg-gray-50 cursor-pointer">
+                className="border border-[var(--color-border)] rounded text-xs bg-white px-2 py-1 hover:bg-gray-50 cursor-pointer">
                 <option value="blocks">Blocks</option>
                 <option value="blocked_by">Blocked by</option>
               </select>
@@ -753,12 +753,12 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                 <input value={depSearch} onChange={(e) => { handleDepSearch(e.target.value); setDepSearchOpen(true); }}
                   onFocus={() => setDepSearchOpen(true)}
                   placeholder="Search tasks to link..."
-                  className="w-full border border-gray-200 rounded px-2 py-1 text-xs" />
+                  className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-xs" />
                 {depSearchOpen && depSearchResults.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 z-10 bg-white border border-gray-200 rounded shadow-lg max-h-32 overflow-y-auto mt-0.5">
+                  <div className="absolute top-full left-0 right-0 z-10 bg-white border border-[var(--color-border)] rounded shadow-lg max-h-32 overflow-y-auto mt-0.5">
                     {depSearchResults.map((t) => (
                       <button key={t.id} onClick={() => handleAddDep(t.id)}
-                        className="w-full text-left px-2 py-1 text-xs hover:bg-blue-50 border-b border-gray-100">
+                        className="w-full text-left px-2 py-1 text-xs hover:bg-blue-50 border-b border-[var(--color-border-muted)]">
                         <span className="font-medium">{t.title}</span>
                         <span className="text-gray-400 ml-1">{t.column_id}</span>
                       </button>
@@ -825,7 +825,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                     <div className="ml-6 mt-1.5 flex gap-2">
                       <textarea value={replyBody} onChange={(e) => setReplyBody(e.target.value)}
                         placeholder="Write a reply..."
-                        className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs min-h-[40px]" />
+                        className="flex-1 border border-[var(--color-border)] rounded px-2 py-1 text-xs min-h-[40px]" />
                       <div className="flex flex-col gap-1">
                         <button onClick={handleReply}
                           className="bg-blue-600 text-white py-1 px-2 rounded text-xs hover:bg-blue-700">Reply</button>
@@ -844,7 +844,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             <div className="flex gap-2">
               <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)}
                 placeholder="Add a comment... (supports markdown)"
-                className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm min-h-[40px]" />
+                className="flex-1 border border-[var(--color-border)] rounded px-2 py-1.5 text-sm min-h-[40px]" />
               <button onClick={handleAddComment}
                 className="bg-blue-600 text-white py-1.5 px-3 rounded text-sm hover:bg-blue-700 self-start">Post</button>
             </div>
@@ -852,7 +852,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
         </div>
 
         {/* Activity sidebar (collapsible) */}
-        <div className={`border-l border-gray-200 flex flex-col transition-all duration-200 ${showActivity ? "w-64 pl-4" : "w-0 overflow-hidden"}`}>
+        <div className={`border-l border-[var(--color-border)] flex flex-col transition-all duration-200 ${showActivity ? "w-64 pl-4" : "w-0 overflow-hidden"}`}>
           <button onClick={() => setShowActivity(!showActivity)}
             className="text-xs text-gray-400 hover:text-gray-600 mb-2 shrink-0 text-left">
             {showActivity ? "◀ Hide" : "▶"}

@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, PersonalityTrait } from "../../lib/api";
 import Overlay from "../components/Overlay";
-import PageProjectBar from "../components/PageProjectBar";
 
 const TYPE_ICONS: Record<string, string> = {
   communication_style: "💬",
@@ -69,7 +68,6 @@ export default function PersonalityPage() {
 
   return (
     <div className="space-y-6">
-      <PageProjectBar />
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Personality Profile</h1>
         <div className="flex items-center gap-3">

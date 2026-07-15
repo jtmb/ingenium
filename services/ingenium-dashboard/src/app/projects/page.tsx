@@ -1,6 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 import { useState, useEffect, useMemo } from "react";
+import { useProject, persistProject } from "../../lib/ProjectContext";
 import { api, Project } from "../../lib/api";
 import { badgeTones } from "../../lib/badgeTones";
 import Overlay from "../components/Overlay";
@@ -26,6 +27,8 @@ export default function ProjectsPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const activeProject = useProject();
+  const [activeName, setActiveName] = useState(activeProject);
 
   const load = () => {
     api.projects.list().then((r) => setProjects(r.data)).catch(() => {});
@@ -113,6 +116,9 @@ export default function ProjectsPage() {
                   <div className="flex items-center gap-2">
                     <span className="text-lg font-semibold">{p.name}</span>
                     {!!p.is_global && <span className={`text-xs ${badgeTones('blue')} px-2 py-0.5 rounded font-medium`}>GLOBAL</span>}
+                    {!p.archived_at && p.name === activeName && (
+                      <span className={`text-xs ${badgeTones('green')} px-2 py-0.5 rounded font-medium`}>ACTIVE</span>
+                    )}
                     {p.archived_at && <span className={`text-xs ${badgeTones('error')} px-2 py-0.5 rounded font-medium`}>ARCHIVED</span>}
                   </div>
                   <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Created {formatRelative(p.created_at)}</div>
@@ -120,6 +126,12 @@ export default function ProjectsPage() {
                 <div className="flex gap-2">
                   {view === "active" && (
                     <>
+                      {p.name !== activeName && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); persistProject(p.name); setActiveName(p.name); }}
+                          className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]"
+                        >Set Active</button>
+                      )}
                       <button onClick={(e) => { e.stopPropagation(); rename(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]">Rename</button>
                       <button onClick={(e) => { e.stopPropagation(); archive(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-error-bg)] text-[var(--color-error-text)]">Archive</button>
                     </>

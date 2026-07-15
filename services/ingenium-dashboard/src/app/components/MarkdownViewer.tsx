@@ -39,7 +39,7 @@ function renderSimpleMarkdown(text: string): string {
   html = html.replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>');
 
   // Horizontal rules
-  html = html.replace(/^---$/gm, '<hr class="my-4 border-gray-300" />');
+  html = html.replace(/^---$/gm, '<hr class="my-4 border-[var(--color-border)]" />');
 
   // Links
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-[var(--color-text-link)] underline">$1</a>');

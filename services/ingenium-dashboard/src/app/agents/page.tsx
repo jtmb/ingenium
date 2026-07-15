@@ -7,7 +7,6 @@ import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
 import { api, type Agent } from "@/lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
-import PageProjectBar from "@/app/components/PageProjectBar";
 
 /**
  * Agent management page.
@@ -115,7 +114,6 @@ export default function AgentsPage() {
 
   return (
     <div className="space-y-8">
-      <PageProjectBar />
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Agents</h1>
         <button

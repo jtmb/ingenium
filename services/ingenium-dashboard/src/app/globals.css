@@ -101,3 +101,9 @@
   --color-code-text: #e5e7eb;
   --color-code-border: #374151;
 }
+
+@layer base {
+  *, ::before, ::after {
+    border-color: var(--color-border);
+  }
+}

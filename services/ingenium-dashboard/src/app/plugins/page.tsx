@@ -6,7 +6,6 @@ import { api, Plugin } from "../../lib/api";
 import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
-import PageProjectBar from "@/app/components/PageProjectBar";
 
 /**
  * Plugin management page.
@@ -122,7 +121,6 @@ export default function PluginsPage() {
 
   return (
     <div className="space-y-8">
-      <PageProjectBar />
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Plugins</h1>
         <button

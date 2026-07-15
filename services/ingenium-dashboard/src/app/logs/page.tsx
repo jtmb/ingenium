@@ -5,7 +5,6 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, type LogEntry } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
-import PageProjectBar from "../components/PageProjectBar";
 
 // ── Constants ────────────────────────────────────────────────────────────
 const MAX_ENTRIES = 500;
@@ -39,7 +38,7 @@ const LEVEL_DOT: Record<string, string> = {
 };
 
 const LEVEL_BADGE: Record<string, string> = {
-  debug: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-gray-300",
+  debug: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]",
   info: "bg-[var(--color-surface-selected)] text-blue-700 border-blue-200",
   warn: "bg-[var(--color-warning-bg)] text-amber-700 border-[var(--color-warning-border)]",
   error: "bg-[var(--color-error-bg)] text-[var(--color-error-text)] border-[var(--color-error-border)]",
@@ -230,8 +229,6 @@ export default function LogsPage() {
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
-      <PageProjectBar />
-
       {/* ── Status Header ──────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -298,7 +295,7 @@ export default function LogsPage() {
                 onClick={() => toggleSource(src)}
                 className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                   isSelected
-                    ? `${badge} shadow-sm ring-1 ring-offset-1`
+                    ? `${badge} shadow-sm ring-1 ring-[var(--color-border)] ring-offset-1`
                     : "bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
                 }`}
               >
@@ -383,7 +380,7 @@ export default function LogsPage() {
                 <th className="px-4 py-2">Message</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-[var(--color-border-muted)]">
               {filteredEntries.map((entry, idx) => {
                 const sourceBadge = sourceBadgeColor(entry.source);
                 const levelDot = LEVEL_DOT[entry.level] ?? "bg-gray-400";
