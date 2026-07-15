@@ -82,6 +82,19 @@ export default function EmailReader({
       });
   }, [project]);
 
+  // FIX 1 — Reset reply/summary state when switching to a different email
+  // DP#32: dependency is `email?.uid` (primitive, stable per email).
+  // Re-rendering the SAME email (uid unchanged) does NOT trigger reset.
+  // Only genuinely changing the viewed email (uid changes) resets the state.
+  useEffect(() => {
+    setIsReplying(false);
+    setReplyPrefill({});
+    setSummariseLoading(false);
+    setSummariseError(null);
+    setSummary(null);
+    setSummaryConfigured(null);
+  }, [email?.uid]);
+
   // No email selected
   if (!email && !loading) {
     return (
