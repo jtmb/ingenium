@@ -561,9 +561,9 @@ highlight.js is loaded globally in `layout.tsx`:
 | Component | Pattern Used | Key Tailwind Classes |
 |-----------|-------------|---------------------|
 | FolderSidebar | FileTree sidebar | `min-w-[200px] max-w-[250px] bg-gray-50 border-r border-gray-200`. Items: `px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded`. Selected: `bg-blue-100 text-blue-800`. |
-| EmailList | List items with borders | Rows: `px-4 py-3 border-b border-gray-200 hover:bg-gray-50`. Unread: `font-semibold text-gray-900`. Read: `text-gray-600`. Selected: `bg-blue-50`. |
-| EmailComposer | Bare form fields inside Overlay | `space-y-4 max-w-2xl mx-auto`. Send: `bg-blue-600 text-white py-2 px-4 rounded`. Draft: `text-gray-600 hover:text-gray-900`. |
-| EmailReader | Headers panel + action bar | Headers: `bg-gray-50 border-b border-gray-200 px-4 py-3`. Actions: `px-3 py-1.5 text-sm border border-gray-200 rounded text-gray-600 hover:bg-gray-100`. Delete: `text-red-600 hover:bg-red-50`. |
+| EmailList | List items with borders; resizable via drag handle | Rows: `px-4 py-3 border-b border-gray-200 hover:bg-gray-50`. Unread: `font-semibold text-gray-900`. Read: `text-gray-600`. Selected: `bg-blue-50`. **Resizable**: default 350px, min 280px, max 500px; drag handle (2px, `cursor-col-resize`, `hover:bg-blue-200`/`active:bg-blue-400`); keyboard ArrowLeft/ArrowRight; width persisted in `localStorage` key `mail-list-width`. |
+| EmailComposer | Bare form fields inside Overlay; contains SmartSuggest inline chips when replying | `space-y-4 max-w-2xl mx-auto`. Send: `bg-blue-600 text-white py-2 px-4 rounded`. Draft: `text-gray-600 hover:text-gray-900`. **Smart reply props**: `emailUid`, `accountId`, `folder` passed from EmailReader — when present, renders `<SmartSuggest compact>` chips between body textarea and Review with AI button. |
+| EmailReader | Headers panel + action bar; smart replies render inside inline EmailComposer (not standalone) | Headers: `bg-gray-50 border-b border-gray-200 px-4 py-3`. Actions: `px-3 py-1.5 text-sm border border-gray-200 rounded text-gray-600 hover:bg-gray-100`. Delete: `text-red-600 hover:bg-red-50`. Smart replies no longer render as a standalone block — they appear as compact chips inside the inline EmailComposer when Reply is clicked. |
 | AccountSetup | Provider grid + form | Provider cards: list item pattern `p-4 rounded border hover:shadow-md`. Form: stacked card `p-6 rounded-lg border space-y-4`. |
 
 ### Overlay Container Pattern — Content Wrapper Delegation
@@ -582,22 +582,40 @@ The email page (`/mail`) supports two composing contexts, each with a different 
 
 | Context | Where | Pattern | Component Prop |
 |---------|-------|---------|---------------|
-| Reply / Draft (context-anchored) | Inside `EmailReader.tsx` pane, below the email body | **Inline-in-pane**: Compact `EmailComposer` with `inline={true}`. Renders in a `border-t` container at the bottom of the reader, no overlay, no backdrop. Uses compact layout (single-line labels like "From"/"To"/"Subj", smaller textarea at `min-h-[150px]`, tighter button spacing). | `inline` |
+| Reply / Draft (context-anchored) | Inside `EmailReader.tsx` pane, below the email body | **Inline-in-pane**: Compact `EmailComposer` with `inline={true}`. Renders in a `border-t` container at the bottom of the reader, no overlay, no backdrop. Uses compact layout (single-line labels like "From"/"To"/"Subj", smaller textarea at `min-h-[150px]`, tighter button spacing). Includes compact SmartSuggest chips between textarea and Review button. | `inline` |
 | Compose New / Forward (context-free) | Full-screen `Overlay` from `page.tsx` | **Modal-overlay**: Standard `EmailComposer` (no `inline` prop, or `inline={false}`) inside the shared `Overlay` component. Renders as a modal with `bg-white rounded-lg shadow-2xl`, full label-column layout, `min-h-[300px]` textarea. The Overlay provides the container shell — the composer provides `space-y-4 max-w-2xl mx-auto` only. | _omitted_ or `inline={false}` |
 
 **When to use inline vs modal:**
 - **Use inline** when the compose action is anchored to a specific email context (Reply, Draft, Forward-as-reply) and should remain visually attached to that email. The composer appears at the bottom of the reader pane with `border-t` separating it from the email body.
 - **Use modal** when the compose action creates a new message independent of the current context (Compose New, standalone Forward). The composer opens in a centered overlay with backdrop.
 
+**Smart Suggestions integration:** When EmailComposer receives `emailUid`, `accountId`, and `folder` props (passed from EmailReader for reply/draft contexts), it renders `<SmartSuggest compact>` between the body textarea and the Review with AI button. The SmartSuggest component auto-fetches suggestions on mount (when `mode="auto"`, the default for inline replies). Suggestions render as compact pill/chip buttons — clicking a chip fills the composer body and subject immediately:
+
+```html
+<!-- Compact inline chips inside EmailComposer -->
+<div class="flex flex-wrap gap-1.5 items-center py-0.5">
+  <button class="flex items-center gap-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-full px-2.5 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer text-left">
+    <span class="text-xs font-medium text-blue-700 dark:text-blue-300 shrink-0">concise</span>
+    <span class="text-xs text-[var(--color-text-muted)] truncate max-w-[180px]">Thanks for the update, I'll review…</span>
+  </button>
+  <button class="flex items-center gap-1 ...">
+    <span class="text-xs font-medium ...">warm</span>
+    <span class="text-xs ... truncate max-w-[180px]">Thank you so much for your…</span>
+  </button>
+  <!-- ... copy icon per chip -->
+</div>
+```
+
 **Reference implementation:**
-- `services/ingenium-dashboard/src/app/mail/components/EmailComposer.tsx` lines 83–256 (inline variant) and lines 262–435 (modal variant)
-- `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` lines 393–417 (inline usage)
+- `services/ingenium-dashboard/src/app/mail/components/SmartSuggest.tsx` (compact variant lines 170–202, full-card variant lines 206–229)
+- `services/ingenium-dashboard/src/app/mail/components/EmailComposer.tsx` lines 192–205 (renders `<SmartSuggest>` when `emailUid` and `accountId` are present)
+- `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` lines 393–417 (passes `emailUid`/`accountId`/`folder` to inline composer)
 - `services/ingenium-dashboard/src/app/mail/page.tsx` lines 579–597 (modal usage)
 
 ```html
-<!-- Inline — compact, in-pane -->
+<!-- Inline — compact, in-pane with smart suggestions -->
 <div class="border-t border-[var(--color-border)] px-4 py-3">
-  <EmailComposer inline ... />
+  <EmailComposer inline emailUid={email.uid} accountId={accountId} folder={email.folder} ... />
 </div>
 
 <!-- Modal — full overlay -->
@@ -607,3 +625,12 @@ The email page (`/mail`) supports two composing contexts, each with a different 
 ```
 
 > 🔴 **Rule**: When using the inline variant, never wrap `EmailComposer` in an `Overlay`. The inline variant is self-contained and renders inside its parent pane using `border-t` for visual separation. Wrapping it in an Overlay defeats the purpose — it would add a backdrop and modal positioning that conflict with the context-anchored intent.
+
+> 🔴 **SmartSuggest auto-fetch**: When the composer mounts with `emailUid`/`accountId`, SmartSuggest auto-fetches suggestions (unless mode=`manual`). The fetch URL uses `encodeURIComponent(folder)` — the folder value is passed exactly as received from `email.folder` without defaulting to `"INBOX"`. This ensures per-folder cache keys work correctly for Sent, Starred, Archive, etc.
+
+### SmartSuggest Variant Summary
+
+| Variant | When Used | Layout | Key Classes |
+|---------|-----------|--------|-------------|
+| **Compact (inline chips)** | Inside inline EmailComposer (reply/draft) | `flex flex-wrap gap-1.5 items-center` with chip buttons | `rounded-full px-2.5 py-1 border`, tone label `text-xs font-medium text-blue-700`, truncated preview `max-w-[180px]`, copy SVG icon |
+| **Full-card (standalone)** | Legacy — inside EmailReader standalone block | `space-y-2` container with heading | `border rounded p-3 card`, tone badge `rounded-full`, Copy/Draft action links, `line-clamp-4` body |

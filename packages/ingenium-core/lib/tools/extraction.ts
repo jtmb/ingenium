@@ -152,7 +152,7 @@ function buildBatchUserPrompt(messages: CandidateMessage[]): string {
     .join("\n\n");
 }
 
-async function callLLMForExtraction(
+export async function callLLMForExtraction(
   messages: CandidateMessage[],
   config: { model: string; endpoint: string; apiKey?: string },
 ): Promise<{ rules: ExtractionRule[]; failed: boolean }> {
@@ -183,7 +183,7 @@ async function callLLMForExtraction(
             { role: "user", content: userContent },
           ],
           temperature: 0.2,
-          max_tokens: 4096, // Qwen is a reasoning model — reasoning_content can consume half the budget
+          max_tokens: 8192,
           // LM Studio rejects "json_object" (requires "json_schema" or "text").
           // The system prompt already instructs strict JSON output, so skip response_format entirely.
           response_format: undefined,
@@ -201,8 +201,7 @@ async function callLLMForExtraction(
 
       const json = await res.json();
       const msg = json.choices?.[0]?.message;
-      // Reasoning models (Qwen) may put output in reasoning_content when content is empty
-      const rawContent = msg?.content || msg?.reasoning_content || "{}";
+      const rawContent = msg?.content || "{}";
       const rules = parseExtractionResponse(rawContent);
       if (rules.length === 0) {
         logger.info("extraction", "LLM returned 0 rules from batch", {
@@ -231,7 +230,7 @@ async function callLLMForExtraction(
 }
 
 /** Parse the LLM response JSON with defensive handling. */
-function parseExtractionResponse(raw: string): ExtractionRule[] {
+export function parseExtractionResponse(raw: string): ExtractionRule[] {
   // Strip markdown fences
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {

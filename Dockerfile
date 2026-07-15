@@ -28,7 +28,7 @@ FROM node:22-slim AS runtime
 
 ARG OPENCODE_VERSION=1.17.18
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor curl ca-certificates tzdata python3 make g++ && \
+    supervisor curl ca-certificates tzdata python3 make g++ git && \
     rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
     tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin/ opencode && \

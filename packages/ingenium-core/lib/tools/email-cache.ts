@@ -23,6 +23,7 @@ export interface CachedEmail {
   flags: string;
   has_attachments: number;
   envelope_json: string | null;
+  labels_json: string | null;
   cached_at: string;
 }
 
@@ -47,6 +48,7 @@ export interface EmailCacheEntry {
   flags?: string;
   has_attachments?: number;
   envelope_json?: string | null;
+  labels_json?: string | null;
 }
 
 export interface SyncState {
@@ -64,8 +66,11 @@ function dbPath(): string {
 // ── Email listing cache ────────────────────────────────────────────────────
 
 /**
- * Insert or update cached email listings. Uses INSERT OR REPLACE to handle
- * the UNIQUE(account_id, folder, uid) constraint so re-fetches update stale data.
+ * Insert or update cached email listings. Uses ON CONFLICT DO UPDATE to handle
+ * the UNIQUE(account_id, folder, uid) constraint without triggering ON DELETE CASCADE
+ * to child tables (email_bodies, email_suggestions, email_summaries). Previously used
+ * INSERT OR REPLACE which deleted the old row → cascading to destroy cached smart
+ * replies, bodies, and summaries on every re-sync cycle.
  */
 export function upsertEmailCache(
   accountId: string,
@@ -75,10 +80,21 @@ export function upsertEmailCache(
   const result = execTransaction(() => {
     const db = getDb(dbPath());
     const stmt = db.prepare(
-      `INSERT OR REPLACE INTO email_cache
+      `INSERT INTO email_cache
          (account_id, folder, uid, subject, from_name, from_addr, date,
-          snippet, flags, has_attachments, envelope_json, cached_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+          snippet, flags, has_attachments, envelope_json, labels_json, cached_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+         subject = excluded.subject,
+         from_name = excluded.from_name,
+         from_addr = excluded.from_addr,
+         date = excluded.date,
+         snippet = excluded.snippet,
+         flags = excluded.flags,
+         has_attachments = excluded.has_attachments,
+         envelope_json = excluded.envelope_json,
+         labels_json = excluded.labels_json,
+         cached_at = datetime('now')`,
     );
     let count = 0;
     for (const e of emails) {
@@ -94,6 +110,7 @@ export function upsertEmailCache(
         e.flags ?? "[]",
         e.has_attachments ?? 0,
         e.envelope_json ?? null,
+        e.labels_json ?? null,
       );
       count++;
     }

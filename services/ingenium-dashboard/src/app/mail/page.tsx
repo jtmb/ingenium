@@ -90,6 +90,34 @@ export default function MailPage() {
   const [pendingEmailUid, setPendingEmailUid] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Resizable EmailList panel state
+  const [listWidth, setListWidth] = useState(350);
+  const [isResizing, setIsResizing] = useState(false);
+  const handleRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("mail-list-width");
+    if (saved) setListWidth(Number(saved));
+  }, []);
+
+  const onPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    handleRef.current?.setPointerCapture(e.pointerId);
+    setIsResizing(true);
+  }, []);
+
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isResizing) return;
+    const containerLeft = e.currentTarget.getBoundingClientRect().left;
+    const newWidth = Math.max(280, Math.min(500, e.clientX - containerLeft));
+    setListWidth(newWidth);
+  }, [isResizing]);
+
+  const onPointerUp = useCallback(() => {
+    setIsResizing(false);
+    localStorage.setItem("mail-list-width", String(listWidth));
+  }, [listWidth]);
+
   // Fetch accounts on mount
   useEffect(() => {
     const fetchAccounts = async () => {
@@ -540,40 +568,66 @@ export default function MailPage() {
               folderSyncStatuses={syncStatus?.folders ?? []}
             />
 
-            {/* Email list */}
-            <EmailList
-              emails={emails}
-              selectedUid={selectedEmail?.uid}
-              onSelect={handleSelectEmail}
-              onPageChange={setPage}
-              total={total}
-              page={page}
-              loading={loading}
-              onSearch={handleSearch}
-              error={emailError}
-              onRefresh={handleRefresh}
-              source={emailSource}
-            />
+            {/* Email list + reader — resizable split */}
+            <div className="flex items-stretch relative flex-1 min-w-0">
+              <EmailList
+                emails={emails}
+                selectedUid={selectedEmail?.uid}
+                onSelect={handleSelectEmail}
+                onPageChange={setPage}
+                total={total}
+                page={page}
+                loading={loading}
+                onSearch={handleSearch}
+                error={emailError}
+                onRefresh={handleRefresh}
+                source={emailSource}
+                width={listWidth}
+              />
 
-            {/* Email reader — inline reply/draft + summarise (FIX 2/3/4) */}
-            <EmailReader
-              email={selectedEmail}
-              loading={selectedEmailLoading}
-              downloading={emailPending}
-              downloadError={emailDownloadError}
-              onRetry={() => {
-                if (pendingEmailUid) handleSelectEmail(pendingEmailUid);
-              }}
-              accountId={selectedAccount}
-              project={project}
-              onForward={handleCompose}
-              onDelete={handleDelete}
-              onArchive={handleArchive}
-              accounts={accounts}
-              selectedAccount={selectedAccount}
-              onComposeSend={handleComposeSend}
-              onComposeSave={handleComposeSave}
-            />
+              {/* Resize handle */}
+              <div
+                ref={handleRef}
+                role="separator"
+                aria-valuenow={listWidth}
+                aria-valuemin={280}
+                aria-valuemax={500}
+                aria-label="Resize email list"
+                tabIndex={0}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={onPointerUp}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowRight") {
+                    setListWidth(w => { const nw = Math.min(500, w + 20); localStorage.setItem("mail-list-width", String(nw)); return nw; });
+                  }
+                  if (e.key === "ArrowLeft") {
+                    setListWidth(w => { const nw = Math.max(280, w - 20); localStorage.setItem("mail-list-width", String(nw)); return nw; });
+                  }
+                }}
+                className={`w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0 ${isResizing ? "bg-blue-400" : "bg-transparent"}`}
+              />
+
+              {/* Email reader — inline reply/draft + summarise (FIX 2/3/4) */}
+              <EmailReader
+                email={selectedEmail}
+                loading={selectedEmailLoading}
+                downloading={emailPending}
+                downloadError={emailDownloadError}
+                onRetry={() => {
+                  if (pendingEmailUid) handleSelectEmail(pendingEmailUid);
+                }}
+                accountId={selectedAccount}
+                project={project}
+                onForward={handleCompose}
+                onDelete={handleDelete}
+                onArchive={handleArchive}
+                accounts={accounts}
+                selectedAccount={selectedAccount}
+                onComposeSend={handleComposeSend}
+                onComposeSave={handleComposeSave}
+              />
+            </div>
           </div>
 
           {/* Compose overlay — for New/Forward ONLY (Reply/Draft now inline in EmailReader) */}

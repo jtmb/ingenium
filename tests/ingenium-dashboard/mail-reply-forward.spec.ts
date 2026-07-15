@@ -215,13 +215,12 @@ test("Reply opens compose with To/Subject/From pre-filled and Body EMPTY", async
   await replyBtn.click();
   await page.waitForTimeout(800);
 
-  // The compose overlay should be visible
-  const composeHeading = page.getByRole("heading", { name: "Compose" }).first();
-  await expect(composeHeading).toBeVisible({ timeout: 5000 });
+  // The inline reply composer should appear inside the reader (not a modal)
+  // Verify the To field is visible — inline composer renders in the reader
+  const toInput = page.getByPlaceholder("To");
+  await expect(toInput).toBeVisible({ timeout: 5000 });
 
   // --- VERIFY To: pre-filled with sender's address ---
-  const toInput = page.getByPlaceholder("To");
-  await expect(toInput).toBeVisible();
   const toValue = await toInput.inputValue();
   expect(toValue).toBe("alice@example.com");
   test.info().annotations.push({
@@ -260,10 +259,13 @@ test("Reply opens compose with To/Subject/From pre-filled and Body EMPTY", async
     description: `Reply Body: empty string "${bodyValue}" — Body is EMPTY as required ✓`,
   });
 
-  // Close the compose modal via Discard
-  await page.getByRole("button", { name: "Discard" }).click();
+  // Close the inline composer via Discard
+  const discardBtn = page.getByRole("button", { name: "Discard" }).first();
+  await expect(discardBtn).toBeVisible({ timeout: 3000 });
+  await discardBtn.click();
   await page.waitForTimeout(500);
-  await expect(composeHeading).not.toBeVisible();
+  // Verify inline composer is gone (To field no longer visible)
+  await expect(toInput).not.toBeVisible();
 });
 
 /* ------------------------------------------------------------------ */

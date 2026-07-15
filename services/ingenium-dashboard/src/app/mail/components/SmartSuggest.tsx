@@ -19,6 +19,7 @@ export default function SmartSuggest({
   mode,
   apiUrl,
   onDraft,
+  compact,
 }: {
   emailUid?: string;
   accountId?: string;
@@ -26,6 +27,7 @@ export default function SmartSuggest({
   mode?: "auto" | "manual";
   apiUrl?: string;
   onDraft?: (draft: { tone: string; subject: string; body: string }) => void;
+  compact?: boolean;
 }) {
   const [suggestions, setSuggestions] = useState<Array<{ tone: string; subject: string; body: string }>>([]);
   const [configured, setConfigured] = useState<boolean>(true);
@@ -53,7 +55,7 @@ export default function SmartSuggest({
       setError(null);
 
       const base = apiUrl || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
-      fetch(`${base}/emails/suggest/${emailUid}?project=${project}&account=${accountId}&folder=${encodeURIComponent(folder || "INBOX")}`)
+      fetch(`${base}/emails/suggest/${emailUid}?project=${project}&account=${accountId}&folder=${encodeURIComponent(folder ?? "")}`)
         .then((res) => {
           if (!res.ok) throw new Error("Failed to fetch suggestion");
           return res.json();
@@ -121,6 +123,13 @@ export default function SmartSuggest({
 
   // Loading state
   if (loading) {
+    if (compact) {
+      return (
+        <p className="text-xs text-[var(--color-text-muted)] animate-pulse py-0.5">
+          Generating suggestions…
+        </p>
+      );
+    }
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4 animate-pulse">
         <div className="h-4 bg-[var(--color-surface-muted)] rounded w-1/4 mb-3" />
@@ -130,8 +139,9 @@ export default function SmartSuggest({
     );
   }
 
-  // Error state
+  // Error state — hide in compact mode to avoid cluttering the composer
   if (error) {
+    if (compact) return null;
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4">
         <p className="text-sm text-[var(--color-text-muted)]">Suggestion unavailable</p>
@@ -144,8 +154,9 @@ export default function SmartSuggest({
     return null;
   }
 
-  // LLM not configured — show setup prompt
+  // LLM not configured — hide in compact mode to avoid cluttering the composer
   if (!configured) {
+    if (compact) return null;
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4">
         <p className="text-sm text-[var(--color-text-muted)]">
@@ -155,7 +166,43 @@ export default function SmartSuggest({
     );
   }
 
-  // Render suggestion cards
+  // Compact mode — render inline chips (no heading, single-line cards)
+  if (compact) {
+    return (
+      <div className="flex flex-wrap gap-1.5 items-center py-0.5">
+        {suggestions.map((draft, i) => (
+          <button
+            key={i}
+            onClick={() => onDraft?.(draft)}
+            className="flex items-center gap-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-full px-2.5 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer text-left"
+            title={draft.body.substring(0, 200)}
+          >
+            <span className="text-xs font-medium text-blue-700 dark:text-blue-300 shrink-0">
+              {draft.tone}
+            </span>
+            <span className="text-xs text-[var(--color-text-muted)] truncate max-w-[180px]">
+              {draft.body.substring(0, 60)}{draft.body.length > 60 ? "…" : ""}
+            </span>
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
+              }}
+              className="text-xs text-[var(--color-text-link)] hover:text-blue-600 ml-1 shrink-0 p-0.5"
+              title="Copy to clipboard"
+              role="button"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </span>
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  // Full-card mode — render suggestion cards with heading
   return (
     <div className="space-y-2">
       <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Smart Replies</h4>

@@ -121,7 +121,18 @@ Cross-project synthesis also runs automatically every 15 minutes as part of the 
 | `ingenium_setting_get` | Get synthesis configuration (model, endpoint, interval) |
 | `ingenium_setting_set` | Set synthesis configuration |
 
+## Reused By Other Features
+
+The same Synthesis LLM configuration powers several features beyond the pipeline:
+
+- **Email suggestions** — `POST /api/v1/emails/:id/suggest` generates reply suggestions
+- **Email summaries** — `GET /api/v1/emails/summarize/:uid` generates email summaries
+- **Job config generation** — `POST /api/v1/jobs/suggest` derives prompt templates, cron schedules, and trigger events from a free-text job description (magic-wand feature on the Jobs page)
+
+All three call `synthesisLlm.resolveLLMConfig()` to load the same model, endpoint, and API key configured in **Settings → Pipeline**.
+
 ## Related Docs
 - [docs/self-learning-pipeline.md](../self-learning-pipeline.md) — Full pipeline reference (Phase 1, Phase 2, architecture, DB schema)
 - [docs/HOW-TO/settings.md](settings.md) — Settings management
 - [docs/HOW-TO/personality.md](personality.md) — Personality traits
+- [docs/HOW-TO/jobs.md](jobs.md) — Job scheduling (magic-wand feature)
