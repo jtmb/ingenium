@@ -32,7 +32,7 @@ export default function TaskCreateModal({
   const [assignee, setAssignee] = useState("");
   const [priority, setPriority] = useState("");
   const [dueDate, setDueDate] = useState("");
-  const [issueType, setIssueType] = useState("");
+  const [issueType, setIssueType] = useState("task");
   const [estimate, setEstimate] = useState("");
 
   const [columns, setColumns] = useState<BoardColumn[]>([]);
@@ -73,7 +73,7 @@ export default function TaskCreateModal({
       setAssignee("");
       setPriority("");
       setDueDate("");
-      setIssueType("");
+      setIssueType("task");
       setEstimate("");
       setError("");
     }
@@ -178,7 +178,7 @@ export default function TaskCreateModal({
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value)}
-              className="w-full border border-[var(--color-border)] rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer"
+              className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]"
             >
               {statusOptions.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -209,7 +209,7 @@ export default function TaskCreateModal({
             <select
               value={priority}
               onChange={(e) => setPriority(e.target.value)}
-              className="w-full border border-[var(--color-border)] rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer"
+              className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]"
             >
               {PRIORITY_OPTIONS.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -237,12 +237,16 @@ export default function TaskCreateModal({
             <label className="block text-xs font-medium text-gray-500 mb-1">
               Issue Type
             </label>
-            <input
+            <select
               value={issueType}
               onChange={(e) => setIssueType(e.target.value)}
-              placeholder="bug, feature, task..."
-              className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm"
-            />
+              className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]"
+            >
+              <option value="epic">Epic</option>
+              <option value="story">Story</option>
+              <option value="task">Task</option>
+              <option value="subtask">Subtask</option>
+            </select>
           </div>
 
           {/* Estimate */}

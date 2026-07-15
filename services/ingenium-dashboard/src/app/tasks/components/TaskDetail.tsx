@@ -490,7 +490,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
               <select value={columnId} onChange={(e) => setColumnId(e.target.value)}
-                className="w-full border border-[var(--color-border)] rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
+                className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 {COLUMN_OPTIONS.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
               </select>
             </div>
@@ -502,7 +502,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Priority</label>
               <select value={priority} onChange={(e) => setPriority(e.target.value)}
-                className="w-full border border-[var(--color-border)] rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
+                className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 <option value="">—</option>
                 {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
               </select>
@@ -514,8 +514,13 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-500 mb-1">Issue Type</label>
-              <input value={issueType} onChange={(e) => setIssueType(e.target.value)}
-                className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" placeholder="bug, feature, task..." />
+              <select value={issueType} onChange={(e) => setIssueType(e.target.value)}
+                className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
+                <option value="epic">Epic</option>
+                <option value="story">Story</option>
+                <option value="task">Task</option>
+                <option value="subtask">Subtask</option>
+              </select>
             </div>
           </div>
 
@@ -590,7 +595,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                       )}
                       {def.type === "single_select" && (
                         <select value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
-                          className="w-full border border-[var(--color-border)] rounded text-sm bg-white px-2 py-1.5 hover:bg-gray-50 cursor-pointer">
+                          className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                           <option value="">—</option>
                           {(def.options ?? []).map((o) => (<option key={o} value={o}>{o}</option>))}
                         </select>
@@ -600,7 +605,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                           {(def.options ?? []).map((o) => {
                             const selected = Array.isArray(val) ? (val as string[]).includes(o) : false;
                             return (
-                              <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                              <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded">
                                 <input type="checkbox" checked={selected} onChange={(e) => {
                                   const current = Array.isArray(val) ? [...val as string[]] : [];
                                   if (e.target.checked) {
@@ -620,7 +625,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                           {(def.options ?? []).map((o) => {
                             const selected = Array.isArray(val) ? (val as string[]).includes(o) : false;
                             return (
-                              <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                              <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded">
                                 <input type="checkbox" checked={selected} onChange={(e) => {
                                   const current = Array.isArray(val) ? [...val as string[]] : [];
                                   if (e.target.checked) {
@@ -638,7 +643,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                       {def.type === "radio" && (
                         <div className="space-y-1 max-h-28 overflow-y-auto border border-[var(--color-border)] rounded p-1.5">
                           {(def.options ?? []).map((o) => (
-                            <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                            <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded">
                               <input type="radio" name={`cf-${def.name}`} checked={val === o} onChange={() => handleCustomFieldChange(def.name, o)} />
                               {o}
                             </label>
@@ -679,7 +684,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                   className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm min-h-[120px] font-mono"
                   placeholder="Task description... Supports **bold**, *italic*, `code`, ```blocks```, - [ ] checklists, @mentions" />
                 {showMentions && filteredAgents.length > 0 && (
-                  <div className="absolute z-10 bg-white border border-[var(--color-border)] rounded shadow-lg max-h-40 overflow-y-auto w-48"
+                  <div className="absolute z-10 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg max-h-40 overflow-y-auto w-48 text-[var(--color-text-primary)]"
                     style={{ top: mentionAnchor.top, left: mentionAnchor.left }}>
                     {filteredAgents.map((a, i) => (
                       <button key={a.name} onClick={() => insertMention(a.name)}
@@ -765,7 +770,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             {/* Add dependency */}
             <div className="mt-2 flex gap-2">
               <select value={depType} onChange={(e) => setDepType(e.target.value as "blocks" | "blocked_by")}
-                className="border border-[var(--color-border)] rounded text-xs bg-white px-2 py-1 hover:bg-gray-50 cursor-pointer">
+                className="border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 <option value="blocks">Blocks</option>
                 <option value="blocked_by">Blocked by</option>
               </select>
@@ -775,7 +780,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                   placeholder="Search tasks to link..."
                   className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-xs" />
                 {depSearchOpen && depSearchResults.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 z-10 bg-white border border-[var(--color-border)] rounded shadow-lg max-h-32 overflow-y-auto mt-0.5">
+                  <div className="absolute top-full left-0 right-0 z-10 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg max-h-32 overflow-y-auto mt-0.5 text-[var(--color-text-primary)]">
                     {depSearchResults.map((t) => (
                       <button key={t.id} onClick={() => handleAddDep(t.id)}
                         className="w-full text-left px-2 py-1 text-xs hover:bg-blue-50 border-b border-[var(--color-border-muted)]">
