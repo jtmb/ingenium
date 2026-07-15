@@ -379,9 +379,14 @@ export function getComments(_projectId: string, taskId: string): TaskComment[] {
 
 export function getTaskActivity(_projectId: string, taskId: string, limit = 50): TaskActivity[] {
   const db = getDb(dbPath());
-  return db.prepare(
+  const rows = db.prepare(
     "SELECT * FROM task_activity WHERE task_id = ? ORDER BY created_at DESC LIMIT ?"
-  ).all(taskId, limit) as TaskActivity[];
+  ).all(taskId, limit) as any[];
+  // Map DB column "event_type" to the frontend-facing "action" field
+  return rows.map((r) => ({
+    ...r,
+    action: r.event_type || "",
+  }));
 }
 
 // ============================================================================

@@ -86,7 +86,8 @@ function relativeTime(dateStr: string): string {
 /*  Activity icon by action type                                      */
 /* ------------------------------------------------------------------ */
 
-function activityIcon(action: string): string {
+function activityIcon(action: string | undefined | null): string {
+  if (!action) return "📋";
   if (action.includes("moved")) return "🔄";
   if (action.includes("edited") || action.includes("updated")) return "✏️";
   if (action.includes("assigned")) return "👤";
@@ -880,15 +881,18 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             <>
               <h3 className="text-sm font-semibold text-gray-700 mb-2 shrink-0">Activity</h3>
               <div className="space-y-2 text-xs overflow-y-auto flex-1 min-h-0">
-                {activity.map((a) => (
-                  <div key={a.id} className="flex gap-1.5 items-start">
-                    <span className="shrink-0 mt-0.5">{activityIcon(a.action)}</span>
-                    <div className="min-w-0">
-                      <p className="text-gray-600 break-words">{activityDescription(a)}</p>
-                      <span className="text-gray-400">{relativeTime(a.created_at)}</span>
+                {activity.map((a: any) => {
+                  const action = a.action || a.event_type || "";
+                  return (
+                    <div key={a.id} className="flex gap-1.5 items-start">
+                      <span className="shrink-0 mt-0.5">{activityIcon(action)}</span>
+                      <div className="min-w-0">
+                        <p className="text-gray-600 break-words">{activityDescription(a)}</p>
+                        <span className="text-gray-400">{relativeTime(a.created_at)}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {activity.length === 0 && (
                   <p className="text-gray-400 italic">No activity yet.</p>
                 )}
