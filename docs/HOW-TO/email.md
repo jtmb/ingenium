@@ -148,7 +148,7 @@ Click any email to view its complete headers and body in the right pane.
 
 1. Click "Compose" button in the left sidebar
 2. The compose dialog opens as an overlay modal with "New Message" header
-3. Select a From account (dropdown), fill in To, CC/BCC (optional), Subject, and Message body
+3. The **From** dropdown auto-selects the currently selected account in the sidebar (via `initialAccountId={selectedAccount}` passed from the mail page). Fill in To, CC/BCC (optional), Subject, and Message body.
 4. Click "Send" — uses SMTP via nodemailer to deliver through Gmail/Outlook servers
 5. Click "Save Draft" to save without sending, or "Discard" to cancel
 
@@ -235,13 +235,38 @@ The email client can learn your response style and draft 3 reply options when yo
 
 3. **Caching**: Generated suggestions are cached in the `email_suggestions` database table (keyed by account + folder + UID). Subsequent opens of the same email return instantly from cache — no repeat LLM calls.
 
-4. **Smart gating**: Suggestions are only generated for **new, unread emails** that haven't been suggested before. Once an email is read or already has cached suggestions, no LLM call is made. This prevents "blowing up your LLM" usage.
+4. **Folder-matching fix**: The suggest endpoint (`GET /suggest/:uid`) now sends the **actual `email.folder` value** from the request query parameter (`req.query.folder`) instead of always defaulting to `"INBOX"`. The `SmartSuggest.tsx` component encodes the folder via `encodeURIComponent(folder || "INBOX")`. This means caching now works correctly for all folders — suggestions generated in Sent, Starred, Archive, etc. are cached and returned by folder key, not lumped under INBOX.
 
-5. **Graceful fallback**: If no Synthesis LLM is configured (Settings → Synthesis LLM), the system falls back to template-based keyword matching against manually-created email skills. The UI shows a note directing you to configure an LLM for full AI drafting.
+5. **Noreply-sender skip gate**: Before any cache or LLM call, the endpoint checks sender fields against `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i` (case-insensitive regex applied to both `from_addr` and `from_name`). If matched, it returns `source: "noreply"` immediately with empty suggestions and **no UI rendering** — the `SmartSuggest.tsx` component returns `null` for the `"noreply"` source. This prevents LLM calls on automated/transactional emails.
+
+6. **Smart gating**: Suggestions are only generated for **new, unread emails** that haven't been suggested before. Once an email is read or already has cached suggestions, no LLM call is made. This prevents "blowing up your LLM" usage.
+
+7. **Graceful fallback**: If no Synthesis LLM is configured (Settings → Synthesis LLM), the system falls back to template-based keyword matching against manually-created email skills. The UI shows a note directing you to configure an LLM for full AI drafting.
 
 ### Configuration
 
 Uses the **existing Synthesis LLM** settings (`synthesis_model`, `synthesis_api_key`, `synthesis_endpoint`). No separate email-specific LLM configuration needed. Configure in Settings → Synthesis LLM.
+
+Two email-specific settings control smart reply behavior, available in **Settings → Mail**:
+
+| Setting Key | Default | UI Widget | Purpose |
+|-------------|---------|-----------|---------|
+| `mail_smart_replies_enabled` | `true` | Checkbox | Master toggle — when disabled, the suggest endpoint returns `source: "disabled"` and the UI shows nothing. |
+| `mail_smart_replies_mode` | `"auto"` | Select dropdown (`auto` / `manual`) | **Automatic** — suggestions are fetched immediately when an email is opened. **Manual** — the component renders a "Generate Suggestions" button instead; the user clicks to trigger the LLM call. |
+
+Configure via dashboard Settings page or MCP tools:
+```typescript
+await ingenium_setting_set({
+  project: "global-default",
+  key: "mail_smart_replies_enabled",
+  value: "true"
+});
+await ingenium_setting_set({
+  project: "global-default",
+  key: "mail_smart_replies_mode",
+  value: "manual"  // or "auto"
+});
+```
 
 ### API Response Shape
 
@@ -263,6 +288,8 @@ Uses the **existing Synthesis LLM** settings (`synthesis_model`, `synthesis_api_
 - `source: "cache"` — instant from cache, no LLM call
 - `source: "not-new"` — email already read, skipped
 - `source: "heuristic"` — LLM not configured, template fallback
+- `source: "noreply"` — sender matched the noreply regex pattern; no UI shown
+- `source: "disabled"` — `mail_smart_replies_enabled` setting is `"false"`; no UI shown
 - `configured: false` — LLM not available, using heuristic
 
 ### Database
@@ -285,6 +312,7 @@ Uses the **existing Synthesis LLM** settings (`synthesis_model`, `synthesis_api_
 | SMTP send fails (timeout) | Mail provider blocking local connections | Verify Docker network allows outbound SMTP, check mail server accepts relay from your IP range |
 | Smart replies show "Configure LLM" note | Synthesis LLM not set up | Go to Settings → Synthesis LLM, select a model and enter API key |
 | Old emails show no suggestions | Correct — suggestions are gated to new/unread emails only | Open a new unread email to see suggestions; this prevents excessive LLM usage |
+| Noreply/automated emails show no "Smart Replies" section | Noreply sender skip gate — senders matching `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i` are suppressed with `source: "noreply"` and render no UI | This is intentional; LLM calls are not wasted on automated/transactional emails |
 
 ## Security Notes
 

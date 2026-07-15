@@ -186,6 +186,10 @@ if (!parent) {
 
 This pattern is used in `upsertEmailBody()` and the email suggestions cache. It must be followed for any new FK-constrained child table writes to prevent silent DB corruption from concurrent deletions.
 
+> 🔴 **`folder` value must be threaded through unchanged from `email.folder`.** The `getCachedSuggestions()` and `upsertEmailSuggestions()` functions (defined in `packages/ingenium-core/lib/tools/email-cache.ts` lines 249–284) use the exact `folder` string in the `WHERE` clause of the `email_suggestions` lookup. Defaulting the folder anywhere in the call chain (e.g., `?? "INBOX"`) causes a 100% cache miss because the stored value uses the IMAP-provided folder name, not the defaulted one. Always pass through the `folder` value received from `email.folder` without defaulting or transforming it.
+
+> 🔴 **Noreply-sender gate — smart replies are never cached for automated senders.** Before any cache lookup or generation, the `/api/v1/emails/:id/suggest` route (at `services/ingenium-api/lib/routes/emails.ts` lines 482–490) checks both `from_addr` and `from_name` against the regex `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i`. If either matches, the route returns `{ suggestions: [], source: "noreply", configured: true }` immediately — no cache read, no LLM invocation. This gate runs BEFORE the cache check so that stale suggestions from before a sender was classified as noreply are never returned. Any code path that generates suggestions must implement this gate.
+
 ---
 
 ## Docker Deployment
@@ -251,6 +255,8 @@ healthcheck:
   retries: 3
   start_period: 15s
 ```
+
+> 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks running inside the `ingenium-api` Express process. The Status page reports them via `GET /api/v1/services/applications/:name` (not `/services/:name`), which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Do NOT add supervisord `[program:synthesis-engine]` or `[program:email-client]` blocks — they would create duplicate, conflicting processes. The four real supervisord programs are listed above (API, Dashboard, opencode-server, opencode-iframe). See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts) lines 216–289 for the application health-check implementations.
 
 ---
 
