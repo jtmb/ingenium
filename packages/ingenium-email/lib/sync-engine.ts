@@ -630,8 +630,8 @@ async function executeBackfillBodies(
           backfilled++;
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("sync-engine",
-            `executeBackfillBodies FAILED for ${worker.email}/${folder} uid=${uid}: ${msg}`,
+          logger.info("sync-engine",
+            `Body backfill skipped for ${worker.email}/${folder} uid=${uid}: ${msg}`,
           );
           // Continue with next UID instead of aborting all backfill
         }

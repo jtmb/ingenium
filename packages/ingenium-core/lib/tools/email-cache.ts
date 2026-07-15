@@ -172,6 +172,15 @@ export function upsertEmailBody(
 ): void {
   execTransaction(() => {
     const db = getDb(dbPath());
+    // Defensive: check parent row exists before inserting into FK-constrained email_bodies.
+    // Avoids FOREIGN KEY constraint failed when parent was deleted concurrently
+    // (e.g., account removal mid-backfill).
+    const parent = db.prepare(
+      "SELECT 1 FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?",
+    ).get(accountId, folder, uid);
+    if (!parent) {
+      return; // parent removed — skip silently, this is expected during account deletion
+    }
     db.prepare(
       `INSERT OR REPLACE INTO email_bodies
          (account_id, folder, uid, html, text, headers_json, fetched_at)

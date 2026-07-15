@@ -21,6 +21,7 @@ export default function MCPServersPage() {
   const [isGlobal, setIsGlobal] = useState(false);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
+  const [serverError, setServerError] = useState<string | null>(null);
 
   // Tools tab state
   const [categories, setCategories] = useState<CategorizedTool[]>([]);
@@ -39,9 +40,14 @@ export default function MCPServersPage() {
 
   const createServer = async () => {
     if (!name || !command) return;
-    const res = await api.servers.create(name, command, project);
-    setServers([res.data, ...servers]);
-    setName(""); setCommand("");
+    try {
+      const res = await api.servers.create(name, command, project);
+      setServers([res.data, ...servers]);
+      setName(""); setCommand("");
+      setServerError(null);
+    } catch (err: any) {
+      setServerError(err?.message || "Failed to add server. Check the API connection.");
+    }
   };
 
   const toggleTool = async (toolName: string, enabled: boolean) => {
@@ -104,6 +110,7 @@ export default function MCPServersPage() {
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Server name" className="border p-2 rounded w-full text-sm" />
             <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command (e.g. kaban mcp)" className="border p-2 rounded w-full text-sm" />
             <button onClick={createServer} className="bg-blue-600 text-white p-2 rounded text-sm hover:bg-blue-700">Add Server</button>
+            {serverError && <p className="text-sm text-red-600 mt-2">{serverError}</p>}
           </div>
           <div className="space-y-2">
             {servers.map((s) => (

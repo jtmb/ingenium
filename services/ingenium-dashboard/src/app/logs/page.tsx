@@ -295,7 +295,7 @@ export default function LogsPage() {
                 onClick={() => toggleSource(src)}
                 className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
                   isSelected
-                    ? `${badge} shadow-sm ring-1 ring-[var(--color-border)] ring-offset-1`
+                    ? `${badge} shadow-sm ring-1 ring-[var(--color-border)] ring-offset-1 ring-offset-[var(--color-surface)]`
                     : "bg-[var(--color-surface)] border-[var(--color-border)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
                 }`}
               >
@@ -326,7 +326,7 @@ export default function LogsPage() {
                 />
                 <span
                   className={`w-2.5 h-2.5 rounded-full inline-block ${dot} ${
-                    isSelected ? "ring-2 ring-offset-1 ring-gray-300" : "opacity-40"
+                    isSelected ? "ring-2 ring-offset-1 ring-offset-[var(--color-surface)] ring-gray-300" : "opacity-40"
                   }`}
                 />
                 {lvl.toUpperCase()}
