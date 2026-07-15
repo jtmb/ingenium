@@ -17,33 +17,33 @@ type ColorSet = {
 const colorMap: Record<string, ColorSet> = {
   blue: {
     bg: "bg-[var(--color-surface-selected)]",
-    dmBg: "",
+    dmBg: "dark:bg-blue-500/15",
     accent: "bg-blue-400",
-    dmAccent: "",
+    dmAccent: "dark:bg-blue-500/15",
     border: "hover:border-blue-300",
     dmBorder: "dark:hover:border-blue-700",
   },
   purple: {
     bg: "bg-purple-50",
-    dmBg: "",
+    dmBg: "dark:bg-purple-500/15",
     accent: "bg-purple-400",
-    dmAccent: "",
+    dmAccent: "dark:bg-purple-500/15",
     border: "hover:border-purple-300",
     dmBorder: "dark:hover:border-purple-700",
   },
   emerald: {
     bg: "bg-emerald-50",
-    dmBg: "",
+    dmBg: "dark:bg-emerald-500/15",
     accent: "bg-emerald-400",
-    dmAccent: "",
+    dmAccent: "dark:bg-emerald-500/15",
     border: "hover:border-emerald-300",
     dmBorder: "dark:hover:border-emerald-700",
   },
   amber: {
     bg: "bg-[var(--color-warning-bg)]",
-    dmBg: "",
+    dmBg: "dark:bg-amber-500/15",
     accent: "bg-amber-400",
-    dmAccent: "",
+    dmAccent: "dark:bg-amber-500/15",
     border: "hover:border-amber-300",
     dmBorder: "dark:hover:border-amber-700",
   },
@@ -71,7 +71,7 @@ function Section({
           <Link
             key={p.href}
             href={p.href}
-            className={`group bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 hover:shadow-xl ${color.border} ${color.dmBorder} hover:-translate-y-0.5 transition-all duration-200`}
+            className={`group bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 hover:shadow-md ${color.border} ${color.dmBorder} hover:-translate-y-0.5 transition-shadow duration-200`}
           >
             <div
               className={`w-10 h-10 ${color.bg} ${color.dmBg} rounded-lg flex items-center justify-center text-xl mb-3 group-hover:scale-110 transition-transform`}
@@ -175,7 +175,7 @@ export default function Home() {
         {stats.map((s) => (
           <div
             key={s.label}
-            className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 text-center hover:shadow-lg transition-shadow"
+            className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-6 text-center hover:shadow-md transition-shadow"
           >
             <div className="text-3xl font-bold text-[var(--color-text-link)]">
               {s.value}

@@ -79,10 +79,11 @@ describe("fillTemplate", () => {
 });
 
 describe("suggestResponse", () => {
-  it("should return null for non-existent email (no connection)", async () => {
+  it("should return null for non-existent email (no cache)", async () => {
     const { suggestResponse } = await import("../lib/responder.js");
-    // This calls getEmail which requires an active IMAP connection
-    // Expect it to throw rather than silently fail
-    await expect(suggestResponse("test-project", "bad-account", 1)).rejects.toThrow();
+    // suggestResponse now uses cache-based lookup (no IMAP).
+    // A non-existent account + uid returns null gracefully — no error.
+    const result = await suggestResponse("test-project", "bad-account", 1);
+    expect(result).toBeNull();
   });
 });

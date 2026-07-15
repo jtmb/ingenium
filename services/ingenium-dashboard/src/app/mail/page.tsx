@@ -9,6 +9,7 @@ import AccountSetup from "./components/AccountSetup";
 import SyncProgress from "./components/SyncProgress";
 import Overlay from "../components/Overlay";
 import EmailComposer from "./components/EmailComposer";
+import PageProjectBar from "@/app/components/PageProjectBar";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 
@@ -430,8 +431,9 @@ export default function MailPage() {
       setEmailError("Refresh failed");
     } finally {
       setLoading(false);
+      setRefreshKey(prev => prev + 1);
     }
-  }, [selectedAccount, selectedFolder, page, searchQuery, project]);
+  }, [selectedAccount, selectedFolder, page, searchQuery, project, setRefreshKey]);
 
   // Derived computed values for cold-state gating and folder sync indicators
   const syncingFolders = syncStatus?.folders?.filter((f: any) => f.syncing).map((f: any) => f.folder) ?? [];
@@ -496,6 +498,8 @@ export default function MailPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
+
+      {selectedAccount && <PageProjectBar />}
 
       {/* Show progress view until cache has data, then show mail UI */}
       {syncStatus && syncStatus.totalCached === 0 ? (

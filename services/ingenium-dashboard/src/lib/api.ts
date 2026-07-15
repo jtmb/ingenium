@@ -318,7 +318,7 @@ export const api = {
     delete: (id: string, project = DEFAULT_PROJECT) =>
       request(`/tasks/${id}?project=${project}`, { method: "DELETE" }),
     complete: (id: string, project = DEFAULT_PROJECT) =>
-      request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: "{}" }),
+      request<{ data: Task }>(`/tasks/${id}?project=${project}`, { method: "PATCH", body: JSON.stringify({ column_id: "done" }) }),
     search: (query: string, project = DEFAULT_PROJECT) =>
       request<{ data: Task[] }>(`/tasks/search?project=${project}&q=${encodeURIComponent(query)}`),
     comments: (taskId: string, project = DEFAULT_PROJECT) =>

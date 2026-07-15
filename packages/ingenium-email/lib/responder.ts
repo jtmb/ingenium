@@ -2,7 +2,7 @@
 
 import type { ResponseSuggestion, EmailMessage } from "./types.js";
 import type { Skill } from "ingenium-core";
-import { getEmail } from "./imap.js";
+import { emailCache } from "ingenium-core";
 import { loadEmailSkills } from "./triage.js";
 
 /** Extract a response template from skill content between ```template and ``` markers. */
@@ -62,8 +62,31 @@ export async function suggestResponse(
   uid: string | number,
   folder: string = "INBOX",
 ): Promise<ResponseSuggestion | null> {
-  const email = await getEmail(accountId, folder, uid);
-  if (!email) return null;
+  // 🔴 L30: Gmail REST API accounts don't have IMAP connections —
+  // getEmail() was calling getConnection() which throws "No active IMAP
+  // connection".  Reconstruct the email from the DB cache instead.
+  const cachedListing = emailCache.getCachedEmail(accountId, folder, String(uid));
+  if (!cachedListing) return null;
+
+  const cachedBody = emailCache.getCachedEmailBody(accountId, folder, String(uid));
+
+  // Reconstruct enough of an EmailMessage for calculateConfidence() and
+  // fillTemplate() — those only need from, subject, date, and body.text.
+  const email: EmailMessage = {
+    uid: String(uid),
+    subject: cachedListing.subject ?? "(no subject)",
+    from: [{ name: cachedListing.from_name ?? undefined, address: cachedListing.from_addr ?? "" }],
+    to: [],
+    cc: [],
+    date: cachedListing.date ?? new Date().toISOString(),
+    body: {
+      text: cachedBody?.text ?? cachedListing.snippet ?? undefined,
+      html: cachedBody?.html ?? undefined,
+    },
+    attachments: [],
+    flags: [],
+    folder,
+  };
 
   const emailSkills = loadEmailSkills(projectId);
 

@@ -311,10 +311,10 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
                 folder,
               });
             }
-            // Set the new cursor after resync
-            if (delta.newCursor) {
-              emailCache.setAccountCursor(worker.accountId, delta.newCursor, "gmail");
-            }
+            // Set the new cursor after resync — GmailProvider always returns a
+            // non-empty cursor now (profile historyId), so the cursor advances
+            // and the next delta poll is incremental.
+            emailCache.setAccountCursor(worker.accountId, delta.newCursor || "", "gmail");
           } else {
             // Apply upserts to cache
             if (delta.upserts.length > 0) {
@@ -350,10 +350,11 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
               );
             }
 
-            // Store new cursor
-            if (delta.newCursor) {
-              emailCache.setAccountCursor(worker.accountId, delta.newCursor, "gmail");
-            }
+            // Store new cursor unconditionally — GmailProvider always returns a
+            // non-empty cursor now (even for fullResyncRequired, it fetches the
+            // profile historyId).  Skipping the save here would cause every
+            // delta poll to be a full resync.
+            emailCache.setAccountCursor(worker.accountId, delta.newCursor || "", "gmail");
           }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -533,6 +534,14 @@ async function executeSyncFolder(
       `Synced ${worker.email}/${folder}: ${cachedTotal} headers, ${bodyCount} bodies`,
     );
 
+    // 🔴 L16: Persist last_synced_at to DB so isFolderFresh() survives
+    // process restarts.  The Gmail REST API doesn't have IMAP UIDs, so we
+    // pass dummy values for those fields — isFolderFresh() only reads
+    // last_synced_at.
+    try {
+      emailCache.updateSyncState(accountId, folder, "0", 0);
+    } catch { /* non-fatal — don't abort sync over DB write failure */ }
+
     // If bodies missing and not at window cap, queue body backfill
     if (missingUids.length > 0 && bodyCount < bodyWindow) {
       enqueueTask(worker, {
@@ -658,6 +667,11 @@ async function executeBackfillBodies(
       `Backfilled ${backfilled} bodies for ${worker.email}/${folder} ` +
       `(${bodyCount}/${cachedTotal} cached)`,
     );
+
+    // 🔴 L16: Persist last_synced_at to DB so isFolderFresh() survives restarts.
+    try {
+      emailCache.updateSyncState(accountId, folder, "0", 0);
+    } catch { /* non-fatal */ }
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn("sync-engine", `executeBackfillBodies FAILED for ${worker.email}/${folder}: ${msg}`);

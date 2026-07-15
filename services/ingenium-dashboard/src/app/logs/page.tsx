@@ -4,6 +4,8 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, type LogEntry } from "../../lib/api";
+import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import PageProjectBar from "../components/PageProjectBar";
 
 // ── Constants ────────────────────────────────────────────────────────────
 const MAX_ENTRIES = 500;
@@ -13,24 +15,27 @@ const ALL_LEVELS = ["debug", "info", "warn", "error"] as const;
 type Level = (typeof ALL_LEVELS)[number];
 
 // ── Color maps ───────────────────────────────────────────────────────────
-const SOURCE_BADGE: Record<string, string> = {
-  agent: "bg-[var(--color-surface-selected)] text-blue-700 border-blue-200",
-  plugin: "bg-[var(--color-success-bg)] text-green-700 border-[var(--color-success-border)]",
-  scheduler: "bg-purple-50 text-purple-700 border-purple-200",
-  observer: "bg-cyan-50 text-cyan-700 border-cyan-200",
-  "auto-observer": "bg-pink-50 text-pink-700 border-pink-200",
-  synthesis: "bg-orange-50 text-orange-700 border-orange-200",
-  api: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]",
-  configs: "bg-teal-50 text-teal-700 border-teal-200",
-  skills: "bg-slate-50 text-slate-700 border-slate-200",
-  email: "bg-indigo-50 text-indigo-700 border-indigo-200",
-};
+function sourceBadgeColor(src: string): string {
+  const hues: Record<string, string> = {
+    agent: "blue",
+    plugin: "purple",
+    scheduler: "purple",
+    observer: "teal",
+    "auto-observer": "pink",
+    synthesis: "orange",
+    api: "blue",
+    configs: "teal",
+    skills: "slate",
+    email: "indigo",
+  };
+  return badgeTones(hues[src] ?? "gray");
+}
 
 const LEVEL_DOT: Record<string, string> = {
   debug: "bg-gray-400",
-  info: "bg-blue-500",
-  warn: "bg-amber-500",
-  error: "bg-red-500",
+  info: "bg-blue-500 dark:bg-blue-400",
+  warn: "bg-amber-500 dark:bg-amber-400",
+  error: "bg-red-500 dark:bg-red-400",
 };
 
 const LEVEL_BADGE: Record<string, string> = {
@@ -225,6 +230,8 @@ export default function LogsPage() {
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
+      <PageProjectBar />
+
       {/* ── Status Header ──────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -254,7 +261,7 @@ export default function LogsPage() {
             onClick={() => setPaused((p) => !p)}
             className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
               paused
-                ? "bg-[var(--color-warning-bg)] border-amber-300 text-amber-700 hover:bg-amber-100"
+                ? "bg-[var(--color-warning-bg)] border-amber-300 text-amber-700 hover:bg-[var(--color-surface-hover)]"
                 : "bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100"
             }`}
           >
@@ -283,7 +290,7 @@ export default function LogsPage() {
             All
           </button>
           {sources.map((src) => {
-            const badge = SOURCE_BADGE[src] ?? "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]";
+            const badge = sourceBadgeColor(src);
             const isSelected = selectedSources.has(src);
             return (
               <button
@@ -378,9 +385,7 @@ export default function LogsPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredEntries.map((entry, idx) => {
-                const sourceBadge =
-                  SOURCE_BADGE[entry.source] ??
-                  "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]";
+                const sourceBadge = sourceBadgeColor(entry.source);
                 const levelDot = LEVEL_DOT[entry.level] ?? "bg-gray-400";
                 const levelBadge =
                   LEVEL_BADGE[entry.level] ??

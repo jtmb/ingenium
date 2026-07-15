@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api } from "../../lib/api";
+import PageProjectBar from "../components/PageProjectBar";
 
 export default function ConfigPage() {
   const project = useProject();
@@ -45,6 +46,7 @@ export default function ConfigPage() {
 
   return (
     <div className="space-y-6">
+      <PageProjectBar />
       <h1 className="text-3xl font-bold">Config</h1>
 
       {/* Tabs */}

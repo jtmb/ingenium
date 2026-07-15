@@ -212,7 +212,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
           {/* ── Diagnostics grid ────────────────────────────────────────── */}
           {detail && (
             <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-[var(--color-bg-subtle,#f9fafb)] dark:bg-gray-800/50 rounded-lg p-3">
+              <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
                 <span className="text-xs text-[var(--color-text-muted)] block mb-1">
                   PID
                 </span>
@@ -220,7 +220,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
                   {detail.pid ?? "—"}
                 </span>
               </div>
-              <div className="bg-[var(--color-bg-subtle,#f9fafb)] dark:bg-gray-800/50 rounded-lg p-3">
+              <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
                 <span className="text-xs text-[var(--color-text-muted)] block mb-1">
                   Port
                 </span>
@@ -228,7 +228,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
                   {detail.port ?? "—"}
                 </span>
               </div>
-              <div className="bg-[var(--color-bg-subtle,#f9fafb)] dark:bg-gray-800/50 rounded-lg p-3">
+              <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
                 <span className="text-xs text-[var(--color-text-muted)] block mb-1">
                   Started
                 </span>
@@ -238,7 +238,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
                     : "—"}
                 </span>
               </div>
-              <div className="bg-[var(--color-bg-subtle,#f9fafb)] dark:bg-gray-800/50 rounded-lg p-3">
+              <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
                 <span className="text-xs text-[var(--color-text-muted)] block mb-1">
                   Uptime
                 </span>
@@ -246,7 +246,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
                   {formatUptime(detail.uptime)}
                 </span>
               </div>
-              <div className="bg-[var(--color-bg-subtle,#f9fafb)] dark:bg-gray-800/50 rounded-lg p-3">
+              <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
                 <span className="text-xs text-[var(--color-text-muted)] block mb-1">
                   Exit Code
                 </span>
@@ -266,7 +266,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
                       : "—"}
                 </span>
               </div>
-              <div className="bg-[var(--color-bg-subtle,#f9fafb)] dark:bg-gray-800/50 rounded-lg p-3">
+              <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
                 <span className="text-xs text-[var(--color-text-muted)] block mb-1">
                   Last Stop
                 </span>
@@ -305,7 +305,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
             </div>
 
             {logsLoading ? (
-              <div className="flex items-center justify-center py-8 bg-[var(--color-bg-subtle,#f9fafb)] dark:bg-gray-800/50 rounded-lg">
+              <div className="flex items-center justify-center py-8 bg-[var(--color-surface-muted)] rounded-lg">
                 <div className="w-6 h-6 border-2 border-[var(--color-primary,#3b82f6)] border-t-transparent rounded-full animate-spin" />
                 <span className="ml-2 text-sm text-[var(--color-text-muted)]">
                   Loading logs…
@@ -338,7 +338,7 @@ export default function ServiceOverlay({ name, onClose }: ServiceOverlayProps) {
                 )}
               </>
             ) : (
-              <div className="bg-[var(--color-bg-subtle,#f9fafb)] dark:bg-gray-800/50 rounded-lg p-6 text-center">
+              <div className="bg-[var(--color-surface-muted)] rounded-lg p-6 text-center">
                 <p className="text-sm text-[var(--color-text-muted)]">
                   No log output yet — process may have just started.
                 </p>

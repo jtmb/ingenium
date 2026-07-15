@@ -24,6 +24,7 @@ import {
   getAttachment as apiGetAttachment,
   sendMessage as apiSendMessage,
   modifyMessage as apiModifyMessage,
+  getProfile,
 } from "./gmail-api.js";
 import { getFreshGmailToken } from "../oauth.js";
 
@@ -307,9 +308,17 @@ export const GmailProvider: MailProvider = {
   }> {
     const token = await getFreshGmailToken(account.id);
 
-    // No cursor → full resync required
+    // No cursor → full resync required, but fetch current historyId so
+    // the next delta poll can work incrementally instead of failing again.
     if (!cursor) {
-      return { upserts: [], deletes: [], newCursor: "", fullResyncRequired: true };
+      try {
+        const profile = await getProfile(token);
+        return { upserts: [], deletes: [], newCursor: profile.historyId, fullResyncRequired: true };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`GmailProvider: failed to get profile historyId for ${account.email}: ${msg}`);
+        return { upserts: [], deletes: [], newCursor: "", fullResyncRequired: true };
+      }
     }
 
     try {
@@ -459,9 +468,11 @@ export const GmailProvider: MailProvider = {
     // Decode base64url data to Buffer
     const data = Buffer.from(att.data, "base64url");
 
-    // Get mimeType + filename from found attachment metadata
+    // Get mimeType + filename from found attachment metadata.
+    // 🔴 L29: NEVER use the opaque Gmail attachmentId token as a filename —
+    // it produces garbage like "ANGjdJ_Jt0bbNX..." in the browser download.
     const mimeType = found?.mimeType ?? "application/octet-stream";
-    const filename = found?.filename ?? attachmentId;
+    const filename = found?.filename ?? `attachment-${attachmentId.slice(0, 8)}`;
 
     return { data, mimeType, filename };
   },

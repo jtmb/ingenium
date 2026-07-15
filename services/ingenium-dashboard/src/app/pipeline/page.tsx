@@ -5,6 +5,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, type PipelineEvent } from "../../lib/api";
 import Overlay from "../components/Overlay";
+import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import PageProjectBar from "@/app/components/PageProjectBar";
 
 // ── Color maps ───────────────────────────────────────────────────────────
 const SOURCE_DOT: Record<string, string> = {
@@ -22,10 +24,10 @@ const SOURCE_LINE: Record<string, string> = {
 };
 
 const SOURCE_BADGE: Record<string, string> = {
-  agent: "bg-[var(--color-warning-bg)] text-amber-700 border-[var(--color-warning-border)]",
-  plugin: "bg-[var(--color-surface-selected)] text-blue-700 border-blue-200",
-  synthesis: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  system: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]",
+  agent: badgeTones("amber"),
+  plugin: badgeTones("blue"),
+  synthesis: badgeTones("emerald"),
+  system: badgeTones("gray"),
 };
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -279,6 +281,7 @@ export default function PipelinePage() {
   // ── Render ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
+      <PageProjectBar />
       {/* ── Header + stats ──────────────────────────────────────────── */}
       <div className="flex justify-between items-center">
         <div>
@@ -329,7 +332,7 @@ export default function PipelinePage() {
           className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
             paused
               ? "bg-[var(--color-success-bg)] border-green-300 text-green-700 hover:bg-[var(--color-success-bg)]"
-              : "bg-[var(--color-warning-bg)] border-amber-300 text-amber-700 hover:bg-amber-100"
+              : "bg-[var(--color-warning-bg)] border-amber-300 text-amber-700 hover:bg-[var(--color-surface-hover)]"
           }`}
         >
           {paused ? "\u25B6 Resume" : "\u275A\u275A Pause"}
@@ -346,7 +349,7 @@ export default function PipelinePage() {
       {events.length > 0 && (
         <div className="relative">
           {/* Continuous vertical timeline line */}
-          <div className="absolute left-[36px] top-0 bottom-0 w-0.5 bg-gray-200" />
+          <div className="absolute left-[36px] top-0 bottom-0 w-0.5 bg-gray-200 dark:bg-gray-700" />
 
           <div className="space-y-0">
             {displayItems.map((item, idx) => {
@@ -378,7 +381,7 @@ export default function PipelinePage() {
                     >
                       {/* Expanded sub-list */}
                       {isExpanded && (
-                        <div className="mt-2 border-l-2 border-dashed border-gray-300 ml-5 pl-4 space-y-2">
+                        <div className="mt-2 border-l-2 border-dashed border-gray-300 dark:border-gray-600 ml-5 pl-4 space-y-2">
                           {group.events.map((obs) => (
                             <div
                               key={obs.id}
@@ -386,7 +389,7 @@ export default function PipelinePage() {
                               onClick={() => setSelected(obs)}
                             >
                               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                <span className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[obs.event_source] ?? "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]"}`}>
+                                <span className={`${BADGE_BASE} border ${SOURCE_BADGE[obs.event_source] ?? badgeTones("muted")}`}>
                                   {SOURCE_LABEL[obs.event_source] ?? obs.event_source}
                                 </span>
                                 <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(obs.created_at)}</span>
@@ -410,7 +413,7 @@ export default function PipelinePage() {
                         const children = childMap.get(obs.id);
                         if (!children) return null;
                         return (
-                          <div key={`ch-${obs.id}`} className="ml-10 pl-6 border-l-2 border-dashed border-gray-300 space-y-0">
+                          <div key={`ch-${obs.id}`} className="ml-10 pl-6 border-l-2 border-dashed border-gray-300 dark:border-gray-600 space-y-0">
                             {children.map((child) => (
                               <EventRow
                                 key={child.id}
@@ -456,7 +459,7 @@ export default function PipelinePage() {
 
                   {/* Children (e.g. trait_created under synthesis_completed) */}
                   {children && (
-                    <div className="ml-10 pl-6 border-l-2 border-dashed border-gray-300 space-y-0">
+                    <div className="ml-10 pl-6 border-l-2 border-dashed border-gray-300 dark:border-gray-600 space-y-0">
                       {children.map((child) => (
                         <EventRow
                           key={child.id}
@@ -507,7 +510,7 @@ export default function PipelinePage() {
             {selected.events.map((obs: PipelineEvent) => (
               <div key={obs.id} className="border border-[var(--color-border)] rounded p-3 bg-[var(--color-surface-muted)]">
                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <span className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[obs.event_source] ?? ""}`}>
+                  <span className={`${BADGE_BASE} border ${SOURCE_BADGE[obs.event_source] ?? badgeTones("muted")}`}>
                     {obs.event_source}
                   </span>
                   <span className="text-xs text-[var(--color-text-muted)]">{fmtAbs(obs.created_at)}</span>
@@ -541,7 +544,7 @@ export default function PipelinePage() {
               <div>
                 <span className="font-semibold">Source:</span>{" "}
                 <span
-                  className={`inline-block px-2 py-0.5 rounded text-xs border ${SOURCE_BADGE[selected.event_source] ?? ""}`}
+                  className={`${BADGE_BASE} border ${SOURCE_BADGE[selected.event_source] ?? badgeTones("muted")}`}
                 >
                   {selected.event_source}
                 </span>
@@ -801,7 +804,7 @@ function EventRow({
             {/* Badge row */}
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span
-                className={`text-xs px-2 py-0.5 rounded border ${SOURCE_BADGE[source] ?? "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]"}`}
+                className={`${BADGE_BASE} border ${SOURCE_BADGE[source] ?? badgeTones("muted")}`}
               >
                 {sourceLabel}
               </span>

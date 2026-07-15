@@ -3,6 +3,8 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Server } from "../../lib/api";
+import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import PageProjectBar from "@/app/components/PageProjectBar";
 
 interface CategorizedTool {
   category: string;
@@ -82,6 +84,7 @@ export default function MCPServersPage() {
 
   return (
     <div className="space-y-6">
+      <PageProjectBar />
       {/* Tab bar */}
       <div className="flex items-center gap-1 border-b border-[var(--color-border)]">
         <h1 className="text-2xl font-bold mr-6">MCP</h1>
@@ -111,10 +114,10 @@ export default function MCPServersPage() {
                   <span className="font-medium text-sm">{s.name}</span>
                   <span className="text-xs text-[var(--color-text-muted)] ml-2">{s.command}</span>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded ${
+                <span className={`${BADGE_BASE} ${
                   s.source === "ingenium"
-                    ? (s.running ? "bg-[var(--color-success-bg)] text-green-700" : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]")
-                    : isGlobal ? (s.enabled ? "bg-[var(--color-success-bg)] text-green-700" : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]") : "bg-blue-100 text-blue-700"
+                    ? (s.running ? badgeTones("green") : badgeTones("muted"))
+                    : isGlobal ? (s.enabled ? badgeTones("green") : badgeTones("muted")) : badgeTones("blue")
                 }`}>
                   {s.source === "ingenium" ? (s.running ? "Running" : "Stopped") : isGlobal ? (s.enabled ? "Enabled" : "Disabled") : "External"}
                 </span>

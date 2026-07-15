@@ -19,6 +19,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { api, Task, BoardColumn, BoardConfig } from "../../../lib/api";
+import { badgeTones } from "../../../lib/badgeTones";
 import TaskDetail from "./TaskDetail";
 
 /* ------------------------------------------------------------------ */
@@ -53,12 +54,14 @@ const PRIORITY_COLORS: Record<string, string> = {
   low: "bg-green-500 text-white",
 };
 
-const COLUMN_COLORS: Record<string, string> = {
-  todo: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]",
-  in_progress: "bg-blue-100 text-blue-700",
-  review: "bg-amber-100 text-amber-700",
-  done: "bg-green-100 text-green-700",
-};
+function columnBadgeTones(columnId: string): string {
+  switch (columnId) {
+    case "in_progress": return badgeTones("blue");
+    case "review":      return badgeTones("amber");
+    case "done":        return badgeTones("green");
+    default:            return badgeTones("slate");
+  }
+}
 
 function priorityWeight(t: Task): number {
   return PRIORITY_WEIGHT[t.priority ?? ""] ?? 0;
@@ -144,6 +147,7 @@ function SortableCard({
   task,
   compact,
   onClick,
+  onDelete,
   bulkMode,
   isSelected,
   onToggleSelect,
@@ -151,6 +155,7 @@ function SortableCard({
   task: Task;
   compact: boolean;
   onClick: (t: Task) => void;
+  onDelete?: (id: string) => void;
   bulkMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: (id: string) => void;
@@ -178,7 +183,7 @@ function SortableCard({
   if (compact) {
     return (
       <div ref={setNodeRef} style={style} {...attributes} {...listeners}
-        className={`${baseCard} p-1.5 text-xs relative`}
+        className={`${baseCard} p-1.5 text-xs relative group`}
         onClick={() => onClick(task)}
       >
         {bulkMode && (
@@ -187,14 +192,35 @@ function SortableCard({
             onChange={() => onToggleSelect?.(task.id)}
             className="absolute top-1 left-1 rounded" />
         )}
-        <div className={`font-medium truncate ${bulkMode ? "pl-4" : ""}`}>{task.title}</div>
+        <div className={`font-medium truncate ${bulkMode ? "pl-4" : "pr-10"}`}>{task.title}</div>
+        {/* Quick actions (hover) */}
+        <div className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onClick(task); }}
+            className="p-0.5 rounded hover:bg-[var(--color-surface-hover)] text-[10px] leading-none"
+            title="Edit"
+          >
+            ✏️
+          </button>
+          {onDelete && (
+            <button
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => { e.stopPropagation(); onDelete(task.id); }}
+              className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/20 text-[10px] leading-none"
+              title="Delete"
+            >
+              🗑️
+            </button>
+          )}
+        </div>
       </div>
     );
   }
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}
-      className={`${baseCard} p-3 text-sm space-y-1.5 relative`}
+      className={`${baseCard} p-3 text-sm space-y-1.5 relative group`}
       onClick={() => onClick(task)}
     >
       {bulkMode && (
@@ -203,7 +229,7 @@ function SortableCard({
           onChange={() => onToggleSelect?.(task.id)}
           className="absolute top-2 left-2 rounded z-10" />
       )}
-      <div className={`font-semibold text-[var(--color-text-primary)] truncate ${bulkMode ? "pl-5" : ""}`}>{task.title}</div>
+      <div className={`font-semibold text-[var(--color-text-primary)] truncate ${bulkMode ? "pl-5" : "pr-10"}`}>{task.title}</div>
       <div className="flex items-center gap-2 flex-wrap">
         {task.priority && (
           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${PRIORITY_COLORS[task.priority] || "bg-gray-200 text-[var(--color-text-secondary)]"}`}>
@@ -231,6 +257,27 @@ function SortableCard({
         )}
         {task.estimated_hours != null && <TimePie estimated={task.estimated_hours} spent={task.spent_hours ?? 0} />}
       </div>
+      {/* Quick actions (hover) */}
+      <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onClick(task); }}
+          className="p-1 rounded hover:bg-[var(--color-surface-hover)] text-xs"
+          title="Edit"
+        >
+          ✏️
+        </button>
+        {onDelete && (
+          <button
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); onDelete(task.id); }}
+            className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/20 text-xs"
+            title="Delete"
+          >
+            🗑️
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -245,6 +292,8 @@ function ColumnDroppable({
   compact,
   wipLimit,
   onTaskClick,
+  onCreateTask,
+  onDeleteTask,
   bulkMode,
   selectedIds,
   onToggleSelect,
@@ -254,6 +303,8 @@ function ColumnDroppable({
   compact: boolean;
   wipLimit?: number;
   onTaskClick: (t: Task) => void;
+  onCreateTask?: (columnId: string, title: string) => Promise<void>;
+  onDeleteTask?: (id: string) => void;
   bulkMode?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (id: string) => void;
@@ -262,6 +313,20 @@ function ColumnDroppable({
     id: `col-${column.id}`,
     data: { type: "column", columnId: column.id },
   });
+
+  const [showAddInput, setShowAddInput] = useState(false);
+  const [addTitle, setAddTitle] = useState("");
+
+  const handleAddSubmit = async () => {
+    if (!addTitle.trim() || !onCreateTask) return;
+    try {
+      await onCreateTask(column.id, addTitle.trim());
+      setAddTitle("");
+      setShowAddInput(false);
+    } catch {
+      // Parent handles error display — leave input open for retry
+    }
+  };
 
   const threshold = wipLimit != null && tasks.length >= wipLimit;
 
@@ -273,7 +338,7 @@ function ColumnDroppable({
       {/* Column header */}
       <div
         className={`px-3 py-2 border-b border-[var(--color-border)] font-medium text-sm uppercase flex items-center justify-between ${
-          threshold ? "bg-red-100 text-red-800" : "text-[var(--color-text-secondary)]"
+          threshold ? `${badgeTones("red")}` : "text-[var(--color-text-secondary)]"
         }`}
       >
         <span className="truncate">{column.name}</span>
@@ -292,11 +357,44 @@ function ColumnDroppable({
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((t) => (
             <SortableCard key={t.id} task={t} compact={compact} onClick={onTaskClick}
+              onDelete={onDeleteTask}
               bulkMode={bulkMode} isSelected={selectedIds?.has(t.id)} onToggleSelect={onToggleSelect} />
           ))}
         </SortableContext>
         {tasks.length === 0 && (
           <p className="text-xs text-[var(--color-text-muted)] italic p-2">No tasks</p>
+        )}
+      </div>
+
+      {/* Inline add form */}
+      <div className="px-2 pb-2">
+        {showAddInput ? (
+          <div className="flex gap-1">
+            <input
+              autoFocus
+              value={addTitle}
+              onChange={(e) => setAddTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAddSubmit();
+                if (e.key === "Escape") { setShowAddInput(false); setAddTitle(""); }
+              }}
+              placeholder="Task title..."
+              className="border border-[var(--color-border)] rounded px-2 py-1 text-xs flex-1"
+            />
+            <button
+              onClick={handleAddSubmit}
+              className="bg-blue-600 text-white px-2 py-1 rounded text-xs hover:bg-blue-700"
+            >
+              Add
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowAddInput(true)}
+            className="w-full text-left px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] rounded"
+          >
+            + Add card
+          </button>
         )}
       </div>
     </div>
@@ -537,6 +635,28 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     }
   }, [selectedIds, bulkColumn, bulkAssignee, bulkPriority, project, onTasksChange]);
 
+  // Inline add task to a specific column
+  const handleAddTask = useCallback(async (columnId: string, title: string) => {
+    setError("");
+    const res = await api.tasks.create(title, project);
+    if (columnId !== "todo") {
+      await api.tasks.move(res.data.id, columnId, project);
+    }
+    const updated = await api.tasks.list(project);
+    onTasksChange(updated.data ?? []);
+  }, [project, onTasksChange]);
+
+  // Delete a task
+  const handleDeleteTask = useCallback(async (taskId: string) => {
+    try {
+      setError("");
+      await api.tasks.delete(taskId, project);
+      onTasksChange(tasks.filter((t) => t.id !== taskId));
+    } catch {
+      setError("Failed to delete task.");
+    }
+  }, [tasks, project, onTasksChange]);
+
   // Build column display order
   const columnWipMap = useMemo(() => {
     const map: Record<string, number | undefined> = {};
@@ -628,6 +748,8 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
                   compact={compact}
                   wipLimit={columnWipMap[col.id]}
                   onTaskClick={setSelectedTask}
+                  onCreateTask={handleAddTask}
+                  onDeleteTask={handleDeleteTask}
                   bulkMode={bulkMode}
                   selectedIds={selectedIds}
                   onToggleSelect={handleToggleSelect}
@@ -664,6 +786,8 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
                             compact={compact}
                             wipLimit={columnWipMap[col.id]}
                             onTaskClick={setSelectedTask}
+                            onCreateTask={handleAddTask}
+                            onDeleteTask={handleDeleteTask}
                             bulkMode={bulkMode}
                             selectedIds={selectedIds}
                             onToggleSelect={handleToggleSelect}

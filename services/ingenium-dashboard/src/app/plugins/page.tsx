@@ -5,6 +5,8 @@ import { useProject } from "../../lib/ProjectContext";
 import { api, Plugin } from "../../lib/api";
 import Overlay from "../components/Overlay";
 import MarkdownViewer from "../components/MarkdownViewer";
+import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
+import PageProjectBar from "@/app/components/PageProjectBar";
 
 /**
  * Plugin management page.
@@ -120,6 +122,7 @@ export default function PluginsPage() {
 
   return (
     <div className="space-y-8">
+      <PageProjectBar />
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Plugins</h1>
         <button
@@ -234,7 +237,7 @@ export default function PluginsPage() {
                         setEditPath(p.file_path);
                         setEditContent(content);
                       }}
-                      className="bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] py-1 px-3 rounded text-sm hover:bg-gray-200 transition-colors"
+                      className="bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] py-1 px-3 rounded text-sm hover:bg-[var(--color-surface-hover)] transition-colors"
                     >
                       Edit
                     </button>
@@ -242,8 +245,8 @@ export default function PluginsPage() {
                       onClick={(e) => { e.stopPropagation(); toggle(p); }}
                       className={`py-1 px-3 rounded text-sm transition-colors ${
                         p.enabled
-                          ? "bg-[var(--color-success-bg)] text-green-700 hover:bg-green-200"
-                          : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] hover:bg-gray-200"
+                          ? "bg-[var(--color-success-bg)] text-green-700 hover:bg-[var(--color-surface-hover)]"
+                          : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]"
                       }`}
                     >
                       {p.enabled ? "Enabled" : "Disabled"}

@@ -2,6 +2,7 @@
 export const dynamic = "force-dynamic";
 import { useState, useEffect, useMemo } from "react";
 import { api, Project } from "../../lib/api";
+import { badgeTones } from "../../lib/badgeTones";
 import Overlay from "../components/Overlay";
 
 function formatRelative(iso: string): string {
@@ -111,8 +112,8 @@ export default function ProjectsPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-lg font-semibold">{p.name}</span>
-                    {!!p.is_global && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-medium">GLOBAL</span>}
-                    {p.archived_at && <span className="text-xs bg-red-100 text-[var(--color-error-text)] px-2 py-0.5 rounded font-medium">ARCHIVED</span>}
+                    {!!p.is_global && <span className={`text-xs ${badgeTones('blue')} px-2 py-0.5 rounded font-medium`}>GLOBAL</span>}
+                    {p.archived_at && <span className={`text-xs ${badgeTones('error')} px-2 py-0.5 rounded font-medium`}>ARCHIVED</span>}
                   </div>
                   <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Created {formatRelative(p.created_at)}</div>
                 </div>
@@ -194,9 +195,9 @@ export default function ProjectsPage() {
                           {d.pipeline.map((e: any) => (
                             <div key={e.created_at} className="text-xs flex gap-3">
                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                e.event_type?.startsWith("synthesis") ? "bg-emerald-100 text-emerald-700" :
-                                e.event_type?.startsWith("trait") ? "bg-blue-100 text-blue-700" :
-                                e.event_type?.startsWith("obs") ? "bg-amber-100 text-amber-700" :
+                                e.event_type?.startsWith("synthesis") ? badgeTones('emerald') :
+                                e.event_type?.startsWith("trait") ? badgeTones('blue') :
+                                e.event_type?.startsWith("obs") ? badgeTones('amber') :
                                 "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
                               }`}>{e.event_type}</span>
                               <span className="text-[var(--color-text-secondary)] flex-1">{e.title}</span>
