@@ -1,5 +1,5 @@
 import { Router, Response } from "express";
-import { logger, emailCache, synthesisLlm } from "ingenium-core";
+import { logger, emailCache, synthesisLlm, settings } from "ingenium-core";
 import {
   // Account CRUD
   listAccounts,
@@ -472,6 +472,23 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
   const { account } = result;
   const projectId = resolveEmailProject();
 
+  // ── Settings gate: smart replies disabled ─────────────────────────────────
+  const smartRepliesEnabled = settings.getSetting(projectId, "mail_smart_replies_enabled");
+  if (smartRepliesEnabled === "false") {
+    res.json({ suggestions: [], source: "disabled", configured: true });
+    return;
+  }
+
+  // ── Noreply sender check (before cache to avoid stale noreply suggestions) ─
+  const senderCheck = emailCache.getCachedEmail(account.id, folder, uid);
+  const noreplyPattern = /no[-_.]?reply|do[-_.]?not[-_.]?reply/i;
+  const senderAddr = senderCheck?.from_addr ?? "";
+  const senderName = senderCheck?.from_name ?? "";
+  if (noreplyPattern.test(senderAddr) || noreplyPattern.test(senderName)) {
+    res.json({ suggestions: [], source: "noreply", configured: true });
+    return;
+  }
+
   // ── 1. Check cached suggestions (instant return) ─────────────────────────
   const cached = emailCache.getCachedSuggestions(account.id, folder, uid);
   if (cached) {
@@ -521,6 +538,9 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
       const suggestions = suggestion
         ? [{ tone: "matched", subject: suggestion.subject, body: suggestion.body }]
         : [];
+      if (suggestions.length > 0) {
+        emailCache.upsertEmailSuggestions(account.id, folder, uid, suggestions, null);
+      }
       res.json({ suggestions, source: "heuristic", configured: false });
     } catch (err: any) {
       logger.error("email", `Suggest response failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
@@ -538,6 +558,9 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
       const suggestions = suggestion
         ? [{ tone: "matched", subject: suggestion.subject, body: suggestion.body }]
         : [];
+      if (suggestions.length > 0) {
+        emailCache.upsertEmailSuggestions(account.id, folder, uid, suggestions, null);
+      }
       res.json({ suggestions, source: "heuristic", configured: false });
       return;
     }

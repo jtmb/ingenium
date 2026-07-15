@@ -220,7 +220,7 @@ async function getEmailClientStatus(): Promise<AppInfo> {
       return { name: "email-client", state: "stopped", description: "Mail sync engine", detail: "Engine not running" };
     }
     if (!engine.heartbeatAt) {
-      return { name: "email-client", state: "starting", description: "Mail sync engine", detail: "Engine starting..." };
+      return { name: "email-client", state: "healthy", description: "Mail sync engine", detail: "Engine active, awaiting first heartbeat" };
     }
     const hbAge = Date.now() - new Date(engine.heartbeatAt).getTime();
     if (hbAge > 120_000) {
@@ -269,7 +269,11 @@ async function getSynthesisStatus(): Promise<AppInfo> {
     }
 
     if (!lastRun) {
-      return { name: "synthesis-engine", state: "starting", description: "Synthesis pipeline", detail: "No runs yet" };
+      const intervalMin = Math.round(intervalMs / 60000);
+      const detail = intervalMs > 0
+        ? `No runs yet — checks every ${intervalMin}m`
+        : "No runs yet";
+      return { name: "synthesis-engine", state: "healthy", description: "Synthesis pipeline", detail };
     }
     const age = Date.now() - lastRun;
     if (age <= intervalMs * 1.5) {
