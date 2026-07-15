@@ -175,7 +175,14 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
 
   // --- Custom fields state ---
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
-  const [customFields, setCustomFields] = useState<Record<string, any>>(task.custom_fields ?? {});
+  const [customFields, setCustomFields] = useState<Record<string, any>>(() => {
+    // Same JSON-text-as-string pattern as columns/custom_field_defs —
+    // the DB stores custom_fields as JSON.stringify'd text and returns it unparsed.
+    if (typeof task.custom_fields === "string") {
+      try { return JSON.parse(task.custom_fields); } catch { return {}; }
+    }
+    return task.custom_fields ?? {};
+  });
 
   // --- Dispatch as Job state ---
   const [dispatching, setDispatching] = useState(false);
@@ -193,7 +200,12 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     setEstimateMin(task.estimate_minutes?.toString() ?? "");
     setSpentMin(task.spent_minutes?.toString() ?? "");
     setRemainingMin(task.remaining_minutes?.toString() ?? "");
-    setCustomFields(task.custom_fields ?? {});
+    // Parse custom_fields if it comes back as a JSON string (DB storage format)
+    if (typeof task.custom_fields === "string") {
+      try { setCustomFields(JSON.parse(task.custom_fields)); } catch { setCustomFields({}); }
+    } else {
+      setCustomFields(task.custom_fields ?? {});
+    }
   }, [task]);
 
   // Load data
@@ -438,7 +450,14 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
 
   // --- Custom fields ---
   const customFieldDefs = useMemo<CustomFieldDef[]>(() => {
-    return boardConfig?.custom_field_defs ?? [];
+    const raw = boardConfig?.custom_field_defs;
+    // DB stores custom_field_defs as JSON.stringify'd text (same as columns).
+    // BoardView already parses columns on its side, but TaskDetail gets the
+    // raw string from its own fetch and must parse it here.
+    if (typeof raw === "string") {
+      try { return JSON.parse(raw); } catch { return []; }
+    }
+    return Array.isArray(raw) ? raw : [];
   }, [boardConfig]);
 
   const handleCustomFieldChange = useCallback((fieldName: string, value: any) => {
