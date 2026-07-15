@@ -19,6 +19,7 @@ export default function SmartSuggest({
   folder,
   mode,
   apiUrl,
+  onDraft,
 }: {
   emailUid?: string;
   accountId?: string;
@@ -26,6 +27,7 @@ export default function SmartSuggest({
   folder?: string;
   mode?: "auto" | "manual";
   apiUrl?: string;
+  onDraft?: (draft: { tone: string; subject: string; body: string }) => void;
 }) {
   const [suggestions, setSuggestions] = useState<Array<{ tone: string; subject: string; body: string }>>([]);
   const [configured, setConfigured] = useState<boolean>(true);
@@ -168,6 +170,10 @@ export default function SmartSuggest({
               onClick={() => navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`)}
               className="text-xs text-[var(--color-text-link)] hover:underline"
             >Copy</button>
+            <button
+              onClick={() => onDraft?.(draft)}
+              className="text-xs text-[var(--color-text-link)] hover:underline"
+            >Draft</button>
           </div>
           <p className="text-sm font-medium text-[var(--color-text-primary)]">{draft.subject}</p>
           <p className="text-sm text-[var(--color-text-secondary)] line-clamp-4">{draft.body}</p>
