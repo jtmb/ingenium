@@ -21,6 +21,10 @@ export default function MailPanel() {
   const [bodyWindow, setBodyWindow] = useState(200);
   const [loadingSync, setLoadingSync] = useState(true);
 
+  // Smart replies state
+  const [smartRepliesEnabled, setSmartRepliesEnabled] = useState(true);
+  const [smartRepliesMode, setSmartRepliesMode] = useState("auto");
+
   // Password visibility toggles
   const [showPw, setShowPw] = useState<Record<string, boolean>>({});
   const togglePw = (name: string) => setShowPw((prev) => ({ ...prev, [name]: !prev[name] }));
@@ -57,14 +61,20 @@ export default function MailPanel() {
       api.settings.get("mail_sync_interval_ms", project),
       api.settings.get("mail_offline_window", project),
       api.settings.get("mail_body_window", project),
+      api.settings.get("mail_smart_replies_enabled", project),
+      api.settings.get("mail_smart_replies_mode", project),
     ])
-      .then(([intervalR, offlineR, bodyR]) => {
+      .then(([intervalR, offlineR, bodyR, enabledR, modeR]) => {
         const ms = parseInt(intervalR.data?.value, 10);
         if (!isNaN(ms) && ms >= 0) setMailIntervalMin(ms / 60000);
         const o = parseInt(offlineR.data?.value, 10);
         if (!isNaN(o) && o > 0) setOfflineWindow(o);
         const b = parseInt(bodyR.data?.value, 10);
         if (!isNaN(b) && b > 0) setBodyWindow(b);
+        const enabledVal = enabledR.data?.value;
+        if (enabledVal === "false") setSmartRepliesEnabled(false);
+        else setSmartRepliesEnabled(true);
+        setSmartRepliesMode(modeR.data?.value === "manual" ? "manual" : "auto");
       })
       .catch(() => {})
       .finally(() => setLoadingSync(false));
@@ -261,6 +271,42 @@ export default function MailPanel() {
               />
               <span className="text-xs text-[var(--color-text-muted)]">bodies</span>
             </div>
+          </SettingRow>
+
+          <SettingRow label="Enable Smart Replies" description="Show AI-drafted reply suggestions when reading emails">
+            <input
+              type="checkbox"
+              checked={smartRepliesEnabled}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setSmartRepliesEnabled(checked);
+                saveSetting(
+                  "mail_smart_replies_enabled",
+                  checked ? "true" : "false",
+                  checked ? "Smart replies enabled ✓" : "Smart replies disabled ✓",
+                );
+              }}
+              className="w-4 h-4 cursor-pointer"
+            />
+          </SettingRow>
+
+          <SettingRow label="Trigger mode" description="How smart replies are triggered">
+            <select
+              value={smartRepliesMode}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSmartRepliesMode(v);
+                saveSetting(
+                  "mail_smart_replies_mode",
+                  v,
+                  v === "auto" ? "Trigger mode set to automatic ✓" : "Trigger mode set to manual ✓",
+                );
+              }}
+              className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+            >
+              <option value="auto">Automatic (on email open)</option>
+              <option value="manual">Manual (click to generate)</option>
+            </select>
           </SettingRow>
         </>
       )}

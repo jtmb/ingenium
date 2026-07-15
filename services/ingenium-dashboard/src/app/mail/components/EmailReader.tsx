@@ -1,6 +1,8 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import SmartSuggest from "./SmartSuggest";
+import { api } from "../../../lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 
@@ -14,6 +16,7 @@ export default function EmailReader({
   downloadError,
   onRetry,
   accountId,
+  project,
   onReply,
   onForward,
   onDelete,
@@ -25,11 +28,34 @@ export default function EmailReader({
   downloadError?: string | null;
   onRetry?: () => void;
   accountId?: string;
+  project?: string;
   onReply: () => void;
   onForward: () => void;
   onDelete: () => void;
   onArchive: () => void;
 }) {
+  const [smartRepliesEnabled, setSmartRepliesEnabled] = useState<boolean | null>(null);
+  const [smartRepliesMode, setSmartRepliesMode] = useState<"auto" | "manual">("auto");
+
+  useEffect(() => {
+    const mailProject = project || "global-default";
+    Promise.all([
+      api.settings.get("mail_smart_replies_enabled", mailProject),
+      api.settings.get("mail_smart_replies_mode", mailProject),
+    ])
+      .then(([enabledRes, modeRes]) => {
+        const val = enabledRes.data?.value;
+        // Default to enabled when setting is absent
+        setSmartRepliesEnabled(val !== "false");
+        setSmartRepliesMode(modeRes.data?.value === "manual" ? "manual" : "auto");
+      })
+      .catch(() => {
+        // Default to enabled on error
+        setSmartRepliesEnabled(true);
+        setSmartRepliesMode("auto");
+      });
+  }, [project]);
+
   // No email selected
   if (!email && !loading) {
     return (
@@ -153,10 +179,16 @@ export default function EmailReader({
         </button>
       </div>
 
-      {/* Smart suggestion */}
-      {accountId && email?.uid && (
+      {/* Smart suggestion — gated by enabled setting & folder prop for backend */}
+      {accountId && email?.uid && smartRepliesEnabled !== false && (
         <div className="px-4 py-2 border-b border-[var(--color-border)]">
-          <SmartSuggest emailUid={email.uid} accountId={accountId} isUnread={isUnread} />
+          <SmartSuggest
+            emailUid={email.uid}
+            accountId={accountId}
+            isUnread={isUnread}
+            folder={email.folder}
+            mode={smartRepliesMode}
+          />
         </div>
       )}
 
