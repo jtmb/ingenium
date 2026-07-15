@@ -1,12 +1,12 @@
 # **🔴HARD RULES:**
  - Your job is to be the brain of the operation.
  - Map Out documentation and testing at every phase and agent orchestration.
- - You are in Plan mode. You use @ingenium-explore for explore actions or @ingenium-software-engineer-premium only if you require a better model with deeper reasoning. You use @ingenium-docs for documentations and finally @ingenium-qa and @vision-bridge to view screenshots and give you detailed descriptions.
+ - You are in Plan mode. You use @ingenium-explore for explore actions or @ingenium-software-engineer-premium only if you require a better model with deeper reasoning. You use @ingenium-docs for documentations and finally @ingenium-qa.
  - When building a plan for the Orchestrator to execute you will build it with agent paralyzation in mind. 
  You are allowed to plan for spawning 6 subagents at once. Obviously don't spawn 6 subagents for everything just tasks that can use the speedup (like software engineer or qa tasks) 
  - At the end of your plan when it's ready to handoff, include a copy paste line i can copy that tells the orchestrator how many agents he's allowed to run. Keep this short about one to two sentences. 
  Example:
- ` "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, ensure you use the todo tool and please ensure you check over the sub-agent output at the end for concerns, reccomendations, findings, bugs etc. Add anny findings as a new task in the todo and have them fixed. Read .opencode/skills/local-models/references/deep-seek.md in full. Apply detection prompts to every subsequent step. Ensure subagents receive this instruction as well."`
+ ` "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, ensure you use the todo tool and please ensure you check over the sub-agent output at the end for concerns, reccomendations, findings, bugs etc. Add anny findings as a new task in the todo and have them fixed. Read .opencode/skills/local-models/references/deep-seek.md in full. Apply detection prompts to every subsequent step. Use @vision-bridge to view screenshots and give you detailed descriptions. Ensure subagents receive this instruction as well. At the end please give me a summary in text of what was done."`
 
 ## DIRECTIVE:
 One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below:
@@ -14,30 +14,16 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 
 ### THE REQUESTS:
 
-1. Please move settings button to the very right of the bav bar, remove the project selector from nav bar, move it into pages where it applies. Also remove the dark mode/light mode toggle from top nav it's already in settings pannel.
+1. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
 
-2. Deepseek does not need to afk watch the docker container for 5 minutes that adds no value but waste time.
+2. /mail i want the smart replies to only show up with the reply box and to be to be integrated into the reply box somehow. Right now with the reply box and smart replies up you can't see the email content at all.... please see image /home/brajam/repos/gh-llm-bootstrap/image.png
 
-3. Dark mode has a lot of incositencies/ Lack of visible card hover states. Please use screenshots to validate each page in dark mode. I want consitency across the app. Lightmode is fine, it's dark mode that is lacking. Especially the pill button colours they are not right for dark mode at all. The settings pannel looks fine. Try to use the theming from there. 
+3. /mail Smart replies are still not saving. Every time the instance is restarted or rebuilt the smart replies are gone and it regenerates them...
 
-4. /tasks the "add" task button does not work. Please ensure that /tasks is a fully functional kanban module.
+4. I would like to be able to resize the emails pannel to the right (makes the email reader shrink with it they scale together)
 
-5. /mail refresh button does nothing. My emails are there now but im not getting new ones. Also add a visual spinning animation to the current refresh icon when it's doing the fetch
-
-6. /mail the attachments don't download. It grabs some random file with characters instead of the document :
-
-(example email from starred ibox: James medical note Jun 30 2026)
-
-ANGjdJ_Jt0bbNXZHVa4NBe1d3kq0q71tioY4USkm1F0gdEs0EAp4RAKZPXDX-WhKYRCUI6QGihPXKRUND5gm8PXblBBibYgJ0Mk54dSk2XeAjG07bxGIx3HnfHV8qnUxJqBI8rNF6ILlCWaUkOp1GD1RSivB9IDjfSb2tN6lAHEb29JM1UbKa9kiPhZKasg63VVhMZk2_iJCQVJ9WuZNk3KnzU
 
 **Documentation references bellow:**
-
-7. Getting an error on response suggestions for email in http://localhost:3000/logs:
-
-19:24:28	Email	
-ERROR	Suggest response failed for account b5867b1d-84b5-473f-9e97-5f7a8d6e1fe8
-19:24:28	Email	
-ERROR	Suggest response failed for account b5867b1d-84b5-473f-9e97-5f7a8d6e1fe8
 ---
 
 ### Documentation References
@@ -52,9 +38,32 @@ ERROR	Suggest response failed for account b5867b1d-84b5-473f-9e97-5f7a8d6e1fe8
 | README | [`README.md`](README.md) |
 | Email | [`docs/HOW-TO/email.md`](docs/HOW-TO/email.md) |
 | Self-Learning Pipeline | [`docs/self-learning-pipeline.md`](docs/self-learning-pipeline.md) |
-
+| Tasks | [`docs/HOW-TO/tasks.md`](docs/HOW-TO/tasks.md)
 ---
+<!-- 1. <button class="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700">Add</button> in /tasks Still does not work. I click the blue "Add" button nothing happens.
 
+2. same with: <button class="bg-blue-600 text-white p-2 rounded text-sm hover:bg-blue-700">Add Server</button> in /mcp-servers the blue "Add Server" button does not work. is taking up the entire screen. It should be a smaller screen overlay. The actuall boxes where you enter information are all centered anyways so the extra space is just dead space. Also the active email account should automatically be selected as the From in the dropdown.
+
+3. in /logs there are still white borders around the "INFO" style pills.
+
+4. /mail Smart reply works! There does seem to be a bug. Every time i open an email it re-generates the smart reply again even if it already generated smart replies for that particullar email already. 
+
+5. /mail once step 4 is fixed, i would like it to be a setting in the settings menu for mail. I would like the user to be able to select if they want smart replies on or off. There should also be a setting for smart replies happening automatically or only when the user presses a button in the smart replies section to generate them. 
+
+6. /mail the compose screen is a full screen overlay with all the content centered in the middle same with /jobs add job screen. Please make the fulll screen overlays one standard size it should not eat the entire screen. The /skills open state overlay size is a good size to use as a example. 
+
+7. /Service Status synthesys engine shows status as "starting" but its not accurate the service is fine, just the actuall card reading it seems to be bugged. When i i open the synthesis-engine card to see its details i see:
+
+```
+"Failed to load service details
+
+HTTP 404
+
+synthesis-engine
+Process Logs (stderr)
+↻ Refresh
+BAD_NAME: synthesis-engine"
+``` -->
 
 <!-- 1. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
 
