@@ -234,6 +234,51 @@ export function updateSyncState(
   checkpointAfterWrite();
 }
 
+// ── Email suggestions cache ──────────────────────────────────────────────────
+
+export interface CachedEmailSuggestions {
+  account_id: string; folder: string; uid: string;
+  suggestions_json: string; model: string | null; generated_at: string;
+}
+
+/**
+ * Retrieve cached AI-generated reply suggestions for an email.
+ * Returns undefined if no suggestions have been generated yet.
+ */
+export function getCachedSuggestions(
+  accountId: string, folder: string, uid: string
+): CachedEmailSuggestions | undefined {
+  const db = getDb(dbPath());
+  return db.prepare(
+    "SELECT * FROM email_suggestions WHERE account_id = ? AND folder = ? AND uid = ?"
+  ).get(accountId, folder, uid) as CachedEmailSuggestions | undefined;
+}
+
+/**
+ * Upsert AI-generated reply suggestions for an email.
+ * Uses the same defensive parent-check pattern as upsertEmailBody:
+ * verifies the email_cache row exists before inserting to avoid FK violations.
+ */
+export function upsertEmailSuggestions(
+  accountId: string, folder: string, uid: string,
+  suggestions: Array<{ tone: string; subject: string; body: string }>,
+  model: string | null,
+): void {
+  execTransaction(() => {
+    const db = getDb(dbPath());
+    const parent = db.prepare(
+      "SELECT 1 FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?"
+    ).get(accountId, folder, uid);
+    if (!parent) return;
+    db.prepare(
+      `INSERT OR REPLACE INTO email_suggestions
+         (account_id, folder, uid, suggestions_json, model, generated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))`
+    ).run(accountId, folder, uid, JSON.stringify(suggestions), model);
+  });
+  checkpointAfterWrite();
+}
+
 // ── Sync status queries ────────────────────────────────────────────────────
 
 export interface FolderSyncStatus {

@@ -1,5 +1,5 @@
 import { Router, Response } from "express";
-import { logger, emailCache } from "ingenium-core";
+import { logger, emailCache, synthesisLlm } from "ingenium-core";
 import {
   // Account CRUD
   listAccounts,
@@ -27,6 +27,9 @@ import {
   getFreshGmailToken,
   // Responder
   suggestResponse,
+  // LLM smart-reply
+  getVoiceSamples,
+  generateSmartReplies,
   // Watcher
   startWatcher,
   getWatcherStatus,
@@ -448,7 +451,10 @@ emailsRouter.get("/triage", async (req, res) => {
   res.json({ data: unread, total: unread.length, source: "cache" });
 });
 
-/** GET /suggest/:uid?project=&account=&folder= — Suggest a response for an email (cache-only). */
+/** GET /suggest/:uid?project=&account=&folder= — Smart-reply suggestions for an email.
+ *  Cache-first: returns cached suggestions instantly.
+ *  If unread + no cache + LLM configured → generates via voice-sample LLM.
+ *  Falls back to heuristic pattern-matching if no LLM configured. */
 emailsRouter.get("/suggest/:uid", async (req, res) => {
   const accountId = req.query.account as string | undefined;
   const result = await getAccountAuthOrError(res, accountId);
@@ -464,11 +470,23 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
 
   const folder = (req.query.folder as string) ?? "INBOX";
   const { account } = result;
+  const projectId = resolveEmailProject();
 
-  // Check if body is cached (required for suggestion)
+  // ── 1. Check cached suggestions (instant return) ─────────────────────────
+  const cached = emailCache.getCachedSuggestions(account.id, folder, uid);
+  if (cached) {
+    try {
+      const suggestions = JSON.parse(cached.suggestions_json) as Array<{ tone: string; subject: string; body: string }>;
+      res.json({ suggestions, source: "cache", configured: true });
+      return;
+    } catch {
+      // Corrupt cache — fall through to regenerate
+    }
+  }
+
+  // ── 2. Check body cache (required for any suggestion path) ───────────────
   const cachedBody = emailCache.getCachedEmailBody(account.id, folder, uid);
   if (!cachedBody) {
-    // Body not cached — hint engine to fetch it
     boostBody(account.id, folder, uid);
     boostFolder(account.id, folder);
     res.status(202).json({
@@ -479,20 +497,82 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     return;
   }
 
-  // Body available — generate suggestion from cache.
-  // No IMAP needed — suggestResponse now uses the email DB cache directly.
+  // ── 3. Determine "new" status from flags ─────────────────────────────────
+  // flags stored as JSON array string, e.g. '["\\\\Seen"]'
+  const cachedListing = emailCache.getCachedEmail(account.id, folder, uid);
+  let isRead = false;
+  if (cachedListing?.flags) {
+    try {
+      const flags: string[] = JSON.parse(cachedListing.flags);
+      isRead = flags.includes("\\Seen");
+    } catch { /* treat as unread */ }
+  }
+  if (isRead) {
+    res.json({ suggestions: [], source: "not-new", configured: true });
+    return;
+  }
+
+  // ── 4. Unread, no cache, body available → generate ──────────────────────
+  const configured = synthesisLlm.isLLMSynthesisConfigured(projectId);
+  if (!configured) {
+    // No LLM — fall back to heuristic pattern-matching
+    try {
+      const suggestion = await suggestResponse(projectId, account.id, uid, folder);
+      const suggestions = suggestion
+        ? [{ tone: "matched", subject: suggestion.subject, body: suggestion.body }]
+        : [];
+      res.json({ suggestions, source: "heuristic", configured: false });
+    } catch (err: any) {
+      logger.error("email", `Suggest response failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
+      res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+    }
+    return;
+  }
+
+  // LLM configured — generate smart replies with voice samples
   try {
-    const suggestion = await suggestResponse(resolveEmailProject(), account.id, uid, folder);
-    if (!suggestion) {
-      res.status(404).json({
-        error: { code: "NOT_FOUND", message: `No response suggestion for UID ${uid}` },
-      });
+    const llmConfig = synthesisLlm.resolveLLMConfig(projectId);
+    if (!llmConfig?.model || !llmConfig?.endpoint) {
+      // Edge case: config exists but is incomplete
+      const suggestion = await suggestResponse(projectId, account.id, uid, folder);
+      const suggestions = suggestion
+        ? [{ tone: "matched", subject: suggestion.subject, body: suggestion.body }]
+        : [];
+      res.json({ suggestions, source: "heuristic", configured: false });
       return;
     }
-    res.json({ data: suggestion });
+
+    // Build target email from cache
+    const targetEmail = {
+      from: cachedListing?.from_addr ?? "unknown",
+      subject: cachedListing?.subject ?? "(no subject)",
+      bodySnippet: cachedBody.text?.substring(0, 800) ?? cachedListing?.snippet ?? "",
+    };
+
+    // Get voice samples from Sent folder
+    const creds = getCredentials(projectId, account.id);
+    const freshToken = await getFreshGmailToken(account.id).catch(() => "");
+    const tokens: OAuthToken = creds?.tokens ?? { accessToken: freshToken, refreshToken: "", expiryDate: 0, scope: "" };
+    const voiceSamples = await getVoiceSamples(account, tokens, 15);
+
+    // Generate
+    const suggestions = await generateSmartReplies(
+      targetEmail,
+      voiceSamples,
+      { model: llmConfig.model, endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey },
+    );
+
+    // Persist to cache
+    if (suggestions.length > 0) {
+      emailCache.upsertEmailSuggestions(
+        account.id, folder, uid, suggestions, llmConfig.model ?? null,
+      );
+    }
+
+    res.json({ suggestions, source: "generated", configured: true });
   } catch (err: any) {
-    logger.error("email", `Suggest response failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+    logger.error("email", `Smart-reply generation failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
+    res.status(500).json({ error: { code: "LLM_ERROR", message: err.message } });
   }
 });
 

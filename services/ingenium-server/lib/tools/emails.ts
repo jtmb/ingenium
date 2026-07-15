@@ -137,28 +137,37 @@ export async function emailSuggestResponse(project: string, account: string, uid
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Auto-draft a response to an email based on learned patterns */
+/** Auto-draft a response to an email based on learned patterns or LLM smart-replies */
 export async function emailDraftResponse(project: string, account: string, uid: number, folder?: string) {
   const suggest = await api.get(`/emails/suggest/${uid}`, {
     project, account,
     folder: folder ?? "INBOX",
   });
-  if (!suggest.data?.body) {
+  // New API shape: { suggestions: [...], source: "...", configured: boolean }
+  // Old API shape: { data: { body, subject, matchedSkill, ... } } — for backward compat
+  const suggestions: Array<{ tone?: string; subject?: string; body?: string }> =
+    suggest.data?.suggestions ?? (suggest.data?.body ? [suggest.data] : []);
+  const first = suggestions[0];
+  if (!first?.body) {
     return { content: [{ type: "text" as const, text: JSON.stringify({ error: "No suggestion available" }) }] };
   }
+  const recipient = suggest.data?.originalSender
+    ? [{ address: suggest.data.originalSender }]
+    : [];
   const draft = await api.post("/emails/draft", {
     account,
-    to: (suggest.data.originalSender ? [{ address: suggest.data.originalSender }] : []),
-    subject: suggest.data.subject ?? "Re:",
-    html: suggest.data.body,
+    to: recipient,
+    subject: first.subject ?? "Re:",
+    html: first.body,
   }, { project });
+  const sourceInfo = suggest.data?.source ?? "unknown";
   await api.post("/observations", {
     observation_type: "preference",
-    content: `Agent auto-drafted response to email #${uid} based on pattern "${suggest.data.matchedSkill ?? "unknown"}"`,
+    content: `Agent auto-drafted response to email #${uid} (source: ${sourceInfo})`,
     importance: 7,
     source: "agent",
   }, { project });
-  return { content: [{ type: "text" as const, text: JSON.stringify({ draft: draft.data, suggestion: suggest.data }) }] };
+  return { content: [{ type: "text" as const, text: JSON.stringify({ draft: draft.data, suggestion: first, source: sourceInfo }) }] };
 }
 
 /** List all learned email response patterns (skills with category 'email') */

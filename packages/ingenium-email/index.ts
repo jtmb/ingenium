@@ -15,3 +15,4 @@ export * from "./lib/responder.js";
 export * from "./lib/watcher.js";
 export * from "./lib/sync.js";
 export * from "./lib/sync-engine.js";
+export * from "./lib/suggest-llm.js";
