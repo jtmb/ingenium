@@ -575,3 +575,35 @@ The `Overlay` component (used for compose, detail views, and modals) provides th
 | EmailComposer inside Overlay | Overlay: `bg-white rounded-lg shadow-2xl` + body `px-6 py-4` | Bare form fields: `space-y-4 max-w-2xl mx-auto` |
 
 > 🔴 **Rule**: Any component rendered as a child of `Overlay` MUST NOT include `bg-white`, `rounded`, `border`, or `shadow` on its outermost wrapper. The Overlay provides these. The child component should only provide layout and spacing classes for its internal content (e.g., `space-y-4`, `max-w-2xl mx-auto`). This keeps the overlay container consistent and avoids nested whites or double-rounded corners.
+
+### Inline-Embedded-Compose Pattern
+
+The email page (`/mail`) supports two composing contexts, each with a different layout strategy:
+
+| Context | Where | Pattern | Component Prop |
+|---------|-------|---------|---------------|
+| Reply / Draft (context-anchored) | Inside `EmailReader.tsx` pane, below the email body | **Inline-in-pane**: Compact `EmailComposer` with `inline={true}`. Renders in a `border-t` container at the bottom of the reader, no overlay, no backdrop. Uses compact layout (single-line labels like "From"/"To"/"Subj", smaller textarea at `min-h-[150px]`, tighter button spacing). | `inline` |
+| Compose New / Forward (context-free) | Full-screen `Overlay` from `page.tsx` | **Modal-overlay**: Standard `EmailComposer` (no `inline` prop, or `inline={false}`) inside the shared `Overlay` component. Renders as a modal with `bg-white rounded-lg shadow-2xl`, full label-column layout, `min-h-[300px]` textarea. The Overlay provides the container shell — the composer provides `space-y-4 max-w-2xl mx-auto` only. | _omitted_ or `inline={false}` |
+
+**When to use inline vs modal:**
+- **Use inline** when the compose action is anchored to a specific email context (Reply, Draft, Forward-as-reply) and should remain visually attached to that email. The composer appears at the bottom of the reader pane with `border-t` separating it from the email body.
+- **Use modal** when the compose action creates a new message independent of the current context (Compose New, standalone Forward). The composer opens in a centered overlay with backdrop.
+
+**Reference implementation:**
+- `services/ingenium-dashboard/src/app/mail/components/EmailComposer.tsx` lines 83–256 (inline variant) and lines 262–435 (modal variant)
+- `services/ingenium-dashboard/src/app/mail/components/EmailReader.tsx` lines 393–417 (inline usage)
+- `services/ingenium-dashboard/src/app/mail/page.tsx` lines 579–597 (modal usage)
+
+```html
+<!-- Inline — compact, in-pane -->
+<div class="border-t border-[var(--color-border)] px-4 py-3">
+  <EmailComposer inline ... />
+</div>
+
+<!-- Modal — full overlay -->
+<Overlay isOpen={showCompose} onClose={...} title="Compose">
+  <EmailComposer ... />
+</Overlay>
+```
+
+> 🔴 **Rule**: When using the inline variant, never wrap `EmailComposer` in an `Overlay`. The inline variant is self-contained and renders inside its parent pane using `border-t` for visual separation. Wrapping it in an Overlay defeats the purpose — it would add a backdrop and modal positioning that conflict with the context-anchored intent.
