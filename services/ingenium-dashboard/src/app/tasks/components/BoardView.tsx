@@ -316,6 +316,7 @@ function ColumnDroppable({
 
   const [showAddInput, setShowAddInput] = useState(false);
   const [addTitle, setAddTitle] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
 
   const handleAddSubmit = async () => {
     if (!addTitle.trim() || !onCreateTask) return;
@@ -323,8 +324,9 @@ function ColumnDroppable({
       await onCreateTask(column.id, addTitle.trim());
       setAddTitle("");
       setShowAddInput(false);
-    } catch {
-      // Parent handles error display — leave input open for retry
+      setAddError(null);
+    } catch (err: any) {
+      setAddError(err?.message || "Failed to add task. Check your connection and try again.");
     }
   };
 
@@ -376,7 +378,7 @@ function ColumnDroppable({
               onChange={(e) => setAddTitle(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleAddSubmit();
-                if (e.key === "Escape") { setShowAddInput(false); setAddTitle(""); }
+                if (e.key === "Escape") { setShowAddInput(false); setAddTitle(""); setAddError(null); }
               }}
               placeholder="Task title..."
               className="border border-[var(--color-border)] rounded px-2 py-1 text-xs flex-1"
@@ -396,6 +398,7 @@ function ColumnDroppable({
             + Add card
           </button>
         )}
+        {addError && <p className="text-xs text-red-600 mt-1">{addError}</p>}
       </div>
     </div>
   );
@@ -496,8 +499,17 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     api.tasks
       .boardConfig(project)
       .then((r) => {
-        if (r.data?.columns?.length) {
-          setColumns(r.data.columns.sort((a, b) => a.order - b.order));
+        if (r.data?.columns) {
+          try {
+            const parsed = typeof r.data.columns === "string"
+              ? JSON.parse(r.data.columns)
+              : r.data.columns;
+            if (Array.isArray(parsed) && parsed.length) {
+              setColumns(parsed.sort((a: any, b: any) => a.order - b.order));
+            }
+          } catch (e) {
+            console.warn("Failed to parse board columns, using defaults:", e);
+          }
         }
       })
       .catch(() => {

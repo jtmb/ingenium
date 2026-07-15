@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Task } from "../../lib/api";
@@ -32,8 +32,20 @@ const VIEW_OPTIONS: { mode: ViewMode; label: string }[] = [
 /**
  * Task board page with view switcher (Board / List / Timeline).
  * View mode is persisted via the `?view=` query parameter.
+ *
+ * Wrapped in <Suspense> because useProject() (via ProjectContext)
+ * internally calls useSearchParams(), which requires a Suspense
+ * boundary in Next.js 15+.
  */
 export default function TasksPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading tasks…</div>}>
+      <TasksContent />
+    </Suspense>
+  );
+}
+
+function TasksContent() {
   const project = useProject();
   const searchParams = useSearchParams();
   const router = useRouter();
