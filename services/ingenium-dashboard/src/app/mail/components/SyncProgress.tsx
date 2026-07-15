@@ -117,7 +117,7 @@ export default function SyncProgress({
       {/* ── Overall progress bar ────────────────────────────────────── */}
       <div className="mb-8">
         <div className="flex justify-between text-sm mb-1.5">
-          <span className="text-[var(--color-text-secondary)] font-medium">
+          <span className="text-[var(--color-text-primary)] font-medium">
             {complete} of {total} folders ready
           </span>
           <span className="text-[var(--color-text-muted)]">
@@ -125,7 +125,7 @@ export default function SyncProgress({
           </span>
         </div>
         <ProgressBar value={complete} max={total} color="blue" />
-        <p className="text-xs text-[var(--color-text-muted)] mt-2">
+        <p className="text-xs text-[var(--color-text-secondary)] mt-2">
           {totalCached > 0
             ? `${totalCached.toLocaleString()} messages cached so far`
             : "Connecting to your mail server…"}

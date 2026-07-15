@@ -169,6 +169,8 @@ Selected items in FileTree also use the token:
 
 Every card on every page of the dashboard MUST use `hover:shadow-md transition-shadow`. This is a universal rule — not optional, not per-page. The only variation is size (`p-4` for list items, `p-6` for feature cards) and border radius (`rounded` for compact, `rounded-lg` for feature).
 
+> 🔴 **Verified standard**: The correct pattern is `hover:shadow-md transition-shadow` (NOT `hover:shadow-lg` or `hover:shadow-xl`). This has been verified and standardized across all dashboard pages as of the dark-mode consistency pass. All 29 card instances across 15 pages use this exact pair — no shadow-lg or shadow-xl variations remain.
+
 | Property | Value | Tailwind |
 |----------|-------|----------|
 | Background | White | `bg-white` |
@@ -187,6 +189,20 @@ Every card on every page of the dashboard MUST use `hover:shadow-md transition-s
 | Link Color (default) | Medium gray | `text-gray-600` |
 | Link Color (hover) | Dark gray | `hover:text-gray-900` |
 | Active Color | Dark | `text-gray-900` |
+| Layout | Logo left, nav links center, gear right | `flex items-center justify-between` |
+| Settings Gear | Sole far-right element | `ml-auto` |
+
+### Nav Layout
+
+The nav bar uses a three-zone layout:
+1. **Left**: Logo / branding
+2. **Center**: Page navigation links
+3. **Right**: Settings gear icon (⚙️) positioned with `ml-auto` as the sole far-right element
+
+### Removed from Nav
+
+- **Theme toggle** — Removed from the nav bar. Dark/light mode switching is now in Settings → General tab only.
+- **ProjectSelector** — Removed from the nav bar. Per-page `<PageProjectBar>` component is used instead at the top of applicable pages, showing the current project context inline.
 
 ## Settings Overlay
 
@@ -239,6 +255,46 @@ Each setting row uses the `SettingRow` component:
 2. Add a pathname mapping in `tabForPathname()` if routing-based auto-select is desired
 3. Create a panel component following the `SettingRow` pattern
 4. Wire it into `TAB_PANELS` in `SettingsOverlay.tsx`
+
+## Dark Mode Badge / Pill Pattern
+
+All badge and pill elements MUST use the shared `badgeTones` helper (`src/lib/badgeTones.ts`) for consistent dark-mode styling.
+
+### Usage
+```ts
+import { badgeTones, BADGE_BASE } from '@/lib/badgeTones';
+
+// For a purple badge:
+<span className={`${BADGE_BASE} ${badgeTones('purple')}`}>Label</span>
+// For a green success badge:
+<span className={`${BADGE_BASE} ${badgeTones('success')}`}>Done</span>
+```
+
+### Available Hues
+| Hue | Use For |
+|-----|---------|
+| `purple` | Preferences, orchestrator agents, plugins |
+| `blue` | Insight, execution agents, info states |
+| `green` / `success` | Done/completed, running, QA agents |
+| `amber` / `warning` | Review, in-progress, pending |
+| `red` / `error` | Critical, failed, errors |
+| `teal` | Workflow, configs, explore agents |
+| `indigo` | Terminology, email |
+| `pink` | Goals, auto-observer |
+| `orange` | Synthesis, behavior |
+| `cyan` | Observer |
+| `emerald` | Pipeline completion, complete states |
+| `slate` | Skills, neutral |
+| `gray` / `muted` | Disabled, idle, queued |
+
+### Light + Dark Class Pattern
+Each hue generates: `bg-{hue}-100 text-{hue}-700 dark:bg-{hue}-500/20 dark:text-{hue}-300`
+
+### Do NOT Hardcode Badge Colors
+❌ `bg-purple-100 text-purple-700` — invisible in dark mode
+✅ `badgeTones('purple')` — adapts to both themes
+
+---
 
 ## 🔴 Rules That Must Not Be Broken
 

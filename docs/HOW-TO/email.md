@@ -446,17 +446,17 @@ When `changesSince()` returns `fullResyncRequired: true` (initial sync or expire
 
 ### Route Contract (Cache-First with Synchronous Fallback)
 
-Read routes serve from cache first. Only `GET /:uid` makes synchronous Gmail API calls on cache-miss for immediate body delivery. All other routes are **cache-only — never block on the Gmail API**:
+Read routes serve from cache first. `GET /:uid` makes synchronous Gmail API calls on cache-miss for immediate body delivery. `GET /` with `?refresh=true` also performs a synchronous fetch via the Gmail REST API with a 10s timeout. All other routes are **cache-only — never block on the Gmail API**:
 
 | Route | Behavior |
 |-------|----------|
-| `GET /` (email list) | Serves from `email_cache`. Cache hit → return instantly with `source: "cache"`. Cache miss → return `source: "pending"` + empty array. `?refresh=true` calls `boostFolder()` (non-blocking hint to engine). |
+| `GET /` (email list) | Serves from `email_cache`. Cache hit → return instantly with `source: "cache"`. Cache miss → return `source: "pending"` + empty array. `?refresh=true` performs a **synchronous fetch** via Gmail REST API with 10s timeout — returns `source: "live"` on success or falls back to `source: "cache"` on timeout. The sync engine still backfills in the background. |
 | `GET /:uid` (single email) | Serves body from `email_bodies` cache. Body cached → return full email with `source: "cache"`. Body miss → fetches body **synchronously** from Gmail API (~400ms) and returns 200 with `source: "live"`. 202 polling remains only as a timeout/error fallback. Background `boostBody()` hint enqueued to cache for subsequent reads. |
 | `GET /search` | Filters cached emails in-memory. No cached data → returns `source: "pending"` + hints engine. |
 | `GET /folders` | Reads from settings cache (`email_folders_<accountId>`). Empty → hints engine, returns `source: "pending"`. |
 | `GET /triage` | Filters cached INBOX emails for unread items. Empty → hints engine. |
 
-**Key principle**: All other routes never call the Gmail API directly — I/O flows through the engine's priority queue via `boostFolder()` / `boostBody()` hints. `GET /:uid` is the sole exception, calling the Gmail API synchronously on cache-miss for immediate body delivery and hinting the engine to cache it for subsequent reads.
+**Key principle**: All other routes never call the Gmail API directly — I/O flows through the engine's priority queue via `boostFolder()` / `boostBody()` hints. `GET /:uid` and `GET /?refresh=true` are the exceptions, calling the Gmail API synchronously for immediate delivery and hinting the engine to cache for subsequent reads.
 
 ### Bounded Windows
 
