@@ -3,7 +3,6 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api } from "../../lib/api";
-import PageProjectBar from "../components/PageProjectBar";
 
 export default function ConfigPage() {
   const project = useProject();
@@ -46,7 +45,6 @@ export default function ConfigPage() {
 
   return (
     <div className="space-y-6">
-      <PageProjectBar />
       <h1 className="text-3xl font-bold">Config</h1>
 
       {/* Tabs */}
@@ -82,7 +80,7 @@ export default function ConfigPage() {
         <div className="flex gap-3">
           <button
             onClick={syncFromDisk}
-            className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-[var(--color-surface-hover)]"
+            className="px-4 py-2 border border-[var(--color-border)] rounded text-sm hover:bg-[var(--color-surface-hover)]"
           >
             Sync from disk
           </button>

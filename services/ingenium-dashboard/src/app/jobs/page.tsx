@@ -6,7 +6,6 @@ import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
 import { api, Job, JobRun, JobRunLog, Agent } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
-import PageProjectBar from "../components/PageProjectBar";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -850,8 +849,6 @@ export default function JobsPage() {
           Create Job
         </button>
       </div>
-
-      <PageProjectBar />
 
       {error && (
         <div className="text-[var(--color-error-text)] text-sm bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3">{error}</div>

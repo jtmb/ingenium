@@ -6,7 +6,6 @@ import { useProject } from "../../lib/ProjectContext";
 import { api, type PipelineEvent } from "../../lib/api";
 import Overlay from "../components/Overlay";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
-import PageProjectBar from "@/app/components/PageProjectBar";
 
 // ── Color maps ───────────────────────────────────────────────────────────
 const SOURCE_DOT: Record<string, string> = {
@@ -281,7 +280,6 @@ export default function PipelinePage() {
   // ── Render ───────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      <PageProjectBar />
       {/* ── Header + stats ──────────────────────────────────────────── */}
       <div className="flex justify-between items-center">
         <div>

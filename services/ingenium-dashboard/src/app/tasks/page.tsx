@@ -6,7 +6,6 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Task } from "../../lib/api";
 
-import PageProjectBar from "@/app/components/PageProjectBar";
 import BoardView from "./components/BoardView";
 import ListView from "./components/ListView";
 import TimelineView from "./components/TimelineView";
@@ -103,8 +102,6 @@ export default function TasksPage() {
 
   return (
     <div className="space-y-6">
-      <PageProjectBar />
-
       {/* Header + create form */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">

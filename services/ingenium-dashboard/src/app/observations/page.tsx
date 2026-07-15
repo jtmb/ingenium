@@ -6,7 +6,6 @@ import { useProject } from "../../lib/ProjectContext";
 import { api, Observation } from "../../lib/api";
 import Overlay from "../components/Overlay";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
-import PageProjectBar from "../components/PageProjectBar";
 
 function typeColors(type: string): string {
   const hues: Record<string, string> = {
@@ -72,8 +71,6 @@ export default function ObservationsPage() {
           <span>Pending: <strong className="text-yellow-600">{stats.pending}</strong></span>
         </div>
       </div>
-
-      <PageProjectBar />
 
       <div className="flex gap-2">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">

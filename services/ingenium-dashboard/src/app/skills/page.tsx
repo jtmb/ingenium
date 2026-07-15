@@ -5,7 +5,6 @@ import { useProject } from "../../lib/ProjectContext";
 import { api, Skill } from "../../lib/api";
 import FileTree from "../components/FileTree";
 import MarkdownViewer from "../components/MarkdownViewer";
-import PageProjectBar from "../components/PageProjectBar";
 
 /**
  * Skills browser page with file tree navigation and inline editing.
@@ -112,7 +111,6 @@ export default function SkillsPage() {
 
   return (
     <div className="space-y-8">
-      <PageProjectBar />
       <h1 className="text-3xl font-bold">Skills ({skills.length})</h1>
       
       {/* Search + Upload */}
