@@ -136,6 +136,7 @@ export default function EmailReader({
       body: "",
     });
     setIsReplying(true);
+    onReply?.(); // ← allows /mail/[id] to intercept and redirect back to /mail
   };
 
   const handleSummarise = async () => {

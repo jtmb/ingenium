@@ -115,8 +115,11 @@ export default function MailPage() {
 
   const onPointerUp = useCallback(() => {
     setIsResizing(false);
-    localStorage.setItem("mail-list-width", String(listWidth));
-  }, [listWidth]);
+    setListWidth((w) => {
+      localStorage.setItem("mail-list-width", String(w));
+      return w;
+    });
+  }, []);
 
   // Fetch accounts on mount
   useEffect(() => {
