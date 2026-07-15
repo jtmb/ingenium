@@ -217,6 +217,15 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 | `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 16 pages. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
+## Status Page Architecture
+
+The `/status` page renders two distinct card types from separate data sources:
+
+- **Service cards** — supervisord-managed processes (ingenium-api, ingenium-dashboard, opencode-server, opencode-iframe). Data sourced from `GET /api/v1/services/:name` which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
+- **Application cards** — in-process scheduled tasks (synthesis-engine, email-client) running inside the `ingenium-api` Express process. Data sourced from `GET /api/v1/services/applications/:name` which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Cards show application-specific fields (interval, last run, pipeline stats, email account folders).
+
+The detail overlay (`ServiceOverlay.tsx`) switches its data fetching and diagnostics grid based on the `type` prop (`"service"` vs. `"application"`). The `handleServiceClick()` function on the page determines the card type by checking which array the name appears in. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts) for the API implementation and [`services/ingenium-dashboard/src/app/status/page.tsx`](./services/ingenium-dashboard/src/app/status/page.tsx) for the frontend split.
+
 ## Dashboard Pages
 
 The Ingenium Dashboard (http://localhost:3000) provides 15 route-based pages:
