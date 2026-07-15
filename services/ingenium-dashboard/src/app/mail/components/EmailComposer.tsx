@@ -8,12 +8,14 @@ import { useState } from "react";
  */
 export default function EmailComposer({
   initialData,
+  initialAccountId,
   accounts,
   onSend,
   onSave,
   onCancel,
 }: {
   initialData?: { to?: string; subject?: string; body?: string };
+  initialAccountId?: string;
   accounts?: { id: string; email: string; name?: string }[];
   onSend: (data: any) => void;
   onSave: (data: any) => void;
@@ -26,7 +28,7 @@ export default function EmailComposer({
   const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState(initialData?.subject || "");
   const [body, setBody] = useState(initialData?.body || "");
-  const [fromAccount, setFromAccount] = useState("");
+  const [fromAccount, setFromAccount] = useState(initialAccountId || "");
 
   const formData = { to, cc: showCc ? cc : "", bcc: showBcc ? bcc : "", subject, body, accountId: fromAccount };
 

@@ -558,6 +558,7 @@ export default function MailPage() {
                 if (pendingEmailUid) handleSelectEmail(pendingEmailUid);
               }}
               accountId={selectedAccount}
+              project={project}
               onReply={handleCompose}
               onForward={handleCompose}
               onDelete={handleDelete}
@@ -570,10 +571,10 @@ export default function MailPage() {
             isOpen={showCompose}
             onClose={handleComposeCancel}
             title="Compose"
-            fullScreen
           >
             <EmailComposer
               accounts={accounts}
+              initialAccountId={selectedAccount}
               onSend={handleComposeSend}
               onSave={handleComposeSave}
               onCancel={handleComposeCancel}
