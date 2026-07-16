@@ -452,6 +452,79 @@ making the identical API call with the same incorrect handling?"
 
 ---
 
+### 40. Synchronization Parity — Matching Counts Are Not Proof of Content Match
+
+**Failure signature:** "10 skills in DB, 10 on disk — sync complete!" But the DB copies
+have revision 0, empty file_trees, and stale content from months ago. DeepSeek compares
+name/count lists and declares parity, missing that content hashes, revisions, metadata,
+and file_trees differ. The count matches, so it moves on.
+
+**Rule:** After any sync operation, verify at least one entity beyond name matching:
+content hash, revision number, metadata fields, or file_tree key count. A matching count
+of names across two systems does not prove the content is synchronized. Spot-check at
+least 2 items for hash parity.
+
+**Detection prompt:** "Did I verify content parity (hash/revision/file_tree), or just
+count/name parity? Can I name one specific field that differs between the two systems?"
+
+---
+
+### 41. Proxy E2E — Follow Redirects and Test Subresources, Not Just HTTP Status
+
+**Failure signature:** `curl -I /opencode-proxy/ returns 200` → "proxy works!" But the
+iframe's JS/CSS/API/WebSocket subresources all bypass the proxy and get 401s. DeepSeek
+tests the initial HTML request only and ignores the redirect chain, asset loading, and
+persistent connections that the actual user path exercises.
+
+**Rule:** When testing a reverse proxy, test the FULL end-to-end path: initial request →
+redirect chain → asset loads → API calls → WebSocket connections. A single HTTP 200 on
+the initial page load does not prove the proxy works for subresources. Test with a browser
+or a WebSocket-capable client. Follow every redirect in the chain.
+
+**Detection prompt:** "Did I test the redirect chain, subresource loads, and WebSocket
+connections — or just the initial HTTP status code? Would a browser loading this page
+see any 401s or connection failures after the initial HTML loads?"
+
+---
+
+### 42. Staged-Diff Ownership — Never Commit Without Inspecting What You're Staging
+
+**Failure signature:** `git add -A && git commit` at the end of a multi-phase run. The
+commit absorbs 28 deleted skill directories, draft docs, backup files, and untracked
+test artifacts that should have been committed in earlier phases. DeepSeek treats `git add -A`
+as the safe default for "commit everything" but instead commits unrelated dirty state
+that belonged to prior runs or should have been excluded.
+
+**Rule:** Never use `git add -A` or `git add .`. Before every commit, run `git diff --cached`
+and verify that every file in the staging area belongs to the current phase. Commit only
+phase-owned explicit paths. Files from prior runs that were never committed are NOT part
+of the current phase — classify them separately and commit them in their own explicit step.
+
+**Detection prompt:** "Did I inspect the staged diff before committing? Can I explain why
+EVERY file in this commit belongs to this specific phase and wasn't leftover from prior work?"
+
+---
+
+### 43. Dirty-Worktree Completion — A Dirty Worktree and Blocked Acceptance Is Not "Complete"
+
+**Failure signature:** Declaring "all 9 phases complete" with a dirty worktree (untracked
+DeepSeek work files, stale test artifacts), blocked visual acceptance (Vision Bridge can't
+run), and a pre-existing email test failure. DeepSeek rationalizes: "the untracked files
+are leftover, the visual acceptance is blocked by a tool issue, the email test was pre-existing"
+— three separate rationalizations that each let it stop working.
+
+**Rule:** "Complete" means the worktree is clean or every untracked file is explicitly
+classified and either committed or excluded. Every acceptance gate either passed or has
+a documented remediation plan with a specific next step. Rationalizing-to-stop compounds:
+one "pre-existing" exemption plus one "tool blocked" plus one "leftover files" = a system
+that was never actually verified end-to-end. Each rationalization must be proven, not assumed.
+
+**Detection prompt:** "Is the worktree clean (all files committed or explicitly excluded)?
+Did every acceptance gate pass? If not, do I have a specific, actionable next step for each
+failure — or am I rationalizing each one to declare done?"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -497,6 +570,10 @@ making the identical API call with the same incorrect handling?"
 | **Moving-reference drag** — Computing drag delta from handle position instead of pointer-down anchor | "For this drag handler, is the reference point fixed at pointer-down or does it move with component state?" |
 | **Container-network blindness** — Testing inside Docker, user accesses from host | "Am I testing inside the container while the user accesses from the host? Is my inside-container curl hiding a host-side connection refusal?" |
 | **Domain-mutation bypass** — Changing data to bypass a CI regex instead of fixing the detector's scope | "Did I fix the forbidden behavior, or just change data until the test stopped matching? Is the data still truthful?" |
+| **Sync-count parity** — Treating matching name/count as proof of content synchronization | "Did I verify content parity (hash/revision/file_tree), or just count/name parity?" |
+| **Proxy E2E blindness** — Testing only the initial HTML redirect, ignoring subresources and WebSockets | "Did I test the redirect chain, subresource loads, and WebSocket connections — or just the initial HTTP status?" |
+| **Staged-diff bypass** — Using `git add -A` and committing unrelated dirty state from prior runs | "Did I inspect the staged diff? Can I explain why every file in this commit belongs to this specific phase?" |
+| **Compound rationalization** — Each failure has its own excuse, together they mean nothing was verified | "Is the worktree clean? Did every acceptance gate pass? Or am I rationalizing each failure to declare done?" |
 
 ---
 
