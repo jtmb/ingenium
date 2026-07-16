@@ -359,6 +359,17 @@ export interface DashboardSummary {
   generatedAt: string;
 }
 
+/** ========== Docs Types ========== */
+
+export interface DocSpace { id: number; name: string; slug: string; description: string; icon: string; sort_order: number; }
+export interface DocPage { id: number; space_id: number; parent_page_id: number | null; title: string; slug: string; content: string; revision: number; status: "draft" | "published" | "archived"; sort_order: number; is_favorite: number; created_at: string; updated_at: string; }
+export interface DocPageTree extends DocPage { children: DocPageTree[]; }
+export interface DocComment { id: number; page_id: number; parent_comment_id: number | null; content: string; selection_text: string; selection_offset: number; resolved: number; created_at: string; updated_at: string; }
+export interface DocPageVersion { id: number; page_id: number; revision: number; title: string; content: string; created_at: string; }
+export interface DocAttachment { id: number; page_id: number; filename: string; original_name: string; mime_type: string; size_bytes: number; storage_path: string; created_at: string; }
+export interface DocTemplate { id: number; name: string; description: string; content: string; category: string; }
+export interface DocTag { id: number; name: string; slug: string; }
+
 /**
  * Typed API client for the Ingenium backend.
  * All methods accept an optional `project` parameter that defaults to "ingenium".
@@ -711,6 +722,180 @@ export const api = {
       request<{ data: JobRun }>(`/jobs/runs/${encodeURIComponent(runId)}/cancel?project=${encodeURIComponent(project)}`, {
         method: "POST",
       }),
+  },
+  docs: {
+    /** Spaces — top-level doc containers. */
+    spaces: {
+      list: (project = DEFAULT_PROJECT) =>
+        request<{ data: DocSpace[] }>(`/docs/spaces?project=${encodeURIComponent(project)}`),
+    },
+
+    /** Pages — individual documents within a space. */
+    pages: {
+      tree: (spaceId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: DocPageTree[] }>(`/docs/spaces/${spaceId}/tree?project=${encodeURIComponent(project)}`),
+      get: (id: number, project = DEFAULT_PROJECT) =>
+        request<{ data: DocPage }>(`/docs/pages/${id}?project=${encodeURIComponent(project)}`),
+      create: (spaceId: number, data: Partial<DocPage>, project = DEFAULT_PROJECT) =>
+        request<{ data: DocPage }>(`/docs/spaces/${spaceId}/pages?project=${encodeURIComponent(project)}`, {
+          method: "POST", body: JSON.stringify(data),
+        }),
+      update: (id: number, data: Partial<DocPage>, expectedRevision?: number, project = DEFAULT_PROJECT) => {
+        const body: Record<string, unknown> = { ...data };
+        if (expectedRevision !== undefined) body.expected_revision = expectedRevision;
+        return request<{ data: DocPage }>(`/docs/pages/${id}?project=${encodeURIComponent(project)}`, {
+          method: "PATCH", body: JSON.stringify(body),
+        });
+      },
+      delete: (id: number, project = DEFAULT_PROJECT) =>
+        request(`/docs/pages/${id}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
+      draft: {
+        get: (pageId: number, project = DEFAULT_PROJECT) =>
+          request<{ data: { content: string } }>(`/docs/pages/${pageId}/draft?project=${encodeURIComponent(project)}`),
+        save: (pageId: number, content: string, project = DEFAULT_PROJECT) =>
+          request(`/docs/pages/${pageId}/draft?project=${encodeURIComponent(project)}`, {
+            method: "PUT", body: JSON.stringify({ content }),
+          }),
+      },
+    },
+
+    /** Comments — threaded discussion on pages. */
+    comments: {
+      list: (pageId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocComment[]; total: number }>(
+          `/docs/pages/${pageId}/comments?project=${encodeURIComponent(project)}`,
+        ),
+      create: (
+        pageId: number,
+        content: string,
+        author: string,
+        parentId?: number,
+        selectionText?: string,
+        offset?: number,
+        project = DEFAULT_PROJECT,
+      ) =>
+        request<{ data: import("./docs-types").DocComment }>(
+          `/docs/pages/${pageId}/comments?project=${encodeURIComponent(project)}`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              content,
+              author,
+              parent_id: parentId ?? null,
+              selection_text: selectionText ?? null,
+              offset: offset ?? null,
+            }),
+          },
+        ),
+      resolve: (commentId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocComment }>(
+          `/docs/comments/${commentId}/resolve?project=${encodeURIComponent(project)}`,
+          { method: "POST" },
+        ),
+    },
+
+    /** Versions — point-in-time page snapshots. */
+    versions: {
+      list: (pageId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocVersion[]; total: number }>(
+          `/docs/pages/${pageId}/versions?project=${encodeURIComponent(project)}`,
+        ),
+      get: (versionId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocVersion }>(
+          `/docs/versions/${versionId}?project=${encodeURIComponent(project)}`,
+        ),
+      restore: (versionId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocVersion }>(
+          `/docs/versions/${versionId}/restore?project=${encodeURIComponent(project)}`,
+          { method: "POST" },
+        ),
+    },
+
+    /** Search — full-text search across all spaces/pages. */
+    search: (query: string, spaceId?: number, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project, q: query });
+      if (spaceId) params.set("space_id", String(spaceId));
+      return request<{ data: import("./docs-types").DocSearchResult[]; total: number }>(
+        `/docs/search?${params}`,
+      );
+    },
+
+    /** Tags — per-page tag management. */
+    tags: {
+      list: (pageId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocTag[]; total: number }>(
+          `/docs/pages/${pageId}/tags?project=${encodeURIComponent(project)}`,
+        ),
+      add: (pageId: number, tagName: string, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocTag }>(
+          `/docs/pages/${pageId}/tags?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify({ name: tagName }) },
+        ),
+      remove: (pageId: number, tagId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: { removed: boolean } }>(
+          `/docs/pages/${pageId}/tags/${tagId}?project=${encodeURIComponent(project)}`,
+          { method: "DELETE" },
+        ),
+      allUnique: (project = DEFAULT_PROJECT) =>
+        request<{ data: string[] }>(
+          `/docs/tags?project=${encodeURIComponent(project)}`,
+        ),
+    },
+
+    /** Backlinks — pages that link to the current page. */
+    backlinks: {
+      list: (pageId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocBacklink[]; total: number }>(
+          `/docs/pages/${pageId}/backlinks?project=${encodeURIComponent(project)}`,
+        ),
+    },
+
+    /** Templates — reusable page templates. */
+    templates: {
+      list: (project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocTemplate[]; total: number }>(
+          `/docs/templates?project=${encodeURIComponent(project)}`,
+        ),
+      get: (id: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocTemplate }>(
+          `/docs/templates/${id}?project=${encodeURIComponent(project)}`,
+        ),
+    },
+
+    /** Import / Export. */
+    importExport: {
+      import: (spaceId: number, formData: FormData, project = DEFAULT_PROJECT) =>
+        request<{ data: { imported: number; errors: string[] } }>(
+          `/docs/spaces/${spaceId}/import?project=${encodeURIComponent(project)}`,
+          {
+            method: "POST",
+            headers: {}, // Let browser set Content-Type for multipart
+            body: formData,
+          },
+        ),
+      exportJson: (spaceId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: { json: string; filename: string } }>(
+          `/docs/spaces/${spaceId}/export?project=${encodeURIComponent(project)}&format=json`,
+        ),
+    },
+
+    /** Trash — soft-deleted pages. */
+    trash: {
+      list: (spaceId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocTrashItem[]; total: number }>(
+          `/docs/spaces/${spaceId}/trash?project=${encodeURIComponent(project)}`,
+        ),
+      restore: (pageId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: { restored: boolean } }>(
+          `/docs/pages/${pageId}/restore?project=${encodeURIComponent(project)}`,
+          { method: "POST" },
+        ),
+      empty: (spaceId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: { purged: number } }>(
+          `/docs/spaces/${spaceId}/trash?project=${encodeURIComponent(project)}`,
+          { method: "DELETE" },
+        ),
+    },
   },
   home: {
     summary: (project = DEFAULT_PROJECT) =>
