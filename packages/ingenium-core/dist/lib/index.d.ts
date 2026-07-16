@@ -22,4 +22,5 @@ export * as jobs from "./tools/jobs.js";
 export * as jobSuggestLlm from "./tools/job-suggest-llm.js";
 export * as mcpToolStates from "./tools/mcp-tool-states.js";
 export * as emailCache from "./tools/email-cache.js";
+export * as emailSuggestionQueue from "./tools/email-suggestion-queue.js";
 //# sourceMappingURL=index.d.ts.map

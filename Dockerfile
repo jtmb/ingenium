@@ -74,6 +74,6 @@ RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".open
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 
-EXPOSE 3000 4096 4097
+EXPOSE 3000 4097 4098
 
 ENTRYPOINT ["/app/entrypoint.sh"]

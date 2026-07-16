@@ -59,7 +59,7 @@ export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, 
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        <div className={`flex-1 overflow-y-auto px-6 py-4 ${fullScreen ? "flex flex-col" : ""}`}>
           {children}
         </div>
       </div>

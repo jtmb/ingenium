@@ -20,8 +20,7 @@ Container runs via `docker compose up --build`. These are server-side processes 
 |---------|------|-------------|
 | ingenium-api | :4097 | Express REST API. Sole database authority. All CRUD operations for skills, plugins, commands, configs, agents, servers, settings, tasks, observations, personality traits, pipeline events, and synthesis pipeline. Also runs the **server-side extraction engine** (reads OpenCode messages, LLM extraction) and the **scheduler** (extraction → synthesis → skill-sync every 15 minutes). |
 | ingenium-dashboard | :3000 | Next.js 16 App Router frontend. Calls API over HTTP. Zero database access. |
-| opencode-server | :4096 | Auth-enabled OpenCode web server |
-| opencode-iframe | :4098 | No-auth OpenCode iframe for embedded dashboard use |
+| opencode-web | :4098 (binds 0.0.0.0 inside container, published 127.0.0.1:4098 on host) | OpenCode web server (host loopback only) |
 
 ### Data Flow
 
@@ -44,8 +43,7 @@ Container runs via `docker compose up --build`. These are server-side processes 
   │    **(thin trigger — no detection)** │  │  └─ sole SQLite authority
   │                                      │  │
   ├─ MCP: ingenium                      │  ├─ dashboard :3000
-  │    HTTP → API :4097                 │  ├─ opencode-server :4096
-  │    exposes ingenium_* tools          │  └─ opencode-iframe :4098
+  │    HTTP → API :4097                 │  └─ opencode-web :4098
   │                                      │
   └─ .opencode/   ← host filesystem     │
      ├─ skills/  ← written by plugins   │

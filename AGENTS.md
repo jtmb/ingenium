@@ -103,7 +103,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 
 
 Ingenium uses a **two-project identity model** distinguishing between server/public and external sessions:
 
-- **Server/public project** (`global-default`, `is_global=1`) — The container's own OpenCode session. Its global config lives at `~/.config/opencode/opencode.jsonc` (set by the Docker entrypoint). This project is used by the container's opencode-webui, email service, and dashboard default. Created automatically by `scripts/docker-entrypoint.sh`.
+- **Server/public project** (`global-default`, `is_global=1`) — The container's own OpenCode session. Its global config lives at `~/.config/opencode/opencode.jsonc` (set by the Docker entrypoint). This project is used by the container's opencode-web service, email service, and dashboard default. Created automatically by `scripts/docker-entrypoint.sh`.
 
 - **External sessions** — Projects named after their repo worktree (e.g., `gh-llm-bootstrap`). These connect via the `@ingenium/extension` plugins. The `INGENIUM_PROJECT` environment variable controls which project the extension plugins write to. For external sessions, the project name derives from the worktree directory.
 
@@ -203,12 +203,11 @@ This pattern is used in `upsertEmailBody()` and the email suggestions cache. It 
 
 ## Docker Deployment
 
-**Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing four processes:
+**Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing three processes:
 
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
 2. **Dashboard** (Next.js on :3000) — 16 route-based pages with highlight.js syntax highlighting in Preview/Source modes
-3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
-4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded dashboard use
+3. **opencode-web** (on :4098) — OpenCode web server (binds `0.0.0.0` inside container, published to host loopback only)
 
 > The API layer is the sole authority for all 5 `.opencode/` resources: skills, agents, plugins, commands, and configs.
 
@@ -237,11 +236,21 @@ docker compose exec ingenium npm run check
 | Host Port | Service | Description |
 |-----------|---------|-------------|
 | `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
-| `4096` | OpenCode Server | Auth-enabled MCP server |
 | `4097` | API | Express REST gateway (sole DB authority) |
-| `4098` | OpenCode Iframe | No-auth iframe for embedded use |
+| `127.0.0.1:4098` | OpenCode Web | OpenCode web server — container binds `0.0.0.0`, published to `127.0.0.1:4098:4098` (host loopback only) |
 
-> 🔴 **Note**: Dockerfile `EXPOSE` only covers ports 3000, 4096, 4097. Port 4098 (opencode-iframe) is mapped in docker-compose.yml but not in Dockerfile `EXPOSE`.
+> 🔴 **Note**: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098.
+
+### Terminal Attachment
+
+The single `opencode-web` process on `:4098` serves both the dashboard iframe and direct terminal connections. Share the same session state between browser and terminal:
+
+```bash
+# Attach a terminal session to the running opencode-web process
+opencode attach http://localhost:4098 --dir /workspace
+```
+
+All sessions, tool providers, and MCP connections share the same process state — the dashboard embedded iframe and terminal attachments use the same backend. No separate instance needed.
 
 > 🔴 **Docker git**: The Dockerfile now installs the `git` package to support OpenCode repository creation inside the container. Without git, OpenCode fails to initialize new repos for code editing.
 
@@ -267,7 +276,7 @@ healthcheck:
   start_period: 15s
 ```
 
-> 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks running inside the `ingenium-api` Express process. The Status page reports them via `GET /api/v1/services/applications/:name` (not `/services/:name`), which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Do NOT add supervisord `[program:synthesis-engine]` or `[program:email-client]` blocks — they would create duplicate, conflicting processes. The four real supervisord programs are listed above (API, Dashboard, opencode-server, opencode-iframe). See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts) lines 216–289 for the application health-check implementations.
+> 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks running inside the `ingenium-api` Express process. The Status page reports them via `GET /api/v1/services/applications/:name` (not `/services/:name`), which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Do NOT add supervisord `[program:synthesis-engine]` or `[program:email-client]` blocks — they would create duplicate, conflicting processes. The three real supervisord programs are listed above (API, Dashboard, opencode-web). See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts) lines 216–289 for the application health-check implementations.
 
 ---
 

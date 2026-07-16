@@ -227,7 +227,7 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 
 The `/status` page renders two distinct card types from separate data sources:
 
-- **Service cards** — supervisord-managed processes (ingenium-api, ingenium-dashboard, opencode-server, opencode-iframe). Data sourced from `GET /api/v1/services/:name` which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
+- **Service cards** — supervisord-managed processes (ingenium-api, ingenium-dashboard, opencode-web). Data sourced from `GET /api/v1/services/:name` which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
 - **Application cards** — in-process scheduled tasks (synthesis-engine, email-client) running inside the `ingenium-api` Express process. Data sourced from `GET /api/v1/services/applications/:name` which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Cards show application-specific fields (interval, last run, pipeline stats, email account folders).
 
 The detail overlay (`ServiceOverlay.tsx`) switches its data fetching and diagnostics grid based on the `type` prop (`"service"` vs. `"application"`). The `handleServiceClick()` function on the page determines the card type by checking which array the name appears in. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts) for the API implementation and [`services/ingenium-dashboard/src/app/status/page.tsx`](./services/ingenium-dashboard/src/app/status/page.tsx) for the frontend split.
@@ -287,7 +287,7 @@ The Express API uses `express.json({ limit: "2mb" })` for request body parsing. 
 ## Dashboard Features
 
 ### OpenCode Web UI Embedded in Dashboard
-The dashboard includes an embedded OpenCode service at `/opencode` — a second OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server. The session persists across tab navigation with a hidden iframe toggle. Workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+The dashboard includes an embedded OpenCode service at `/opencode` — a single shared OpenCode instance on `:4098` that binds `0.0.0.0` inside container, published to host loopback only (`127.0.0.1:4098`). Serves both the dashboard iframe and direct terminal connections without auth. The session persists across tab navigation with a hidden iframe toggle. Workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 
 ### Project Management
 The Projects page at `/projects` features Active/Archived tab views. Users can:
@@ -320,16 +320,15 @@ services:
     ports:
       - "4097:4097"   # API
       - "3000:3000"   # Dashboard
-      - "4096:4096"   # opencode-server (managed by supervisord)
+      - "127.0.0.1:4098:4098"   # opencode-web (binds 0.0.0.0 inside container, published to host loopback only)
     volumes:
       - ingenium-data:/app/.ingenium
 ```
 
-Inside the container, **supervisord** manages four processes:
+Inside the container, **supervisord** manages three processes:
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
 2. **Dashboard** (Next.js on :3000) — 16 route-based pages with highlight.js syntax highlighting in Preview/Source modes
-3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
-4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded dashboard use
+3. **opencode-web** (on :4098) — OpenCode web server (binds 0.0.0.0 inside container, published to host loopback only)
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
@@ -345,11 +344,10 @@ docker compose up --build
 | Host Port | Service | Description |
 |-----------|---------|-------------|
 | `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
-| `4096` | OpenCode Server | Auth-enabled MCP server |
 | `4097` | API | Express REST gateway (sole DB authority) |
-| `4098` | OpenCode Iframe | No-auth iframe for embedded use |
+| `4098` | opencode-web | Terminal attach + iframe |
 
-> Note: Dockerfile `EXPOSE` only covers ports 3000, 4096, 4097. Port 4098 is mapped in docker-compose.yml but not in Dockerfile `EXPOSE`.
+> Note: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098.
 
 ### Volume Configurations
 

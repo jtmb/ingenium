@@ -18,10 +18,11 @@
  * 🔴 `lastSyncedAt` timestamps survive restarts (Lesson 16 — no in-memory booleans).
  */
 
-import { emailCache, logger, settings } from "ingenium-core";
+import { emailCache, emailSuggestionQueue, logger, settings, synthesisLlm } from "ingenium-core";
 import { listAccounts, getAccount, getCredentials, getGlobalProjectId } from "./accounts.js";
 import { GmailProvider } from "./providers/gmail.js";
 import type { MailProvider } from "./providers/mail-provider.js";
+import { getVoiceSamples, generateSmartReplies } from "./suggest-llm.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -146,6 +147,15 @@ function tickHeartbeat(): void {
 }
 
 /**
+ * Check if a sender address or name matches known noreply patterns.
+ * Used as a gate before enqueuing suggestion jobs or generating replies.
+ */
+function isNoreplySender(fromAddr: string | null | undefined, fromName?: string | null): boolean {
+  const pattern = /no[-_.]?reply|do[-_.]?not[-_.]?reply/i;
+  return pattern.test(fromAddr ?? "") || pattern.test(fromName ?? "");
+}
+
+/**
  * Push a task onto a worker's task queue, maintaining priority order.
  * If a task for the same account+folder+type already exists at equal or
  * higher priority, the new task is skipped (dedup).
@@ -217,7 +227,126 @@ function isFolderFresh(accountId: string, folder: string): boolean {
   return msSince < interval;
 }
 
-// ── Watchdog timer ──────────────────────────────────────────────────────────
+/**
+ * Process queued smart-reply suggestion jobs.
+ *
+ * Reads settings (`mail_smart_replies_enabled`, `mail_smart_replies_prefetch`),
+ * checks LLM config, then dequeues up to 2 jobs per iteration. For each job:
+ *  - Check noreply gate, check suggestions already cached, check body cached
+ *  - Generate voice samples, call generateSmartReplies, upsert suggestions
+ *  - Mark complete or failed as appropriate
+ *
+ * 🔴 Error sentinels (markJobFailed) log BEFORE returning — Lesson 14.
+ * 🔴 Sequential for...of + await — Lesson 25 (don't overload external LLM).
+ * 🔴 AbortSignal at 30s timeout to prevent stuck jobs.
+ */
+async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
+  // 1. Check settings
+  const pid = getProjectId();
+  const repliesEnabled = settings.getSetting(pid, "mail_smart_replies_enabled");
+  if (repliesEnabled === "false") return; // "true" or missing → enabled
+
+  const prefetchEnabled = settings.getSetting(pid, "mail_smart_replies_prefetch");
+  if (prefetchEnabled !== "true") return; // explicitly "true" only
+
+  // 2. Check LLM config
+  if (!synthesisLlm.isLLMSynthesisConfigured(pid)) return;
+
+  const llmConfig = synthesisLlm.resolveLLMConfig(pid);
+  if (!llmConfig?.endpoint || !llmConfig?.model) return;
+
+  // 3. Dequeue up to 2 jobs per iteration
+  for (let i = 0; i < 2; i++) {
+    const job = emailSuggestionQueue.dequeueSuggestionJob();
+    if (!job) break;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+
+    try {
+      // Check noreply gate (from email_cache)
+      const cachedEmail = emailCache.getCachedEmail(job.account_id, job.folder, job.uid);
+      if (!cachedEmail) {
+        emailSuggestionQueue.markJobComplete(job.id);
+        continue;
+      }
+
+      if (isNoreplySender(cachedEmail.from_addr, cachedEmail.from_name)) {
+        emailSuggestionQueue.markJobComplete(job.id);
+        continue;
+      }
+
+      // Check suggestions already cached
+      const existing = emailCache.getCachedSuggestions(job.account_id, job.folder, job.uid);
+      if (existing) {
+        emailSuggestionQueue.markJobComplete(job.id);
+        continue;
+      }
+
+      // Check body cached
+      const body = emailCache.getCachedEmailBody(job.account_id, job.folder, job.uid);
+      if (!body?.text && !body?.html) {
+        // Body not yet cached — leave job in queue for later retry
+        continue;
+      }
+
+      // Get voice samples from the account
+      const account = getAccount(worker.projectId, job.account_id);
+      if (!account) {
+        logger.warn("sync-engine", `processSuggestionQueue: account ${job.account_id} not found`);
+        emailSuggestionQueue.markJobFailed(job.id, "Account not found");
+        continue;
+      }
+
+      const creds = getCredentials(worker.projectId, job.account_id);
+      if (!creds?.tokens) {
+        logger.warn("sync-engine", `processSuggestionQueue: no OAuth tokens for ${job.account_id}`);
+        emailSuggestionQueue.markJobFailed(job.id, "No OAuth tokens");
+        continue;
+      }
+
+      const voiceSamples = await getVoiceSamples(account, creds.tokens, 15, controller.signal);
+
+      // Generate suggestions via LLM
+      const bodySnippet = (body.text ?? body.html ?? "").substring(0, 800);
+      const suggestions = await generateSmartReplies(
+        {
+          from: cachedEmail.from_addr ?? "unknown",
+          subject: cachedEmail.subject ?? "(no subject)",
+          bodySnippet,
+        },
+        voiceSamples,
+        {
+          model: llmConfig.model,
+          endpoint: llmConfig.endpoint,
+          apiKey: llmConfig.apiKey,
+        },
+        controller.signal,
+      );
+
+      // Cache suggestions if any were generated
+      if (suggestions.length > 0) {
+        emailCache.upsertEmailSuggestions(
+          job.account_id, job.folder, job.uid,
+          suggestions,
+          llmConfig.model,
+        );
+      }
+
+      // Mark job complete
+      emailSuggestionQueue.markJobComplete(job.id);
+      logger.info("sync-engine",
+        `Generated ${suggestions.length} smart replies for ${job.account_id}/${job.folder}/${job.uid}`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("sync-engine", `processSuggestionQueue failed for job ${job.id}: ${msg}`);
+      emailSuggestionQueue.markJobFailed(job.id, msg);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
 
 function withWatchdog<T>(
   promise: Promise<T>,
@@ -337,6 +466,18 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
                   accountId: worker.accountId,
                   folder: msg.folder,
                 });
+                // Enqueue smart-reply suggestion for genuinely NEW messages only
+                // (not label-only changes), and only for non-noreply senders.
+                if (msg.changeType === "added" && !isNoreplySender(msg.fromAddr, msg.fromName)) {
+                  const enqueued = emailSuggestionQueue.enqueueSuggestionJob(
+                    worker.accountId, msg.folder, msg.id,
+                  );
+                  if (enqueued) {
+                    logger.info("sync-engine",
+                      `Enqueued smart-reply suggestion job for ${worker.accountId}/${msg.folder}/${msg.id}`,
+                    );
+                  }
+                }
               }
               logger.info("sync-engine",
                 `Delta upserts for ${worker.email}: ${delta.upserts.length} messages`,
@@ -362,6 +503,18 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
           // Non-fatal: continue the loop
         }
       }
+
+      // ── Process smart-reply suggestion queue (before task generation) ──
+      //
+      // 🟡 KNOWN TRADE-OFF: processSuggestionQueue blocks the main delta-poll
+      // loop for up to 2 LLM calls (30s timeout each). This is acceptable for
+      // the current single-account, low-volume workload, but will become a
+      // bottleneck with multiple accounts or high email volume.
+      //
+      // 🟡 FUTURE OPTIMIZATION: Consider queuing suggestion jobs to an external
+      // queue (e.g., Bull/BullMQ, a dedicated worker thread, or a separate
+      // microservice) to avoid blocking delta poll entirely.
+      await processSuggestionQueue(worker);
 
       // ── Generate maintenance tasks if queue is empty ─────────────────
       if (worker.taskQueue.length === 0) {

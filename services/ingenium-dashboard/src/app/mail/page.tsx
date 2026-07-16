@@ -95,9 +95,20 @@ export default function MailPage() {
   const [isResizing, setIsResizing] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
 
+  // Resizable reply composer panel state (persisted in localStorage)
+  const [replyWidth, setReplyWidth] = useState(420);
+
   useEffect(() => {
     const saved = localStorage.getItem("mail-list-width");
-    if (saved) setListWidth(Number(saved));
+    if (saved) setListWidth(Math.min(720, Math.max(240, Number(saved))));
+  }, []);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("mail-reply-width");
+    if (saved) {
+      const val = Number(saved);
+      setReplyWidth(val > 0 ? val : 420);
+    }
   }, []);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
@@ -109,7 +120,7 @@ export default function MailPage() {
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!isResizing) return;
     const containerLeft = e.currentTarget.getBoundingClientRect().left;
-    const newWidth = Math.max(280, Math.min(500, e.clientX - containerLeft));
+    const newWidth = Math.max(240, Math.min(720, e.clientX - containerLeft));
     setListWidth(newWidth);
   }, [isResizing]);
 
@@ -314,7 +325,8 @@ export default function MailPage() {
       if (data.to) body.to = data.to.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
       if (data.cc) body.cc = data.cc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
       if (data.bcc) body.bcc = data.bcc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
-      if (data.body) body.text = data.body;
+      if (data.html) body.html = data.html;
+      if (data.text) body.text = data.text;
 
       const res = await fetch(`${API_BASE}/emails?project=${project}`, {
         method: "POST",
@@ -341,7 +353,8 @@ export default function MailPage() {
       if (data.to) body.to = data.to.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
       if (data.cc) body.cc = data.cc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
       if (data.bcc) body.bcc = data.bcc.split(",").map((s: string) => ({ address: s.trim() })).filter((s: any) => s.address);
-      if (data.body) body.text = data.body;
+      if (data.html) body.html = data.html;
+      if (data.text) body.text = data.text;
 
       const res = await fetch(`${API_BASE}/emails/draft?project=${project}`, {
         method: "POST",
@@ -555,7 +568,7 @@ export default function MailPage() {
         />
       ) : (
         <>
-          <div className="flex h-[calc(100vh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
+          <div className="flex h-[calc(100dvh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
             {/* Folder sidebar */}
             <FolderSidebar
               accounts={accounts}
@@ -593,8 +606,8 @@ export default function MailPage() {
                 ref={handleRef}
                 role="separator"
                 aria-valuenow={listWidth}
-                aria-valuemin={280}
-                aria-valuemax={500}
+                aria-valuemin={240}
+                aria-valuemax={720}
                 aria-label="Resize email list"
                 tabIndex={0}
                 onPointerDown={onPointerDown}
@@ -602,10 +615,10 @@ export default function MailPage() {
                 onPointerUp={onPointerUp}
                 onKeyDown={(e) => {
                   if (e.key === "ArrowRight") {
-                    setListWidth(w => { const nw = Math.min(500, w + 20); localStorage.setItem("mail-list-width", String(nw)); return nw; });
+                    setListWidth(w => { const nw = Math.min(720, w + 20); localStorage.setItem("mail-list-width", String(nw)); return nw; });
                   }
                   if (e.key === "ArrowLeft") {
-                    setListWidth(w => { const nw = Math.max(280, w - 20); localStorage.setItem("mail-list-width", String(nw)); return nw; });
+                    setListWidth(w => { const nw = Math.max(240, w - 20); localStorage.setItem("mail-list-width", String(nw)); return nw; });
                   }
                 }}
                 className={`w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0 ${isResizing ? "bg-blue-400" : "bg-transparent"}`}
@@ -629,6 +642,11 @@ export default function MailPage() {
                 selectedAccount={selectedAccount}
                 onComposeSend={handleComposeSend}
                 onComposeSave={handleComposeSave}
+                replyWidth={replyWidth}
+                onReplyWidthChange={(w) => {
+                  setReplyWidth(w);
+                  localStorage.setItem("mail-reply-width", String(w));
+                }}
               />
             </div>
           </div>
@@ -638,6 +656,7 @@ export default function MailPage() {
             isOpen={showCompose}
             onClose={handleComposeCancel}
             title="Compose"
+            fullScreen
           >
             <EmailComposer
               accounts={accounts}

@@ -561,9 +561,9 @@ highlight.js is loaded globally in `layout.tsx`:
 | Component | Pattern Used | Key Tailwind Classes |
 |-----------|-------------|---------------------|
 | FolderSidebar | FileTree sidebar | `min-w-[200px] max-w-[250px] bg-gray-50 border-r border-gray-200`. Items: `px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded`. Selected: `bg-blue-100 text-blue-800`. |
-| EmailList | List items with borders; resizable via drag handle | Rows: `px-4 py-3 border-b border-gray-200 hover:bg-gray-50`. Unread: `font-semibold text-gray-900`. Read: `text-gray-600`. Selected: `bg-blue-50`. **Resizable**: default 350px, min 280px, max 500px; drag handle (2px, `cursor-col-resize`, `hover:bg-blue-200`/`active:bg-blue-400`); keyboard ArrowLeft/ArrowRight; width persisted in `localStorage` key `mail-list-width`. |
+| EmailList | List items with borders; resizable via drag handle | Rows: `px-4 py-3 border-b border-gray-200 hover:bg-gray-50`. Unread: `font-semibold text-gray-900`. Read: `text-gray-600`. Selected: `bg-blue-50`. **Resizable**: default 350px, min 240px, max 720px; drag handle (2px, `cursor-col-resize`, `hover:bg-blue-200`/`active:bg-blue-400`); keyboard ArrowLeft/ArrowRight; **touch support** via pointer events (`touch-action: none` on handle); width persisted in `localStorage` key `mail-list-width`. |
 | EmailComposer | Bare form fields inside Overlay; contains SmartSuggest inline chips when replying | `space-y-4 max-w-2xl mx-auto`. Send: `bg-blue-600 text-white py-2 px-4 rounded`. Draft: `text-gray-600 hover:text-gray-900`. **Smart reply props**: `emailUid`, `accountId`, `folder` passed from EmailReader — when present, renders `<SmartSuggest compact>` chips between body textarea and Review with AI button. |
-| EmailReader | Headers panel + action bar; smart replies render inside inline EmailComposer (not standalone) | Headers: `bg-gray-50 border-b border-gray-200 px-4 py-3`. Actions: `px-3 py-1.5 text-sm border border-gray-200 rounded text-gray-600 hover:bg-gray-100`. Delete: `text-red-600 hover:bg-red-50`. Smart replies no longer render as a standalone block — they appear as compact chips inside the inline EmailComposer when Reply is clicked. |
+| EmailReader | Headers panel + action bar; side-by-side reply layout at xl+ | Headers: `bg-gray-50 border-b border-gray-200 px-4 py-3`. Actions: `px-3 py-1.5 text-sm border border-gray-200 rounded text-gray-600 hover:bg-gray-100`. Delete: `text-red-600 hover:bg-red-50`. On widescreen (xl+), clicking Reply opens the composer alongside the email body in a side-by-side layout. On smaller screens the reply panel stacks below the email body. |
 | AccountSetup | Provider grid + form | Provider cards: list item pattern `p-4 rounded border hover:shadow-md`. Form: stacked card `p-6 rounded-lg border space-y-4`. |
 
 ### Overlay Container Pattern — Content Wrapper Delegation
@@ -606,6 +606,14 @@ The email page (`/mail`) supports two composing contexts, each with a different 
 </div>
 ```
 
+### Smart Replies Collapse/Expand
+
+The Smart Replies heading acts as a collapse toggle. The chevron icon rotates on expand/collapse. Cards are hidden via conditional rendering when collapsed.
+
+### Dual Resize Handles
+
+Resize handles use `w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0`. Active state adds `bg-blue-400`. Both handles have `role='separator'` with appropriate `aria-*` attributes. Widths persist to `localStorage` under `mail-list-width` and `mail-reply-width` keys.
+
 **Reference implementation:**
 - `services/ingenium-dashboard/src/app/mail/components/SmartSuggest.tsx` (compact variant lines 170–202, full-card variant lines 206–229)
 - `services/ingenium-dashboard/src/app/mail/components/EmailComposer.tsx` lines 192–205 (renders `<SmartSuggest>` when `emailUid` and `accountId` are present)
@@ -633,4 +641,4 @@ The email page (`/mail`) supports two composing contexts, each with a different 
 | Variant | When Used | Layout | Key Classes |
 |---------|-----------|--------|-------------|
 | **Compact (inline chips)** | Inside inline EmailComposer (reply/draft) | `flex flex-wrap gap-1.5 items-center` with chip buttons | `rounded-full px-2.5 py-1 border`, tone label `text-xs font-medium text-blue-700`, truncated preview `max-w-[180px]`, copy SVG icon |
-| **Full-card (standalone)** | Legacy — inside EmailReader standalone block | `space-y-2` container with heading | `border rounded p-3 card`, tone badge `rounded-full`, Copy/Draft action links, `line-clamp-4` body |
+| **Full-card (standalone)** | Primary — labeled "Smart Replies" section alongside the inline composer | `space-y-2` container with heading | `border rounded p-3 card`, tone badge `rounded-full`, subject line, `line-clamp-4` body preview, "Use this draft" button. 5 visible states: loading skeletons, error + retry, unconfigured + settings link, noreply info, 3 suggestion cards. |

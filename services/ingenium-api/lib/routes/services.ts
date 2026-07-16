@@ -39,19 +39,17 @@ const SUPERVISOR_RPC = "http://127.0.0.1:9001/RPC2";
 const PORT_MAP: Record<string, number> = {
   "ingenium-api": 4097,
   "ingenium-dashboard": 3000,
-  "opencode-server": 4096,
-  "opencode-iframe": 4098,
+  "opencode-web": 4098,
 };
 
 const DESCRIPTION_MAP: Record<string, string> = {
   "ingenium-api": "REST API Gateway (sole DB authority)",
   "ingenium-dashboard": "Next.js Dashboard UI",
-  "opencode-server": "OpenCode Web Server (auth-enabled)",
-  "opencode-iframe": "OpenCode Iframe (embedded)",
+  "opencode-web": "OpenCode Web Server",
 };
 
 const DISPLAY_NAME_MAP: Record<string, string> = {
-  "opencode-iframe": "opencode-webui-client",
+  "opencode-web": "OpenCode Web",
 };
 
 const STATE_MAP: Record<string, ServiceInfo["state"]> = {

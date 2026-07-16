@@ -72,7 +72,7 @@ try {
 } finally { db.close(); }
 ")
   if [ "$WORKTREE" != "/workspace" ]; then
-    supervisorctl stop opencode-server opencode-iframe 2>/dev/null || true
+    supervisorctl stop opencode-web 2>/dev/null || true
     node -e "
 const D = require('/app/node_modules/better-sqlite3');
 const db = new D('$OC_DB');
@@ -80,7 +80,7 @@ db.prepare('UPDATE project SET worktree = ? WHERE id = ?').run('/workspace', 'gl
 console.log('Updated OpenCode workspace to /workspace');
 db.close();
 "
-    supervisorctl start opencode-server opencode-iframe 2>/dev/null || true
+    supervisorctl start opencode-web 2>/dev/null || true
   fi
 fi
 wait

@@ -1,7 +1,7 @@
 # Conventions
 
 ## OpenCode Web UI Embedded in Dashboard
-The dashboard includes an embedded OpenCode service at `/opencode` — a second OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server. The session persists across tab navigation with a hidden iframe toggle. Workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+The dashboard includes an embedded OpenCode service at `/opencode` — a single shared OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server. The session persists across tab navigation with a hidden iframe toggle. Workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 
 ## DB Isolation
 - Only `packages/ingenium-core` and `services/ingenium-api` may import SQL libraries

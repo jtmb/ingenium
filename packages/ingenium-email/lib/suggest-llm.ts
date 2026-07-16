@@ -39,6 +39,7 @@ export async function getVoiceSamples(
   account: EmailAccount,
   tokens: OAuthToken,
   limit: number = 15,
+  _signal?: AbortSignal,
 ): Promise<Array<{ subject: string; snippet: string }>> {
   try {
     const sentFolder = "Sent";
@@ -78,6 +79,7 @@ export async function generateSmartReplies(
   targetEmail: { from: string; subject: string; bodySnippet: string },
   voiceSamples: Array<{ subject: string; snippet: string }>,
   llmConfig: LLMConfig,
+  signal?: AbortSignal,
 ): Promise<SmartReply[]> {
   if (!llmConfig.endpoint || !llmConfig.model) return [];
 
@@ -93,6 +95,7 @@ export async function generateSmartReplies(
     const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
+      signal,
       body: JSON.stringify({
         model: llmConfig.model,
         messages: [

@@ -140,9 +140,13 @@ After successful authentication, you should see:
 The inbox displays in a 3-pane layout:
 1. **Left sidebar** — account dropdown, compose button, and folder list (INBOX, Sent, Drafts, Archive, Spam, Trash)
 2. **Middle pane** — email list with subject, sender, date preview
-3. **Right pane** — full message content when an email is selected
+3. **Right pane** — full message content when an email is selected, with a responsive reply panel
 
-**Resizable EmailList**: The email list pane (middle pane) is resizable — a 2px draggable handle sits between the list and reader panes. Drag it horizontally (or use ArrowLeft/ArrowRight keys when focused) to resize. The width defaults to 350px, with bounds of 280px (min) and 500px (max). Width is persisted in `localStorage` under the key `mail-list-width` — it survives page refreshes and browser restarts.
+**Reply panel layout**: On widescreen (xl+) clicking Reply opens the composer alongside the email body in a side-by-side layout. On smaller screens the reply composer stacks below the email body. The mail container uses `100dvh` (dynamic viewport height) for better mobile support.
+
+**Resizable EmailList**: The email list pane (middle pane) is resizable — a 2px draggable handle sits between the list and reader panes. Drag it horizontally (or use ArrowLeft/ArrowRight keys when focused) to resize. The width defaults to 350px, with bounds of 240px (min) and 720px (max). Width is persisted in `localStorage` under the key `mail-list-width` — it survives page refreshes and browser restarts.
+
+**Dual Resize Handles**: Both the email list panel and the reply composer panel can be independently resized by dragging their separator handles or using ArrowLeft/ArrowRight keys while focused. Widths are stored in `localStorage` under `mail-list-width` and `mail-reply-width` respectively.
 
 Click any email to view its complete headers and body in the right pane.
 
@@ -158,6 +162,29 @@ Click any email to view its complete headers and body in the right pane.
 4. Click "Send" — uses SMTP via nodemailer to deliver through Gmail/Outlook servers
 5. Click "Save Draft" to save without sending, or "Discard" to cancel
 6. **Review with AI** — A "Review with AI" button appears below the message textarea in both inline compose and modal compose. Clicking it sends your draft to the AI and shows an Original vs Improved comparison with Apply/Dismiss options. See "Review with AI" below for details.
+7. **Full-screen compose** — The compose overlay uses the full available screen width and height, providing ample space for drafting long messages.
+
+### Rich Text Formatting
+
+The email composer uses a **TipTap-based rich text editor** (replacing the old `<textarea>`). A formatting toolbar provides these controls:
+
+| Control | Function | Tips |
+|---------|----------|------|
+| Undo / Redo | Revert or reapply the last edit | Keyboard shortcuts: Ctrl+Z / Ctrl+Shift+Z |
+| Font Family | Select font (e.g., Sans Serif, Serif, Monospace) | Applies to selected text |
+| Font Size | Increase / decrease text size | Preset sizes for headings vs body |
+| Bold / Italic / Underline | Standard text emphasis | Keyboard shortcuts: Ctrl+B / Ctrl+I / Ctrl+U |
+| Text Color | Foreground color picker | Opens a compact color swatch panel |
+| Alignment | Left, center, right, justify | Block-level alignment |
+| Ordered / Unordered Lists | Numbered and bullet lists | Multi-level nesting supported |
+| Indent / Outdent | Increase or decrease list/item indentation | Works on lists and blockquotes |
+| Blockquote | Quote-style formatting for cited text | Renders with left border accent |
+| Clear Formatting | Remove all inline formatting from selection | Resets to default body style |
+
+**How it works:**
+- Formatted emails send **both HTML and plain-text fallback**. The HTML carries all formatting; the plain-text alternative ensures compatibility with text-only mail clients.
+- **SmartSuggest and AI Review text is safely inserted as text, not raw HTML.** When you click "Use this draft" on a suggestion card or "Apply" on an AI review, the content is inserted as plain text into the TipTap editor — it never bypasses the editor's sanitization layer. This prevents XSS vectors and formatting corruption from LLM-generated content.
+- The toolbar is fully accessible with `role="toolbar"` and `aria-label` attributes. See the [Styling Guide](../services/ingenium-dashboard/STYLING-GUIDE.md#formatting-toolbar) for detailed component styling.
 
 ### Reply, Draft, Forward, and Compose New
 
@@ -171,21 +198,31 @@ Each email reader pane includes action buttons for quick responses. The compose 
 - **Subject**: Prefixed with `"Re: "` — the `buildReplySubject()` helper (`mail/page.tsx:272-273`) checks the original subject against `/^re:/i` before adding the prefix, so double `"Re: Re:"` never occurs (dedup-guarded)
 - **Body**: Empty — compose your response from scratch
 
-**Draft (from smart-reply suggestion)** — When you click Reply, the inline composer opens with the empty Reply prefill (To/Subject). Compact suggestion chips render inside the composer below the textarea. Clicking a chip fills the subject and body with the selected suggestion's content immediately. This lets you review, tweak, and send an AI-drafted reply without leaving the reading pane.
+**Draft (from smart-reply suggestion)** — When you click Reply, the inline composer opens with the empty Reply prefill (To/Subject). A **"Smart Replies"** section appears alongside the composer, showing up to 3 suggestion cards — each displaying a tone badge, subject line, and body preview. Click **"Use this draft"** on a card to fill the composer's subject and body with that suggestion's content immediately. This lets you review, tweak, and send an AI-drafted reply without leaving the reading pane.
+
+The Smart Replies section has 5 visible states: loading skeletons (pulsing card placeholders while fetching), error with retry button (on API failure), unconfigured with a settings link (when no Synthesis LLM is set up), noreply info (automated senders — section hidden), and 3 suggestion cards (normal state).
 
 **Forward** — Located in the action bar. Opens the full modal overlay (`EmailComposer`) with the original message content prefilled.
 
 **Compose New** — Click "Compose" in the left sidebar. Opens the full modal overlay (`EmailComposer`) with a blank message.
 
-Both inline compose and modal overlay include the **"Review with AI"** button below the message textarea. See the Review with AI section below for details.
+Both inline compose and modal overlay include the **"Review with AI"** button below the message textarea. In the inline compose box, the button appears above the Smart Replies section. See the Review with AI section below for details.
 
-**Inline reply with smart suggestions**: When replying (Reply or Draft from suggestion), the inline composer renders `<SmartSuggest compact>` chips between the message textarea and the Review with AI button. These auto-fetch on mount (in `auto` mode) and appear as compact pill/chip buttons showing tone + truncated body preview. Clicking a chip fills the composer's subject and body fields immediately. The composer passes `emailUid`, `accountId`, and `folder` directly from EmailReader — no defaulting of folder to `"INBOX"`.
+**Inline reply with smart suggestions**: When replying (Reply or Draft from suggestion), a labeled **"Smart Replies"** section appears alongside the composer with up to 3 readable cards. Each card shows a tone badge, full subject line, and body preview (with `line-clamp-4` truncation). Click **"Use this draft"** on a card to fill the composer's subject and body immediately. The section has 5 visible states: loading skeletons (three pulsing card placeholders), error with retry button, unconfigured with a settings link, noreply info (hidden by default), and the 3 suggestion cards. The composer passes `emailUid`, `accountId`, and `folder` directly from EmailReader — no defaulting of folder to `"INBOX"`.
 
 Source reference: `handleReply` at `mail/page.tsx:279-287`, `handleDraft` at `mail/page.tsx:289-297`.
 
+#### Smart Reply Cards UX
+
+**Smart Replies collapsible**: Smart Replies are shown expanded by default and can be collapsed/expanded using the disclosure button next to the heading. The button uses `aria-expanded` for accessibility. Cards are hidden via conditional rendering when collapsed.
+
+**Applying drafts**: Click anywhere on a Smart Reply card (or press Enter/Space while focused) to apply the draft to the composer — fills the subject and body fields immediately.
+
+**Copy button**: Use the copy icon button on each card to copy the draft to clipboard without applying it to the composer.
+
 ### Review with AI
 
-A **"Review with AI"** button appears below the message textarea in both the inline compose box (Reply/Draft) and the full modal overlay (Compose New/Forward).
+A **"Review with AI"** button appears below the message textarea (and above the Smart Replies section in inline compose) in both the inline compose box (Reply/Draft) and the full modal overlay (Compose New/Forward).
 
 **How it works:**
 1. Write your draft as usual
@@ -298,16 +335,28 @@ The email client can learn your response style and draft 3 reply options when yo
 
 7. **Graceful fallback**: If no Synthesis LLM is configured (Settings → Synthesis LLM), the system falls back to template-based keyword matching against manually-created email skills. The UI shows a note directing you to configure an LLM for full AI drafting.
 
+8. **Background precomputation (optional)**: When `mail_smart_replies_prefetch` is enabled, the sync engine generates suggestions **in the background** for genuinely new incoming messages as they arrive through delta poll. This means suggestions appear instantly (from cache) when you open those emails later — no waiting for LLM generation.
+
+   **How background precomputation works:**
+   - The sync engine's delta poll (every 30s) detects genuinely new messages (via `history.list`'s `messagesAdded` entries — label changes and resyncs are **not** queued)
+   - New messages are enqueued into a **durable `email_suggestion_queue` table** (survives restarts)
+   - A dedicated worker processes the queue: for each message, it calls the LLM to generate suggestions and stores them in `email_suggestions` cache
+   - **Retry with backoff**: If an LLM call fails, the queue entry is retried up to 3 times with exponential backoff (30s → 2min → 5min). After the final failure, the entry is marked `failed` and not retried.
+   - **Settings gate**: Queue processing respects `mail_smart_replies_enabled` and noreply checks
+   - **LLM timeout safety**: Each generation uses the same `max_tokens: 8192` and `content`-only pattern as on-demand suggestions — reasoning traces are never exposed
+   - The precomputed result is **indistinguishable from on-demand generation** — the same cache table, same API response shape, same source labels when read from cache
+
 ### Configuration
 
 Uses the **existing Synthesis LLM** settings (`synthesis_model`, `synthesis_api_key`, `synthesis_endpoint`). No separate email-specific LLM configuration needed. Configure in Settings → Synthesis LLM.
 
-Two email-specific settings control smart reply behavior, available in **Settings → Mail**:
+Three email-specific settings control smart reply behavior, available in **Settings → Mail**:
 
 | Setting Key | Default | UI Widget | Purpose |
 |-------------|---------|-----------|---------|
 | `mail_smart_replies_enabled` | `true` | Checkbox | Master toggle — when disabled, the suggest endpoint returns `source: "disabled"` and the UI shows nothing. |
 | `mail_smart_replies_mode` | `"auto"` | Select dropdown (`auto` / `manual`) | **Automatic** — suggestions are fetched immediately when an email is opened. **Manual** — the component renders a "Generate Suggestions" button instead; the user clicks to trigger the LLM call. |
+| `mail_smart_replies_prefetch` | `"false"` | Checkbox | Pre-generate smart replies in the background so they load instantly — enqueues genuinely new incoming messages for proactive LLM generation. |
 
 Configure via dashboard Settings page or MCP tools:
 ```typescript
@@ -320,6 +369,11 @@ await ingenium_setting_set({
   project: "global-default",
   key: "mail_smart_replies_mode",
   value: "manual"  // or "auto"
+});
+await ingenium_setting_set({
+  project: "global-default",
+  key: "mail_smart_replies_prefetch",
+  value: "true"  // or "false"
 });
 ```
 
@@ -389,6 +443,8 @@ A **"Summarize this email"** button appears near the top of every email reading 
 | Smart replies disappeared after re-sync | Old `INSERT OR REPLACE` bug (pre-fix) | If a re-sync occurred before the `ON CONFLICT DO UPDATE` fix was deployed, cached suggestions were cascade-deleted. Re-open the email and click Reply — suggestions regenerate on the next suggestion fetch (the new cache is now persistent). |
 | Old emails show no suggestions | Noreply sender or settings disabled | Check if sender matches the noreply regex or verify `mail_smart_replies_enabled` is `"true"` in Settings → Mail |
 | Noreply/automated emails show no "Smart Replies" section | Noreply sender skip gate — senders matching `/no[-_.]?reply|do[-_.]?not[-_.]?reply/i` are suppressed with `source: "noreply"` and render no Smart Replies UI | This is intentional; smart reply LLM calls are not wasted on automated/transactional emails. The "Summarize this email" button still works for these emails. |
+| Neither toolbar nor suggestions appear | TipTap build issue or missing Synthesis LLM config | Verify the TipTap/rich-text composer built correctly (check console for JS errors). If the toolbar doesn't render, the compose area may fall back to a plain textarea with no formatting controls. Also verify Synthesis LLM is configured in Settings → Synthesis LLM — without it, Smart Suggestions and AI Review won't work. |
+| Background generation not working | Precompute disabled or LLM not configured | Verify `mail_smart_replies_prefetch` is enabled (Settings → Mail checkbox). Ensure Synthesis LLM is configured. Check the API logs for `processSuggestionQueue` entries — if none appear, the queue worker isn't running or no new messages were enqueued. |
 
 ## Security Notes
 

@@ -105,8 +105,7 @@ docker compose up --build
 This starts all services in a single container:
   - **API** on http://localhost:4097 — REST API gateway, sole database authority  
   - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend (17 pages; `/observations`)  
-  - **opencode-server** on stdio (port :4096) — Auth-enabled OpenCode web server
-  - **opencode-iframe** on port :4098 — No-auth iframe for embedded dashboard use
+  - **opencode-web** on 127.0.0.1:4098 — OpenCode web server (binds 0.0.0.0 inside container, published to host loopback only)
 
 The container runs supervisord managing all processes. Press `Ctrl+C` to stop gracefully.
 
@@ -128,10 +127,10 @@ This starts services locally and will:
 ### Docker Quick Start
 
 ```bash
-# Single-container deployment with all 4 processes
+# Single-container deployment with all 3 processes
 docker compose up --build
 
-# This starts API (:4097), Dashboard (:3000), and opencode-server (:4096)
+# This starts API (:4097), Dashboard (:3000), and opencode-web (:4098)
 # managed by supervisord inside the container
 ```
 
