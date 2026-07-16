@@ -1,3 +1,8 @@
+---
+title: Concepts
+description: Architecture and conceptual documentation for the Ingenium system.
+---
+
 # Concepts
 
 Architecture and conceptual documentation for the Ingenium system.
@@ -8,10 +13,11 @@ Architecture and conceptual documentation for the Ingenium system.
 
 | Document | Description |
 |----------|-------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | System architecture, project identity model, and component overview |
-| [TECH-STACK.md](./TECH-STACK.md) | Languages, frameworks, packages, and tools used |
-| [Self-Learning Pipeline](./self-learning-pipeline.md) | Complete reference for the self-learning pipeline: extraction, traits, skills, observability |
-| [Docs Workspace](../reference/docs-workspace.md) | Documentation workspace feature: spaces, pages, versions, comments, attachments |
+| [Architecture](architecture.md) | System architecture, project identity model, and component overview |
+| [Tech Stack](tech-stack.md) | Languages, frameworks, packages, and tools used |
+| [Conventions](conventions.md) | Naming, file organization, error handling, git practices |
+| [Skill System](skill-system.md) | Canonical taxonomy, three-layer lifecycle, sync, security, and tool catalog |
+| [Self-Learning Pipeline](self-learning.md) | Complete reference for the self-learning pipeline: extraction, traits, skills, observability |
 
 ---
 
@@ -19,4 +25,4 @@ Architecture and conceptual documentation for the Ingenium system.
 
 - [Reference Documentation](../reference/index.md) — Detailed technical references (database, environment variables, API)
 - [Operations Guides](../operations/index.md) — Deployment and maintenance procedures
-- [Security](../security/iframe-sandbox.md) — Security documentation
+- [Security](../security/index.md) — Security documentation

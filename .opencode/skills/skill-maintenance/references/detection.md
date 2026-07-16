@@ -67,6 +67,6 @@ Before every coding session — and whenever you touch a new area — scan for t
 
 **Trigger:** The project's documentation is out of sync with the actual file structure.
 
-- Agent files changed but `docs/agents.md` hasn't been updated
+- Agent files changed but `docs/configure/agents.md` hasn't been updated
 - Skills changed but skill count in docs hasn't been updated
 - Hook files changed but architecture diagram is stale
