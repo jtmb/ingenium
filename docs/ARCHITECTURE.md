@@ -1,3 +1,5 @@
+> **Note:** This document is being reorganized. The canonical location will be `docs/concepts/ARCHITECTURE.md`. Please update your bookmarks.
+
 # Architecture
 
 ## Project Identity Model

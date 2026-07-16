@@ -1,3 +1,5 @@
+> **Note:** This document is being reorganized. The canonical location will be `docs/getting-started/GETTING-STARTED.md`. Please update your bookmarks.
+
 # Getting Started with Ingenium
 
 This guide walks you through setting up Ingenium — a self-learning AI agent skill system and MCP server — on OpenCode.

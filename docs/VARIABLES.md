@@ -1,3 +1,5 @@
+> **Note:** This document is being reorganized. The canonical reference is now at `docs/reference/environment-variables.md`. This file is maintained as a per-service quick-reference.
+
 # VARIABLES — Environment Variables
 
 All environment variables used across the Ingenium monorepo. Any new variable added to the codebase MUST be documented here in the same commit.
