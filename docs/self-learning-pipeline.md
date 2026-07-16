@@ -1,3 +1,5 @@
+> **Note:** This document is being reorganized. The canonical location will be `docs/concepts/self-learning-pipeline.md`. Please update your bookmarks.
+
 # Self-Learning Pipeline Reference
 
 A comprehensive guide to the Ingenium self-learning pipeline that replaced the old agent self-reporting system.
