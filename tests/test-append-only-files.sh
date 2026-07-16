@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-LEARNINGS_HELPER="$REPO_ROOT/.agents/skills/learnings.sh"
+LEARNINGS_HELPER="$REPO_ROOT/.opencode/skills/learnings.sh"
 
 pass() { echo "✓ PASS: $1"; }
 fail() { echo "✗ FAIL: $1"; }

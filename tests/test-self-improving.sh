@@ -17,7 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-SKILLS_DIR="$REPO_ROOT/.agents/skills"
+SKILLS_DIR="$REPO_ROOT/.opencode/skills"
 VERBOSE=false
 PASSED=0
 FAILED=0
@@ -290,7 +290,7 @@ test_manual_guide() {
     echo "  5. The AI should PROPOSE (and create) an ORM or Prisma skill"
     echo ""
     echo "  6. Verify the AI created the skill at:"
-    echo "     .agents/skills/{prisma-conventions}/SKILL.md"
+    echo "     .opencode/skills/{prisma-conventions}/SKILL.md"
     echo ""
     echo "  7. Verify the skill has valid frontmatter and content"
     echo ""

@@ -133,10 +133,12 @@ export function createSkill(projectId: string, name: string, description: string
     // Sync FTS5 index: use lastInsertRowid (integer) for FTS5 rowid
     db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
       .run(result.lastInsertRowid, content, description);
-    // 🔴 writeSkillToDisk DISABLED to stop frontmatter amplification
     return getSkill(projectId, name)!;
   });
   checkpointAfterWrite();
+  // Write to disk AFTER the DB transaction commits — frontmatter amplification
+  // is prevented by stripLeadingFrontmatter() inside writeSkillToDisk
+  if (skill) writeSkillToDisk(skill);
   return skill;
 }
 
@@ -283,23 +285,14 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
            file_tree = excluded.file_tree,
            updated_at = excluded.updated_at`
       ).run(id, projectId, diskName, description, content, diskTags, diskAlwaysApply, fileTree, now, now);
-      // Sync FTS5
-      const inserted = db.prepare("SELECT rowid FROM skills WHERE id = ?").get(id) as any;
-      db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
-        .run(inserted.rowid, content, description);
+      // FTS5 index is auto-synced by AFTER INSERT trigger on skills (migration 024)
       logger.info("skills", "Skill created from disk sync", { name: diskName });
     } else {
       // Update existing skill from disk file
+      // FTS5 index is auto-synced by AFTER UPDATE trigger on skills (migration 024)
       const now = new Date().toISOString();
-      const row = db.prepare("SELECT rowid FROM skills WHERE id = ?").get(existing.id) as any;
-      // Remove old FTS entry
-      db.prepare("DELETE FROM skills_fts WHERE rowid = ?").run(row.rowid);
-      // Update skill
       db.prepare("UPDATE skills SET content = ?, description = ?, tags = ?, always_apply = ?, file_tree = ?, updated_at = ? WHERE id = ?")
         .run(content, description, diskTags, diskAlwaysApply, fileTree, now, existing.id);
-      // Re-insert FTS
-      db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
-        .run(row.rowid, content, description);
       logger.info("skills", "Skill synced from disk", { name: diskName });
     }
 
