@@ -876,16 +876,21 @@ skillsRouter.get("/:name/lineage", (req, res) => {
   res.json({ data: lineage.map(lineageToDto), total: lineage.length });
 });
 
-// POST /sync-all — sync ALL skills disk→DB then DB→disk for a project
-skillsRouter.post("/sync-all", (req, res) => {
+interface SyncDetail {
+  name: string;
+  status: "created" | "updated" | "unchanged" | "skipped_archived" | "error";
+  revision: number;
+}
+
+// GET /sync-all/preview — preview what sync-all would do without modifying anything
+skillsRouter.get("/sync-all/preview", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  if (!checkSkillLock(req, res, projectId)) return;
 
   const skillsDir = getSkillsBase(projectId);
-
-  let fromDisk = 0;
-  let toDisk = 0;
+  let willCreate: string[] = [];
+  let willUpdate: string[] = [];
+  let willSkip: string[] = [];
   let errors: string[] = [];
 
   try {
@@ -895,15 +900,26 @@ skillsRouter.post("/sync-all", (req, res) => {
         if (e.isDirectory()) {
           const skillMdPath = path.join(skillsDir, e.name, "SKILL.md");
           if (!fs.existsSync(skillMdPath)) continue;
-          try {
-            const existing = skills.getSkill(projectId, e.name);
-            if (!existing) {
-              const synced = skills.syncSkillFromDisk(projectId, e.name);
-              if (synced) fromDisk++;
-              else errors.push(`Disk sync failed: ${e.name}`);
+
+          const existing = skills.getSkill(projectId, e.name);
+
+          if (!existing) {
+            willCreate.push(e.name);
+          } else if (existing.archived_at) {
+            willSkip.push(e.name);
+          } else {
+            // Compare disk content against DB to predict whether sync would update
+            try {
+              const rawContent = fs.readFileSync(skillMdPath, "utf-8");
+              const parsedContent = skills.stripLeadingFrontmatter(rawContent);
+              if (parsedContent === existing.content) {
+                willSkip.push(e.name);
+              } else {
+                willUpdate.push(e.name);
+              }
+            } catch {
+              willSkip.push(e.name);
             }
-          } catch (err: any) {
-            errors.push(`Disk sync error: ${e.name} — ${err.message}`);
           }
         }
       }
@@ -912,13 +928,90 @@ skillsRouter.post("/sync-all", (req, res) => {
     errors.push(`Failed to scan skills dir: ${err.message}`);
   }
 
+  res.json({
+    data: {
+      will_create: willCreate,
+      will_update: willUpdate,
+      will_skip: willSkip,
+      total: willCreate.length + willUpdate.length + willSkip.length,
+      errors: errors.length > 0 ? errors : undefined,
+    },
+  });
+});
+
+// POST /sync-all — sync ALL skills disk→DB for a project
+// Optional ?write_to_disk=true to also push DB skills back to disk
+skillsRouter.post("/sync-all", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  if (!checkSkillLock(req, res, projectId)) return;
+
+  const skillsDir = getSkillsBase(projectId);
+  const writeToDisk = req.query.write_to_disk === "true";
+
+  let syncedToDb = 0;
+  let unchanged = 0;
+  let writtenToDisk = 0;
+  let errors: string[] = [];
+  let details: SyncDetail[] = [];
+
+  // Phase 1: Sync every disk skill → DB (syncSkillFromDisk is idempotent)
   try {
-    toDisk = skills.syncAllSkills(projectId);
+    if (fs.existsSync(skillsDir)) {
+      const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isDirectory()) {
+          const skillMdPath = path.join(skillsDir, e.name, "SKILL.md");
+          if (!fs.existsSync(skillMdPath)) continue;
+          try {
+            const existingBefore = skills.getSkill(projectId, e.name);
+            const synced = skills.syncSkillFromDisk(projectId, e.name);
+
+            if (!synced) {
+              errors.push(`Disk sync failed: ${e.name}`);
+              details.push({ name: e.name, status: "error", revision: 0 });
+            } else if (synced.archived_at) {
+              unchanged++;
+              details.push({ name: e.name, status: "skipped_archived", revision: synced.revision });
+            } else if (!existingBefore) {
+              syncedToDb++;
+              details.push({ name: e.name, status: "created", revision: synced.revision });
+            } else if (synced.revision > existingBefore.revision) {
+              syncedToDb++;
+              details.push({ name: e.name, status: "updated", revision: synced.revision });
+            } else {
+              unchanged++;
+              details.push({ name: e.name, status: "unchanged", revision: synced.revision });
+            }
+          } catch (err: any) {
+            errors.push(`Disk sync error: ${e.name} — ${err.message}`);
+            details.push({ name: e.name, status: "error", revision: 0 });
+          }
+        }
+      }
+    }
   } catch (err: any) {
-    errors.push(`Failed to write skills to disk: ${err.message}`);
+    errors.push(`Failed to scan skills dir: ${err.message}`);
   }
 
-  res.json({ data: { synced_to_db: fromDisk, written_to_disk: toDisk, errors } });
+  // Phase 2: Optional DB→disk write (only when explicitly requested)
+  if (writeToDisk) {
+    try {
+      writtenToDisk = skills.syncAllSkills(projectId);
+    } catch (err: any) {
+      errors.push(`Failed to write skills to disk: ${err.message}`);
+    }
+  }
+
+  res.json({
+    data: {
+      synced_to_db: syncedToDb,
+      unchanged,
+      written_to_disk: writtenToDisk,
+      errors,
+      details,
+    },
+  });
 });
 
 // POST /consolidate — LLM-driven skill audit to merge redundant skills, targeting ≤20

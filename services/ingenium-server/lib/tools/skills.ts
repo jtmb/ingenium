@@ -70,7 +70,13 @@ export async function skillConsolidate(project: string) {
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Sync ALL skills disk↔DB for a project. */
+/** Preview what sync-all would change without modifying anything. */
+export async function skillSyncAllPreview(project: string) {
+  const res = await api.get("/skills/sync-all/preview", { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Sync ALL skills disk→DB for a project. Use ?write_to_disk=true to also push DB→disk. */
 export async function skillSyncAll(project: string) {
   const res = await api.post("/skills/sync-all", {}, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
