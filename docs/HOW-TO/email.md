@@ -148,6 +148,10 @@ The inbox displays in a 3-pane layout:
 
 **Dual Resize Handles**: Both the email list panel and the reply composer panel can be independently resized by dragging their separator handles or using ArrowLeft/ArrowRight keys while focused. Widths are stored in `localStorage` under `mail-list-width` and `mail-reply-width` respectively.
 
+**Resize implementation**: Uses the `startX`/`startWidth` ref-based pattern — `useRef<{ startX: number; startWidth: number }>` captures the pointer position and panel width at drag start, then computes the new width from the delta on pointer move. Widths are clamped between 240px (min) and 720px (max) for the list pane. Pointer capture (`setPointerCapture()`) ensures reliable drag tracking across the viewport. Widths are persisted to `localStorage` on pointer up, not during drag.
+
+**Two-line email rows at narrow widths**: The email list row is a three-line layout (sender+timestamp, subject, body snippet). At narrow pane widths (<300px), the body snippet line is visually clipped, yielding an effective two-line layout. The pane has a minimum width of 240px, below which horizontal scrolling occurs.
+
 Click any email to view its complete headers and body in the right pane.
 
 > **Note**: Re-clicking the already-open email no longer triggers a visible reload. A same-UID guard (`selectedEmail?.uid === uid` at `mail/page.tsx:202-203`) prevents redundant fetch + state reset when the user clicks the same email row again.
@@ -215,6 +219,8 @@ Source reference: `handleReply` at `mail/page.tsx:279-287`, `handleDraft` at `ma
 #### Smart Reply Cards UX
 
 **Smart Replies collapsible**: Smart Replies are shown expanded by default and can be collapsed/expanded using the disclosure button next to the heading. The button uses `aria-expanded` for accessibility. Cards are hidden via conditional rendering when collapsed.
+
+**Collapse persistence**: The collapsed/expanded state of the Smart Replies section persists across email switches and re-renders (e.g., during fetch completion, retry timers, and draft changes). This is achieved by extracting the `CardsVariant` component at module scope so its React state survives parent re-renders of the same email. The `key={emailUid}` prop ensures it unmounts/remounts only when switching to a different email.
 
 **Applying drafts**: Click anywhere on a Smart Reply card (or press Enter/Space while focused) to apply the draft to the composer — fills the subject and body fields immediately.
 

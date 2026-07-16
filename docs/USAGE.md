@@ -9,7 +9,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container running 3 processes under supervisord: API (:4097), Dashboard (:3000), and opencode-web (binds 0.0.0.0:4098 inside container, published 127.0.0.1:4098 on host). The MCP server exposes **73 tools** accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-web (binds 0.0.0.0:4098 inside container, published 127.0.0.1:4098 on host), and ttyd-opencode (:4099). The MCP server exposes **150 tools** accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
 
 ### Connecting an MCP Client
 
@@ -234,7 +234,7 @@ These 16 skills provide guidance for specific contexts but are not required for 
 
 ## MCP (Servers + Tool Manager)
 
-**What it does**: Configure and manage MCP servers and tools through a dual-tab page at `/mcp-servers`. The **Servers** tab manages MCP server lifecycle (add, start, stop). The **Tools** tab provides a categorized view of all 73 MCP tools across 15 categories with search, category filter, and per-tool or per-category enable/disable toggles. Tool state is checked at the MCP server level before each tool execution — a disabled tool returns a `TOOL_DISABLED` error instead of executing.
+**What it does**: Configure and manage MCP servers and tools through a dual-tab page at `/mcp-servers`. The **Servers** tab manages MCP server lifecycle (add, start, stop). The **Tools** tab provides a categorized view of all 150 MCP tools across 23 categories with search, category filter, and per-tool or per-category enable/disable toggles. Tool state is checked at the MCP server level before each tool execution — a disabled tool returns a `TOOL_DISABLED` error instead of executing.
 
 **Servers tab — How to use**:
 - View all configured MCP servers with `source` badges: **External** (blue), **Enabled** (green, inherited from global project), **Running** (green, built-in proxy), **Stopped/Disabled** (gray)
@@ -242,7 +242,7 @@ These 16 skills provide guidance for specific contexts but are not required for 
 - See inherited servers from the global-default project marked as "Enabled"
 
 **Tools tab — How to use**:
-- View all 73 tools grouped into 15 categories (e.g., Settings, Skills, Projects, Email, Tasks, etc.)
+- View all 150 tools grouped into 23 categories (e.g., Settings, Skills, Projects, Email, Tasks, etc.)
 - Search tools by name using the search box
 - Filter by category using the dropdown (defaults to "All categories")
 - Toggle individual tools on/off using the green/gray toggle switches

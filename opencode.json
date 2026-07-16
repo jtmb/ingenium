@@ -1,5 +1,3 @@
-// To switch back to ask mode, change "permission" from "allow" to:
-// { "read": "allow", "edit": "ask", "bash": "allow", "grep": "allow", "glob": "allow", "list": "allow" }
 {
   "$schema": "https://opencode.ai/config.json",
   "skills": {
@@ -22,7 +20,7 @@
         "THREAD_SERVER_URL": "http://localhost:5000",
         "THREAD_DEFAULT_SESSION": "gh-llm-bootstrap",
         "THREAD_REQUEST_TIMEOUT": "10",
-        "THREAD_API_TOKEN": "eyJhbGciOiJIUzI1NiIsInR5cCI6IlRIUkVBRCJ9.eyJzdWIiOiJhZG1pbiIsImlhdCI6MTc4MzIyMjQzMX0.ULrWu0TAj8A-6q3Uf5PnOw70RIPIwRDETitq-Mopf0k"
+        "THREAD_API_TOKEN": "<YOUR_THREAD_API_TOKEN>"
       }
     },
     "ingenium": {
@@ -35,7 +33,8 @@
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
         "INGENIUM_API_TIMEOUT": "10000",
-        "LOG_LEVEL": "info"
+        "LOG_LEVEL": "info",
+        "INGENIUM_PROJECT": "gh-llm-bootstrap"
       }
     },
     "playwright": {
@@ -50,9 +49,9 @@
     }
   },
   "plugin": [
-    "./packages/ingenium-extension/observer.ts",
-    "./packages/ingenium-extension/auto-observer.ts",
-    "./packages/ingenium-extension/skill-sync.ts",
-    "./packages/ingenium-extension/onboarding-sync.ts"
+    "packages/ingenium-extension/auto-observer.ts",
+    "packages/ingenium-extension/observer.ts",
+    "packages/ingenium-extension/onboarding-sync.ts",
+    "packages/ingenium-extension/skill-sync.ts"
   ]
 }

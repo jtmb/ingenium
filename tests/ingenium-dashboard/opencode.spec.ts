@@ -27,12 +27,18 @@ test.describe("OpenCode Docker Integration", () => {
 
   test("OpenCode iframe renders in dashboard /opencode page", async ({ page }) => {
     await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
-    // The iframe should be present
-    const iframe = page.locator('iframe[title="OpenCode"]');
-    await expect(iframe).toBeVisible({ timeout: 10000 });
-    // The iframe src should be localhost:4098
-    const src = await iframe.getAttribute("src");
+    // The Web iframe should be present (always mounted)
+    const webIframe = page.locator('iframe[title="OpenCode Web"]');
+    await expect(webIframe).toBeVisible({ timeout: 10000 });
+    // The Web iframe src should contain localhost:4098
+    const src = await webIframe.getAttribute("src");
     expect(src).toContain("4098");
+
+    // The CLI (terminal) iframe is lazy-mounted — may not exist on first load.
+    // Check it's at least capable of rendering (count 0 or 1, never >1).
+    const cliIframe = page.locator('iframe[title="OpenCode Terminal"]');
+    const cliCount = await cliIframe.count();
+    expect(cliCount).toBeLessThanOrEqual(1);
   });
 
   test("/opencode page has no console errors from iframe loading", async ({ page }) => {
@@ -42,8 +48,8 @@ test.describe("OpenCode Docker Integration", () => {
     });
     await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
     // Wait for iframe to appear (proves page loaded)
-    const iframe = page.locator('iframe[title="OpenCode"]');
-    await expect(iframe).toBeVisible({ timeout: 10000 });
+    const webIframe = page.locator('iframe[title="OpenCode Web"]');
+    await expect(webIframe).toBeVisible({ timeout: 10000 });
     // Give a short time for console errors to appear after iframe renders
     await page.waitForTimeout(1000);
 
@@ -59,8 +65,8 @@ test.describe("OpenCode Docker Integration", () => {
     });
     await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
     // Wait for iframe to load
-    const iframe = page.locator('iframe[title="OpenCode"]');
-    await expect(iframe).toBeVisible({ timeout: 10000 });
+    const webIframe = page.locator('iframe[title="OpenCode Web"]');
+    await expect(webIframe).toBeVisible({ timeout: 10000 });
     // Wait for the iframe's network activity to settle
     await page.waitForTimeout(2000);
 

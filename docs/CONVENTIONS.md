@@ -1,7 +1,15 @@
 # Conventions
 
 ## OpenCode Web UI Embedded in Dashboard
-The dashboard includes an embedded OpenCode service at `/opencode` — a single shared OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server. The session persists across tab navigation with a hidden iframe toggle. Workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode interface**:
+
+- **Web mode** — Embeds the OpenCode Web UI (`http://localhost:4098/`) in a full-viewport iframe
+- **CLI mode** — Embeds a ttyd terminal (`http://localhost:4099/`) in a full-viewport iframe, running `opencode attach http://localhost:4098 --dir /workspace`
+- **Mode switch** — A right-edge glass tab (`OpenCodeSwitch` component with `backdrop-blur-sm`) toggles between modes. The inactive iframe is hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
+- **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
+- **Persistence**: The chosen mode is saved in `localStorage`.
+- **Session sharing**: All sessions (Web iframe, CLI ttyd, direct terminal attachments) share the same backend process state.
+- **Workspace** (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 
 ## DB Isolation
 - Only `packages/ingenium-core` and `services/ingenium-api` may import SQL libraries

@@ -8,7 +8,7 @@ if [ -z "${OPENCODE_SERVER_PASSWORD:-}" ]; then
 fi
 
 # Ensure writable directories exist with correct ownership
-for dir in /app/.ingenium /app/.opencode/skills /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log; do
+for dir in /app/.ingenium /app/.ingenium/logs /app/.opencode/skills /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log; do
   if [ ! -d "$dir" ]; then
     mkdir -p "$dir"
   fi

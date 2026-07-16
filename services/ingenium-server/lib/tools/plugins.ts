@@ -42,3 +42,9 @@ export async function pluginGet(project: string, name: string) {
   const res = await api.get(`/plugins/${name}?project=${project}`);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** Get a plugin's source content from disk. */
+export async function pluginSource(project: string, name: string) {
+  const res = await api.get(`/plugins/${encodeURIComponent(name)}/source?project=${project}`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

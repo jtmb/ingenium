@@ -1,5 +1,20 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { MCPToolState } from "../schema.js";
+import {
+  MCP_TOOL_CATALOG,
+  getAllToolNames,
+  getToolsByCategory,
+  getCatalogMap,
+  getCategoryOrder,
+} from "./mcp-tool-catalog.js";
+
+export { getToolsByCategory, getAllToolNames };
+export type { McpToolCatalogEntry } from "./mcp-tool-catalog.js";
+
+/** Returns the full catalog map (name → entry). */
+export function getAllTools() {
+  return getCatalogMap();
+}
 
 export function getToolState(projectId: string, toolName: string): boolean {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -9,7 +24,7 @@ export function getToolState(projectId: string, toolName: string): boolean {
 }
 
 export function setToolState(projectId: string, toolName: string, enabled: boolean): MCPToolState {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
     // Use UPSERT — table has UNIQUE(project_id, tool_name), no id column needed
@@ -18,9 +33,12 @@ export function setToolState(projectId: string, toolName: string, enabled: boole
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(project_id, tool_name) DO UPDATE SET enabled = ?, updated_at = ?
     `).run(projectId, toolName, enabled ? 1 : 0, now, now, enabled ? 1 : 0, now);
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM mcp_tool_states WHERE project_id = ? AND tool_name = ?").get(projectId, toolName) as MCPToolState;
   });
+  // 🔴 checkpointAfterWrite MUST be outside the transaction — calling it inside
+  // the execTransaction callback causes SQLITE_LOCKED under concurrent access.
+  checkpointAfterWrite();
+  return result;
 }
 
 export function listToolStates(projectId: string): Array<{ tool_name: string; enabled: boolean }> {
@@ -29,28 +47,8 @@ export function listToolStates(projectId: string): Array<{ tool_name: string; en
   return rows.map(r => ({ tool_name: r.tool_name, enabled: r.enabled === 1 }));
 }
 
-const ALL_TOOLS = [
-  "ingenium_setting_get", "ingenium_setting_set",
-  "ingenium_skill_list", "ingenium_skill_load", "ingenium_skill_search", "ingenium_skill_create", "ingenium_skill_update", "ingenium_skill_delete", "ingenium_skill_enable", "ingenium_skill_disable", "ingenium_skill_sync",
-  "ingenium_task_list", "ingenium_task_create", "ingenium_task_move", "ingenium_task_complete",
-  "ingenium_project_list", "ingenium_project_init", "ingenium_project_delete", "ingenium_project_restore", "ingenium_project_list_archived", "ingenium_project_purge", "ingenium_project_set_global",
-  "ingenium_plugin_list", "ingenium_plugin_get", "ingenium_plugin_create", "ingenium_plugin_update", "ingenium_plugin_delete", "ingenium_plugin_enable", "ingenium_plugin_disable",
-  "ingenium_server_list", "ingenium_server_add", "ingenium_server_remove",
-  "ingenium_agent_list", "ingenium_agent_get", "ingenium_agent_create", "ingenium_agent_update", "ingenium_agent_delete", "ingenium_agent_enable", "ingenium_agent_disable", "ingenium_agent_sync",
-  "ingenium_observation_list", "ingenium_observation_search", "ingenium_observation_stats",
-  "ingenium_personality", "ingenium_personality_traits",
-  "ingenium_synthesis_run", "ingenium_synthesis_status", "ingenium_synthesis_cross_project",
-  "ingenium_command_list", "ingenium_command_get", "ingenium_command_create", "ingenium_command_update", "ingenium_command_delete",
-  "ingenium_config_get", "ingenium_config_set", "ingenium_config_sync",
-  "ingenium_plan_list", "ingenium_plan_save", "ingenium_plan_search",
-  "ingenium_email_list", "ingenium_email_search", "ingenium_email_read", "ingenium_email_send", "ingenium_email_draft", "ingenium_email_draft_response", "ingenium_email_folders", "ingenium_email_accounts", "ingenium_email_triage", "ingenium_email_suggest", "ingenium_email_patterns", "ingenium_email_watch_start", "ingenium_email_watch_status",
-  "ingenium_observe",
-  "ingenium_logs_list", "ingenium_logs_sources",
-];
-
-export function getAllToolNames(): string[] {
-  return [...ALL_TOOLS];
-}
+/** Derived from the catalog — all known tool names. */
+export const ALL_TOOLS: string[] = MCP_TOOL_CATALOG.map(e => e.name);
 
 export function listToolStatesWithDefaults(projectId: string): Array<{ tool_name: string; enabled: boolean }> {
   const states = listToolStates(projectId);
@@ -61,29 +59,40 @@ export function listToolStatesWithDefaults(projectId: string): Array<{ tool_name
   }));
 }
 
-const CATEGORY_PREFIX: Record<string, string> = {
-  setting: "Settings",
-  skill: "Skills",
-  task: "Tasks",
-  project: "Projects",
-  plugin: "Plugins",
-  server: "Servers",
-  agent: "Agents",
-  observation: "Observations",
-  personality: "Personality",
-  synthesis: "Synthesis",
-  command: "Commands",
-  config: "Config",
-  plan: "Plans",
-  email: "Email",
-  observe: "Observe",
-  logs: "Logs",
-};
+/** Derived from catalog: category name → set of tool names in that category. */
+export function getCategoryMap(): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const entry of MCP_TOOL_CATALOG) {
+    if (!map.has(entry.category)) map.set(entry.category, []);
+    map.get(entry.category)!.push(entry.name);
+  }
+  return map;
+}
+
+/** Backward-compatible: prefix → category name. */
+export const CATEGORY_PREFIX: Record<string, string> = (() => {
+  const map: Record<string, string> = {};
+  for (const entry of MCP_TOOL_CATALOG) {
+    const parts = entry.name.split("_");
+    const prefix = parts[1];
+    if (prefix && !map[prefix]) {
+      map[prefix] = entry.category;
+    }
+  }
+  // Handle non-ingenium-prefixed tools explicitly
+  map["synthesize"] = "Synthesis";
+  map["auto"] = "Extraction";
+  return map;
+})();
 
 export function getCategory(toolName: string): string {
-  // toolName = "ingenium_skill_list" → prefix = "skill" → "Skills"
+  const catalogMap = getCatalogMap();
+  const entry = catalogMap.get(toolName);
+  if (entry) return entry.category;
+
+  // Fallback for any tool not in the catalog (shouldn't happen, but guard)
   const parts = toolName.split("_");
-  const prefix = parts[1];
+  const prefix = parts.length > 1 ? parts[1] : parts[0];
   if (prefix && CATEGORY_PREFIX[prefix]) {
     return CATEGORY_PREFIX[prefix];
   }
@@ -112,10 +121,17 @@ export function listCategorizedTools(projectId: string): Array<{
     groups.get(t.category)!.push({ tool_name: t.tool_name, enabled: t.enabled });
   }
 
-  // Return sorted categories
-  const categoryOrder = Object.values(CATEGORY_PREFIX);
+  // Return sorted categories in catalog order
+  const categoryOrder = getCategoryOrder();
   return Array.from(groups.entries())
-    .sort((a, b) => categoryOrder.indexOf(a[0]) - categoryOrder.indexOf(b[0]))
+    .sort((a, b) => {
+      const ai = categoryOrder.indexOf(a[0]);
+      const bi = categoryOrder.indexOf(b[0]);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    })
     .map(([category, tools]) => ({
       category,
       enabled_count: tools.filter(t => t.enabled).length,
@@ -125,10 +141,10 @@ export function listCategorizedTools(projectId: string): Array<{
 }
 
 export function setCategoryState(projectId: string, category: string, enabled: boolean): number {
-  const prefix = Object.entries(CATEGORY_PREFIX).find(([, v]) => v === category)?.[0];
-  if (!prefix) return 0;
+  const categoryMap = getCategoryMap();
+  const matchingTools = categoryMap.get(category);
+  if (!matchingTools || matchingTools.length === 0) return 0;
 
-  const matchingTools = getAllToolNames().filter(n => n.startsWith(`ingenium_${prefix}`));
   let changed = 0;
   for (const toolName of matchingTools) {
     setToolState(projectId, toolName, enabled);

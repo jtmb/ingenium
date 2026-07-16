@@ -5,11 +5,11 @@
 - **Package Manager**: npm workspaces (monorepo)
 - **API**: Express.js on port 4097, JSON body limit 2MB (`express.json({ limit: "2mb" })`), helmet + CORS middleware
 - **Database**: SQLite via better-sqlite3 with WAL mode + FTS5 full-text search
-- **MCP**: @modelcontextprotocol/sdk for stdio transport (73 tools)
+- **MCP**: @modelcontextprotocol/sdk for stdio transport (150 tools)
 - **Frontend**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Syntax Highlighting**: highlight.js (`github.css` + custom `hljs-dark.css`) — Preview and Source modes in skill detail overlay
 - **State / Persistence**: Thread MCP server for cross-session context
-- **Container**: Docker multi-stage build (node:22-alpine), supervisord (3 processes: API + Dashboard + opencode-web)
+- **Container**: Docker multi-stage build (node:22-alpine), supervisord (4 processes: API + Dashboard + opencode-web + ttyd-opencode)
 - **Packages**: `ingenium-core` (shared lib), `ingenium-extension` (client-side OpenCode — MCP server, observer plugin, skill-sync plugin, auto-observer thin trigger), `ingenium-email` (IMAP/SMTP client)
 - **Testing**: Vitest, Playwright
 - **Linting**: ESLint, TypeScript compiler

@@ -65,7 +65,7 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access. Tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
+├── ingenium-server/      # MCP stdio server with 150 tools. Calls API via HTTP. Zero DB access. Tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
 └── ingenium-dashboard/   # Next.js 16 App Router frontend (16 pages). Calls API via HTTP. Zero DB access.
 ```
 
@@ -77,8 +77,8 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 
 
 | Page | Purpose |
 |------|---------|
-| `/` | Home — feature cards overview |
-| `/opencode` | Embedded OpenCode web UI iframe |
+| `/` | Home — operational home dashboard with live metrics via `/api/v1/dashboard/summary` |
+| `/opencode` | Embedded OpenCode with Web/CLI dual-mode (glass tab toggle, Ctrl+Shift+`) |
 | `/projects` | Project management (create, rename, archive, restore) |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
 | `/jobs` | Job queue and background task monitoring |
@@ -88,7 +88,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
-| `/mcp-servers` | MCP servers + Tool Manager (Servers/Tools tabs, 73 tools in 15 categories, per-tool enable/disable toggle, search, category filter) |
+| `/mcp-servers` | MCP servers + Tool Manager (Servers/Tools tabs, 150 tools in 23 categories, per-tool enable/disable toggle, search, category filter) |
 | `/config` | OpenCode config editor (Project/Global tabs, sync from disk, save) |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
@@ -203,11 +203,12 @@ This pattern is used in `upsertEmailBody()` and the email suggestions cache. It 
 
 ## Docker Deployment
 
-**Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing three processes:
+**Single-container deployment via `docker compose up --build`**. The container runs **supervisord** managing four processes:
 
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
 2. **Dashboard** (Next.js on :3000) — 16 route-based pages with highlight.js syntax highlighting in Preview/Source modes
 3. **opencode-web** (on :4098) — OpenCode web server (binds `0.0.0.0` inside container, published to host loopback only)
+4. **ttyd-opencode** (on :4099) — OpenCode CLI terminal via ttyd (`ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace`). Provides the xterm.js terminal for the dashboard's CLI mode. appuser has passwordless sudo.
 
 > The API layer is the sole authority for all 5 `.opencode/` resources: skills, agents, plugins, commands, and configs.
 
@@ -238,19 +239,33 @@ docker compose exec ingenium npm run check
 | `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
 | `4097` | API | Express REST gateway (sole DB authority) |
 | `127.0.0.1:4098` | OpenCode Web | OpenCode web server — container binds `0.0.0.0`, published to `127.0.0.1:4098:4098` (host loopback only) |
+| `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
 
-> 🔴 **Note**: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098.
+> 🔴 **Note**: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099.
 
-### Terminal Attachment
+### OpenCode Web/CLI Mode Switch
 
-The single `opencode-web` process on `:4098` serves both the dashboard iframe and direct terminal connections. Share the same session state between browser and terminal:
+The dashboard `/opencode` page features a **dual-mode** interface with a Web/CLI toggle:
+
+- **Web mode** — Embeds `http://localhost:4098/` in a full-viewport iframe (OpenCode Web UI)
+- **CLI mode** — Embeds `http://localhost:4099/` in a full-viewport iframe (ttyd terminal running `opencode attach http://localhost:4098 --dir /workspace`)
+- **Glass tab**: A right-edge `OpenCodeSwitch` component (`bg-[var(--color-surface)]/35 backdrop-blur-sm`, `fixed right-0 top-1/2`) toggles between modes. On hover it expands leftward. Keyboard shortcut `Ctrl+Shift+\`` toggles from anywhere on the page.
+- **Dual-iframe architecture**: Both iframes remain in the DOM at full viewport size once mounted. The inactive iframe is hidden via `opacity: 0` / `visibility: hidden` / `pointer-events: none` instead of `display:none` to prevent xterm dimension zeroing.
+- **Mode persistence** saved in `localStorage` under `opencode-mode`.
+- The CLI (ttyd) process is managed by supervisord as `[program:ttyd-opencode]`.
+
+### Terminal Attachment (Direct)
+
+You can also attach a terminal session directly to the opencode-web process (without the dashboard iframe):
 
 ```bash
 # Attach a terminal session to the running opencode-web process
 opencode attach http://localhost:4098 --dir /workspace
 ```
 
-All sessions, tool providers, and MCP connections share the same process state — the dashboard embedded iframe and terminal attachments use the same backend. No separate instance needed.
+All sessions, tool providers, and MCP connections share the same process state — the dashboard embedded iframe, CLI ttyd iframe, and direct terminal attachments all use the same backend. No separate instance needed.
+
+> 🔴 **Docker sudo**: The Dockerfile installs `sudo` and grants `appuser` passwordless sudo access via `/etc/sudoers.d/appuser`. This enables package installation from within OpenCode CLI sessions (e.g., `sudo apt-get install <pkg>`).
 
 > 🔴 **Docker git**: The Dockerfile now installs the `git` package to support OpenCode repository creation inside the container. Without git, OpenCode fails to initialize new repos for code editing.
 
@@ -276,7 +291,7 @@ healthcheck:
   start_period: 15s
 ```
 
-> 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks running inside the `ingenium-api` Express process. The Status page reports them via `GET /api/v1/services/applications/:name` (not `/services/:name`), which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Do NOT add supervisord `[program:synthesis-engine]` or `[program:email-client]` blocks — they would create duplicate, conflicting processes. The three real supervisord programs are listed above (API, Dashboard, opencode-web). See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts) lines 216–289 for the application health-check implementations.
+> 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks running inside the `ingenium-api` Express process. The Status page reports them via `GET /api/v1/services/applications/:name` (not `/services/:name`), which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Do NOT add supervisord `[program:synthesis-engine]` or `[program:email-client]` blocks — they would create duplicate, conflicting processes. The four real supervisord programs are listed above (API, Dashboard, opencode-web, ttyd-opencode). See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts) lines 216–289 for the application health-check implementations.
 
 ---
 
@@ -609,6 +624,7 @@ The `/config` page provides a tabbed editor:
 | PUT | `/api/v1/config/global` | Update global config |
 | POST | `/api/v1/config/sync` | Sync project config from disk to DB |
 | POST | `/api/v1/config/global/sync` | Sync global config from disk to DB |
+| GET | `/api/v1/dashboard/summary` | Aggregated home dashboard endpoint — returns learning stats, task counts, job counts, and mail status. Each module resolved independently; failed modules listed in `unavailable[]`. Returns 200 with partial data unless ALL modules fail (500). |
 | POST | `/api/v1/extraction/run` | Trigger server-side extraction of observations from OpenCode messages |
 | DELETE | `/api/v1/observations/:id` | Delete a single observation by ID |
 | DELETE | `/api/v1/observations?source=X` | Delete all observations from a source (source param required) |
@@ -645,15 +661,15 @@ Every skill in the DB has a `file_tree` column (JSON map of relative paths → c
 
 ### 🔴 Skill Sync Pattern (Client-Side)
 
-After any skill mutation (`ingenium_skill_create`, `update`, or `enable`), use this pattern to persist locally:
+Skills are synced via the **Resource Sync Engine** (`packages/ingenium-extension/resource-sync.ts`), which supersedes the old `skill-sync.ts`. The hash-manifest model ensures conflict-aware bidirectional sync:
 
-1. **Call `ingenium_skill_load(project, name)`** — Pull the full skill object from DB
-2. **Use `write` tool** — Write files at `.opencode/skills/<name>/`:
-   - `SKILL.md` with YAML frontmatter + content body
-   - `metadata.json` with `{name, description, tags, alwaysApply}`
-3. **Verify persistence** — Optionally read back to confirm
+1. **Sync manifest** — A `.opencode/.ingenium-sync-state.json` file tracks SHA-256 hashes of every synced resource (skills, agents, plugins, commands, config) as a baseline.
+2. **On session.created** — `fullSync()` compares API vs disk vs manifest hashes. If API changed and disk matches baseline → pull API→disk. If disk changed and API matches baseline → push disk→API. If both changed → conflict (logged, preserved).
+3. **On session.idle** — `incrementalSync()` runs (throttled to 1/60s), checking for out-of-sync resources.
+4. **Sync directions per resource**: Skills, agents, plugins, commands, and config all use the same conflict-resolution algorithm but with resource-specific disk read/write helpers.
+5. **Project resolution**: Uses `INGENIUM_PROJECT` env var first, then worktree basename. Never falls back to `"global-default"`.
 
-This is the client-side equivalent of server-side `writeSkillToDisk()`. The local-persistence skill (always_apply: true) enforces this pattern automatically when loaded before mutations.
+The old manual pattern (skill_load → write files) still works for individual skill edits, but the resource-sync plugin handles bulk sync automatically on session start/idle hooks.
 
 ### Dashboard Styling Guide
 

@@ -67,3 +67,9 @@ export async function skillConsolidate(project: string) {
   const res = await api.post("/skills/consolidate", {}, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** Sync ALL skills disk↔DB for a project. */
+export async function skillSyncAll(project: string) {
+  const res = await api.post("/skills/sync-all", {}, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

@@ -274,6 +274,42 @@ export type PersonalityTrait = {
   updated_at: string;
 };
 
+/** Dashboard summary types — matching GET /api/v1/dashboard/summary response. */
+
+interface LearningSummary {
+  pendingObservations: number;
+  displayTraitsCount: number;
+  lastSynthesisAt: string | null;
+  synthesisIntervalMs: number;
+}
+
+interface TasksSummary {
+  todoCount: number;
+  inProgressCount: number;
+  reviewCount: number;
+  nextTask: { id: string; title: string } | null;
+}
+
+interface JobsSummary {
+  total: number;
+  enabledCount: number;
+  failedRecently: Array<{ id: string; name: string; finishedAt: string | null }>;
+}
+
+interface MailSummary {
+  accountCount: number;
+  engineRunning: boolean;
+  engineHealthy: boolean;
+}
+
+export interface DashboardSummary {
+  learning: LearningSummary | null;
+  tasks: TasksSummary | null;
+  jobs: JobsSummary | null;
+  mail: MailSummary | null;
+  generatedAt: string;
+}
+
 /**
  * Typed API client for the Ingenium backend.
  * All methods accept an optional `project` parameter that defaults to "ingenium".
@@ -626,5 +662,11 @@ export const api = {
       request<{ data: JobRun }>(`/jobs/runs/${encodeURIComponent(runId)}/cancel?project=${encodeURIComponent(project)}`, {
         method: "POST",
       }),
+  },
+  home: {
+    summary: (project = DEFAULT_PROJECT) =>
+      request<{ data: DashboardSummary; unavailable: string[] }>(
+        `/dashboard/summary?project=${encodeURIComponent(project)}`,
+      ),
   },
 };

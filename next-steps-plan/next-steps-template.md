@@ -3,10 +3,10 @@
  - Map Out documentation and testing at every phase and agent orchestration.
  - You are in Plan mode. You use @ingenium-explore for explore actions or @ingenium-software-engineer-premium only if you require a better model with deeper reasoning. You use @ingenium-docs for documentations and finally @ingenium-qa.
  - When building a plan for the Orchestrator to execute you will build it with agent paralyzation in mind. 
- You are allowed to plan for spawning 6 subagents at once. Obviously don't spawn 6 subagents for everything just tasks that can use the speedup (like software engineer or qa tasks) 
+ You are allowed to plan for spawning 12 subagents at once. Obviously don't spawn 12 subagents for everything just tasks that can use the speedup (like software engineer or qa tasks) 
  - At the end of your plan when it's ready to handoff, include a copy paste line i can copy that tells the orchestrator how many agents he's allowed to run. Keep this short about one to two sentences. 
  Example:
- ` "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, ensure you use the todo tool and please ensure you check over the sub-agent output at the end for concerns, reccomendations, findings, bugs etc. Add anny findings as a new task in the todo and have them fixed. Read .opencode/skills/local-models/references/deep-seek.md in full. Apply detection prompts to every subsequent step. Use @vision-bridge to view screenshots and give you detailed descriptions. Ensure subagents receive this instruction as well. At the end please give me a summary in text of what was done."`
+ ` "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, please give me a brief summary of what was performed at the end. Reemember, you are responsible for making sure it works. So verify yourself at the end that everything works, it's your ass on the line."`
 
 ## DIRECTIVE:
 One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below:
@@ -14,14 +14,51 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 
 ### THE REQUESTS:
 
-1. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
 
-2. /mail i want the smart replies to only show up with the reply box and to be to be integrated into the reply box somehow. Right now with the reply box and smart replies up you can't see the email content at all.... please see image /home/brajam/repos/gh-llm-bootstrap/image.png
 
-3. /mail Smart replies are still not saving. Every time the instance is restarted or rebuilt the smart replies are gone and it regenerates them...
+1. (BIG FIX FEATURE) Every endpoint is supposed to have mcp tools and these tools should be turned on and off in /mcp-servers tools tab:
+```
+Projects
+Skills
+Tasks
+Jobs
+Plugins
+Mail
+Agents
+MCP
+Config
+Observations
+Personality
+Pipeline
+Logs
+Status
+```
+Some already have tools.
 
-4. I would like to be able to resize the emails pannel to the right (makes the email reader shrink with it they scale together)
+2. /opencode in te opecode terminal i see that the user opencode runs under does not have the ability to install packages or sudo. This is necessecery for agentic building and workflows.  
 
+```
+appuser@0630c4b3facd:/workspace$ ls
+hello.html
+appuser@0630c4b3facd:/workspace$ apt update
+Reading package lists... Done
+E: List directory /var/lib/apt/lists/partial is missing. - Acquire (13: Permission denied)
+appuser@0630c4b3facd:/workspace$ sudo apt update
+bash: sudo: command not found
+appuser@0630c4b3facd:/workspace$
+```
+
+3. Here is a sidequest for you.Ingenium extension is not syncing the new skills in /skills to my skills in /home/brajam/repos/gh-llm-bootstrap/.opencode/skills (this project) are not automatically syncing new skills. The extension (one of the plugins) is supposed to sync agents, skills, opencode.json, plugins (i think plugins as well please check current sync configuration).
+
+4. Please see this image of my current /opencode screen `/home/brajam/repos/gh-llm-bootstrap/opencode.png`. I want some kind of beatutiful reactive overlay side button that i can click to quickly change between opencode CLI and opencode web. Im thinking somekind of tab button that sits at the right edge of the screen that is mostly translucent until you hover it but it's still apparent it's there when not hovered. Please ensure opencode cli loads properly through the iframe, there is a known issue that causes visual distortion when going through iframes, there is a workaround.
+
+5. /mail smart replies collapse state keeps resetting on it's own while im still on the page
+
+6. When resizing the left emails pannel the part of the container that contains the times the emails came in seem to clip when dragging the resize slider. Also the resize slider resets position everytime you click to slide it. (only on the left side, the right side reply slider works fine)
+
+7. (BIG FEATURE) http://localhost:3000/ the current "dashboard" serves no purpose it's just buttons of things that are already on the nav bar. Think to yourself, if you were using this all in one workspace app with self learning ai, email, code, kanban etc. What would you have on that home page?
+
+8. Please look over deepseeks last run and ensure they did everything soundly.If you feel they could have improved in certain areas and you would do it differently or have to correct their work - then in that case create a skill under .opencode/skills/local-models (only create a new file if one does not exist, append or update if one exists already.). call it "deep-seek" follow the current skill format in `local-models` , the skill should be broad enough that it covers many use causes, something that can be taught and reused, not to be used as a log file or specific to this project. It's litteraly about finding the models shortcommings in reasoning that led it to make that bad decision then making a skill file so it can avoid it in the future.
 
 **Documentation references bellow:**
 ---
@@ -39,6 +76,7 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 | Email | [`docs/HOW-TO/email.md`](docs/HOW-TO/email.md) |
 | Self-Learning Pipeline | [`docs/self-learning-pipeline.md`](docs/self-learning-pipeline.md) |
 | Tasks | [`docs/HOW-TO/tasks.md`](docs/HOW-TO/tasks.md)
+| HOW-TO | [`docs/HOW-TO`](docs/HOW-TO)
 ---
 <!-- 1. <button class="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700">Add</button> in /tasks Still does not work. I click the blue "Add" button nothing happens.
 

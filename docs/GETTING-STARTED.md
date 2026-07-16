@@ -90,7 +90,7 @@ To make Ingenium available in **all** your OpenCode projects, add the same entry
 
 Add the `ingenium` entry under the `mcp.servers` section, using the same JSON structure from Step 3. The global config uses JSONC format (supports comments), so you can add explanatory notes.
 
-Once added, every OpenCode project on your machine will have access to Ingenium's 73 MCP tools.
+Once added, every OpenCode project on your machine will have access to Ingenium's 98 MCP tools.
 
 ---
 
@@ -106,8 +106,9 @@ This starts all services in a single container:
   - **API** on http://localhost:4097 — REST API gateway, sole database authority  
   - **Dashboard** on http://localhost:3000 — Next.js 16 App Router frontend (17 pages; `/observations`)  
   - **opencode-web** on 127.0.0.1:4098 — OpenCode web server (binds 0.0.0.0 inside container, published to host loopback only)
+  - **ttyd-opencode** on 127.0.0.1:4099 — OpenCode CLI terminal via ttyd (host loopback only)
 
-The container runs supervisord managing all processes. Press `Ctrl+C` to stop gracefully.
+The container runs supervisord managing all 4 processes. Press `Ctrl+C` to stop gracefully.
 
 ### Local Development Setup
 
@@ -127,11 +128,11 @@ This starts services locally and will:
 ### Docker Quick Start
 
 ```bash
-# Single-container deployment with all 3 processes
+# Single-container deployment with all 4 processes
 docker compose up --build
 
-# This starts API (:4097), Dashboard (:3000), and opencode-web (:4098)
-# managed by supervisord inside the container
+# This starts API (:4097), Dashboard (:3000), opencode-web (:4098), ttyd-opencode (:4099)
+# and ttyd-opencode CLI terminal (:4099), managed by supervisord inside the container
 ```
 
 ## Step 6 — Verify
@@ -186,6 +187,7 @@ If the tools don't appear, restart your OpenCode session (the MCP server list is
 | MCP tools return errors | API URL mismatch | Verify `INGENIUM_API_URL` in `opencode.json` matches `http://localhost:4097/api/v1` |
 | SQLite errors on startup | Missing data directory | Ensure `.ingenium/data/` exists in the repo root (created automatically by `run.sh`) |
 | Large skill upload fails | Payload exceeds 2MB limit | Reduce skill file size or increase `express.json({ limit: "2mb" })` in `api-server.ts` |
+| Need to install packages inside container | No root access | The `appuser` has passwordless sudo — use `sudo apt-get install <pkg>` in OpenCode CLI sessions |
 
 ---
 

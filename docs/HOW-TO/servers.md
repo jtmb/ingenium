@@ -1,7 +1,7 @@
 # HOW-TO: Servers (MCP Servers)
 
 ## What It Does
-Manages MCP server configurations and tools. The page has two tabs: **Servers** (manage server definitions) and **Tools** (enable/disable individual tools across 15 categories).
+Manages MCP server configurations and tools. The page has two tabs: **Servers** (manage server definitions) and **Tools** (enable/disable individual tools across 23 categories).
 
 ## Server Management
 
@@ -26,8 +26,8 @@ Each server shows a `source` badge indicating its origin:
 
 ## Tool Manager
 
-The Tools tab shows all 73 tools organized into 15 categories:
-- Projects, Skills, Observations, Personality, Synthesis, Extraction, Tasks, Plans, Plugins, Commands, Settings, Config, Servers, Agents, Email
+The Tools tab shows all 150 tools organized into 23 categories:
+- Projects, Skills, Observe, Observations, Personality, Synthesis, Extraction, Tasks, Plans, Plugins, Commands, Settings, Config, Servers, Agents, Email, Logs, Jobs
 
 ### Per-Tool Enable/Disable
 - Each tool has a toggle switch to enable or disable it
@@ -63,5 +63,5 @@ The Tools tab shows all 73 tools organized into 15 categories:
 - Core: `packages/ingenium-core/lib/tools/servers.ts`
 
 ## Related Docs
-- [mcp-tools.md](./mcp-tools.md) — Full MCP tools reference (73 tools in 13 categories)
+- [mcp-tools.md](./mcp-tools.md) — Full MCP tools reference (150 tools in 23 categories)
 - [STYLING-GUIDE.md](../STYLING-GUIDE.md) — Form and status badge styling

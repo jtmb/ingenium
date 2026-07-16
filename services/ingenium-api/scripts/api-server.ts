@@ -27,6 +27,7 @@ import { opencodeRouter } from "../lib/routes/opencode.js";
 import { extractionRouter } from "../lib/routes/extraction.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { servicesRouter } from "../lib/routes/services.js";
+import { dashboardRouter } from "../lib/routes/dashboard.js";
 import { startScheduler } from "../lib/scheduler.js";
 
 // ── Defense-in-depth crash handlers ──────────────────────────────────────────
@@ -86,6 +87,7 @@ app.use("/api/v1/jobs", jobsRouter);
 
 // System-level routes (no project dependency)
 app.use("/api/v1/services", servicesRouter);
+app.use("/api/v1/dashboard", dashboardRouter);
 
 // Error handler
 app.use(errorHandler);

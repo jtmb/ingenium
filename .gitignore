@@ -40,6 +40,9 @@ build/
 .agents/skills/learnings.md
 .opencode/skills/learnings.md
 
+# ── Resource sync state — local manifest, not for sharing ─
+.opencode/.ingenium-sync-state.json
+
 # ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env
 .vscode
@@ -59,6 +62,9 @@ session_*.md
 
 # ── Playwright MCP artifacts ──────────────────────────────
 .playwright-mcp/
+
+# YAML page snapshots (Playwright output)
+*.snapshot.yml
 
 # ── Plans and scratch notes ───────────────────────────────
 email-plan.md

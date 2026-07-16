@@ -1,0 +1,1518 @@
+/**
+ * McpToolCatalog — canonical single source of truth for all Ingenium MCP tools.
+ *
+ * Derived from services/ingenium-server/scripts/mcp-server.ts registerTool() calls
+ * plus extension-registered tools (synthesize_observations, auto_observe_now).
+ *
+ * Every tool known to the system MUST be listed here. The ALL_TOOLS array and
+ * CATEGORY_PREFIX map in mcp-tool-states.ts derive from this catalog.
+ */
+
+export interface McpToolCatalogEntry {
+  name: string;           // e.g. "ingenium_skill_list"
+  category: string;       // e.g. "Skills"
+  description: string;
+  projectScope: "per-project" | "global";
+  defaultEnabled: boolean;
+  apiEndpoints: string[]; // e.g. ["GET /api/v1/skills"]
+}
+
+// ── Category-level endpoint maps (shared by all tools in that category) ──
+
+const SETTINGS_ENDPOINTS = [
+  "GET /api/v1/settings",
+  "POST /api/v1/settings",
+  "POST /api/v1/settings/test-llm",
+];
+
+const SKILLS_ENDPOINTS = [
+  "GET /api/v1/skills",
+  "POST /api/v1/skills",
+  "GET /api/v1/skills/:name",
+  "PATCH /api/v1/skills/:name",
+  "DELETE /api/v1/skills/:name",
+  "POST /api/v1/skills/:name/enable",
+  "POST /api/v1/skills/:name/disable",
+  "POST /api/v1/skills/:name/sync",
+  "GET /api/v1/skills/search",
+  "POST /api/v1/skills/consolidate",
+  "POST /api/v1/skills/sync-all",
+];
+
+const OBSERVATIONS_ENDPOINTS = [
+  "GET /api/v1/observations",
+  "GET /api/v1/observations/search",
+  "GET /api/v1/observations/stats",
+  "GET /api/v1/observations/:id",
+  "PATCH /api/v1/observations/:id",
+  "POST /api/v1/observations/enrich",
+  "DELETE /api/v1/observations/:id",
+  "DELETE /api/v1/observations",
+];
+
+const OBSERVE_ENDPOINTS = [
+  "POST /api/v1/observations",
+];
+
+const PERSONALITY_ENDPOINTS = [
+  "GET /api/v1/personality",
+  "GET /api/v1/personality/traits",
+  "POST /api/v1/personality",
+  "POST /api/v1/personality/:id/dismiss",
+  "POST /api/v1/personality/:id/disable",
+  "DELETE /api/v1/personality/:id",
+  "DELETE /api/v1/personality",
+];
+
+const SYNTHESIS_ENDPOINTS = [
+  "POST /api/v1/synthesis/run",
+  "GET /api/v1/synthesis/status",
+  "POST /api/v1/synthesis/cross-project",
+];
+
+const EXTRACTION_ENDPOINTS = [
+  "POST /api/v1/extraction/run",
+];
+
+const TASKS_ENDPOINTS = [
+  "GET /api/v1/tasks",
+  "POST /api/v1/tasks",
+  "PATCH /api/v1/tasks/:id",
+  "GET /api/v1/tasks/next",
+  "POST /api/v1/tasks/search",
+  "POST /api/v1/tasks/:id/comments",
+  "GET /api/v1/tasks/:id/activity",
+  "POST /api/v1/tasks/:id/links",
+  "GET /api/v1/tasks/board-config",
+  "PUT /api/v1/tasks/board-config",
+  "POST /api/v1/tasks/:id/subtasks",
+  "GET /api/v1/tasks/notifications",
+  "GET /api/v1/tasks/:id",
+  "GET /api/v1/tasks/:id/comments",
+  "PATCH /api/v1/tasks/:id/comments/:id",
+  "POST /api/v1/tasks/:id/comments/:id/react",
+  "GET /api/v1/tasks/:id/links",
+  "DELETE /api/v1/tasks/:id/links/:id",
+  "GET /api/v1/tasks/:id/tree",
+  "POST /api/v1/tasks/notifications/:id/read",
+  "POST /api/v1/tasks/bulk",
+];
+
+const PLANS_ENDPOINTS = [
+  "GET /api/v1/context",
+  "POST /api/v1/context",
+  "GET /api/v1/context/search",
+];
+
+const PROJECTS_ENDPOINTS = [
+  "GET /api/v1/projects",
+  "POST /api/v1/projects",
+  "DELETE /api/v1/projects/:name",
+  "POST /api/v1/projects/:name/restore",
+  "GET /api/v1/projects/archive",
+  "POST /api/v1/projects/purge",
+  "POST /api/v1/projects/:name/set-global",
+  "PATCH /api/v1/projects/:name",
+  "GET /api/v1/projects/:name/detail",
+];
+
+const PLUGINS_ENDPOINTS = [
+  "GET /api/v1/plugins",
+  "POST /api/v1/plugins",
+  "PUT /api/v1/plugins/:name",
+  "DELETE /api/v1/plugins/:name",
+  "GET /api/v1/plugins/:name",
+  "POST /api/v1/plugins/:name/enable",
+  "POST /api/v1/plugins/:name/disable",
+  "GET /api/v1/plugins/:name/source",
+];
+
+const SERVERS_ENDPOINTS = [
+  "GET /api/v1/servers",
+  "POST /api/v1/servers",
+  "DELETE /api/v1/servers/:name",
+  "PATCH /api/v1/servers/:name",
+  "POST /api/v1/servers/sync-all",
+];
+
+const AGENTS_ENDPOINTS = [
+  "GET /api/v1/agents",
+  "POST /api/v1/agents",
+  "PATCH /api/v1/agents/:name",
+  "DELETE /api/v1/agents/:name",
+  "POST /api/v1/agents/:name/enable",
+  "POST /api/v1/agents/:name/disable",
+  "POST /api/v1/agents/:name/sync",
+];
+
+const COMMANDS_ENDPOINTS = [
+  "GET /api/v1/commands",
+  "POST /api/v1/commands",
+  "PUT /api/v1/commands/:name",
+  "DELETE /api/v1/commands/:name",
+];
+
+const CONFIG_ENDPOINTS = [
+  "GET /api/v1/config",
+  "PUT /api/v1/config",
+  "POST /api/v1/config/sync",
+];
+
+const EMAIL_ENDPOINTS = [
+  "GET /api/v1/emails",
+  "POST /api/v1/emails/send",
+  "GET /api/v1/emails/:uid",
+  "POST /api/v1/emails/draft",
+  "GET /api/v1/emails/folders",
+  "GET /api/v1/emails/accounts",
+  "POST /api/v1/emails/triage",
+  "GET /api/v1/emails/suggest/:uid",
+  "POST /api/v1/emails/draft-response/:uid",
+  "GET /api/v1/emails/patterns",
+  "POST /api/v1/emails/watch/start",
+  "GET /api/v1/emails/watch/status",
+  "POST /api/v1/emails/accounts",
+  "DELETE /api/v1/emails/accounts/:account",
+  "POST /api/v1/emails/accounts/:account/test",
+  "GET /api/v1/emails/accounts/oauth/url",
+  "POST /api/v1/emails/accounts/oauth",
+  "GET /api/v1/emails/summarize/:uid",
+  "POST /api/v1/emails/review-draft",
+  "PATCH /api/v1/emails/:uid/move",
+  "PATCH /api/v1/emails/:uid/flags",
+  "DELETE /api/v1/emails/:uid",
+  "POST /api/v1/emails/sync",
+  "GET /api/v1/emails/sync-status",
+  "POST /api/v1/emails/watch/stop",
+  "GET /api/v1/emails/:uid/attachments/:attachmentId",
+];
+
+const LOGS_ENDPOINTS = [
+  "GET /api/v1/logs",
+  "GET /api/v1/logs/sources",
+];
+
+const JOBS_ENDPOINTS = [
+  "GET /api/v1/jobs",
+  "POST /api/v1/jobs",
+  "PUT /api/v1/jobs/:id",
+  "DELETE /api/v1/jobs/:id",
+  "POST /api/v1/jobs/:id/run",
+  "GET /api/v1/jobs/:id/runs",
+  "GET /api/v1/jobs/runs/:id/logs",
+  "POST /api/v1/jobs/runs/:id/cancel",
+  "GET /api/v1/jobs/:id",
+  "POST /api/v1/jobs/suggest",
+];
+
+const PIPELINE_ENDPOINTS = [
+  "GET /api/v1/pipeline/events",
+  "GET /api/v1/pipeline/timeline",
+  "POST /api/v1/pipeline/events",
+];
+
+const STATUS_ENDPOINTS = [
+  "GET /api/v1/services/status",
+  "GET /api/v1/services/applications/:name",
+  "GET /api/v1/services/:name",
+  "GET /api/v1/services/:name/logs",
+];
+
+const HEALTH_ENDPOINTS = [
+  "GET /api/v1/health",
+];
+
+const OPENCODE_ENDPOINTS = [
+  "GET /api/v1/opencode/messages",
+];
+
+const DASHBOARD_ENDPOINTS = [
+  "GET /api/v1/dashboard/summary",
+];
+
+// ── Canonical Catalog ────────────────────────────────────
+
+export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
+  // ── Settings (3) ─────────────────────────────────────
+  {
+    name: "ingenium_setting_get",
+    category: "Settings",
+    description: "Get a setting value by key",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SETTINGS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_setting_set",
+    category: "Settings",
+    description: "Set a setting value",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SETTINGS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_setting_test_llm",
+    category: "Settings",
+    description: "Test the configured synthesis LLM connection.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SETTINGS_ENDPOINTS,
+  },
+
+  // ── Skills (11) ──────────────────────────────────────
+  {
+    name: "ingenium_skill_list",
+    category: "Skills",
+    description: "List all skills for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_load",
+    category: "Skills",
+    description: "Load a single skill by name.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_search",
+    category: "Skills",
+    description: "Full-text search across skills.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_create",
+    category: "Skills",
+    description: "Create a new skill.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_update",
+    category: "Skills",
+    description: "Update an existing skill's content.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_delete",
+    category: "Skills",
+    description: "Delete a skill by name.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_enable",
+    category: "Skills",
+    description: "Enable a skill and sync to disk.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_disable",
+    category: "Skills",
+    description: "Disable a skill and remove from disk.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_sync",
+    category: "Skills",
+    description: "Sync a skill from its .md file on disk to the DB — edits made directly to the file are persisted.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_consolidate",
+    category: "Skills",
+    description: "Trigger LLM-driven skill audit — merges redundant skills to maintain ≤20 total. Analyzes all enabled skills and proposes merges/deletes for overlapping topics.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_skill_sync_all",
+    category: "Skills",
+    description: "Sync ALL skills disk↔DB for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SKILLS_ENDPOINTS,
+  },
+
+  // ── Observations + Observe (9) ───────────────────────
+  {
+    name: "ingenium_observe",
+    category: "Observe",
+    description: "Store an observation about the user's behavior, preferences, or interaction pattern. The agent uses this naturally during its workflow — no explicit self-reporting needed. Types: correction, preference, pattern, insight, feedback, behavior, terminology, workflow, error, goal.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVE_ENDPOINTS,
+  },
+  {
+    name: "ingenium_observation_search",
+    category: "Observations",
+    description: "Full-text search across observations.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVATIONS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_observation_list",
+    category: "Observations",
+    description: "List observations with optional status and type filters.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVATIONS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_observation_stats",
+    category: "Observations",
+    description: "Get observation pipeline statistics (total, pending, processed).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVATIONS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_observation_get",
+    category: "Observations",
+    description: "Get a single observation by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVATIONS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_observation_update",
+    category: "Observations",
+    description: "Update an observation (status, importance).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVATIONS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_observation_enrich",
+    category: "Observations",
+    description: "Enrich raw observations via LLM.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVATIONS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_observation_delete",
+    category: "Observations",
+    description: "Hard delete a single observation by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVATIONS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_observation_delete_by_source",
+    category: "Observations",
+    description: "Bulk hard delete observations by source — requires confirm=true.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OBSERVATIONS_ENDPOINTS,
+  },
+
+  // ── Personality (7) ──────────────────────────────────
+  {
+    name: "ingenium_personality",
+    category: "Personality",
+    description: "Get the full learned personality profile — aggregated traits about user preferences, communication style, and behavior patterns.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PERSONALITY_ENDPOINTS,
+  },
+  {
+    name: "ingenium_personality_traits",
+    category: "Personality",
+    description: "List personality traits, optionally filtered by type.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PERSONALITY_ENDPOINTS,
+  },
+  {
+    name: "ingenium_personality_set_trait",
+    category: "Personality",
+    description: "Upsert a personality trait (used by synthesis pipeline).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PERSONALITY_ENDPOINTS,
+  },
+  {
+    name: "ingenium_personality_trait_dismiss",
+    category: "Personality",
+    description: "Dismiss a trait (set as inactive without deleting).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PERSONALITY_ENDPOINTS,
+  },
+  {
+    name: "ingenium_personality_trait_disable",
+    category: "Personality",
+    description: "Disable a trait (harder deactivation).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PERSONALITY_ENDPOINTS,
+  },
+  {
+    name: "ingenium_personality_trait_delete",
+    category: "Personality",
+    description: "Hard delete a single personality trait.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PERSONALITY_ENDPOINTS,
+  },
+  {
+    name: "ingenium_personality_traits_delete_all",
+    category: "Personality",
+    description: "Hard delete ALL personality traits for the project — requires confirm=true.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PERSONALITY_ENDPOINTS,
+  },
+
+  // ── Synthesis (4) — includes observer plugin tool ─────
+  {
+    name: "ingenium_synthesis_run",
+    category: "Synthesis",
+    description: "Trigger the background synthesis pipeline — processes pending observations into personality traits and skill updates.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SYNTHESIS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_synthesis_status",
+    category: "Synthesis",
+    description: "Check the synthesis pipeline status (pending count, last run, processed count).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SYNTHESIS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_synthesis_cross_project",
+    category: "Synthesis",
+    description: "Trigger cross-project synthesis — evaluates patterns across all projects and promotes shared patterns to the global-default project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SYNTHESIS_ENDPOINTS,
+  },
+  {
+    name: "synthesize_observations",
+    category: "Synthesis",
+    description: "Process all pending observations through the synthesis pipeline. Reads unprocessed observations, classifies them, generates/updates personality traits and skills, and marks them as processed in the DB. Returns a JSON summary of what was done.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SYNTHESIS_ENDPOINTS,
+  },
+
+  // ── Extraction + Auto-Observer (2) ───────────────────
+  {
+    name: "ingenium_extraction_run",
+    category: "Extraction",
+    description: "Trigger LLM-based observation extraction — scans OpenCode messages since last watermark, pre-filters candidates via cheap regex, then uses the synthesis LLM to extract durable user behavior rules.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EXTRACTION_ENDPOINTS,
+  },
+  {
+    name: "auto_observe_now",
+    category: "Extraction",
+    description: "Trigger server-side extraction — the API scans OpenCode message history for behavior patterns and creates observations. Returns a summary of what was found and created.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EXTRACTION_ENDPOINTS,
+  },
+
+  // ── Tasks (24) ───────────────────────────────────────
+  {
+    name: "ingenium_task_create",
+    category: "Tasks",
+    description: "Create a new task with optional description and assignee.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_list",
+    category: "Tasks",
+    description: "List tasks, optionally filtered by column.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_move",
+    category: "Tasks",
+    description: "Move a task to a different column.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_complete",
+    category: "Tasks",
+    description: "Mark a task as completed.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_next",
+    category: "Tasks",
+    description: "Get the highest-priority next task to work on.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_update",
+    category: "Tasks",
+    description: "Update task fields (title, description, assigned_to, priority, etc.).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_delete",
+    category: "Tasks",
+    description: "Delete a task by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_search",
+    category: "Tasks",
+    description: "Full-text search across tasks.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_comment",
+    category: "Tasks",
+    description: "Add a comment to a task, optionally threaded under a parent comment.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_activity",
+    category: "Tasks",
+    description: "Get activity feed for a task.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_link",
+    category: "Tasks",
+    description: "Link two tasks together (blocks, relates_to, duplicates).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_board_config_get",
+    category: "Tasks",
+    description: "Get board configuration (columns and custom field definitions).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_board_config_set",
+    category: "Tasks",
+    description: "Set board configuration (columns and/or custom field definitions).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_subtask_create",
+    category: "Tasks",
+    description: "Create a subtask under an existing parent task.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_notifications",
+    category: "Tasks",
+    description: "List task notifications for a recipient, optionally filtered by unread status.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_get",
+    category: "Tasks",
+    description: "Get a single task by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_comments_list",
+    category: "Tasks",
+    description: "List comments for a task.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_comment_edit",
+    category: "Tasks",
+    description: "Edit an existing comment on a task.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_comment_react",
+    category: "Tasks",
+    description: "Add a reaction to a task comment.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_links_list",
+    category: "Tasks",
+    description: "List task links (blocks, relates_to, duplicates).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_link_delete",
+    category: "Tasks",
+    description: "Delete a task link by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_tree",
+    category: "Tasks",
+    description: "Get the full task tree (parent + subtasks + linked tasks).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_notification_read",
+    category: "Tasks",
+    description: "Mark a notification as read.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_task_bulk_update",
+    category: "Tasks",
+    description: "Bulk update multiple tasks with the same fields.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: TASKS_ENDPOINTS,
+  },
+
+  // ── Plans (3) ────────────────────────────────────────
+  {
+    name: "ingenium_plan_save",
+    category: "Plans",
+    description: "Save a context entry with optional tags and priority.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLANS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plan_search",
+    category: "Plans",
+    description: "Full-text search across context entries.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLANS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plan_list",
+    category: "Plans",
+    description: "List plan/context entries.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLANS_ENDPOINTS,
+  },
+
+  // ── Projects (9) ─────────────────────────────────────
+  {
+    name: "ingenium_project_list",
+    category: "Projects",
+    description: "List all projects known to the Ingenium API.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_init",
+    category: "Projects",
+    description: "Initialise a new project on the Ingenium API.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_delete",
+    category: "Projects",
+    description: "Delete a project by name.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_restore",
+    category: "Projects",
+    description: "Restore an archived project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_list_archived",
+    category: "Projects",
+    description: "List archived projects.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_purge",
+    category: "Projects",
+    description: "Purge old projects.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_set_global",
+    category: "Projects",
+    description: "Mark a project as global (or unmark).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_rename",
+    category: "Projects",
+    description: "Rename an existing project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_detail",
+    category: "Projects",
+    description: "Get detailed info about a project by name.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+
+  // ── Plugins (8) ──────────────────────────────────────
+  {
+    name: "ingenium_plugin_list",
+    category: "Plugins",
+    description: "List all plugins available for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLUGINS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plugin_get",
+    category: "Plugins",
+    description: "Get a single plugin by name.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLUGINS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plugin_enable",
+    category: "Plugins",
+    description: "Enable a plugin for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLUGINS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plugin_disable",
+    category: "Plugins",
+    description: "Disable a plugin for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLUGINS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plugin_create",
+    category: "Plugins",
+    description: "Create a new plugin for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLUGINS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plugin_delete",
+    category: "Plugins",
+    description: "Delete a plugin from a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLUGINS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plugin_update",
+    category: "Plugins",
+    description: "Update a plugin's file path or source content.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLUGINS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_plugin_source",
+    category: "Plugins",
+    description: "Get a plugin's source content from disk.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PLUGINS_ENDPOINTS,
+  },
+
+  // ── Servers (5) ──────────────────────────────────────
+  {
+    name: "ingenium_server_list",
+    category: "Servers",
+    description: "List all registered child MCP servers for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SERVERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_server_add",
+    category: "Servers",
+    description: "Add a new child MCP server definition.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SERVERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_server_remove",
+    category: "Servers",
+    description: "Remove a child MCP server definition.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SERVERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_server_update",
+    category: "Servers",
+    description: "Update a server's running state.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SERVERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_server_sync_all",
+    category: "Servers",
+    description: "Sync all servers — upserts an array of server definitions for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: SERVERS_ENDPOINTS,
+  },
+
+  // ── Agents (8) ───────────────────────────────────────
+  {
+    name: "ingenium_agent_list",
+    category: "Agents",
+    description: "List all agents for a project, optionally filtered by category.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: AGENTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_agent_get",
+    category: "Agents",
+    description: "Get an agent by name.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: AGENTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_agent_create",
+    category: "Agents",
+    description: "Create a new agent with YAML-frontmatter content.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: AGENTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_agent_update",
+    category: "Agents",
+    description: "Update an existing agent's metadata or content.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: AGENTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_agent_delete",
+    category: "Agents",
+    description: "Delete an agent by name.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: AGENTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_agent_enable",
+    category: "Agents",
+    description: "Enable an agent and write its .md file to disk.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: AGENTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_agent_disable",
+    category: "Agents",
+    description: "Disable an agent and remove its .md file from disk.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: AGENTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_agent_sync",
+    category: "Agents",
+    description: "Sync an agent from its .md file on disk to the DB — edits made directly to the file are persisted.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: AGENTS_ENDPOINTS,
+  },
+
+  // ── Commands (5) ─────────────────────────────────────
+  {
+    name: "ingenium_command_list",
+    category: "Commands",
+    description: "List all commands for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: COMMANDS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_command_get",
+    category: "Commands",
+    description: "Get a command by name.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: COMMANDS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_command_create",
+    category: "Commands",
+    description: "Create a new command.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: COMMANDS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_command_update",
+    category: "Commands",
+    description: "Update an existing command.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: COMMANDS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_command_delete",
+    category: "Commands",
+    description: "Delete a command.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: COMMANDS_ENDPOINTS,
+  },
+
+  // ── Config (3) ───────────────────────────────────────
+  {
+    name: "ingenium_config_get",
+    category: "Config",
+    description: "Get config (opencode.json/opencode.jsonc) content for a project",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: CONFIG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_config_set",
+    category: "Config",
+    description: "Set config content for a project (writes to DB and disk)",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: CONFIG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_config_sync",
+    category: "Config",
+    description: "Sync config from disk to DB",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: CONFIG_ENDPOINTS,
+  },
+
+  // ── Email (27) ───────────────────────────────────────
+  {
+    name: "ingenium_email_list",
+    category: "Email",
+    description: "List emails in a folder. Use this to check inbox, sent items, or any folder.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_search",
+    category: "Email",
+    description: "Search emails by keyword, sender, subject, or date range.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_read",
+    category: "Email",
+    description: "Read a full email by its UID (unique ID).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_send",
+    category: "Email",
+    description: "Compose and send an email. Use HTML for formatting.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_draft",
+    category: "Email",
+    description: "Save a draft email without sending.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_folders",
+    category: "Email",
+    description: "List all email folders for an account.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_accounts",
+    category: "Email",
+    description: "List connected email accounts.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_triage",
+    category: "Email",
+    description: "Triage emails — categorize by priority and suggest actions based on learned patterns. Use this to process your inbox.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_suggest",
+    category: "Email",
+    description: "Suggest an email response based on learned user patterns and past behavior.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_draft_response",
+    category: "Email",
+    description: "Auto-draft a response to an email based on learned patterns and save it to Drafts folder.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_patterns",
+    category: "Email",
+    description: "List all learned email response patterns (skills with category 'email').",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_watch_start",
+    category: "Email",
+    description: "Start IMAP IDLE watcher for real-time email monitoring and auto-drafting.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_watch_status",
+    category: "Email",
+    description: "Check if the IMAP IDLE watcher is running for an account.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_account_create",
+    category: "Email",
+    description: "Create a new email account connection.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_account_delete",
+    category: "Email",
+    description: "Delete an email account and clear its cached data.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_account_test",
+    category: "Email",
+    description: "Test IMAP connection for an account.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_oauth_url",
+    category: "Email",
+    description: "Get OAuth authorization URL — never returns tokens, only the URL.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_oauth_exchange",
+    category: "Email",
+    description: "Exchange OAuth code for tokens — never returns tokens, only success/failure.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_summarize",
+    category: "Email",
+    description: "Get LLM-generated email summary (cache-first).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_review_draft",
+    category: "Email",
+    description: "LLM-powered draft review and improvement.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_move",
+    category: "Email",
+    description: "Move an email to another folder.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_set_flags",
+    category: "Email",
+    description: "Set flags on an email.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_delete",
+    category: "Email",
+    description: "Delete an email (moves to Trash via IMAP).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_sync",
+    category: "Email",
+    description: "Trigger engine-backed sync hint.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_sync_status",
+    category: "Email",
+    description: "Get per-folder sync status from the engine.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_watch_stop",
+    category: "Email",
+    description: "Stop IMAP IDLE watcher.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+  {
+    name: "ingenium_email_attachment_get",
+    category: "Email",
+    description: "Download an email attachment to a validated path — never returns raw binary.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: EMAIL_ENDPOINTS,
+  },
+
+  // ── Logs (2) ─────────────────────────────────────────
+  {
+    name: "ingenium_logs_list",
+    category: "Logs",
+    description: "List recent system log entries from the unified logger. Filter by source, level, or time.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: LOGS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_logs_sources",
+    category: "Logs",
+    description: "List active log sources (e.g., scheduler, api, auto-observer).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: LOGS_ENDPOINTS,
+  },
+
+  // ── Jobs (10) ─────────────────────────────────────────
+  {
+    name: "ingenium_job_list",
+    category: "Jobs",
+    description: "List all jobs for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_create",
+    category: "Jobs",
+    description: "Create a new job with optional schedule, trigger event, and timeout.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_update",
+    category: "Jobs",
+    description: "Update existing job fields (name, description, agent, prompt_template, schedule_cron, trigger_event, enabled, timeout_minutes).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_delete",
+    category: "Jobs",
+    description: "Delete a job by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_run",
+    category: "Jobs",
+    description: "Manually trigger a job run.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_runs",
+    category: "Jobs",
+    description: "List all runs for a job.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_run_logs",
+    category: "Jobs",
+    description: "Get log entries for a specific run, optionally after a sequence number for tail polling.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_run_cancel",
+    category: "Jobs",
+    description: "Cancel a running job.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_get",
+    category: "Jobs",
+    description: "Get a single job by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_job_suggest",
+    category: "Jobs",
+    description: "Get LLM-generated job suggestions based on a natural-language description.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: JOBS_ENDPOINTS,
+  },
+
+  // ── Pipeline (3) ──────────────────────────────────────
+  {
+    name: "ingenium_pipeline_events",
+    category: "Pipeline",
+    description: "List pipeline events with optional filters (source, type, limit, since).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PIPELINE_ENDPOINTS,
+  },
+  {
+    name: "ingenium_pipeline_timeline",
+    category: "Pipeline",
+    description: "Get grouped timeline with children nested in parents.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PIPELINE_ENDPOINTS,
+  },
+  {
+    name: "ingenium_pipeline_event_log",
+    category: "Pipeline",
+    description: "Log a new pipeline event for observability.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PIPELINE_ENDPOINTS,
+  },
+
+  // ── Status (4) ────────────────────────────────────────
+  {
+    name: "ingenium_service_status",
+    category: "Status",
+    description: "Get overall service health — supervisord process states + application health.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: STATUS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_service_application_detail",
+    category: "Status",
+    description: "Get detailed status for a specific application (email-client or synthesis-engine).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: STATUS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_service_process_detail",
+    category: "Status",
+    description: "Get single process detail via supervisor.getProcessInfo.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: STATUS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_service_process_logs",
+    category: "Status",
+    description: "Read process logs with byte-size cap (max 10000 bytes).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: STATUS_ENDPOINTS,
+  },
+
+  // ── Health (1) ────────────────────────────────────────
+  {
+    name: "ingenium_health_check",
+    category: "Health",
+    description: "API health check — returns status and uptime. No project param needed.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: HEALTH_ENDPOINTS,
+  },
+
+  // ── OpenCode (1) ──────────────────────────────────────
+  {
+    name: "ingenium_opencode_messages",
+    category: "OpenCode",
+    description: "Read recent user messages from the OpenCode DB.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: OPENCODE_ENDPOINTS,
+  },
+
+  // ── Dashboard (1) ─────────────────────────────────────
+  {
+    name: "ingenium_dashboard_summary",
+    category: "Dashboard",
+    description: "Get aggregated dashboard summary — learning stats, task counts, job counts, and mail status.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: DASHBOARD_ENDPOINTS,
+  },
+];
+
+// ── Derived helpers ────────────────────────────────────
+
+/** Builds the lookup map of tool name → catalog entry. */
+export function getCatalogMap(): Map<string, McpToolCatalogEntry> {
+  const map = new Map<string, McpToolCatalogEntry>();
+  for (const entry of MCP_TOOL_CATALOG) {
+    map.set(entry.name, entry);
+  }
+  return map;
+}
+
+/** Returns all tool names (in catalog order). */
+export function getAllToolNames(): string[] {
+  return MCP_TOOL_CATALOG.map(e => e.name);
+}
+
+/** Returns catalog entries grouped by category. Categories are sorted by catalog order. */
+export function getToolsByCategory(): Map<string, McpToolCatalogEntry[]> {
+  const groups = new Map<string, McpToolCatalogEntry[]>();
+  for (const entry of MCP_TOOL_CATALOG) {
+    if (!groups.has(entry.category)) groups.set(entry.category, []);
+    groups.get(entry.category)!.push(entry);
+  }
+  return groups;
+}
+
+/** Returns the ordered list of categories as they appear in the catalog. */
+export function getCategoryOrder(): string[] {
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const entry of MCP_TOOL_CATALOG) {
+    if (!seen.has(entry.category)) {
+      seen.add(entry.category);
+      order.push(entry.category);
+    }
+  }
+  return order;
+}

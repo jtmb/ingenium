@@ -1,6 +1,6 @@
 # ingenium-server
 
-MCP stdio server with 73 tools. Calls the API via HTTP. Zero DB access.
+MCP stdio server with 150 tools. Calls the API via HTTP. Zero DB access.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ MCP stdio server with 73 tools. Calls the API via HTTP. Zero DB access.
 
 ## Tools
 
-73 tools across 15 categories (email, skills, agents, plugins, commands, servers, configs, observations, personality, synthesis, projects, settings, extraction, tasks, context). All tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
+150 tools across 23 categories (email, skills, agents, plugins, commands, servers, configs, observations, personality, synthesis, projects, settings, extraction, tasks, context, dashboard, health, jobs, logs, opencode, pipeline, plans, status). All tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
 
 ## Configuration
 

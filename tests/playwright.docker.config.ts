@@ -7,7 +7,7 @@ import { defineConfig } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./ingenium-dashboard",
-  testMatch: "opencode.spec.ts",
+  testMatch: "opencode*.spec.ts",
   timeout: 30000,
   retries: 0,
   fullyParallel: false,

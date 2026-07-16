@@ -55,7 +55,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 
 ## Docker / opencode-web
 
-Inside the container, **supervisord** manages three processes: API (:4097), Dashboard (:3000), and opencode-web (binds 0.0.0.0:4098 inside container, published 127.0.0.1:4098 on host).
+Inside the container, **supervisord** manages four processes: API (:4097), Dashboard (:3000), opencode-web (binds 0.0.0.0:4098 inside container, published 127.0.0.1:4098 on host), and ttyd-opencode (:4099, host loopback only).
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
