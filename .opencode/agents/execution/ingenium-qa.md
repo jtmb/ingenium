@@ -26,6 +26,8 @@ permission:
     "@local-models": allow
     "@mcp-tooling": allow
     "@documentation": allow
+    "@security-audit": allow
+    "@database-conventions": allow
     "*": deny
 ---
 
@@ -114,10 +116,7 @@ When a plugin, config, or script file is changed:
 ## What You Don't Do
 
 - No test authoring — tests are written by @ingenium-software-engineer
-- Leave test execution to @ingenium-orchestrator
+- Run tests directly for VM-based verification; leave E2E/container tests and full test suite runs to @ingenium-orchestrator.
 - Don't approve code changes that lack tests (enforce the 🔴 HARD RULE)
 - Don't approve snapshot tests of non-deterministic values (dates, random IDs)
 - Never skip tests with `test.skip()` or leave `test.only()` in committed code
-# QA verification note
-
-Added via disk edit test: Tue Jul  7 21:49:07 EDT 2026

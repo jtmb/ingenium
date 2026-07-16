@@ -9,7 +9,6 @@ permission:
   write: deny
   bash: deny
   playwright_*: deny
-skill:
 ---
 
 # Prompt Engineer

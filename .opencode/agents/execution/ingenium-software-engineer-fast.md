@@ -30,6 +30,9 @@ permission:
     "@engineering-workflow": allow
     "@mcp-tooling": allow
     "@documentation": allow
+    "@local-models": allow
+    "@skill-maintenance": allow
+    "@database-conventions": allow
     "*": deny
 ---
 

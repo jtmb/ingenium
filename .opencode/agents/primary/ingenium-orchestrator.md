@@ -41,6 +41,10 @@ permission:
     "@local-models": allow
     "@skill-maintenance": allow
     "@mcp-tooling": allow
+    "@documentation": allow
+    "@security-audit": allow
+    "@self-learning": allow
+    "@database-conventions": allow
     "*": deny
 ---
 
@@ -239,7 +243,7 @@ After every task, update `todowrite`. If using a checkpoint for crash recovery, 
 
 #### Step 10 — Commit
 ```bash
-cd /home/brajam/agent_workspaces && git add -A && git commit -m "feat: {task description}"
+cd /home/brajam/repos/gh-llm-bootstrap && git add <explicit-phase-files> && git commit -m "feat: {task description}"
 ```
 
 ### Phase 3 — Skill Detection Pipeline (After Every Batch of 3 Tasks)
@@ -256,7 +260,7 @@ After every 3 task completions (or end of session), run the auto-detection pipel
 After all tasks complete:
 1. **Spawn @ingenium-docs** — Delegate documentation updates with the list of all changes (files changed, new skills, pattern discoveries)
 2. **Output the Subagent Execution Summary** — the full table from Phase 2
-3. **Final commit** — `git add -A && git commit -m "feat: {project-name} complete"`
+3. **Final commit** — `git add <explicit-phase-files> && git commit -m "feat: {project-name} complete"`
 4. **Clear todowrite** — Mark all items as completed
 
 ## 🔴 Documentation Trigger Table — Mandatory After Every Change
