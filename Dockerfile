@@ -26,7 +26,7 @@ RUN npm prune --omit=dev
 # Stage 2: Runtime with supervisord + opencode
 FROM node:22-slim AS runtime
 
-ARG OPENCODE_VERSION=1.17.18
+ARG OPENCODE_VERSION=1.18.3
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor curl ca-certificates tzdata python3 make g++ git sudo && \
     rm -rf /var/lib/apt/lists/*

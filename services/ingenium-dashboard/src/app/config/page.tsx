@@ -4,6 +4,13 @@ import { useState, useEffect } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import { api } from "../../lib/api";
 
+/**
+ * ConfigPage — Dual-tab editor for opencode.json (project) and opencode.jsonc (global).
+ *
+ * The "Sync from disk" button reads the on-disk file back into the editor,
+ * useful when OpenCode itself has modified the config. "Save" writes the
+ * current editor content to both the DB and disk.
+ */
 export default function ConfigPage() {
   const project = useProject();
   const [tab, setTab] = useState<"project" | "global">("project");
@@ -74,8 +81,9 @@ export default function ConfigPage() {
           value={content}
           onChange={(e) => setContent(e.target.value)}
           className="w-full border border-[var(--color-border)] rounded p-3 font-mono text-sm leading-relaxed"
-          rows={24}
+          rows={30}
           spellCheck={false}
+          wrap="off"
         />
         <div className="flex gap-3">
           <button
