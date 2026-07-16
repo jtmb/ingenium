@@ -29,6 +29,7 @@ import { extractionRouter } from "../lib/routes/extraction.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { servicesRouter } from "../lib/routes/services.js";
 import { dashboardRouter } from "../lib/routes/dashboard.js";
+import { router as docsRouter } from "../lib/routes/docs.js";
 import { startScheduler } from "../lib/scheduler.js";
 
 // ── Defense-in-depth crash handlers ──────────────────────────────────────────
@@ -91,6 +92,7 @@ app.use("/api/v1/jobs", jobsRouter);
 // System-level routes (no project dependency)
 app.use("/api/v1/services", servicesRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
+app.use("/api/v1/docs", docsRouter);
 
 // Error handler
 app.use(errorHandler);
