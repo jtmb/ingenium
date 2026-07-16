@@ -133,7 +133,7 @@ function StandaloneOpenCode() {
     <div className="relative w-full h-full">
       {/* Web iframe */}
       <iframe
-        src="/opencode-proxy/"
+        src="http://localhost:4098/"
         className="absolute inset-0 w-full h-full border-0"
         style={{
           opacity: mode === "web" ? 1 : 0,

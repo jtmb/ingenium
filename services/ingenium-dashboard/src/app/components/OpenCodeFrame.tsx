@@ -51,7 +51,7 @@ export default function OpenCodeFrame({
     <div ref={containerRef} className="absolute inset-0">
       {/* Web iframe — always mounted */}
       <iframe
-        src="/opencode-proxy/"
+        src="http://localhost:4098/"
         className="absolute inset-0 w-full h-full border-0"
         style={{
           opacity: mode === "web" ? 1 : 0,

@@ -101,7 +101,7 @@ export default function PipelinePanel() {
   // Fetch providers from OpenCode's own HTTP API (port 4098).
   // This is the canonical source for available LLM providers + their models.
   useEffect(() => {
-    fetch("/opencode-proxy/provider?directory=/workspace")
+    fetch("http://localhost:4098/provider?directory=/workspace")
       .then((r) => r.json())
       .then((d) => setProviders(d.all || []))
       .catch(() => setProviders([]))
