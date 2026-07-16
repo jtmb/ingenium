@@ -31,7 +31,7 @@ import { simpleParser } from "mailparser";
 
 // ── Label ↔ Folder mapping ──────────────────────────────────────────────────
 
-/** System label IDs that map to folder names. DRAFT is excluded (skip rule). */
+/** System label IDs that map to folder names. DRAFT and ALL are now included. */
 const SYSTEM_LABEL_MAP: Record<string, string> = {
   INBOX: "INBOX",
   SENT: "Sent",
@@ -39,10 +39,11 @@ const SYSTEM_LABEL_MAP: Record<string, string> = {
   TRASH: "Trash",
   STARRED: "Starred",
   IMPORTANT: "Important",
+  ALL: "Archive",  // Gmail "All Mail" → user-facing "Archive"
 };
 
 /** Label IDs to skip entirely. */
-const SKIP_LABEL_IDS = new Set(["CHAT", "DRAFT"]);
+const SKIP_LABEL_IDS = new Set(["CHAT"]);  // DRAFT now included for Drafts folder
 
 // ── Internal helpers ────────────────────────────────────────────────────────
 

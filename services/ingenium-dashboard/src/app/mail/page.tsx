@@ -244,6 +244,15 @@ export default function MailPage() {
     fetchEmails();
   }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project]);
 
+  // Re-fetch emails when sync status shows selected folder transitioned from syncing → done/error
+  useEffect(() => {
+    const status = syncStatus?.folders?.find((f: any) => f.folder === selectedFolder);
+    if (!status) return;
+    if (emailSource === "pending" && !status.syncing) {
+      setRefreshKey(k => k + 1);
+    }
+  }, [syncStatus, selectedFolder, emailSource]);
+
   const handleSelectEmail = useCallback(async (uid: string) => {
     // Guard: re-clicking the already-open email must not reset state
     // Prevents a flash when the user clicks the same email again.
