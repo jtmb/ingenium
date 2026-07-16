@@ -110,4 +110,12 @@ describe("pipeline events", () => {
     const limited = getEvents(projectId, { limit: 3 });
     expect(limited.length).toBeLessThanOrEqual(3);
   });
+
+  it("accepts skill_created and skill_updated event types", () => {
+    const se = logEvent(projectId, "skill_created", "synthesis", "Skill created: test-skill");
+    expect(se.event_type).toBe("skill_created");
+
+    const su = logEvent(projectId, "skill_updated", "synthesis", "Skill updated: test-skill");
+    expect(su.event_type).toBe("skill_updated");
+  });
 });
