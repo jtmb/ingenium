@@ -1,5 +1,13 @@
-/** Email sync — IMAP-to-DB synchronization with UIDVALIDITY tracking.
- *  Always uses the global project regardless of passed projectId. */
+/**
+ * Email sync — IMAP-to-DB synchronization with UIDVALIDITY tracking.
+ *
+ * Always uses the global project regardless of passed projectId.
+ * Handles full initial sync (windowed), incremental sync (UID range search),
+ * UIDVALIDITY changes (cache clear), and body prefetch for recent messages.
+ *
+ * 🔴 Single-flight deduplication prevents concurrent syncFolder calls
+ * for the same account+folder within one process.
+ */
 
 import type { ImapFlow } from "imapflow";
 import { emailCache, logger } from "ingenium-core";
@@ -9,9 +17,11 @@ import { parseRawEmail } from "./parser.js";
 
 /**
  * 🔴 Single-flight deduplication map — prevents concurrent syncFolder calls
- * for the same account+ folder within one process. Keyed by `${accountId}\x00${folder}`.
+ * for the same account+folder within one process. Keyed by `${accountId}\x00${folder}`.
+ *
  * In-memory by design: guards concurrency within a process lifetime, not freshness.
  * A process restart naturally clears the guard, which is correct — new process, new guards.
+ * The null byte separator prevents collisions between account+folder pairs.
  */
 const inFlightSyncs = new Map<string, Promise<SyncResult>>();
 
@@ -96,6 +106,7 @@ export async function syncFolder(
       if (lastUid === 0) {
         // First sync — use windowed sequence-range to avoid scanning all messages.
         // Fetch by sequence, capturing UIDs, for the most recent maxBatch emails.
+        // This avoids the O(n) cost of scanning 62K+ UIDs on initial connect.
         const windowStart = Math.max(1, total - maxBatch + 1);
         const fetchedUids: number[] = [];
         for await (const msg of client.fetch(
@@ -108,10 +119,13 @@ export async function syncFolder(
       } else {
         // Incremental sync — UIDs > last_uid, capped at maxBatch
         try {
+          // UID range search ("UID next:*") is the most efficient way to find
+          // new messages — the server only scans UIDs greater than the last known.
           const result = await client.search({ uid: `${lastUid + 1}:*` } as Record<string, unknown>);
           uids = (result === false ? [] : (result as number[])).slice(0, maxBatch);
         } catch {
-          // Range search may not be supported — fall back to search-all + filter
+          // Range search may not be supported by all IMAP servers (unusual but possible).
+          // Fall back to search-all + client-side filter — less efficient but universal.
           const allResult = await client.search({ all: true });
           uids = (allResult === false ? [] : allResult)
             .filter((uid) => uid > lastUid)

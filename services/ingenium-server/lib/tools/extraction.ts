@@ -1,6 +1,7 @@
 /**
  * MCP tool handler for the LLM-based observation extraction engine.
- * Triggers extraction runs via the Ingenium API.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
+ * Triggers extraction runs that read OpenCode messages and detect observation candidates.
  */
 import { api } from "../client.js";
 

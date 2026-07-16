@@ -1,9 +1,11 @@
+/** A settings sidebar tab definition. Icon names map to SVG paths in SettingsSidebar. */
 export interface SettingsTab {
   id: string;
   label: string;
   icon: "settings" | "folder" | "sparkle" | "check" | "clock" | "puzzle" | "mail" | "bot" | "server" | "file" | "eye" | "user" | "activity" | "terminal";
 }
 
+/** Ordered list of all settings tabs — drives both the sidebar and the overlay's tab-panel routing. */
 export const ALL_TABS: SettingsTab[] = [
   { id: "general", label: "General", icon: "settings" },
   { id: "projects", label: "Projects", icon: "folder" },
@@ -21,6 +23,14 @@ export const ALL_TABS: SettingsTab[] = [
   { id: "logs", label: "Logs", icon: "terminal" },
 ];
 
+/**
+ * Derive the settings tab to auto-select when the overlay opens, based on the
+ * current page the user is on. Pages like `/status`, `/settings`, and `/opencode`
+ * don't have their own settings tab so they fall back to "general".
+ *
+ * This enables deep-linking: clicking the gear icon on any page opens Settings
+ * with the most relevant tab pre-selected.
+ */
 export function tabForPathname(pathname: string): string {
   const segment = pathname.split("/")[1] || "";
   const MAP: Record<string, string> = {

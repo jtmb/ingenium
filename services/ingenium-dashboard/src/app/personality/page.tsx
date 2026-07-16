@@ -18,6 +18,15 @@ const TYPE_ICONS: Record<string, string> = {
   personality_trait: "🌟",
 };
 
+/**
+ * PersonalityPage — Learned personality traits from the self-learning pipeline.
+ *
+ * Traits are generated from observations by the synthesis engine. They have
+ * a confidence score (0.0–1.0). Traits below the 0.30 threshold are hidden
+ * by default — this threshold requires at least 2 confirming observations
+ * before a trait becomes visible (starting confidence ~0.15, +0.15 per
+ * confirmation). The "Show hidden" toggle exposes sub-threshold traits.
+ */
 export default function PersonalityPage() {
   const project = useProject();
   const [traits, setTraits] = useState<PersonalityTrait[]>([]);

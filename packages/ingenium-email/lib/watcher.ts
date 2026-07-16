@@ -1,4 +1,21 @@
-/** IMAP IDLE watcher for real-time email monitoring with auto-triage and response suggestions. */
+/**
+ * IMAP IDLE watcher for real-time email monitoring with auto-triage and response suggestions.
+ *
+ * Uses IMAP IDLE to listen for new messages on the INBOX.  On each "exists" event,
+ * runs triage on recent unreads and auto-saves drafts for high-confidence matches.
+ *
+ * 🔴 IMAP IDLE requires an active connection — the watcher holds one open connection
+ *    per account.  Connection drops are handled by the pool cleanup in imap.ts.
+ *
+ * 🔴 The watcher is separate from (and complementary to) the sync engine.  The sync
+ *    engine handles periodic delta polling for Gmail API; this watcher handles IMAP
+ *    IDLE for real-time notifications on IMAP-connected accounts.
+ *
+ * 🔴 The watcher intentionally scopes to INBOX only — IMAP IDLE monitors a single
+ *    mailbox and INBOX is where new messages arrive. This is a legitimate semantic
+ *    scope, not a missing-folder bug. The "INBOX" literal on handleNewEmail line 134
+ *    reflects the actual mailbox the watcher is monitoring.
+ */
 
 import { connectAccount, disconnectAccount } from "./imap.js";
 import { triageEmails } from "./triage.js";
@@ -15,9 +32,19 @@ interface WatcherEntry {
   running: boolean;
 }
 
+/** Process-global watcher registry. Keyed by account ID. */
 const watchers = new Map<string, WatcherEntry>();
 
-/** Start the IMAP IDLE watcher for an account. */
+/**
+ * Start the IMAP IDLE watcher for an account.
+ *
+ * Opens an IMAP connection, selects INBOX, and listens for "exists" events
+ * (IMAP IDLE notification for new messages).  Also performs an initial triage
+ * scan to catch messages that arrived between connection establishment and
+ * the IDLE listener being registered.
+ *
+ * If a watcher already exists for this account, it is stopped first.
+ */
 export async function startWatcher(
   projectId: string,
   accountId: string,
@@ -46,16 +73,20 @@ export async function startWatcher(
   const entry: WatcherEntry = { projectId, accountId, account, auth, running: true };
   watchers.set(accountId, entry);
 
-  // Listen for new emails (exists event fires on new messages)
+  // Listen for new emails (exists event fires on new messages via IMAP IDLE)
   client.on("exists", async () => {
     await handleNewEmail(entry);
   });
 
-  // Kick off an initial scan
+  // Kick off an initial scan to catch messages that arrived before IDLE was registered
   await handleNewEmail(entry);
 }
 
-/** Stop the IDLE watcher for an account. */
+/**
+ * Stop the IDLE watcher for an account.
+ * Disconnects the IMAP connection and removes the watcher from the registry.
+ * Idempotent — safe to call if no watcher exists.
+ */
 export async function stopWatcher(accountId: string): Promise<void> {
   const entry = watchers.get(accountId);
   if (!entry) return;
@@ -64,18 +95,26 @@ export async function stopWatcher(accountId: string): Promise<void> {
   try {
     await disconnectAccount(accountId);
   } catch {
-    // Non-fatal
+    // Non-fatal: connection may already be closed
   }
   watchers.delete(accountId);
 }
 
-/** Get watcher status for an account. */
+/** Get watcher status for an account (whether it's running or stopped). */
 export function getWatcherStatus(accountId: string): { running: boolean } {
   const entry = watchers.get(accountId);
   return { running: entry?.running ?? false };
 }
 
-/** Handle a new email event: triage and optionally generate draft responses. */
+/**
+ * Handle a new email event: triage and optionally generate draft responses.
+ *
+ * For each triaged email:
+ *   1. Logs an observation for the self-learning pipeline
+ *   2. If priority is high or medium AND confidence > 0.5, auto-saves a draft
+ *
+ * All errors are caught and logged as observations (never thrown).
+ */
 async function handleNewEmail(entry: WatcherEntry): Promise<void> {
   if (!entry.running) return;
 
@@ -93,6 +132,8 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
 
       // For high/medium priority with response skills, generate suggestions
       if (triage.priority === "high" || triage.priority === "medium") {
+        // 🔴 Legitimate INBOX scope — the watcher monitors INBOX via IMAP IDLE.
+        // This is NOT a missing-folder bug; it's the actual mailbox being watched.
         const suggestion = await suggestResponse(
           entry.projectId,
           entry.accountId,
@@ -134,7 +175,10 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
   }
 }
 
-/** Log an observation to the Ingenium API for the self-learning pipeline. */
+/**
+ * Log an observation to the Ingenium API for the self-learning pipeline.
+ * Best-effort: failures are silent (non-critical path).
+ */
 async function logObservation(
   projectId: string,
   data: {

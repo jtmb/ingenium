@@ -5,11 +5,21 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveProjectBase, getConfigPath } from "./paths.js";
 
+/**
+ * Get configuration content from the DB.
+ * "global" configs use the opencode.jsonc path, "project" configs use opencode.json.
+ */
 export function getConfig(projectId: string, type: "project" | "global"): Config | undefined {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   return db.prepare("SELECT * FROM configs WHERE project_id = ? AND type = ?").get(projectId, type) as Config | undefined;
 }
 
+/**
+ * Save config to both DB and disk.
+ * DB write is authoritative; disk write is best-effort (failure is logged but
+ * does not roll back the transaction). This ensures the config is not lost
+ * even if the filesystem is read-only or the path is invalid.
+ */
 export function saveConfig(projectId: string, type: "project" | "global", content: string): Config {
   return execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -41,6 +51,12 @@ export function saveConfig(projectId: string, type: "project" | "global", conten
   });
 }
 
+/**
+ * Read config from the filesystem and save it to the DB.
+ * Returns undefined if the file does not exist or is unreadable
+ * (e.g., the workspace hasn't been initialized yet).
+ * This is the "pull from disk" direction of the sync.
+ */
 export function syncConfigFromDisk(projectId: string, type: "project" | "global"): Config | undefined {
   try {
     const configPath = type === "global"

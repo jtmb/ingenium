@@ -31,12 +31,18 @@ const VIEW_OPTIONS: { mode: ViewMode; label: string }[] = [
 /* ------------------------------------------------------------------ */
 
 /**
- * Task board page with view switcher (Board / List / Timeline).
- * View mode is persisted via the `?view=` query parameter.
+ * TasksPage — Kanban board with view switcher (Board / List / Timeline).
+ *
+ * View mode is persisted via the `?view=` query parameter so browser
+ * back/forward navigation preserves the user's preferred layout.
  *
  * Wrapped in <Suspense> because useProject() (via ProjectContext)
  * internally calls useSearchParams(), which requires a Suspense
  * boundary in Next.js 15+.
+ *
+ * The search filter is client-side (case-insensitive substring match on
+ * title + description) since the task list is typically small enough
+ * (< 500 items) that server-side filtering would add unnecessary latency.
  */
 export default function TasksPage() {
   return (

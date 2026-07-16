@@ -1,6 +1,13 @@
-/** Account CRUD using ingenium-core settings for encrypted credential storage.
- *  🔴 All accounts are always global — the `projectId` parameter is accepted
- *     for backward compatibility but ignored. Accounts live in the global project. */
+/**
+ * Account CRUD using ingenium-core settings for encrypted credential storage.
+ *
+ * 🔴 All accounts are always global — the `projectId` parameter is accepted
+ *    for backward compatibility but ignored. Accounts live in the global project
+ *    because email accounts are shared infrastructure, not per-project data.
+ *
+ * SECURITY: Credentials (IMAP password, OAuth tokens) are encrypted at rest
+ * via AES-256-GCM when `INGENIUM_EMAIL_ENCRYPTION_KEY` is set.
+ */
 
 import { randomUUID } from "node:crypto";
 import { settings, getDb } from "ingenium-core";
@@ -10,6 +17,11 @@ import { encryptCredentials, decryptCredentials } from "./oauth.js";
 
 const SETTINGS_PREFIX = "email_account_";
 
+/**
+ * Internal stored shape in the settings table.
+ * This is JSON-serialized and written to `settings` rows — NOT a DB table itself.
+ * Credential fields (imapPass, smtpPass, tokens) are encrypted when stored.
+ */
 interface StoredAccount {
   id: string;
   email: string;
@@ -30,9 +42,16 @@ interface StoredAccount {
 
 // ── Global project resolution ─────────────────────────────────────────────
 
+/** Cached reference to avoid re-querying the DB on every call. Cleared on process restart. */
 let _cachedGlobalProjectId: string | null = null;
 
-/** Resolve the global project ID. Cached after first call for performance. */
+/**
+ * Resolve the global project ID.
+ *
+ * Cached after first call — valid for the process lifetime.  If the global project
+ * is deleted and re-created during the same process, a restart is needed.
+ * This is acceptable because project lifecycle changes are rare (admin operations).
+ */
 export function getGlobalProjectId(): string {
   if (_cachedGlobalProjectId) return _cachedGlobalProjectId;
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -50,7 +69,10 @@ function settingsKey(accountId: string): string {
 
 // ── Account CRUD ───────────────────────────────────────────────────────────
 
-/** List all email accounts. Always uses the global project regardless of the passed projectId. */
+/**
+ * List all email accounts.
+ * Always uses the global project regardless of the passed projectId.
+ */
 export function listAccounts(_projectId: string): EmailAccount[] {
   const projectId = getGlobalProjectId();
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -64,7 +86,10 @@ export function listAccounts(_projectId: string): EmailAccount[] {
   });
 }
 
-/** Get a single email account by ID. Always uses the global project. */
+/**
+ * Get a single email account by ID.
+ * Always uses the global project regardless of the passed projectId.
+ */
 export function getAccount(_projectId: string, accountId: string): EmailAccount | undefined {
   const projectId = getGlobalProjectId();
   const raw = settings.getSetting(projectId, settingsKey(accountId));
@@ -73,7 +98,10 @@ export function getAccount(_projectId: string, accountId: string): EmailAccount 
   return storedToAccount(stored);
 }
 
-/** Add a new email account with encrypted credentials. Always uses the global project. */
+/**
+ * Add a new email account with encrypted credentials.
+ * Always uses the global project regardless of the passed projectId.
+ */
 export function addAccount(
   _projectId: string,
   account: Omit<EmailAccount, "id" | "connected">,
@@ -96,7 +124,10 @@ export function addAccount(
   return storedToAccount(stored);
 }
 
-/** Remove an email account by ID. Always uses the global project. */
+/**
+ * Remove an email account by ID.
+ * Always uses the global project regardless of the passed projectId.
+ */
 export function removeAccount(_projectId: string, accountId: string): void {
   const projectId = getGlobalProjectId();
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -104,7 +135,14 @@ export function removeAccount(_projectId: string, accountId: string): void {
     .run(projectId, settingsKey(accountId));
 }
 
-/** Store encrypted credentials for an account. Always uses the global project. */
+/**
+ * Store encrypted credentials for an account.
+ * Always uses the global project regardless of the passed projectId.
+ *
+ * SECURITY: IMAP/SMTP passwords are encrypted with AES-256-GCM before storage.
+ * OAuth tokens are passed through as-is — encryption happens inside oauth.storeTokens().
+ * Throws if INGENIUM_EMAIL_ENCRYPTION_KEY is not set.
+ */
 export function storeCredentials(
   _projectId: string,
   accountId: string,
@@ -129,7 +167,17 @@ export function storeCredentials(
   settings.setSetting(projectId, settingsKey(accountId), JSON.stringify(stored));
 }
 
-/** Get decrypted credentials for an account. Always uses the global project. */
+/**
+ * Get decrypted credentials for an account.
+ * Always uses the global project regardless of the passed projectId.
+ *
+ * Two storage paths are checked:
+ *   1. The account settings key (email_account_<id>) — holds IMAP password + OAuth tokens
+ *   2. Fallback to the legacy OAuth token key (email_oauth_<id>) — for accounts created
+ *      before the unified storage format.
+ *
+ * Returns undefined if neither the account nor any OAuth tokens exist.
+ */
 export function getCredentials(
   _projectId: string,
   accountId: string,
@@ -152,7 +200,8 @@ export function getCredentials(
     }
   }
 
-  // Fallback: also check the OAuth token key (email_oauth_<id>)
+  // Fallback: also check the legacy OAuth token key (email_oauth_<id>)
+  // Handles accounts created before tokens were folded into the account settings row.
   if (!tokens) {
     const oauthRaw = settings.getSetting(projectId, `email_oauth_${accountId}`);
     if (oauthRaw) {
@@ -166,6 +215,12 @@ export function getCredentials(
   return { password, tokens };
 }
 
+/**
+ * Decrypt stored OAuth tokens. Handles two scenarios:
+ *   1. Encryption key present → decrypt both access and refresh tokens
+ *   2. Decryption fails → tokens were stored unencrypted (legacy data or key rotation),
+ *      return them as-is
+ */
 function decodeTokens(stored: OAuthToken, encKey?: string): OAuthToken {
   if (encKey) {
     try {
@@ -176,13 +231,19 @@ function decodeTokens(stored: OAuthToken, encKey?: string): OAuthToken {
         scope: stored.scope,
       };
     } catch {
-      // Decryption failed — tokens were stored unencrypted (old/different key)
+      // Decryption failed — tokens were stored unencrypted (old/different key).
+      // Return raw tokens — the caller can attempt re-encryption on next save.
     }
   }
   return stored;
 }
 
-/** Test the IMAP connection for an account and return folder listing. */
+/**
+ * Test the IMAP connection for an account and return folder listing.
+ * Used by the UI's "Test Connection" flow during account setup.
+ * Returns a structured result instead of throwing, so the UI can display
+ * specific error messages (wrong password, network timeout, etc.).
+ */
 export async function testConnection(
   account: EmailAccount,
   auth: { password?: string; tokens?: OAuthToken },
@@ -197,7 +258,11 @@ export async function testConnection(
   }
 }
 
-/** Update the connected flag on an account. Always uses the global project. */
+/**
+ * Update the connected flag on an account. Always uses the global project.
+ * Also updates `lastSync` timestamp when marking as connected.
+ * Used by the sync engine and IMAP watcher to track connection state.
+ */
 export function setAccountConnected(
   _projectId: string,
   accountId: string,
@@ -213,7 +278,7 @@ export function setAccountConnected(
   settings.setSetting(projectId, settingsKey(accountId), JSON.stringify(stored));
 }
 
-/** Convert a stored account to the public EmailAccount type. */
+/** Convert a stored account (with encrypted fields) to the public EmailAccount type. */
 function storedToAccount(s: StoredAccount): EmailAccount {
   return {
     id: s.id,

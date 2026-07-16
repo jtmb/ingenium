@@ -2,6 +2,7 @@ import { Router } from "express";
 import { settings, logger, projects } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
+/** Handles /api/v1/settings — per-project key-value settings with LLM test-connection proxy. */
 export const settingsRouter = Router();
 
 settingsRouter.get("/", (req, res) => {

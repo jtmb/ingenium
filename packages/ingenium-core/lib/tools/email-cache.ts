@@ -59,6 +59,7 @@ export interface SyncState {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/** Resolve the SQLite DB path from env var or fall back to the default location. */
 function dbPath(): string {
   return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
 }
@@ -177,8 +178,12 @@ export function getCachedEmailBody(
 }
 
 /**
- * Cache an email body (HTML, text, headers). Uses INSERT OR REPLACE so
- * re-fetches update the content.
+ * Cache an email body (HTML, text, headers). Uses ON CONFLICT(account_id, folder, uid)
+ * DO UPDATE so re-fetches update the content without triggering row deletion that
+ * could cascade to child tables. The UNIQUE(account_id, folder, uid) constraint
+ * matches the FK parent's key.
+ *
+ * 🔴 HARD RULE #11: ON CONFLICT DO UPDATE, never INSERT OR REPLACE.
  */
 export function upsertEmailBody(
   accountId: string,
@@ -200,9 +205,14 @@ export function upsertEmailBody(
       return; // parent removed — skip silently, this is expected during account deletion
     }
     db.prepare(
-      `INSERT OR REPLACE INTO email_bodies
+      `INSERT INTO email_bodies
          (account_id, folder, uid, html, text, headers_json, fetched_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+         html = excluded.html,
+         text = excluded.text,
+         headers_json = excluded.headers_json,
+         fetched_at = datetime('now')`,
     ).run(accountId, folder, uid, html ?? null, text ?? null, headersJson ?? null);
   });
   checkpointAfterWrite();
@@ -272,11 +282,17 @@ export function getCachedSuggestions(
   ).get(accountId, folder, uid) as CachedEmailSuggestions | undefined;
 }
 
-/**
- * Upsert AI-generated reply suggestions for an email.
- * Uses the same defensive parent-check pattern as upsertEmailBody:
- * verifies the email_cache row exists before inserting to avoid FK violations.
- */
+  /**
+   * Upsert AI-generated reply suggestions for an email.
+   * Uses the same defensive parent-check pattern as upsertEmailBody:
+   * verifies the email_cache row exists before inserting to avoid FK violations.
+   *
+   * Uses ON CONFLICT(account_id, folder, uid) DO UPDATE (not INSERT OR REPLACE)
+   * per HARD RULE #11. The PRIMARY KEY is (account_id, folder, uid) — matching
+   * the FK parent's UNIQUE(account_id, folder, uid). INSERT OR REPLACE would delete
+   * the old row first, which would cascade to any future child tables of
+   * email_suggestions.
+   */
 export function upsertEmailSuggestions(
   accountId: string, folder: string, uid: string,
   suggestions: Array<{ tone: string; subject: string; body: string }>,
@@ -292,9 +308,13 @@ export function upsertEmailSuggestions(
       return;
     }
     db.prepare(
-      `INSERT OR REPLACE INTO email_suggestions
+      `INSERT INTO email_suggestions
          (account_id, folder, uid, suggestions_json, model, generated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))`
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+         suggestions_json = excluded.suggestions_json,
+         model = excluded.model,
+         generated_at = datetime('now')`
     ).run(accountId, folder, uid, JSON.stringify(suggestions), model);
   });
   checkpointAfterWrite();
@@ -320,11 +340,15 @@ export function getCachedSummary(
   ).get(accountId, folder, uid) as CachedEmailSummary | undefined;
 }
 
-/**
- * Upsert an AI-generated summary for an email.
- * Uses the same defensive parent-check pattern as upsertEmailSuggestions:
- * verifies the email_cache row exists before inserting to avoid FK violations.
- */
+  /**
+   * Upsert an AI-generated summary for an email.
+   * Uses the same defensive parent-check pattern as upsertEmailSuggestions:
+   * verifies the email_cache row exists before inserting to avoid FK violations.
+   *
+   * Uses ON CONFLICT(account_id, folder, uid) DO UPDATE (not INSERT OR REPLACE)
+   * per HARD RULE #11. The PRIMARY KEY is (account_id, folder, uid) — matching
+   * the FK parent's UNIQUE(account_id, folder, uid).
+   */
 export function upsertEmailSummary(
   accountId: string, folder: string, uid: string,
   summaryText: string,
@@ -340,9 +364,13 @@ export function upsertEmailSummary(
       return;
     }
     db.prepare(
-      `INSERT OR REPLACE INTO email_summaries
+      `INSERT INTO email_summaries
          (account_id, folder, uid, summary_text, model, generated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'))`
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+         summary_text = excluded.summary_text,
+         model = excluded.model,
+         generated_at = datetime('now')`
     ).run(accountId, folder, uid, summaryText, model);
   });
   checkpointAfterWrite();

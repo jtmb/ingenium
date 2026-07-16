@@ -2,8 +2,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4097/api/v1";
 
 interface ServiceDetail {
@@ -60,12 +58,10 @@ interface AppDetail {
   state: string;
   description: string;
   detail?: string;
-  // synthesis-engine fields
   intervalMs?: number;
   lastRunAt?: string | null;
   nextEstimate?: string | null;
   stats?: AppStats | null;
-  // email-client fields
   engine?: AppEngine | null;
 }
 
@@ -75,8 +71,11 @@ interface ServiceOverlayProps {
   onClose: () => void;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
+/**
+ * Maps a supervisord process state to CSS classes for the state badge.
+ * Semantic: error state category is used for both "error" and "stopped"/"disabled"
+ * since both indicate an unhealthy condition requiring attention.
+ */
 function stateBadgeStyle(state: string) {
   switch (state) {
     case "running":
@@ -136,24 +135,27 @@ function formatTimestamp(seconds?: number): string {
   return new Date(seconds * 1000).toLocaleString();
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-
+/**
+ * Full-screen detail overlay for a supervisord process or in-process application
+ * (synthesis-engine, email-client). Renders via portal to `document.body`.
+ *
+ * Dispatches between two data-fetching strategies based on `type`:
+ * - "service" → fetches supervisord process info + stderr logs
+ * - "application" → fetches in-process engine state (pipeline stats, email accounts)
+ */
 export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayProps) {
-  // Service-specific state
   const [detail, setDetail] = useState<ServiceDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  // Logs (service-type only)
   const [logs, setLogs] = useState<ServiceLogs | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
 
-  // Application-specific state
   const [appDetail, setAppDetail] = useState<AppDetail | null>(null);
   const [appDetailError, setAppDetailError] = useState<string | null>(null);
 
-  // ── Data fetching ───────────────────────────────────────────────────────────
-
+  // Fetch functions wrapped in useCallback so they can be safely included
+  // in the useEffect dependency array without causing infinite loops.
   const fetchServiceDetail = useCallback(async () => {
     try {
       const res = await fetch(`${API_URL}/services/${encodeURIComponent(name)}`);
@@ -205,8 +207,6 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
     }
   }, [type, fetchServiceDetail, fetchAppDetail, fetchLogs]);
 
-  // ── Escape key dismiss ───────────────────────────────────────────────────
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -214,8 +214,6 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
-
-  // ── Determine what to render ──────────────────────────────────────────────
 
   const isLoading = type === "service" ? !detail && !detailError : !appDetail && !appDetailError;
   const error = type === "service" ? detailError : appDetailError;
@@ -229,8 +227,6 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
 
   const badge = stateBadgeStyle(displayState);
 
-  // ── Render ──────────────────────────────────────────────────────────────────
-
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
@@ -241,7 +237,6 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
         style={{ maxHeight: "85vh" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Close button */}
         <button
           onClick={onClose}
           className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-border)]/50 transition-colors"
@@ -251,7 +246,6 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
         </button>
 
         <div className="p-6 sm:p-8">
-          {/* ── Error state ─────────────────────────────────────────────── */}
           {error && (
             <div className="mb-6 bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded-lg p-4">
               <p className="text-[var(--color-error-text)] text-sm font-medium">
@@ -263,7 +257,6 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
             </div>
           )}
 
-          {/* ── Header ──────────────────────────────────────────────────── */}
           <div className="mb-6 pr-8">
             <h2 className="text-2xl font-bold text-[var(--color-text-primary)]">
               {displayName}
@@ -280,7 +273,6 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
             )}
           </div>
 
-          {/* ── State badge ─────────────────────────────────────────────── */}
           {!isLoading && (
             <div className="flex items-center gap-3 mb-6">
               <div
@@ -299,29 +291,22 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
             </div>
           )}
 
-          {/* ── Service diagnostics grid (supervisord) ─────────────────── */}
           {type === "service" && detail && (
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                  PID
-                </span>
+                <span className="text-xs text-[var(--color-text-muted)] block mb-1">PID</span>
                 <span className="text-sm font-mono text-[var(--color-text-primary)]">
                   {detail.pid ?? "—"}
                 </span>
               </div>
               <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                  Port
-                </span>
+                <span className="text-xs text-[var(--color-text-muted)] block mb-1">Port</span>
                 <span className="text-sm font-mono text-[var(--color-text-primary)]">
                   {detail.port ?? "—"}
                 </span>
               </div>
               <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                  Started
-                </span>
+                <span className="text-xs text-[var(--color-text-muted)] block mb-1">Started</span>
                 <span className="text-sm font-mono text-[var(--color-text-primary)]">
                   {detail.uptime > 0
                     ? new Date(Date.now() - detail.uptime * 1000).toLocaleString()
@@ -329,17 +314,13 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                 </span>
               </div>
               <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                  Uptime
-                </span>
+                <span className="text-xs text-[var(--color-text-muted)] block mb-1">Uptime</span>
                 <span className="text-sm font-mono text-[var(--color-text-primary)]">
                   {formatUptime(detail.uptime)}
                 </span>
               </div>
               <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                  Exit Code
-                </span>
+                <span className="text-xs text-[var(--color-text-muted)] block mb-1">Exit Code</span>
                 <span
                   className={`text-sm font-mono ${
                     detail.exitstatus === 0
@@ -357,9 +338,7 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                 </span>
               </div>
               <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                  Last Stop
-                </span>
+                <span className="text-xs text-[var(--color-text-muted)] block mb-1">Last Stop</span>
                 <span className="text-sm font-mono text-[var(--color-text-primary)]">
                   {formatTimestamp(detail.stop)}
                 </span>
@@ -367,40 +346,28 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
             </div>
           )}
 
-          {/* ── Application diagnostics grid ────────────────────────────── */}
           {type === "application" && appDetail && (
             <>
-              {/* General fields */}
               <div className="grid grid-cols-2 gap-4 mb-6">
                 {appDetail.intervalMs != null && (
                   <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                      Interval
-                    </span>
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">Interval</span>
                     <span className="text-sm font-mono text-[var(--color-text-primary)]">
-                      {appDetail.intervalMs === 0
-                        ? "Disabled"
-                        : `${Math.round(appDetail.intervalMs / 60000)}m`}
+                      {appDetail.intervalMs === 0 ? "Disabled" : `${Math.round(appDetail.intervalMs / 60000)}m`}
                     </span>
                   </div>
                 )}
                 {appDetail.lastRunAt !== undefined && (
                   <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                      Last Run
-                    </span>
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">Last Run</span>
                     <span className="text-sm font-mono text-[var(--color-text-primary)]">
-                      {appDetail.lastRunAt
-                        ? new Date(appDetail.lastRunAt).toLocaleString()
-                        : "—"}
+                      {appDetail.lastRunAt ? new Date(appDetail.lastRunAt).toLocaleString() : "—"}
                     </span>
                   </div>
                 )}
                 {appDetail.nextEstimate != null && (
                   <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                      Next Run (est.)
-                    </span>
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">Next Run (est.)</span>
                     <span className="text-sm font-mono text-[var(--color-text-primary)]">
                       {new Date(appDetail.nextEstimate).toLocaleString()}
                     </span>
@@ -408,9 +375,7 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                 )}
                 {appDetail.detail && (
                   <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                      Detail
-                    </span>
+                    <span className="text-xs text-[var(--color-text-muted)] block mb-1">Detail</span>
                     <span className="text-sm font-mono text-[var(--color-text-primary)]">
                       {appDetail.detail}
                     </span>
@@ -418,50 +383,30 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                 )}
               </div>
 
-              {/* Synthesis stats */}
               {appDetail.stats && (
                 <div className="mb-6">
-                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
-                    Pipeline Stats
-                  </h3>
+                  <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">Pipeline Stats</h3>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                        Total Observations
-                      </span>
-                      <span className="text-sm font-mono text-[var(--color-text-primary)]">
-                        {appDetail.stats.totalObservations}
-                      </span>
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">Total Observations</span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{appDetail.stats.totalObservations}</span>
                     </div>
                     <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                        Pending
-                      </span>
-                      <span className="text-sm font-mono text-[var(--color-text-primary)]">
-                        {appDetail.stats.pendingCount}
-                      </span>
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">Pending</span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{appDetail.stats.pendingCount}</span>
                     </div>
                     <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                        Processed
-                      </span>
-                      <span className="text-sm font-mono text-[var(--color-text-primary)]">
-                        {appDetail.stats.processedCount}
-                      </span>
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">Processed</span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{appDetail.stats.processedCount}</span>
                     </div>
                     <div className="bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">
-                        Traits
-                      </span>
-                      <span className="text-sm font-mono text-[var(--color-text-primary)]">
-                        {appDetail.stats.traitCount}
-                      </span>
+                      <span className="text-xs text-[var(--color-text-muted)] block mb-1">Traits</span>
+                      <span className="text-sm font-mono text-[var(--color-text-primary)]">{appDetail.stats.traitCount}</span>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Email-client engine accounts */}
               {appDetail.engine && appDetail.engine.accounts.length > 0 && (
                 <div className="mb-6">
                   <h3 className="text-sm font-semibold text-[var(--color-text-primary)] mb-2">
@@ -469,9 +414,7 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                   </h3>
                   {appDetail.engine.accounts.map((acct) => (
                     <div key={acct.accountId} className="mb-4 bg-[var(--color-surface-muted)] rounded-lg p-3">
-                      <p className="text-sm font-medium text-[var(--color-text-primary)] mb-1">
-                        {acct.email}
-                      </p>
+                      <p className="text-sm font-medium text-[var(--color-text-primary)] mb-1">{acct.email}</p>
                       <div className="grid grid-cols-2 gap-2 mt-2">
                         {acct.folders.map((folder) => {
                           const folderColor =
@@ -481,31 +424,14 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                                 ? "text-[var(--color-error-text)]"
                                 : "text-[var(--color-text-muted)]";
                           return (
-                            <div
-                              key={folder.folder}
-                              className="bg-[var(--color-surface)] rounded p-2"
-                            >
-                              <span className="text-xs font-medium text-[var(--color-text-primary)]">
-                                {folder.folder}
-                              </span>
-                              <span className={`text-xs ml-1.5 ${folderColor}`}>
-                                {folder.state}
-                              </span>
+                            <div key={folder.folder} className="bg-[var(--color-surface)] rounded p-2">
+                              <span className="text-xs font-medium text-[var(--color-text-primary)]">{folder.folder}</span>
+                              <span className={`text-xs ml-1.5 ${folderColor}`}>{folder.state}</span>
                               <div className="text-xs text-[var(--color-text-muted)] mt-1 space-y-0.5">
-                                {folder.headersSynced > 0 && (
-                                  <div>Headers: {folder.headersSynced}/{folder.headersTotal}</div>
-                                )}
-                                {folder.bodiesCached > 0 && (
-                                  <div>Bodies: {folder.bodiesCached}/{folder.bodiesWindow}</div>
-                                )}
-                                {folder.lastSyncedAt && (
-                                  <div>Synced: {new Date(folder.lastSyncedAt).toLocaleString()}</div>
-                                )}
-                                {folder.lastError && (
-                                  <div className="text-[var(--color-error-text)]">
-                                    Error: {folder.lastError}
-                                  </div>
-                                )}
+                                {folder.headersSynced > 0 && <div>Headers: {folder.headersSynced}/{folder.headersTotal}</div>}
+                                {folder.bodiesCached > 0 && <div>Bodies: {folder.bodiesCached}/{folder.bodiesWindow}</div>}
+                                {folder.lastSyncedAt && <div>Synced: {new Date(folder.lastSyncedAt).toLocaleString()}</div>}
+                                {folder.lastError && <div className="text-[var(--color-error-text)]">Error: {folder.lastError}</div>}
                               </div>
                             </div>
                           );
@@ -516,7 +442,6 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
                 </div>
               )}
 
-              {/* Email-client engine running but no accounts */}
               {appDetail.engine && appDetail.engine.accounts.length === 0 && (
                 <div className="mb-6 bg-[var(--color-surface-muted)] rounded-lg p-4 text-center">
                   <p className="text-sm text-[var(--color-text-muted)]">
@@ -527,30 +452,21 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
             </>
           )}
 
-          {/* ── Spawn error detail ──────────────────────────────────────── */}
           {type === "service" && detail?.spawnerr && (
             <div className="mb-6">
-              <span className="text-xs font-semibold text-[var(--color-error-text)] block mb-1">
-                Spawn Error
-              </span>
+              <span className="text-xs font-semibold text-[var(--color-error-text)] block mb-1">Spawn Error</span>
               <pre className="text-sm text-[var(--color-error-text)] bg-[var(--color-error-bg)] rounded-lg p-3 overflow-x-auto whitespace-pre-wrap font-mono border border-[var(--color-error-border)]">
                 {detail.spawnerr}
               </pre>
             </div>
           )}
 
-          {/* ── Process Logs (service-type only) ────────────────────────── */}
           {type === "service" && (
             <div>
               <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">
-                  Process Logs (stderr)
-                </h3>
-                <button
-                  onClick={fetchLogs}
-                  className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
-                  aria-label="Refresh logs"
-                >
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Process Logs (stderr)</h3>
+                <button onClick={fetchLogs}
+                  className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors" aria-label="Refresh logs">
                   ↻ Refresh
                 </button>
               </div>
@@ -558,41 +474,27 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
               {logsLoading ? (
                 <div className="flex items-center justify-center py-8 bg-[var(--color-surface-muted)] rounded-lg">
                   <div className="w-6 h-6 border-2 border-[var(--color-primary,#3b82f6)] border-t-transparent rounded-full animate-spin" />
-                  <span className="ml-2 text-sm text-[var(--color-text-muted)]">
-                    Loading logs…
-                  </span>
+                  <span className="ml-2 text-sm text-[var(--color-text-muted)]">Loading logs…</span>
                 </div>
               ) : logsError ? (
                 <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded-lg p-4">
-                  <p className="text-[var(--color-error-text)] text-sm">
-                    Failed to load logs
-                  </p>
-                  <p className="text-[var(--color-error-text)] text-xs mt-1">
-                    {logsError}
-                  </p>
+                  <p className="text-[var(--color-error-text)] text-sm">Failed to load logs</p>
+                  <p className="text-[var(--color-error-text)] text-xs mt-1">{logsError}</p>
                 </div>
               ) : logs && logs.log ? (
                 <>
-                  <pre
-                    className="bg-gray-900 text-gray-100 text-xs leading-relaxed rounded-lg p-4 overflow-auto font-mono whitespace-pre-wrap"
-                    style={{ maxHeight: "40vh" }}
-                  >
+                  <pre className="bg-gray-900 text-gray-100 text-xs leading-relaxed rounded-lg p-4 overflow-auto font-mono whitespace-pre-wrap" style={{ maxHeight: "40vh" }}>
                     {logs.log}
                   </pre>
                   {logs.more && (
-                    <button
-                      onClick={fetchLogs}
-                      className="mt-2 text-xs text-[var(--color-primary,#3b82f6)] hover:underline"
-                    >
+                    <button onClick={fetchLogs} className="mt-2 text-xs text-[var(--color-primary,#3b82f6)] hover:underline">
                       ← Load older entries
                     </button>
                   )}
                 </>
               ) : (
                 <div className="bg-[var(--color-surface-muted)] rounded-lg p-6 text-center">
-                  <p className="text-sm text-[var(--color-text-muted)]">
-                    No log output yet — process may have just started.
-                  </p>
+                  <p className="text-sm text-[var(--color-text-muted)]">No log output yet — process may have just started.</p>
                 </div>
               )}
             </div>
@@ -600,20 +502,13 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
         </div>
       </div>
 
-      {/* ── Animations ─────────────────────────────────────────────────── */}
       <style jsx>{`
         .animate-fadeIn {
           animation: overlayFadeIn 200ms ease-out;
         }
         @keyframes overlayFadeIn {
-          from {
-            opacity: 0;
-            transform: scale(0.95);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1);
-          }
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
         }
       `}</style>
     </div>,

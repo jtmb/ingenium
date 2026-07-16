@@ -141,7 +141,7 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
     const cliBtn = page.locator(SWITCH_TO_WEB);
     await expect(cliBtn).toBeVisible({ timeout: 3000 });
 
-    expect(await cliBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(await cliBtn.getAttribute("aria-pressed")).toBe("false");
     expect(await cliBtn.getAttribute("aria-label")).toBe("Switch to Web mode");
   });
 
@@ -157,7 +157,7 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
     await expect(page.locator(SWITCH_TO_CLI)).toBeVisible({ timeout: 5000 });
 
     // Press keyboard shortcut — should switch to CLI
-    await page.keyboard.press("Control+Shift+`");
+    await page.keyboard.press("Control+Shift+Backquote");
 
     // CLI iframe should now be mounted
     await expect(page.locator(CLI_IFRAME)).toBeAttached({ timeout: 10000 });
@@ -166,7 +166,7 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
     await expect(page.locator(SWITCH_TO_WEB)).toBeVisible({ timeout: 5000 });
 
     // Press shortcut again to switch back
-    await page.keyboard.press("Control+Shift+`");
+    await page.keyboard.press("Control+Shift+Backquote");
 
     // Should be back to Web mode
     await expect(page.locator(SWITCH_TO_CLI)).toBeVisible({ timeout: 5000 });

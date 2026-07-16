@@ -9,6 +9,10 @@ type SpotlightSearchProps = {
   onTaskSelect: (task: Task) => void;
 };
 
+/**
+ * Highlight matching query text in a string using a case-insensitive regex.
+ * Escapes special regex characters from the user's query to avoid injection.
+ */
 function highlightMatch(text: string, query: string): React.ReactNode {
   if (!query.trim()) return text;
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -19,6 +23,15 @@ function highlightMatch(text: string, query: string): React.ReactNode {
   );
 }
 
+/**
+ * Spotlight-style task search (Cmd+K / Ctrl+K).
+ *
+ * Features:
+ * - Debounced API search (200ms) to avoid flooding the server on every keystroke
+ * - Keyboard navigation: ArrowUp/ArrowDown to move through results, Enter to select
+ * - Esc to close, Cmd+K to toggle
+ * - Regex-escaped text highlighting in results
+ */
 export default function SpotlightSearch({ project, onTaskSelect }: SpotlightSearchProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -33,6 +46,7 @@ export default function SpotlightSearch({ project, onTaskSelect }: SpotlightSear
     setQuery("");
     setResults([]);
     setSelectedIndex(0);
+    // Use rAF to ensure the DOM has rendered before focusing the input.
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
@@ -42,7 +56,6 @@ export default function SpotlightSearch({ project, onTaskSelect }: SpotlightSear
     setResults([]);
   }, []);
 
-  // Ctrl+K / Cmd+K listener
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "k") {
@@ -58,7 +71,8 @@ export default function SpotlightSearch({ project, onTaskSelect }: SpotlightSear
     return () => document.removeEventListener("keydown", handler);
   }, [isOpen, openSpotlight, closeSpotlight]);
 
-  // Debounced search
+  // Debounced search: 200ms delay prevents a request per keystroke while
+  // keeping the search responsive. Clears on unmount/query change.
   useEffect(() => {
     if (!query.trim()) {
       setResults([]);

@@ -7,14 +7,15 @@ services:
       - "127.0.0.1:4098:4098"   # OpenCode Web (host loopback only)
       - "127.0.0.1:4099:4099"   # ttyd OpenCode CLI
     environment:
-      - OPENCODE_SERVER_PASSWORD=test
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is required}
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
       - INGENIUM_GLOBAL_CONFIG_PATH=/home/appuser/.config/opencode
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:3000}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET:-}
       - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID:-}
       - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
-      - INGENIUM_EMAIL_ENCRYPTION_KEY=${INGENIUM_EMAIL_ENCRYPTION_KEY:-c3c13abc6afd70efcad425fc501b07677ec3bfe5777a97393b76c876bfc3f278}
+      - INGENIUM_EMAIL_ENCRYPTION_KEY=${INGENIUM_EMAIL_ENCRYPTION_KEY:?INGENIUM_EMAIL_ENCRYPTION_KEY (64 hex chars) is required}
       - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-http://localhost:3000/mail/oauth/callback}
     security_opt: ["seccomp=unconfined"]
     volumes:

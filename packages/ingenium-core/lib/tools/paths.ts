@@ -20,6 +20,11 @@ export function resolveProjectBase(projectId?: string): string {
   return resolve(process.env.INGENIUM_CORE_DB_PATH ?? "./data", "..", "..");
 }
 
+/**
+ * Check whether a project ID corresponds to the global project (is_global=1).
+ * Silently returns false if the project doesn't exist or DB is unavailable —
+ * callers treat "not global" as the safe default for path resolution.
+ */
 export function isGlobal(projectId?: string): boolean {
   if (!projectId) return false;
   try {
@@ -29,18 +34,30 @@ export function isGlobal(projectId?: string): boolean {
   } catch { return false; }
 }
 
+/**
+ * Resolve the skills directory for a project.
+ * Global: <config>/skills/  |  Normal: <project>/.opencode/skills/
+ */
 export function getSkillsBase(projectId?: string): string {
   const base = resolveProjectBase(projectId);
   if (isGlobal(projectId)) return resolve(base, "skills");
   return resolve(base, ".opencode", "skills");
 }
 
+/**
+ * Resolve the plugins directory for a project.
+ * Global: <config>/plugins/  |  Normal: <project>/.opencode/plugins/
+ */
 export function getPluginsBase(projectId?: string): string {
   const base = resolveProjectBase(projectId);
   if (isGlobal(projectId)) return resolve(base, "plugins");
   return resolve(base, ".opencode", "plugins");
 }
 
+/**
+ * Resolve the commands directory for a project.
+ * Global: <config>/commands/  |  Normal: <project>/.opencode/commands/
+ */
 export function getCommandsBase(projectId?: string): string {
   const base = resolveProjectBase(projectId);
   if (isGlobal(projectId)) return resolve(base, "commands");

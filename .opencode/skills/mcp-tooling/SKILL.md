@@ -115,10 +115,17 @@ The Ingenium email client provides MCP tools for IMAP/SMTP email operations:
 - \`ingenium_email_watch_start\` — Start IMAP polling watcher (background)
 - \`ingenium_email_watch_status\` — Check/watcher status for active watchers
 
+## Migrated Sources (Phase 3 Taxonomy)
+
+| Source | Content Preserved At |
+|--------|---------------------|
+| `browsing-the-web` | [`references/sources/browsing-the-web/`](references/sources/browsing-the-web/source-index.md) |
+| `dashboard-screenshots` | [`references/sources/dashboard-screenshots/`](references/sources/dashboard-screenshots/source-index.md) |
+
 ## Cross-References
 
-- **`development-conventions`** (`references/web-design/reviewer.md`) — Web design review workflow that uses Playwright for visual inspection
-- **`devops-conventions`** (`references/shell-scripts/scripting.md`) — Shell scripts for launching dev servers before testing
-- **`configuring-opencode`** — Agent permission lockdown patterns for MCP tools
+- **`@development-conventions`** — Web design review workflow that uses Playwright for visual inspection
+- **`@devops-conventions`** — Shell scripts for launching dev servers before testing
+- **`@engineering-workflow`** — Agent configuration and permission lockdown patterns for MCP tools
 
 (End of file - total 89 lines)

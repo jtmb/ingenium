@@ -6,6 +6,15 @@ import { jobs, logger } from "ingenium-core";
 // ============================================================================
 
 let activeRunCount = 0;
+
+/**
+ * Conservative concurrency limit: only 2 simultaneous opencode CLI invocations.
+ *
+ * Each opencode process loads an LLM model context and may consume significant
+ * memory (especially with agentic tool loops). A cap of 2 prevents resource
+ * starvation in the single-container deployment while still allowing parallel
+ * execution for staggered cron jobs.
+ */
 const MAX_CONCURRENT_RUNS = 2;
 
 /** In-memory map of runId → ChildProcess for cancellation and status tracking. */
@@ -49,6 +58,9 @@ export async function executeJobRun(
     jobs.finishJobRun(runId, "running" as any, null);
   }
 
+  // Default 30-minute timeout prevents runaway agents from consuming resources indefinitely.
+  // The timeout is generous — typical agent runs finish in 2-10 minutes — because the
+  // opencode CLI may include LLM inference time, tool calls, and user-facing confirmations.
   const timeoutMs = (job.timeout_minutes || 30) * 60 * 1000;
   let timedOut = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
@@ -59,6 +71,9 @@ export async function executeJobRun(
 
   logger.info("job-runner", `Spawning: opencode ${args.map(a => a.includes(" ") ? `"${a}"` : a).join(" ")}`);
 
+  // cwd: "/workspace" matches the Docker bind mount so the agent sees the host's repos.
+  // HOME is set explicitly because the Docker container's appuser may not inherit the
+  // expected home directory through the spawn() environment merge.
   const proc = spawn("opencode", args, {
     cwd: "/workspace",
     env: { ...process.env, HOME: "/home/appuser" },
@@ -67,7 +82,9 @@ export async function executeJobRun(
 
   runningProcesses.set(runId, proc);
 
-  // Timeout handler
+  // Timeout handler — SIGTERM first with a 5s grace period, then SIGKILL.
+  // This two-phase kill gives the opencode process time to flush logs and clean up
+  // child processes (e.g., LLM subprocesses) before a hard kill.
   timeoutHandle = setTimeout(() => {
     timedOut = true;
     logger.warn("job-runner", `Run ${runId} timed out after ${timeoutMs}ms — killing process.`);
@@ -88,7 +105,7 @@ export async function executeJobRun(
   proc.stdout?.on("data", (chunk: Buffer) => {
     stdoutBuffer += chunk.toString("utf-8");
     const lines = stdoutBuffer.split("\n");
-    // Keep the last incomplete line in the buffer
+    // Keep the last incomplete line in the buffer (stream may end mid-line)
     stdoutBuffer = lines.pop() ?? "";
     for (const line of lines) {
       if (line.length > 0) {
@@ -111,7 +128,7 @@ export async function executeJobRun(
   });
 
   proc.on("close", (code) => {
-    // Flush any remaining buffer content
+    // Flush any remaining buffer content (last partial line from stream data)
     if (stdoutBuffer.length > 0) {
       jobs.appendRunLog(runId, "stdout", stdoutBuffer);
     }

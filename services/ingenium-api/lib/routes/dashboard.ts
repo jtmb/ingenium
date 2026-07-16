@@ -87,14 +87,12 @@ interface HealthData {
 }
 
 interface DashboardData {
-  // Existing fields preserved
   learning: LearningSummary | null;
   tasks: TasksSummary | null;
   jobs: JobsSummary | null;
   mail: MailSummary | null;
   generatedAt: string;
 
-  // NEW fields
   attention: AttentionData | null;
   resume: ResumeData | null;
   activity: ActivityItem[] | null;
@@ -106,8 +104,8 @@ interface DashboardResponse {
   unavailable: string[];
 }
 
-// ── DB path helper ─────────────────────────────────────────────────────────────
-
+// Resolves to the SQLite DB path used by getDb() for direct queries (attention, error logs, unread counts).
+// Falls back to the default path when the env var is unset (e.g., tests).
 function dbPath(): string {
   return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
 }
@@ -140,7 +138,7 @@ function fetchLearning(projectId: string, globalProjectId: string): {
     unavailable.push("learning.personality");
   }
 
-  // Synthesis interval
+  // Synthesis interval — read from the global-default project where it's configured
   try {
     const intervalStr = settings.getSetting(globalProjectId, "synthesis_interval_ms");
     learning.synthesisIntervalMs = intervalStr ? parseInt(intervalStr, 10) : 900000;
@@ -150,7 +148,6 @@ function fetchLearning(projectId: string, globalProjectId: string): {
     learning.synthesisIntervalMs = 900000;
   }
 
-  // If we got nothing at all, return null
   if (Object.keys(learning).length === 0) {
     return { learning: null, unavailable };
   }
@@ -264,6 +261,7 @@ async function fetchMail(): Promise<{
       accountCount = engine.accounts.length;
     }
 
+    // Engine is healthy only if it's running AND has sent a heartbeat in the last 2 minutes
     const heartbeatAge = engine.heartbeatAt
       ? Date.now() - new Date(engine.heartbeatAt).getTime()
       : null;
@@ -296,6 +294,8 @@ const SEVERITY_ORDER: Record<AttentionItem["severity"], number> = {
 /**
  * Attention queue — things that need the user's immediate attention.
  * Each sub-check is independently wrapped so one failure doesn't cascade.
+ * Sorted by severity (critical → warning → info) then newest-first.
+ * Limited to 10 items to avoid overwhelming the dashboard.
  */
 function fetchAttention(projectId: string): {
   attention: AttentionData | null;
@@ -493,14 +493,13 @@ function fetchAttention(projectId: string): {
     unavailable.push("attention.error_logs");
   }
 
-  // ── Sort by severity then timestamp ────────────────────────────────────
+  // Sort: severity (critical first) → newest-first within same severity
   items.sort((a, b) => {
     const severityDiff = SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity];
     if (severityDiff !== 0) return severityDiff;
-    return b.timestamp.localeCompare(a.timestamp); // newest first
+    return b.timestamp.localeCompare(a.timestamp);
   });
 
-  // Limit to 10
   const limited = items.slice(0, 10);
 
   return {
@@ -637,7 +636,8 @@ async function fetchHealth(projectId: string): Promise<{
     services: [],
   };
 
-  // ── Supervisord process check ──────────────────────────────────────────
+  // ── Supervisord process check via XML-RPC (Docker internal only) ─────────
+  // 3s timeout avoids hanging the dashboard if supervisord is unresponsive
   try {
     const response = await fetch("http://127.0.0.1:9001/RPC2", {
       method: "POST",
@@ -716,7 +716,8 @@ async function fetchHealth(projectId: string): Promise<{
 
   // ── In-process application checks ──────────────────────────────────────
   try {
-    // Synthesis engine
+    // Synthesis engine — status based on interval config vs last-run age
+    // interval=0 means disabled; >3x interval = error; >1.5x = still running (may catch up)
     try {
       const intervalMs = parseInt(
         settings.getSetting("global-default", "synthesis_interval_ms") ?? "900000",
@@ -733,7 +734,7 @@ async function fetchHealth(projectId: string): Promise<{
       } else if (lastRun) {
         const age = Date.now() - lastRun;
         if (age > intervalMs * 3) synthState = "error";
-        else if (age > intervalMs * 1.5) synthState = "running"; // degraded but still ok
+        else if (age > intervalMs * 1.5) synthState = "running";
       }
 
       health.services.push({
@@ -845,7 +846,7 @@ dashboardRouter.get("/summary", async (req, res) => {
 
   data.generatedAt = new Date().toISOString();
 
-  // If ALL modules failed, return 500
+  // 500 only if every single module failed — partial failures are still 200 with unavailable[]
   const allNull =
     data.learning === null &&
     data.tasks === null &&

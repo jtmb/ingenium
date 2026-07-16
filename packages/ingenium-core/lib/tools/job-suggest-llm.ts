@@ -8,7 +8,8 @@ export interface JobSuggestResult {
   trigger_event: string | null;
 }
 
-// ── Truncation caps ──────────────────────────────────────────
+// Truncation caps prevent LLM output from overflowing DB column limits or
+// producing impractically long job configurations.
 const MAX_DESCRIPTION = 2000;
 const MAX_PROMPT_TEMPLATE = 4000;
 const MAX_CRON = 100;
@@ -36,14 +37,23 @@ Respond ONLY with valid JSON (no markdown, no code fences):
 { "prompt_template": "string or null", "schedule_cron": "string or null", "trigger_event": "string or null" }`;
 }
 
+/**
+ * Lenient JSON parser that handles common LLM output quirks:
+ * - Code-fence wrapped JSON (```json ... ```)
+ * - Response with trailing/garbage text (falls back to extracting the first `{...}` block)
+ * - Returns `null` on any parse failure instead of throwing
+ */
 function tryParseJSON(text: string): any {
   try {
     let cleaned = text.trim();
     if (cleaned.startsWith("```")) {
+      // Strip markdown code fences — LLMs frequently wrap raw JSON in ```json ... ```
       cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
     }
     return JSON.parse(cleaned);
   } catch {
+    // Greedy fallback: extract the first braced block `{...}`
+    // This handles cases where the model wraps the JSON in explanatory text.
     const match = text.match(/\{[\s\S]*\}/);
     if (match) {
       try { return JSON.parse(match[0]); } catch {}
@@ -119,8 +129,8 @@ export async function generateJobConfig(
           { role: "system", content: "You are a job configuration assistant that outputs only valid JSON." },
           { role: "user", content: prompt },
         ],
-        temperature: 0.3,
-        max_tokens: 8192,
+        temperature: 0.3, // Low temperature for deterministic JSON output — we want structure, not creativity
+        max_tokens: 8192, // Generous limit gives reasoning models room to finish thinking before content
       }),
     });
 

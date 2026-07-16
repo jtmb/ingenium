@@ -1,6 +1,7 @@
 /**
  * MCP tool handlers for child MCP server management.
- * Supports listing, adding, and removing child servers (Kaban, Thread, etc.).
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
+ * Supports listing, adding, removing, updating, and bulk-syncing child servers (Kaban, Thread, etc.).
  */
 import { api } from "../client.js";
 /** List all registered child MCP servers for a project. */
@@ -17,4 +18,14 @@ export async function serverAdd(project, name, command, args, env, source) {
 export async function serverRemove(project, name) {
     const res = await api.del(`/servers/${encodeURIComponent(name)}`, { project });
     return { content: [{ type: "text", text: JSON.stringify(res.data ?? "ok") }] };
+}
+/** Update a server's running state. */
+export async function serverUpdate(project, name, running) {
+    const res = await api.patch(`/servers/${encodeURIComponent(name)}`, { running }, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Sync all servers — upserts an array of server definitions for a project. */
+export async function serverSyncAll(project, servers) {
+    const res = await api.post("/servers/sync-all", { servers }, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }

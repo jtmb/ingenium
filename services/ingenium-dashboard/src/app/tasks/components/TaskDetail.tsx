@@ -27,10 +27,14 @@ const PRIORITY_OPTIONS = [
   { id: "low", label: "Low" },
 ];
 
-/* ------------------------------------------------------------------ */
-/*  Time Pie (SVG)                                                    */
-/* ------------------------------------------------------------------ */
+// ── Time Pie (SVG) ──────────────────────────────────────────────────────────
 
+/**
+ * SVG donut chart showing spent vs remaining vs estimate.
+ * - Green: within estimate with remaining time
+ * - Amber: all time used but not over estimate
+ * - Red: over estimate
+ */
 function TimePieChart({ spent, remaining, estimate }: { spent: number; remaining: number; estimate: number }) {
   const total = spent + remaining;
   const pct = total > 0 ? spent / total : 0;
@@ -64,9 +68,7 @@ function TimePieChart({ spent, remaining, estimate }: { spent: number; remaining
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Relative time helper                                              */
-/* ------------------------------------------------------------------ */
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
@@ -82,10 +84,7 @@ function relativeTime(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-/* ------------------------------------------------------------------ */
-/*  Activity icon by action type                                      */
-/* ------------------------------------------------------------------ */
-
+/** Map activity action strings to emoji for the activity sidebar. */
 function activityIcon(action: string | undefined | null): string {
   if (!action) return "📋";
   if (action.includes("moved")) return "🔄";
@@ -96,6 +95,7 @@ function activityIcon(action: string | undefined | null): string {
   return "📋";
 }
 
+/** Build a human-readable string from a TaskActivity entry. */
 function activityDescription(a: TaskActivity): string {
   const actor = a.actor ?? "System";
   const action = a.action ?? "updated";
@@ -106,12 +106,14 @@ function activityDescription(a: TaskActivity): string {
   return `${actor} ${action}${field}`;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Custom field formula evaluation                                   */
-/* ------------------------------------------------------------------ */
+// ── Custom Field Formula Evaluation ────────────────────────────────────────
 
+/**
+ * Evaluate a simple formula DSL for computed custom fields.
+ * Currently supports: "field_name + N days" → returns an ISO date string.
+ * Returns "—" for unrecognized formulas or missing inputs.
+ */
 function evaluateFormula(formula: string, values: Record<string, any>): string {
-  // Simple DSL: "field_name + N days"
   const match = formula.match(/^(\S+)\s*\+\s*(\d+)\s*days?$/i);
   if (match) {
     const field = match[1]!;
@@ -128,12 +130,20 @@ function evaluateFormula(formula: string, values: Record<string, any>): string {
   return "—";
 }
 
-/* ------------------------------------------------------------------ */
-/*  TaskDetail                                                        */
-/* ------------------------------------------------------------------ */
+// ── TaskDetail ─────────────────────────────────────────────────────────────
 
+/**
+ * Full task detail overlay with edit fields, time tracking, comments,
+ * activity log, dependency linking, custom fields, and job dispatch.
+ *
+ * Custom fields are stored in the DB as JSON.stringify'd text (same pattern as
+ * `columns` and `custom_field_defs` in BoardConfig). Both are parsed here from
+ * their string-encoded transport form.
+ *
+ * @mentions in the description trigger a live agent search dropdown positioned
+ * at the cursor using computed pixel offsets from the textarea.
+ */
 export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTaskClick }: TaskDetailProps) {
-  // --- State: editable fields ---
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [columnId, setColumnId] = useState(task.column_id);
@@ -147,7 +157,6 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // --- Description editor state ---
   const [descMode, setDescMode] = useState<"edit" | "preview">("edit");
   const [mentionSearch, setMentionSearch] = useState("");
   const [showMentions, setShowMentions] = useState(false);
@@ -156,17 +165,14 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   const [mentionAnchor, setMentionAnchor] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // --- Comments state ---
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState("");
 
-  // --- Activity state ---
   const [activity, setActivity] = useState<TaskActivity[]>([]);
   const [showActivity, setShowActivity] = useState(true);
 
-  // --- Dependencies state ---
   const [links, setLinks] = useState<TaskLink[]>([]);
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [depSearch, setDepSearch] = useState("");
@@ -174,22 +180,20 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
   const [depSearchResults, setDepSearchResults] = useState<Task[]>([]);
   const [depType, setDepType] = useState<"blocks" | "blocked_by">("blocks");
 
-  // --- Custom fields state ---
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
+  // The DB stores custom_fields as JSON.stringify'd text and returns it unparsed.
+  // Must parse here, same as columns/custom_field_defs in BoardView.
   const [customFields, setCustomFields] = useState<Record<string, any>>(() => {
-    // Same JSON-text-as-string pattern as columns/custom_field_defs —
-    // the DB stores custom_fields as JSON.stringify'd text and returns it unparsed.
     if (typeof task.custom_fields === "string") {
       try { return JSON.parse(task.custom_fields); } catch { return {}; }
     }
     return task.custom_fields ?? {};
   });
 
-  // --- Dispatch as Job state ---
   const [dispatching, setDispatching] = useState(false);
   const [dispatchMsg, setDispatchMsg] = useState("");
 
-  // Sync state when task changes
+  // Sync local state when the task prop changes (e.g., navigating between tasks via task dependency links).
   useEffect(() => {
     setTitle(task.title);
     setDescription(task.description ?? "");
@@ -201,7 +205,6 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     setEstimateMin(task.estimate_minutes?.toString() ?? "");
     setSpentMin(task.spent_minutes?.toString() ?? "");
     setRemainingMin(task.remaining_minutes?.toString() ?? "");
-    // Parse custom_fields if it comes back as a JSON string (DB storage format)
     if (typeof task.custom_fields === "string") {
       try { setCustomFields(JSON.parse(task.custom_fields)); } catch { setCustomFields({}); }
     } else {
@@ -209,7 +212,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     }
   }, [task]);
 
-  // Load data
+  // Load all ancillary data when the task changes.
   useEffect(() => {
     api.tasks.comments(task.id, project).then((r) => setComments(r.data ?? [])).catch(() => {});
     api.tasks.activity(task.id, project).then((r) => setActivity(r.data ?? [])).catch(() => {});
@@ -219,7 +222,15 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     api.tasks.boardConfig(project).then((r) => setBoardConfig(r.data ?? null)).catch(() => {});
   }, [task.id, project]);
 
-  // --- Mention detection from textarea ---
+  /**
+   * Detect `@` mentions as the user types in the description textarea.
+   * When an `@` is followed by characters, compute the pixel position of the
+   * caret and show a dropdown of matching agents below the cursor.
+   *
+   * Uses lineHeight (20px) × charWidth (8px) estimates for positioning since
+   * we can't measure rendered text dimensions in a textarea easily. This is
+   * a best-effort approximation that works well for single-line mentions.
+   */
   const handleDescChange = useCallback((value: string) => {
     setDescription(value);
 
@@ -236,7 +247,6 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
       setShowMentions(true);
       setMentionIndex(0);
 
-      // Compute cursor position for dropdown
       const textBefore = value.substring(0, cursorPos - atMatch[0].length);
       const lines = textBefore.split("\n");
       const lineHeight = 20;
@@ -272,7 +282,6 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
       setDescription(newDesc);
       setShowMentions(false);
 
-      // Restore cursor after insertion
       const newPos = beforeAt.length + agentName.length + 2;
       requestAnimationFrame(() => {
         textarea.focus();
@@ -298,7 +307,10 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     }
   }, [showMentions, filteredAgents, mentionIndex, insertMention]);
 
-  // --- Save ---
+  /**
+   * Persist all editable fields to the API. The custom_fields object is sent
+   * as-is; the API serializes it to JSON text for DB storage.
+   */
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
@@ -317,7 +329,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
       }, project);
       onTaskUpdated(updated.data);
     } catch {
-      // Silently fail
+      // Silently fail — the user can retry.
     } finally {
       setSaving(false);
     }
@@ -334,7 +346,12 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     }
   }, [task.id, project, onClose]);
 
-  // --- Dispatch as Job ---
+  /**
+   * Create a background job from this task using the assigned_to agent.
+   * The job's prompt_template is the task description (or title as fallback).
+   * This enables the "Dispatch as Job" button that links task tracking to the
+   * job queue.
+   */
   const handleDispatchAsJob = useCallback(async () => {
     if (!task.assigned_to || !task.title) return;
     setDispatching(true);
@@ -355,7 +372,6 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     }
   }, [task.title, task.description, task.assigned_to, project]);
 
-  // --- Comments ---
   const handleAddComment = useCallback(async () => {
     if (!newComment.trim()) return;
     try {
@@ -379,8 +395,12 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     }
   }, [replyBody, replyTo, task.id, project]);
 
+  /**
+   * Optimistic reaction toggle: increment the reaction count immediately, then
+   * persist. On failure, rollback by decrementing. Uses Math.max(0, ...) to
+   * prevent negative counts on rollback.
+   */
   const handleReact = useCallback(async (commentId: string, reaction: string) => {
-    // Optimistic update
     setComments((prev) =>
       prev.map((c) => {
         if (c.id !== commentId) return c;
@@ -391,7 +411,6 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     try {
       await api.tasks.reactToComment(task.id, commentId, reaction, project);
     } catch {
-      // rollback
       setComments((prev) =>
         prev.map((c) => {
           if (c.id !== commentId) return c;
@@ -402,7 +421,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     }
   }, [task.id, project]);
 
-  // --- Dependencies ---
+  // Split links into "this blocks X" and "this is blocked by X" for the two dependency lists.
   const blocksLinks = useMemo(() => links.filter((l) => l.link_type === "blocks" && l.task_id === task.id), [links, task.id]);
   const blockedByLinks = useMemo(() => links.filter((l) => l.link_type === "blocked_by" || (l.link_type === "blocks" && l.linked_task_id === task.id)), [links, task.id]);
 
@@ -410,6 +429,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     return allTasks.find((t) => t.id === id);
   }, [allTasks]);
 
+  /** Get the "other end" of a link — the task that is *not* the current one. */
   const otherEndId = useCallback((link: TaskLink) => {
     return link.task_id === task.id ? link.linked_task_id : link.task_id;
   }, [task.id]);
@@ -449,12 +469,14 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     }
   }, [task.id, project]);
 
-  // --- Custom fields ---
+  /**
+   * Parse custom_field_defs from the board config.
+   * The DB stores this as JSON.stringify'd text (same pattern as `columns`).
+   * BoardView parses columns on its side; TaskDetail gets the raw string from
+   * its own fetch and must parse it here.
+   */
   const customFieldDefs = useMemo<CustomFieldDef[]>(() => {
     const raw = boardConfig?.custom_field_defs;
-    // DB stores custom_field_defs as JSON.stringify'd text (same as columns).
-    // BoardView already parses columns on its side, but TaskDetail gets the
-    // raw string from its own fetch and must parse it here.
     if (typeof raw === "string") {
       try { return JSON.parse(raw); } catch { return []; }
     }
@@ -465,7 +487,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
     setCustomFields((prev) => ({ ...prev, [fieldName]: value }));
   }, []);
 
-  // Compute comments for rendering (threaded)
+  // Top-level comments (thread roots) and their replies.
   const topLevelComments = useMemo(() => {
     return comments.filter((c) => !c.parent_comment_id);
   }, [comments]);

@@ -34,6 +34,13 @@ function safeParseJson(raw: string | undefined | null): object | null {
   }
 }
 
+/**
+ * ObservationDetailPage — Full-page detail view for a single observation.
+ *
+ * The `id` param is resolved from the dynamic route segment. It is parsed
+ * to an integer for the API call; non-numeric IDs render a 404-like error
+ * state. Context is parsed as JSON when possible for rich display.
+ */
 export default function ObservationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();

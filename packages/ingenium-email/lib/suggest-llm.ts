@@ -4,6 +4,11 @@
  * Uses voice samples from the user's Sent folder (few-shot examples) and a
  * configured LLM to generate 3 distinct reply drafts for a target email.
  * Falls back gracefully on any failure — returns an empty array, never throws.
+ *
+ * 🔴 All functions follow "return sentinel, never throw" pattern — the caller
+ *    (sync-engine) is a long-lived background loop and must not crash.
+ * 🔴 max_tokens is set to 8192 (never falls back to reasoning_content) per
+ *    AGENTS.md HARD RULE #10 — reasoning models may return empty content.
  */
 
 import { emailCache } from "ingenium-core";
@@ -13,13 +18,17 @@ import type { EmailAccount, OAuthToken } from "./types.js";
 // ── Exported interfaces ─────────────────────────────────────────────────────
 
 export interface SmartReply {
+  /** Tone label (e.g., "concise", "warm", "formal"). Max 50 chars. */
   tone: string;
+  /** Reply subject line. Max 200 chars. */
   subject: string;
+  /** Reply body text. Max 2000 chars. */
   body: string;
 }
 
 export interface LLMConfig {
   model: string;
+  /** OpenAI-compatible API endpoint. Supports custom endpoints (e.g., Ollama, vLLM, LiteLLM). */
   endpoint?: string;
   apiKey?: string;
 }
@@ -312,16 +321,25 @@ ${text}`;
 
 // ── JSON parse (same multi-strategy as synthesis-llm.ts) ────────────────────
 
+/**
+ * Multi-strategy JSON parser that handles common LLM output quirks:
+ *   1. Direct JSON parse
+ *   2. Strip markdown fences (```json ... ```) then parse
+ *   3. Extract JSON array from text (regex \[...\])
+ *
+ * Never throws — returns null on all parse failures.
+ */
 function tryParseJSON(text: string): any {
   try {
     let cleaned = text.trim();
-    // Strip markdown code blocks if present
+    // Strip markdown code blocks if present (LLMs love wrapping in ```json)
     if (cleaned.startsWith("```")) {
       cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
     }
     return JSON.parse(cleaned);
   } catch {
-    // Try to extract JSON array from markdown
+    // Try to extract JSON array from markdown — LLMs sometimes embed the
+    // array in flowing text rather than a clean code block.
     const match = text.match(/\[[\s\S]*\]/);
     if (match) {
       try { return JSON.parse(match[0]); } catch {}

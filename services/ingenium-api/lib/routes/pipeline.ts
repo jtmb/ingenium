@@ -2,9 +2,9 @@ import { Router } from "express";
 import { pipelineEvents } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
+/** Handles /api/v1/pipeline — event logging and timeline grouping used by the Pipeline dashboard page. */
 export const pipelineRouter = Router();
 
-// GET /events — list pipeline events with optional filters
 pipelineRouter.get("/events", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -28,7 +28,7 @@ pipelineRouter.get("/events", (req, res) => {
   res.json({ data: list, total: list.length });
 });
 
-// GET /timeline — grouped timeline with children nested in parents
+// Returns events grouped into a timeline view — child events nested under their parent. Used by the Pipeline page's git-style timeline.
 pipelineRouter.get("/timeline", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -46,7 +46,6 @@ pipelineRouter.get("/timeline", (req, res) => {
   res.json({ data: timeline, total: timeline.length });
 });
 
-// POST /events — log a new pipeline event
 pipelineRouter.post("/events", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;

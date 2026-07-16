@@ -1,6 +1,12 @@
 import { Router, Request, Response } from "express";
 import { synthesisLlm } from "ingenium-core";
 
+/**
+ * AI-assisted documentation routes for the Docs wiki.
+ * All routes use the configured Synthesis LLM (same model used for self-learning).
+ * Content is truncated to 4000 chars per prompt to keep token usage predictable
+ * given that most requested actions only need context, not the full document.
+ */
 export const router = Router();
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -19,6 +25,7 @@ interface AIRequestBody {
   action: AIAction;
   content: string;
   title?: string;
+  // Subset of content to operate on (for rewrite/grammar fixes on selection)
   selectedText?: string;
 }
 
@@ -94,6 +101,8 @@ Return ONLY the rewritten text. Do not include any preamble or explanation.`;
 }
 
 // ── POST /ai ───────────────────────────────────────────────────────────────────
+// Reuses the Synthesis LLM config (Settings → Synthesis LLM) so users don't need
+// a separate API key for documentation features.
 
 router.post("/ai", async (req: Request, res: Response) => {
   try {
@@ -136,6 +145,9 @@ router.post("/ai", async (req: Request, res: Response) => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
 
+    // temperature 0.5 balances creativity (tone rewrites) with consistency (outlines, summaries)
+    // max_tokens 8192: 🔴 must NOT fall back to reasoning_content — this ensures the model
+    // allocates enough output tokens for full document transformations
     const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,

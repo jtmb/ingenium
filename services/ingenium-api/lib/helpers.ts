@@ -13,10 +13,16 @@ export function resolveProjectId(name: string): string | null {
 /**
  * Express middleware helper that reads the `project` query parameter,
  * validates it exists, resolves it to a UUID, and returns 400/404 if invalid.
- * Call this at the top of every route handler that needs a project:
+ *
+ * HACK: Returns null instead of calling next(err) so route handlers can
+ * early-return with a clean pattern:
  *
  *   const projectId = requireProject(req, res);
  *   if (!projectId) return;
+ *
+ * The project is passed as a query parameter (not a header or URL segment)
+ * to keep routes flat and RESTful — every resource is scoped to a project
+ * without deeply nested paths like /projects/:id/skills/:skillId.
  */
 export function requireProject(req: Request, res: Response): string | null {
   const name = req.query.project as string | undefined;

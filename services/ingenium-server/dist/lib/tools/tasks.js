@@ -1,6 +1,7 @@
 /**
  * MCP tool handlers for Kaban-style task management.
- * Supports task CRUD, column movement, completion, and next-task retrieval.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
+ * Supports task CRUD, column movement, completion, subtasks, comments, links, notifications, and board config.
  */
 import { api } from "../client.js";
 /** Create a new task with optional description and assignee. */
@@ -101,5 +102,56 @@ export async function taskNotifications(project, recipient, unread) {
     if (unread !== undefined)
         params.unread = String(unread);
     const res = await api.get("/tasks/notifications", params);
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Get a single task by ID. */
+export async function taskGet(project, taskId) {
+    const res = await api.get(`/tasks/${taskId}`, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** List comments for a task. */
+export async function taskCommentsList(project, taskId) {
+    const res = await api.get(`/tasks/${taskId}/comments`, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Edit an existing comment on a task. */
+export async function taskCommentEdit(project, taskId, commentId, body, actor) {
+    const payload = { body };
+    if (actor)
+        payload.actor = actor;
+    const res = await api.patch(`/tasks/${taskId}/comments/${commentId}`, payload, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Add a reaction to a task comment. */
+export async function taskCommentReact(project, taskId, commentId, reaction, actor) {
+    const res = await api.post(`/tasks/${taskId}/comments/${commentId}/react`, { reaction, actor }, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** List task links (blocks, relates_to, duplicates). */
+export async function taskLinksList(project, taskId) {
+    const res = await api.get(`/tasks/${taskId}/links`, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Delete a task link by ID. */
+export async function taskLinkDelete(project, taskId, linkId, actor) {
+    const params = { project };
+    if (actor)
+        params.actor = actor;
+    await api.del(`/tasks/${taskId}/links/${linkId}`, params);
+    return { content: [{ type: "text", text: JSON.stringify({ deleted: linkId }) }] };
+}
+/** Get the full task tree (parent + subtasks + linked tasks). */
+export async function taskTree(project, taskId) {
+    const res = await api.get(`/tasks/${taskId}/tree`, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Mark a notification as read. */
+export async function taskNotificationRead(project, notificationId) {
+    const res = await api.post(`/tasks/notifications/${notificationId}/read`, {}, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Bulk update multiple tasks with the same fields. */
+export async function taskBulkUpdate(project, taskIds, fields) {
+    const res = await api.post("/tasks/bulk", { task_ids: taskIds, ...fields }, { project });
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }

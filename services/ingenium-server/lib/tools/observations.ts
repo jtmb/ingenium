@@ -1,5 +1,6 @@
 /**
  * MCP tool handlers for the observations pipeline.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports storing new observations, searching via FTS5, listing, stats, enrichment, and deletion.
  */
 import { api } from "../client.js";

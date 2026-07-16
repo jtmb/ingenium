@@ -1,7 +1,21 @@
-import { settings, projects, logger, extraction, synthesis, jobs, checkpointAfterWrite } from "ingenium-core";
+import { settings, projects, logger, extraction, synthesis, jobs, maintenanceLocks, checkpointAfterWrite } from "ingenium-core";
 import { executeJobRun } from "./job-runner.js";
 import { listAccounts, startEngine, getEngineStatus, getGlobalProjectId } from "ingenium-email";
 
+/**
+ * Default synthesis interval: 15 minutes (900,000ms).
+ *
+ * This is a deliberate trade-off between reactivity and cost:
+ * - Too short (< 5 min): LLM extraction fees accumulate even when no new messages exist,
+ *   and the trait confidence model needs multiple observations before meaningful changes.
+ * - Too long (> 60 min): the dashboard feels stale and corrections take too long to
+ *   propagate to personality traits.
+ *
+ * 15 minutes gives ~96 cycles/day — enough granularity for the dashboard timeline
+ * without saturating the LLM provider. Operators can override via the
+ * SYNTHESIS_INTERVAL_MS env var or the `synthesis_interval_ms` setting in the
+ * global-default project (which takes precedence once configured via Settings UI).
+ */
 const SYNTHESIS_DEFAULT_MS = parseInt(process.env.SYNTHESIS_INTERVAL_MS ?? "900000", 10);
 
 /** Read the synthesis interval from the global-default project's settings. Falls back to env var default. */
@@ -21,67 +35,99 @@ function getSynthesisInterval(): number {
   return SYNTHESIS_DEFAULT_MS;
 }
 
+/** TTL for per-project skill locks during scheduled synthesis cycles (2 min). */
+const SYNTHESIS_LOCK_TTL_MS = 120_000;
+/** Interval between lock renewals during synthesis (every 60s). */
+const LOCK_RENEW_INTERVAL_MS = 60_000;
+/** Interval between expired-lock cleanup sweeps (every 5 minutes). */
+const LOCK_CLEANUP_INTERVAL_MS = 300_000;
+/** Cross-project HTTP client timeout. */
+const CROSS_PROJECT_TIMEOUT_MS = 120_000;
+/** Resource name for skills lock. */
+const LOCK_RESOURCE = "skills";
+
 async function triggerSynthesisForAllProjects(port: number) {
   const allProjects = projects.listProjects();
   const activeProjects = allProjects.filter(p => !p.archived_at);
 
   for (const p of activeProjects) {
-    // 1. Extraction — LLM-based observation extraction from OpenCode messages.
-    //    Await completion so synthesis sees the new observations same cycle.
-    try {
-      const extractResult = await extraction.runExtraction(p.id, p.name);
-      logger.info("scheduler", `Extraction for "${p.name}": scanned=${extractResult.scanned}, created=${extractResult.created}`);
-    } catch (err: any) {
-      logger.warn("scheduler", `Extraction for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+    // 0. Acquire per-project skills lock before touching any skill mutations.
+    const ownerToken = maintenanceLocks.generateOwnerToken();
+    const acquired = maintenanceLocks.acquireLock("skills", p.id, ownerToken, SYNTHESIS_LOCK_TTL_MS);
+    if (!acquired) {
+      logger.info("scheduler", `Synthesis for "${p.name}" skipped — skills resource locked by another owner`);
+      continue;
     }
 
-    // 2. Synthesis — processes pending observations into traits + skills
+    // Start renewal heartbeat: renew every 60s until work completes
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
     try {
-      const result = await synthesis.runSynthesis(p.id);
-      logger.info(
-        "scheduler",
-        `Synthesis for "${p.name}": ${result.summary}`,
-      );
-    } catch (err: any) {
-      logger.warn("scheduler", `Synthesis for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-    }
+      heartbeat = setInterval(() => {
+        const renewed = maintenanceLocks.renewLock(LOCK_RESOURCE, p.id, ownerToken, SYNTHESIS_LOCK_TTL_MS);
+        if (!renewed) {
+          logger.warn("scheduler", `Lock renewal failed for "${p.name}" — lock may have expired or been stolen`);
+          if (heartbeat) clearInterval(heartbeat);
+          heartbeat = null;
+        }
+      }, LOCK_RENEW_INTERVAL_MS);
 
-    // 🔴 TEMPORARILY DISABLED — consolidation + sync corrupt skills
-    // TODO: re-enable after Phase 0 fixes are verified safe
-    /*
-    try {
-      const consolidationResult = await synthesis.consolidateSkills(p.id);
-      if (consolidationResult.merged > 0 || consolidationResult.deleted > 0) {
-        logger.info("scheduler", `Skill consolidation for "${p.name}": ${consolidationResult.summary}`);
+      // 1. Extraction — LLM-based observation extraction from OpenCode messages.
+      try {
+        const extractResult = await extraction.runExtraction(p.id, p.name);
+        logger.info("scheduler", `Extraction for "${p.name}": scanned=${extractResult.scanned}, created=${extractResult.created}`);
+      } catch (err: any) {
+        logger.warn("scheduler", `Extraction for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
       }
-    } catch (err: any) {
-      logger.warn("scheduler", `Skill consolidation for "${p.name}" failed: ${err.message}`, ...);
-    }
-    */
 
-    // Force WAL checkpoint after synthesis (no readers active)
-    checkpointAfterWrite();
+      // 2. Synthesis — processes pending observations into traits + skills
+      try {
+        const result = await synthesis.runSynthesis(p.id);
+        logger.info(
+          "scheduler",
+          `Synthesis for "${p.name}": ${result.summary}`,
+        );
+      } catch (err: any) {
+        logger.warn("scheduler", `Synthesis for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+      }
 
-    /*
-    try {
-      const syncRes = await fetch(...);
-      ...
-    } catch (err: any) {
-      logger.debug("scheduler", ...);
+      // Force WAL checkpoint after synthesis (no readers active)
+      checkpointAfterWrite();
+    } finally {
+      // Always clear heartbeat and release lock
+      if (heartbeat) clearInterval(heartbeat);
+      maintenanceLocks.releaseLock("skills", p.id, ownerToken);
     }
-    */
   }
 
-  // Cross-project synthesis
+  // Cross-project synthesis — the route OWNS the global lock internally.
+  // Scheduler just calls with client timeout; does NOT acquire a second global lock.
   try {
-    await fetch(`http://localhost:${port}/api/v1/synthesis/cross-project`, {
-      method: "POST",
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CROSS_PROJECT_TIMEOUT_MS);
+    try {
+      const res = await fetch(`http://localhost:${port}/api/v1/synthesis/cross-project`, {
+        method: "POST",
+        signal: controller.signal,
+      });
+      if (!res.ok && res.status !== 423) {
+        const body = await res.json().catch(() => ({})) as any;
+        logger.warn("scheduler", `Cross-project synthesis returned ${res.status}: ${body?.error?.message || "unknown error"}`);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const name = e instanceof Error ? e.name : "Unknown";
+      const stack = e instanceof Error ? e.stack : undefined;
+      if ((e as any)?.name === "AbortError") {
+        logger.warn("scheduler", "Cross-project synthesis client timed out after 120s — server-side work continues with route-held lock");
+      } else {
+        logger.debug("scheduler", `Cross-project synthesis client error: ${msg}`, { error: msg, name, stack: stack?.split("\n").slice(0, 5).join("\n") });
+      }
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    const name = e instanceof Error ? e.name : "Unknown";
-    const stack = e instanceof Error ? e.stack : undefined;
-    logger.debug("scheduler", `Cross-project synthesis failed: ${msg}`, { error: msg, name, stack: stack?.split("\n").slice(0, 5).join("\n") });
+    logger.debug("scheduler", `Cross-project synthesis outer error: ${msg}`);
   }
 }
 
@@ -89,7 +135,7 @@ async function triggerSynthesisForAllProjects(port: number) {
 // Mail sync scheduler — independent timer, reads "mail_sync_interval_ms"
 // ============================================================================
 
-const MAIL_SYNC_DEFAULT_MS = 300_000; // 5 minutes — enabled by default now that email is global
+const MAIL_SYNC_DEFAULT_MS = 300_000;
 
 function getMailSyncInterval(): number {
   try {
@@ -107,7 +153,6 @@ function getMailSyncInterval(): number {
   return MAIL_SYNC_DEFAULT_MS;
 }
 
-/** Verify the sync engine is alive — the engine handles all IMAP sync autonomously. */
 async function triggerMailSyncForAllProjects(): Promise<void> {
   try {
     const engineStatus = getEngineStatus();
@@ -120,7 +165,6 @@ async function triggerMailSyncForAllProjects(): Promise<void> {
       return;
     }
 
-    // Check heartbeat staleness (>2 minutes without a tick)
     const msSince = Date.now() - new Date(engineStatus.heartbeatAt).getTime();
     if (msSince > 120_000) {
       logger.warn("mail-sync", `Engine heartbeat stale (${Math.round(msSince / 1000)}s since last tick), restarting`);
@@ -166,9 +210,6 @@ function scheduleNext(port: number) {
 // Job cron scheduler — runs every 60 seconds on a separate cycle
 // ============================================================================
 
-// Minimal 5-field cron matcher.
-// Format: minute hour day-of-month month day-of-week
-// Supports: *, N, step (slash N), N-M (range), N,M (list)
 function matchesCron(cron: string, date: Date): boolean {
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return false;
@@ -185,27 +226,19 @@ function matchesCron(cron: string, date: Date): boolean {
 
 function matchField(pattern: string, value: number, _min: number, _max: number): boolean {
   if (pattern === "*") return true;
-
-  // Handle comma-separated lists: 1,2,3
   if (pattern.includes(",")) {
     return pattern.split(",").some(p => matchField(p.trim(), value, _min, _max));
   }
-
-  // Handle step: */5
   if (pattern.startsWith("*/")) {
     const step = parseInt(pattern.slice(2), 10);
     if (isNaN(step) || step <= 0) return false;
     return value % step === 0;
   }
-
-  // Handle range: 1-5
   if (pattern.includes("-")) {
     const [start, end] = pattern.split("-").map(Number);
     if (start === undefined || end === undefined || isNaN(start) || isNaN(end)) return false;
     return value >= start && value <= end;
   }
-
-  // Exact number
   const n = parseInt(pattern, 10);
   if (isNaN(n)) return false;
   return value === n;
@@ -221,27 +254,19 @@ function runJobScheduler(): void {
       const projectJobs = jobs.listJobs(p.id);
 
       for (const job of projectJobs) {
-        // Skip disabled jobs
         if (!job.enabled) continue;
-
-        // Skip jobs without a cron schedule
         if (!job.schedule_cron || job.schedule_cron.trim() === "") continue;
-
-        // Check if this job is due to run now (current minute matches)
         if (!matchesCron(job.schedule_cron, now)) continue;
 
-        // Start the run
         const result = jobs.startJobRun(p.id, job.id, "cron");
 
         if ("reason" in result) {
-          // Already running or disabled — log and skip
           logger.debug("job-scheduler", `Job "${job.name}" skipped: ${result.reason}`);
           continue;
         }
 
         logger.info("job-scheduler", `Triggered cron run ${result.id} for job "${job.name}"`);
 
-        // Fire-and-forget the execution
         executeJobRun(result.id, job, job.prompt_template).catch((err: Error) => {
           logger.error("job-scheduler", `Fire-and-forget executeJobRun failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
         });
@@ -251,12 +276,29 @@ function runJobScheduler(): void {
     logger.warn("job-scheduler", `Job scheduler tick failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
   }
 
-  // Schedule next tick
   scheduleJobTick();
 }
 
 function scheduleJobTick(): void {
   setTimeout(runJobScheduler, 60_000);
+}
+
+// ============================================================================
+// Lock cleanup scheduler
+// ============================================================================
+
+function scheduleLockCleanup(): void {
+  setTimeout(() => {
+    try {
+      const cleaned = maintenanceLocks.cleanupExpiredLocks();
+      if (cleaned > 0) {
+        logger.info("scheduler", `Cleaned up ${cleaned} expired maintenance lock(s)`);
+      }
+    } catch (err: any) {
+      logger.warn("scheduler", `Lock cleanup failed: ${err.message}`);
+    }
+    scheduleLockCleanup();
+  }, LOCK_CLEANUP_INTERVAL_MS);
 }
 
 // ============================================================================
@@ -269,9 +311,13 @@ export function startScheduler(port: number) {
     `Auto-synthesis initial default: ${SYNTHESIS_DEFAULT_MS / 1000}s (reads settings after first cycle)`,
   );
 
-  // Startup health check — diagnose config issues before the first cycle runs
   logSynthesisHealth();
 
+  // Start periodic expired-lock cleanup
+  logger.info("scheduler", `Lock cleanup scheduler started (${LOCK_CLEANUP_INTERVAL_MS / 1000}s cycle)`);
+  setTimeout(scheduleLockCleanup, 60_000);
+
+  // Staggered startup delays
   setTimeout(() => {
     triggerSynthesisForAllProjects(port).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
@@ -282,24 +328,18 @@ export function startScheduler(port: number) {
   }, 30000);
   setTimeout(() => scheduleNext(port), 30000);
 
-  // Start the job cron scheduler on a separate 60s cycle
   logger.info("scheduler", "Job cron scheduler started (60s cycle)");
-  setTimeout(scheduleJobTick, 10_000); // Start after a short initial delay
+  setTimeout(scheduleJobTick, 10_000);
 
-  // Start mail sync scheduler (5 min default, now that email is global)
   const mailInterval = getMailSyncInterval();
   if (mailInterval > 0) {
     logger.info("mail-sync", `Mail sync scheduler started (${mailInterval / 1000}s cycle)`);
-    setTimeout(scheduleMailSync, 15_000); // Start after a short initial delay
+    setTimeout(scheduleMailSync, 15_000);
   } else {
     logger.info("mail-sync", "Mail sync disabled (mail_sync_interval_ms = 0)");
   }
 }
 
-/**
- * Check that the synthesis LLM config is in a healthy state.
- * Logs clear diagnostics to help operators fix config issues.
- */
 function logSynthesisHealth(): void {
   try {
     const globalProject = projects.getGlobalProject();
@@ -316,7 +356,6 @@ function logSynthesisHealth(): void {
       return;
     }
 
-    // No global project — scan all active projects for synthesis config
     const allProjects = projects.listProjects();
     const activeProjects = allProjects.filter(p => !p.archived_at);
     const projectsWithSynthesis: string[] = [];

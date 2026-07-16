@@ -8,6 +8,7 @@ type TrashPanelProps = {
   spaceId: number;
 };
 
+/** Relative timestamp for trash item deletion time. */
 function timeAgo(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
@@ -22,6 +23,10 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
+/**
+ * TrashPanel — soft-deleted pages list with restore-by-item and "Empty trash" (bulk permanent delete).
+ * Uses a confirm-first pattern for both single-item restore and bulk empty operations.
+ */
 export default function TrashPanel({ spaceId }: TrashPanelProps) {
   const [items, setItems] = useState<DocTrashItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,8 +54,8 @@ export default function TrashPanel({ spaceId }: TrashPanelProps) {
   const handleRestore = async (pageId: number) => {
     setRestoringId(pageId);
     try {
-      await api.docs.trash.restore(pageId);
-      setItems((prev) => prev.filter((i) => i.page_id !== pageId));
+      await api.docs.pages.restore(pageId);
+      setItems((prev) => prev.filter((i) => i.id !== pageId));
     } catch (e: any) {
       setError(e?.message ?? "Failed to restore");
     } finally {
@@ -121,23 +126,23 @@ export default function TrashPanel({ spaceId }: TrashPanelProps) {
           <div className="divide-y divide-[var(--color-border-muted)]">
             {items.map((item) => (
               <div
-                key={item.page_id}
+                key={item.id}
                 className="flex items-center justify-between p-3 hover:bg-[var(--color-surface-hover)] transition-colors"
               >
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
                     {item.title}
                   </p>
-                  <p className="text-xs text-[var(--color-text-muted)]">
-                    Deleted {timeAgo(item.deleted_at)}
-                  </p>
-                </div>
-                <button
-                  className="ml-3 px-2.5 py-1 text-xs text-[var(--color-text-link)] hover:bg-[var(--color-surface-selected)] rounded shrink-0 disabled:opacity-50"
-                  disabled={restoringId === item.page_id}
-                  onClick={() => handleRestore(item.page_id)}
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      Deleted {timeAgo(item.updatedAt)}
+                    </p>
+                  </div>
+                  <button
+                    className="ml-3 px-2.5 py-1 text-xs text-[var(--color-text-link)] hover:bg-[var(--color-surface-selected)] rounded shrink-0 disabled:opacity-50"
+                    disabled={restoringId === item.id}
+                    onClick={() => handleRestore(item.id)}
                 >
-                  {restoringId === item.page_id ? "Restoring…" : "Restore"}
+                    {restoringId === item.id ? "Restoring…" : "Restore"}
                 </button>
               </div>
             ))}

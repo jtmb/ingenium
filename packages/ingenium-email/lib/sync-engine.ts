@@ -26,25 +26,39 @@ import { getVoiceSamples, generateSmartReplies } from "./suggest-llm.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
+/** Per-folder state within the sync engine. Mirrors both header sync and body backfill progress. */
 export interface FolderEngineState {
   folder: string;
   state: "idle" | "syncing-headers" | "backfilling-bodies" | "complete" | "error";
   headersSynced: number;
   headersTotal: number;
   bodiesCached: number;
-  bodiesWindow: number;        // the window cap from settings
-  lastSyncedAt: string | null; // ISO timestamp
+  /** The window cap from settings — max bodies to cache per folder. */
+  bodiesWindow: number;
+  /** ISO timestamp of last sync activity (not just completion — updates during backfill too). */
+  lastSyncedAt: string | null;
   lastError: string | null;
 }
 
+/** Aggregate engine status returned by getEngineStatus() for dashboard/monitoring. */
 export interface EngineStatus {
   running: boolean;
-  heartbeatAt: string | null;  // ISO, updated EVERY loop tick even on errors
+  /** ISO timestamp, updated EVERY loop tick even on errors (detect stuck workers). */
+  heartbeatAt: string | null;
   accounts: { accountId: string; email: string; folders: FolderEngineState[] }[];
 }
 
 // ── Internal task queue ─────────────────────────────────────────────────────
 
+/**
+ * Task priority levels:
+ *   P0: Gmail delta poll (cheap historyId check, 30s interval)
+ *   P1: boostFolder'd folders (user is viewing)
+ *   P2: Full resync (all folders) or INBOX if stale
+ *   P3: All folders round-robin headers (skipFresh gate)
+ *   P4: Body backfill (newest→oldest, capped)
+ *   P5: Deeper history backfill (beyond body window)
+ */
 type TaskPriority = 0 | 1 | 2 | 3 | 4 | 5;
 
 interface EngineTask {
@@ -60,13 +74,13 @@ interface EngineTask {
 
 const DEFAULT_OFFLINE_WINDOW = 500;   // max headers per folder
 const DEFAULT_BODY_WINDOW = 200;      // max bodies per folder
-const DEFAULT_SYNC_INTERVAL_MS = 300_000; // 5 min
+const DEFAULT_SYNC_INTERVAL_MS = 300_000; // 5 min between full folder refreshes
 const GMAIL_POLL_INTERVAL_MS = 30_000;    // 30s delta poll (cheap — empty response when nothing changed)
-const TASK_WATCHDOG_MS = 5 * 60_000;      // 5 min — abort stuck tasks
+const TASK_WATCHDOG_MS = 5 * 60_000;      // 5 min — abort stuck tasks (e.g., server hang)
 const BODY_BATCH_SIZE = 5;                // batch body fetches in groups of 5 (rate limit safe)
-const BODY_BATCH_YIELD_MS = 200;          // yield between body fetch groups
-const LOOP_YIELD_MS = 1000;               // yield between full account loop ticks
-const TASK_PROCESS_YIELD_MS = 100;        // yield between individual tasks in a loop
+const BODY_BATCH_YIELD_MS = 200;          // yield between body fetch groups to avoid overwhelming the API
+const LOOP_YIELD_MS = 1000;               // yield between full account loop ticks (gives other workers CPU)
+const TASK_PROCESS_YIELD_MS = 100;        // yield between individual tasks in a loop (cooperative scheduling)
 
 // ── Engine singleton state ──────────────────────────────────────────────────
 

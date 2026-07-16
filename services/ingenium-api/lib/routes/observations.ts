@@ -2,9 +2,9 @@ import { Router } from "express";
 import { observations, synthesisLlm, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
+/** Handles /api/v1/observations — CRUD for self-learning observations with FTS5 search and LLM enrichment. */
 export const observationsRouter = Router();
 
-// GET / — list observations with optional filters
 observationsRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -20,7 +20,7 @@ observationsRouter.get("/", (req, res) => {
   res.json({ data: list, total: list.length });
 });
 
-// GET /search — FTS5 search
+// Uses SQLite FTS5 for full-text search across observation content
 observationsRouter.get("/search", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -33,7 +33,6 @@ observationsRouter.get("/search", (req, res) => {
   res.json({ data: results, total: results.length });
 });
 
-// POST / — store a new observation
 observationsRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -46,7 +45,7 @@ observationsRouter.post("/", (req, res) => {
   res.status(201).json({ data: entry });
 });
 
-// GET /stats — counts for dashboard (MUST be before /:id to avoid route capture)
+// NOTE: /stats MUST be registered before /:id to avoid Express route capture
 observationsRouter.get("/stats", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -55,7 +54,6 @@ observationsRouter.get("/stats", (req, res) => {
   res.json({ data: { total: all.length, pending } });
 });
 
-// GET /:id — fetch a single observation
 observationsRouter.get("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -72,7 +70,7 @@ observationsRouter.get("/:id", (req, res) => {
   res.json({ data: entry });
 });
 
-// PATCH /:id — update observation (e.g., mark processed)
+// Supports status transitions (e.g., mark as processed) and importance adjustments
 observationsRouter.patch("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -93,7 +91,7 @@ observationsRouter.patch("/:id", (req, res) => {
   res.json({ data: result });
 });
 
-// POST /enrich — enrich raw auto-observer observations via LLM
+// Enriches raw auto-observer observations via LLM — filters out noise (length < 3), falls back to no-op if no LLM configured
 observationsRouter.post("/enrich", async (req, res, next) => {
   try {
     const projectId = requireProject(req, res);
@@ -123,8 +121,8 @@ observationsRouter.post("/enrich", async (req, res, next) => {
     const config = synthesisLlm.getFullLLMSynthesisConfig();
     
     if (!config || !config.endpoint) {
-      // No LLM configured — return originals with skip:false
-      res.json({
+    // No LLM endpoint configured — pass through originals unmodified with skip:false
+    res.json({
         data: obs.map((o: any) => ({ ...o, enriched_content: undefined, skip: false })),
       });
       return;
@@ -138,7 +136,7 @@ observationsRouter.post("/enrich", async (req, res, next) => {
   }
 });
 
-// DELETE /:id — hard delete a single observation
+// Hard-deletes an observation — no soft-delete, no undo
 observationsRouter.delete("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -155,7 +153,7 @@ observationsRouter.delete("/:id", (req, res) => {
   res.status(204).send();
 });
 
-// DELETE / — bulk hard delete observations by source
+// Bulk-deletes all observations matching a source — used for cleanup after re-sync
 observationsRouter.delete("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;

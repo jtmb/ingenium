@@ -143,4 +143,46 @@ describe("observations", () => {
     const count = deleteObservationsBySource(projectId, "nonexistent-source");
     expect(count).toBe(0);
   });
+
+  it("accepts auto-observer source on fresh DB (migration 015 regression)", () => {
+    // Verifies the fresh-DB path includes migration 015 so the observations
+    // source CHECK constraint permits "auto-observer".
+    // If migration 015 is missing from the fresh-DB array, this throws
+    // SQLITE_CONSTRAINT: CHECK constraint failed: observations
+    const obs = storeObservation(projectId, "pattern", "Auto-observer detected user preference", 5, "auto-observer");
+    expect(obs).not.toBeNull();
+    expect(obs.id).toBeGreaterThan(0);
+    expect(obs.source).toBe("auto-observer");
+    expect(obs.observation_type).toBe("pattern");
+    expect(obs.content).toBe("Auto-observer detected user preference");
+
+    // Verify the observation is retrievable and persisted
+    const found = getObservation(obs.id);
+    expect(found).not.toBeNull();
+    expect(found!.source).toBe("auto-observer");
+  });
+
+  it("migration state is valid: observations table allows all expected source values", () => {
+    // Verify all allowed source values work (including auto-observer from migration 015)
+    const sources: Array<string> = [
+      "agent", "email", "chat", "document", "calendar",
+      "synthesis", "import", "manual", "auto-observer",
+    ];
+    for (const source of sources) {
+      const obs = storeObservation(projectId, "insight", `Test source: ${source}`, 5, source);
+      expect(obs.source).toBe(source);
+    }
+  });
+
+  it("can query and search observations with auto-observer source", () => {
+    const obs = storeObservation(projectId, "behavior", "User frequently opens mail dashboard", 6, "auto-observer");
+    // Can retrieve by ID
+    const found = getObservation(obs.id);
+    expect(found!.source).toBe("auto-observer");
+
+    // Can search via FTS
+    const results = searchObservations(projectId, "mail dashboard");
+    const hasMatch = results.some(r => r.id === obs.id);
+    expect(hasMatch).toBe(true);
+  });
 });

@@ -2,9 +2,9 @@ import { Router } from "express";
 import { personality } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
+/** Handles /api/v1/personality — personality traits CRUD and aggregated profile for self-learning. */
 export const personalityRouter = Router();
 
-// GET / — list traits
 personalityRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -13,7 +13,6 @@ personalityRouter.get("/", (req, res) => {
   res.json({ data: list, total: list.length });
 });
 
-// GET /profile — aggregated profile
 personalityRouter.get("/profile", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -21,7 +20,7 @@ personalityRouter.get("/profile", (req, res) => {
   res.json({ data: profile });
 });
 
-// POST / — upsert a trait
+// Upserts a trait — creates or updates based on trait_type + trait_value uniqueness constraint
 personalityRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -34,7 +33,7 @@ personalityRouter.post("/", (req, res) => {
   res.status(201).json({ data: trait });
 });
 
-// POST /:id/dismiss
+// Dismiss marks a trait inactive (active=false) without removing it — preserves history for re-evaluation
 personalityRouter.post("/:id/dismiss", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -47,7 +46,7 @@ personalityRouter.post("/:id/dismiss", (req, res) => {
   res.json({ data: { id } });
 });
 
-// POST /:id/disable
+// Disable hard-removes the trait from the active set and deletes its file from disk
 personalityRouter.post("/:id/disable", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -60,7 +59,7 @@ personalityRouter.post("/:id/disable", (req, res) => {
   res.status(204).send();
 });
 
-// DELETE /:id — hard delete a single personality trait
+// Hard-deletes a single personality trait from DB — distinct from disable (which only removes from active set)
 personalityRouter.delete("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -77,7 +76,7 @@ personalityRouter.delete("/:id", (req, res) => {
   res.status(204).send();
 });
 
-// DELETE / — hard delete ALL personality traits for the project
+// Bulk-deletes ALL traits for the project — used during project reset or re-sync
 personalityRouter.delete("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;

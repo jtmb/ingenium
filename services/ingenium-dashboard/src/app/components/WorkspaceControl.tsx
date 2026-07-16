@@ -33,13 +33,14 @@ export default function WorkspaceControl({
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check fullscreen API availability
+    // Check fullscreen API availability at mount (iOS Safari doesn't support it)
     if (typeof document === "undefined") return;
     setFullscreenAvailable(
       !!document.documentElement.requestFullscreen &&
         !!document.exitFullscreen,
     );
 
+    // Track fullscreen state changes from keyboard (F11) or other triggers
     const handler = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
@@ -56,6 +57,7 @@ export default function WorkspaceControl({
   }, [isFullscreen]);
 
   // ── Pop-out ─────────────────────────────────────────────────────────
+  /** Build the standalone URL with current page + state parameters encoded in the query string. */
   const buildPopoutUrl = useCallback(() => {
     const params = new URLSearchParams();
     params.set("page", pageId);
@@ -76,6 +78,7 @@ export default function WorkspaceControl({
       "width=1280,height=900,noopener",
     );
     if (!popup) {
+      // window.open returns null when blocked by a pop-up blocker
       setToast("Pop-up blocked. Please allow pop-ups for this site.");
       setTimeout(() => setToast(null), 4000);
     }
@@ -86,7 +89,8 @@ export default function WorkspaceControl({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    // Check both window.opener and the URL param
+    // Two detection mechanisms: window.opener (popup opened by script)
+    // and ?standalone=1 URL param (direct navigation to /standalone)
     if (window.opener) {
       setIsStandalone(true);
       return;
@@ -99,6 +103,12 @@ export default function WorkspaceControl({
     }
   }, []);
 
+  /**
+   * Close the standalone window.
+   *
+   * `window.close()` only works on windows opened by `window.open()`.
+   * If it fails (e.g. direct navigation), we navigate to "/" as fallback.
+   */
   const handleReturn = useCallback(() => {
     try {
       window.close();

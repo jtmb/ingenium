@@ -1,5 +1,6 @@
 /**
  * MCP tool handlers for the personality profile pipeline.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports fetching aggregated profiles, listing traits, upserting, dismissing, disabling, and deleting traits.
  */
 import { api } from "../client.js";

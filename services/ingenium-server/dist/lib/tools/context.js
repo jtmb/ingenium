@@ -1,6 +1,7 @@
 /**
  * MCP tool handlers for persistent context storage (Thread-like).
- * Supports saving context entries and full-text search.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
+ * Supports saving context entries with tags/priority and full-text search.
  */
 import { api } from "../client.js";
 /** Save a context entry with optional tags and priority. */

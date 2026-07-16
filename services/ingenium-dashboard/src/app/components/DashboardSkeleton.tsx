@@ -1,6 +1,7 @@
 /**
  * Loading skeleton for the homepage dashboard.
- * Renders four placeholder cards in a 2×2 grid matching the operational layout.
+ * Renders four placeholder cards in a 2×2 grid matching the operational layout
+ * (Learning, Tasks, Jobs, Mail).
  */
 export default function DashboardSkeleton() {
   return (

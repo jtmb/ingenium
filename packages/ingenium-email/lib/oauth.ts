@@ -8,7 +8,16 @@ import { getGlobalProjectId } from "./accounts.js";
 
 // ── OAuth credential resolution ──────────────────────────────────────────
 
-/** Resolve OAuth client ID/secret: check settings table first, fall back to env vars. */
+/**
+ * Resolve OAuth client ID/secret: check settings table first, fall back to env vars.
+ *
+ * The dual resolution (settings → env var) allows per-instance configuration
+ * via the Dashboard UI (settings) while still supporting container-level env
+ * overrides for production deployments.
+ *
+ * When projectId is omitted, only env vars are checked (used during initial
+ * setup before a global project exists).
+ */
 function getOAuthCreds(
   provider: Extract<EmailProvider, "gmail" | "outlook">,
   projectId?: string,
@@ -34,6 +43,11 @@ function getOAuthCreds(
 
 // ── Encryption helpers ────────────────────────────────────────────────────
 
+/**
+ * Retrieve the AES-256 encryption key from environment.
+ * Key must be exactly 32 bytes (64 hex chars).
+ * SECURITY: Key is never stored in DB — only referenced from the env var at runtime.
+ */
 function getEncryptionKey(): Buffer {
   const hex = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
   if (!hex) {
@@ -46,7 +60,14 @@ function getEncryptionKey(): Buffer {
   return key;
 }
 
-/** Encrypt string data using AES-256-GCM. Returns base64(iv + authTag + ciphertext). */
+/**
+ * Encrypt string data using AES-256-GCM.
+ *
+ * AES-256-GCM chosen over AES-256-CBC for built-in authentication tag (detects
+ * tampering) and no padding oracle vulnerability.  IV is random 16 bytes per call.
+ *
+ * Output format (base64): [16-byte IV] + [16-byte GCM auth tag] + [ciphertext]
+ */
 export function encryptCredentials(data: string): string {
   const key = getEncryptionKey();
   const iv = crypto.randomBytes(16);
@@ -89,7 +110,13 @@ function oauthKey(accountId: string): string {
   return `${OAUTH_SETTINGS_PREFIX}${accountId}`;
 }
 
-/** Store encrypted OAuth tokens in settings. Always uses the global project. */
+/**
+ * Store encrypted OAuth tokens in settings. Always uses the global project.
+ *
+ * SECURITY: Tokens are encrypted at rest with AES-256-GCM when
+ * INGENIUM_EMAIL_ENCRYPTION_KEY is set.  Without it, tokens are stored in
+ * plaintext (warns at startup).  Never logs token values.
+ */
 export function storeTokens(
   _projectId: string,
   accountId: string,
@@ -111,7 +138,15 @@ export function storeTokens(
   settings.setSetting(projectId, oauthKey(accountId), JSON.stringify(payload));
 }
 
-/** Retrieve and optionally refresh stored OAuth tokens. Always uses the global project. */
+/**
+ * Retrieve and optionally refresh stored OAuth tokens. Always uses the global project.
+ *
+ * Auto-refresh is triggered when the token is within 60 seconds of expiry.
+ * This buffer prevents TOCTOU races where a token passes validation but expires
+ * before reaching the Gmail API.
+ *
+ * Returns null if no stored tokens exist (account needs re-authentication).
+ */
 export async function getValidTokens(
   _projectId: string,
   accountId: string,
@@ -136,7 +171,7 @@ export async function getValidTokens(
     tokens = stored;
   }
 
-  // Check if expired (with 60-second buffer)
+  // Check if expired (with 60-second buffer to avoid TOCTOU expiry races)
   const now = Date.now();
   if (tokens.expiryDate && tokens.expiryDate < now + 60_000) {
     // Auto-refresh
@@ -154,6 +189,13 @@ function getRedirectUri(): string {
   return process.env.OAUTH_REDIRECT_URI ?? "http://localhost:3000/mail/oauth/callback";
 }
 
+/**
+ * Singleton cache for the default Gmail OAuth2 client.
+ *
+ * Cached only for the env-based path (no projectId) to avoid re-initializing
+ * the google-auth-library on every call.  Project-specific credentials are
+ * short-lived and not cached — they're used during multi-tenant setup flows.
+ */
 let _googleOAuthClient: Awaited<ReturnType<typeof cachedGoogleClient>>["client"] | undefined;
 
 async function cachedGoogleClient(projectId?: string): Promise<{ client: import("google-auth-library").OAuth2Client }> {
@@ -177,6 +219,13 @@ async function cachedGoogleClient(projectId?: string): Promise<{ client: import(
 
 // ── Microsoft OAuth2 ──────────────────────────────────────────────────────
 
+/**
+ * Singleton cache for the default MSAL ConfidentialClientApplication.
+ *
+ * Same caching strategy as Google: env-based default is cached; project-specific
+ * instances are ephemeral.  Authority uses "common" endpoint for multi-tenant
+ * support (any Microsoft account or Azure AD tenant).
+ */
 let _msalApp: import("@azure/msal-node").ConfidentialClientApplication | undefined;
 
 async function getMsalApp(projectId?: string): Promise<import("@azure/msal-node").ConfidentialClientApplication> {
@@ -206,7 +255,15 @@ async function getMsalApp(projectId?: string): Promise<import("@azure/msal-node"
 
 // ── Public API ────────────────────────────────────────────────────────────
 
-/** Generate an OAuth authorization URL for the given provider. Always uses the global project. */
+/**
+ * Generate an OAuth authorization URL for the given provider. Always uses the global project.
+ *
+ * Generates a CSRF state token, stores it in the DB, and builds the provider-specific
+ * authorization URL.  Google uses `prompt: "consent"` and `access_type: "offline"` to
+ * guarantee a refresh token on every auth (not just the first).
+ *
+ * For Yahoo/custom, returns an empty URL — these providers use app-password auth instead.
+ */
 export async function getOAuthUrl(
   provider: EmailProvider,
   _projectId?: string,
@@ -222,6 +279,7 @@ export async function getOAuthUrl(
     const url = gClient.generateAuthUrl({
       access_type: "offline",
       prompt: "consent",
+      // Full Gmail scope for IMAP/SMTP API access; openid+email+profile for user info
       scope: "https://mail.google.com/ openid email profile",
       state,
       redirect_uri: getRedirectUri(),
@@ -243,11 +301,20 @@ export async function getOAuthUrl(
     return { url, state };
   }
 
-  // yahoo / custom — placeholder URL
+  // yahoo / custom — placeholder URL (these providers use app-password auth)
   return { url: "", state };
 }
 
-/** Exchange an authorization code for OAuth tokens. Always uses the global project. */
+/**
+ * Exchange an authorization code for OAuth tokens. Always uses the global project.
+ *
+ * SECURITY: Validates the CSRF state token before exchanging the code, then
+ * immediately deletes the stored state to prevent replay attacks.
+ *
+ * For Google, extracts the user's email from the id_token JWT (unverified
+ * header+payload decode — standard practice for getting the email claim).
+ * For Outlook, MSAL returns the email from the account object.
+ */
 export async function exchangeCode(
   provider: EmailProvider,
   code: string,
@@ -260,7 +327,7 @@ export async function exchangeCode(
   if (!storedState || storedState !== state) {
     throw new Error(`OAuth state mismatch for provider ${provider}. Possible CSRF attack.`);
   }
-  // Delete stored state after validation
+  // Delete stored state after validation (one-time use, prevents replay)
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
     .run(pid, `oauth_state_${provider}`);
@@ -270,7 +337,7 @@ export async function exchangeCode(
   if (provider === "gmail") {
     const { client: gClient } = await cachedGoogleClient(pid);
     const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
-    // Extract email from id_token JWT
+    // Extract email from id_token JWT (unverified decode — standard for getting email claim)
     let email: string | undefined;
     if (tokens.id_token) {
       try {
@@ -284,6 +351,7 @@ export async function exchangeCode(
     return {
       accessToken: tokens.access_token ?? "",
       refreshToken: tokens.refresh_token ?? "",
+      // Fallback expiry: 1 hour from now (typical Google expiry)
       expiryDate: tokens.expiry_date ?? Date.now() + 3600_000,
       scope: tokens.scope ?? "https://mail.google.com/",
       email,
@@ -303,7 +371,7 @@ export async function exchangeCode(
     });
     return {
       accessToken: result?.accessToken ?? "",
-      refreshToken: "", // MSAL handles refresh internally
+      refreshToken: "", // MSAL handles refresh internally — no refresh token to store
       expiryDate: result?.expiresOn?.getTime() ?? Date.now() + 3600_000,
       scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
       email: result?.account?.username ?? undefined,

@@ -1,3 +1,6 @@
 {
-  "tags": ["database", "sql", "postgresql", "conventions"]
+  "name": "database-conventions",
+  "description": "Database conventions — SQL/PostgreSQL schema design, query optimization, SQLite WAL safety, migration management, FTS5 integrity.",
+  "tags": ["database", "sql", "postgresql", "sqlite", "migrations", "wal"],
+  "alwaysApply": true
 }

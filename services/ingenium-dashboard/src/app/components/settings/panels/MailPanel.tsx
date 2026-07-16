@@ -4,6 +4,14 @@ import { api } from "../../../../lib/api";
 import { useProject } from "../../../../lib/ProjectContext";
 import SettingRow from "../SettingRow";
 
+/**
+ * Mail settings panel — OAuth credentials (gated by project), mail sync intervals,
+ * body/header caching windows, and smart-reply configuration.
+ *
+ * Smart-reply settings are stored in the global-default project because the API
+ * routes that read them always resolve to the global project regardless of the
+ * caller's project. OAuth and sync settings are per-project.
+ */
 export default function MailPanel() {
   const project = useProject();
 
@@ -30,7 +38,6 @@ export default function MailPanel() {
   const [showPw, setShowPw] = useState<Record<string, boolean>>({});
   const togglePw = (name: string) => setShowPw((prev) => ({ ...prev, [name]: !prev[name] }));
 
-  // Toast
   const [toast, setToast] = useState("");
   useEffect(() => {
     if (!toast) return;
@@ -38,7 +45,10 @@ export default function MailPanel() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Load OAuth settings
+  // Load OAuth settings — runs once on mount (project is stable for the panel lifecycle).
+  // eslint-disable-next-line react-hooks/exhaustive-deps is intentionally suppressed:
+  // adding `project` to the deps would re-fetch on every project switch, which is
+  // unnecessary since the panel is remounted when the overlay opens.
   useEffect(() => {
     Promise.all([
       api.settings.get("oauth_gmail_client_id", project),
@@ -56,8 +66,9 @@ export default function MailPanel() {
       .finally(() => setLoadingOauth(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load mail sync interval — smart-reply settings read from global project
-  // (sync engine + API route always resolve to global-default)
+  // Load mail sync and smart-reply settings.
+  // Smart-reply settings intentionally read from "global-default" because the
+  // API route that resolves them always falls back to the global project.
   useEffect(() => {
     Promise.all([
       api.settings.get("mail_sync_interval_ms", project),
@@ -109,7 +120,10 @@ export default function MailPanel() {
     }
   };
 
-  /** Reusable password input with show/hide toggle */
+  /**
+   * Reusable password input with show/hide toggle.
+   * Defined inline because it captures `showPw` and `togglePw` from the panel scope.
+   */
   function PwInput({
     value,
     onChange,
@@ -143,7 +157,6 @@ export default function MailPanel() {
 
   return (
     <div>
-      {/* Section: OAuth Credentials */}
       <div className="px-6 pt-5 pb-2">
         <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">OAuth Credentials</h3>
         <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
@@ -205,7 +218,6 @@ export default function MailPanel() {
         </>
       )}
 
-      {/* Section: Mail Sync */}
       <div className="px-6 pt-5 pb-2">
         <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Mail Sync</h3>
         <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
@@ -290,7 +302,7 @@ export default function MailPanel() {
                 "mail_smart_replies_enabled",
                 checked ? "true" : "false",
                 checked ? "Smart replies enabled ✓" : "Smart replies disabled ✓",
-                true, // global-default (API route reads from global project)
+                true,
               );
               }}
               className="w-4 h-4 cursor-pointer"
@@ -307,7 +319,7 @@ export default function MailPanel() {
                 "mail_smart_replies_mode",
                 v,
                 v === "auto" ? "Trigger mode set to automatic ✓" : "Trigger mode set to manual ✓",
-                true, // global-default (API route reads from global project)
+                true,
               );
               }}
               className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
@@ -337,7 +349,6 @@ export default function MailPanel() {
         </>
       )}
 
-      {/* Toast */}
       {toast && (
         <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg z-50 text-sm">
           {toast}

@@ -6,10 +6,11 @@ import type { DocComment } from "@/lib/docs-types";
 
 type CommentsPanelProps = {
   pageId: number;
+  /** Full page content — used to contextualize selection-anchored comments */
   pageContent: string;
 };
 
-/** Like-count formats for relative time. */
+/** Relative time formatting for comment timestamps (not exported — internal helper). */
 function timeAgo(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
@@ -35,6 +36,12 @@ function authorColor(name: string): string {
   return AUTHOR_COLORS[Math.abs(hash) % AUTHOR_COLORS.length]!;
 }
 
+/**
+ * CommentsPanel — sidebar thread view with selection-anchored comments.
+ * Listens for `docs-selection` CustomEvent dispatched by the editor when
+ * text is selected, allowing users to attach comments to a specific snippet.
+ * Supports threaded replies and resolve-tracking.
+ */
 export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProps) {
   const [comments, setComments] = useState<DocComment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,7 +70,11 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
     fetchComments();
   }, [fetchComments]);
 
-  // Listen for text selection events from the parent editor
+  /**
+   * Listen for `docs-selection` CustomEvent dispatched by DocsEditor when
+   * the user highlights text. This populates the `selectionText` badge in the
+   * comment input, indicating the new comment will be anchored to that range.
+   * WARNING: Using window event bus — fragile if multiple editors exist on the same page. */
   useEffect(() => {
     const handler = (e: CustomEvent<{ text: string; offset: number }>) => {
       setSelectionText(e.detail.text);
@@ -80,7 +91,6 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
       const res = await api.docs.comments.create(
         pageId,
         text,
-        "user",
         undefined,
         selectionText || undefined,
         selectionOffset ?? undefined,
@@ -100,7 +110,7 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
     const text = replyText.trim();
     if (!text) return;
     try {
-      const res = await api.docs.comments.create(pageId, text, "user", parentId);
+      const res = await api.docs.comments.create(pageId, text, parentId);
       if (res?.data) {
         setComments((prev) => [res.data, ...prev]);
       }
@@ -113,7 +123,7 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
 
   const handleResolve = async (commentId: number) => {
     try {
-      const res = await api.docs.comments.resolve(commentId);
+      const res = await api.docs.comments.resolve(pageId, commentId);
       if (res?.data) {
         setComments((prev) =>
           prev.map((c) => (c.id === commentId ? { ...c, resolved: true } : c)),
@@ -124,16 +134,15 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
     }
   };
 
-  const rootComments = comments.filter((c) => !c.parent_id);
+  const rootComments = comments.filter((c) => !c.parentCommentId);
   const visibleRoots = showResolved
     ? rootComments
     : rootComments.filter((c) => !c.resolved);
   const resolvedCount = rootComments.filter((c) => c.resolved).length;
 
   const childComments = (parentId: number) =>
-    comments.filter((c) => c.parent_id === parentId);
+    comments.filter((c) => c.parentCommentId === parentId);
 
-  // Loading skeleton
   if (loading) {
     return (
       <div className="p-4 space-y-3">
@@ -228,19 +237,19 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
                   {/* Comment header */}
                   <div className="flex items-start gap-2.5">
                     <div
-                      className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 ${authorColor(comment.author)}`}
+                      className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0 ${authorColor("User")}`}
                     >
-                      {(comment.author || "U")[0]?.toUpperCase()}
+                      {"U"}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                          {comment.author || "Anonymous"}
+                          {"User"}
                         </span>
                         <span className="text-xs text-[var(--color-text-muted)]">
-                          {timeAgo(comment.created_at)}
+                          {timeAgo(comment.createdAt)}
                         </span>
-                        {comment.selection_text && (
+                        {comment.selectionText && (
                           <span className="text-xs text-[var(--color-text-link)]" title="Linked to selection">
                             <svg className="w-3.5 h-3.5 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
@@ -312,17 +321,17 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
                           {children.map((child) => (
                             <div key={child.id} className="flex items-start gap-2">
                               <div
-                                className={`w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0 ${authorColor(child.author)}`}
+                                className={`w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold shrink-0 ${authorColor("User")}`}
                               >
-                                {(child.author || "U")[0]?.toUpperCase()}
+                                U
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-xs font-medium text-[var(--color-text-primary)]">
-                                    {child.author || "Anonymous"}
+                                    User
                                   </span>
                                   <span className="text-[10px] text-[var(--color-text-muted)]">
-                                    {timeAgo(child.created_at)}
+                                    {timeAgo(child.createdAt)}
                                   </span>
                                 </div>
                                 <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">
@@ -342,7 +351,8 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
         )}
       </div>
 
-      {/* Resolved toggle */}
+      {/* Resolved toggle — only appears when at least one thread is resolved.
+          Hides Show button when already showing resolved (toggles back to hide). */}
       {resolvedCount > 0 && (
         <div className="px-3 py-2 border-t border-[var(--color-border)]">
           <button

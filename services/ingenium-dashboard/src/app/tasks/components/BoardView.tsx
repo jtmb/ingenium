@@ -22,9 +22,7 @@ import { api, Task, BoardColumn, BoardConfig } from "../../../lib/api";
 import { badgeTones } from "../../../lib/badgeTones";
 import TaskDetail from "./TaskDetail";
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 const DEFAULT_COLUMNS: BoardColumn[] = [
   { id: "todo", name: "To Do", wip_limit: undefined, order: 0 },
@@ -67,6 +65,10 @@ function priorityWeight(t: Task): number {
   return PRIORITY_WEIGHT[t.priority ?? ""] ?? 0;
 }
 
+/**
+ * Sort tasks: highest priority first, then earliest created.
+ * Stable ordering helps with visual consistency across re-renders.
+ */
 function sortTasks(tasks: Task[]): Task[] {
   return [...tasks].sort((a, b) => {
     const pw = priorityWeight(b) - priorityWeight(a);
@@ -75,6 +77,10 @@ function sortTasks(tasks: Task[]): Task[] {
   });
 }
 
+/**
+ * Compare a date string against midnight today. A task is "overdue" if its
+ * due date is before the start of the current day (i.e., yesterday or earlier).
+ */
 function isOverdue(dateStr?: string): boolean {
   if (!dateStr) return false;
   const d = new Date(dateStr);
@@ -94,17 +100,23 @@ function initials(name?: string): string {
     .join("");
 }
 
+/** Days between two ISO date strings, floored to 0. Uses 86_400_000 for UTC-safe day calculations. */
 function daysBetween(start: string, end: string): number {
   const s = new Date(start);
   const e = new Date(end);
   return Math.max(0, Math.ceil((e.getTime() - s.getTime()) / 86_400_000));
 }
 
+/** Day-of-year number, used for consistent hashing offsets. */
 function dayInYear(d: Date): number {
   const start = new Date(d.getFullYear(), 0, 0);
   return Math.floor((d.getTime() - start.getTime()) / 86_400_000);
 }
 
+/**
+ * Deterministic HSL color from a seed string (e.g., assignee name).
+ * Uses a simple hash to produce a consistent hue per person.
+ */
 function hexColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
@@ -114,10 +126,12 @@ function hexColor(seed: string): string {
   return `hsl(${h}, 55%, 60%)`;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Time Remaining Mini SVG Pie                                       */
-/* ------------------------------------------------------------------ */
+// ── Time Remaining Mini SVG Pie ─────────────────────────────────────────────
 
+/**
+ * Small SVG donut chart showing spent-vs-estimated time.
+ * Color transitions green → amber → red as the task approaches/exceeds its estimate.
+ */
 function TimePie({ estimated, spent }: { estimated: number; spent: number }) {
   const pct = estimated > 0 ? Math.min(spent / estimated, 1) : 0;
   const r = 18;
@@ -139,10 +153,17 @@ function TimePie({ estimated, spent }: { estimated: number; spent: number }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Sortable Card                                                     */
-/* ------------------------------------------------------------------ */
+// ── Sortable Card ───────────────────────────────────────────────────────────
 
+/**
+ * A single task card that can be dragged between columns via @dnd-kit/sortable.
+ * Two visual modes:
+ * - compact: thin card for dense boards (no priority/assignee details)
+ * - rich (default): full card with priority badge, time pie, assignee avatar, due date
+ *
+ * Quick-action buttons (edit, delete) appear on hover. Bulk-mode checkboxes
+ * replace drag handles when bulk edit is active.
+ */
 function SortableCard({
   task,
   compact,
@@ -193,7 +214,6 @@ function SortableCard({
             className="absolute top-1 left-1 rounded" />
         )}
         <div className={`font-medium truncate ${bulkMode ? "pl-4" : "pr-10"}`}>{task.title}</div>
-        {/* Quick actions (hover) */}
         <div className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
           <button
             onPointerDown={(e) => e.stopPropagation()}
@@ -257,7 +277,6 @@ function SortableCard({
         )}
         {task.estimated_hours != null && <TimePie estimated={task.estimated_hours} spent={task.spent_hours ?? 0} />}
       </div>
-      {/* Quick actions (hover) */}
       <div className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
         <button
           onPointerDown={(e) => e.stopPropagation()}
@@ -282,10 +301,12 @@ function SortableCard({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Column Droppable                                                  */
-/* ------------------------------------------------------------------ */
+// ── Column Droppable ────────────────────────────────────────────────────────
 
+/**
+ * A single Kanban column: droppable zone, sorted card list, inline add form,
+ * and WIP limit indicator. Visual feedback when a card is dragged over it.
+ */
 function ColumnDroppable({
   column,
   tasks,
@@ -337,7 +358,6 @@ function ColumnDroppable({
       ref={setNodeRef}
       className={`bg-[var(--color-surface)] rounded min-h-[160px] flex flex-col transition-colors border border-[var(--color-border)] ${isOver ? "bg-[var(--color-surface-selected)] ring-2 ring-blue-300" : ""}`}
     >
-      {/* Column header */}
       <div
         className={`px-3 py-2 border-b border-[var(--color-border)] font-medium text-sm uppercase flex items-center justify-between ${
           threshold ? `${badgeTones("red")}` : "text-[var(--color-text-secondary)]"
@@ -354,7 +374,6 @@ function ColumnDroppable({
         </span>
       </div>
 
-      {/* Cards */}
       <div className="p-2 space-y-1.5 flex-1">
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           {tasks.map((t) => (
@@ -368,7 +387,6 @@ function ColumnDroppable({
         )}
       </div>
 
-      {/* Inline add form */}
       <div className="px-2 pb-2">
         {showAddInput ? (
           <div className="flex gap-1">
@@ -404,10 +422,12 @@ function ColumnDroppable({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Drag Overlay Card (static clone while dragging)                    */
-/* ------------------------------------------------------------------ */
+// ── Drag Overlay Card ───────────────────────────────────────────────────────
 
+/**
+ * Static clone of the card rendered while dragging. Shows only title + priority
+ * to keep the drag preview lightweight and non-interactive.
+ */
 function DragCard({ task }: { task: Task }) {
   return (
     <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-3 text-sm shadow-lg w-56">
@@ -421,9 +441,7 @@ function DragCard({ task }: { task: Task }) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Swimlane grouping helpers                                          */
-/* ------------------------------------------------------------------ */
+// ── Swimlane Helpers ────────────────────────────────────────────────────────
 
 type SwimlaneMode = "none" | "assignee" | "epic" | "priority";
 
@@ -434,6 +452,10 @@ const SWIMLANE_LABELS: Record<SwimlaneMode, string> = {
   priority: "By Priority",
 };
 
+/**
+ * Group tasks into swimlanes. Each swimlane renders its own set of columns
+ * (nested kanban). Unassigned / no-epic / no-priority keys sort to the end.
+ */
 function groupTasks(tasks: Task[], swimlane: SwimlaneMode): Record<string, Task[]> {
   if (swimlane === "none") return { "": tasks };
   const groups: Record<string, Task[]> = {};
@@ -458,9 +480,7 @@ function groupTasks(tasks: Task[], swimlane: SwimlaneMode): Record<string, Task[
   return groups;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Board View                                                        */
-/* ------------------------------------------------------------------ */
+// ── Board View ──────────────────────────────────────────────────────────────
 
 type BoardViewProps = {
   project: string;
@@ -468,9 +488,20 @@ type BoardViewProps = {
   onTasksChange: (tasks: Task[]) => void;
 };
 
+/**
+ * Kanban board with drag-and-drop columns, swimlane grouping, bulk edit,
+ * inline card creation, and a density toggle.
+ *
+ * Uses @dnd-kit for accessible drag-and-drop. An 8px PointerSensor activation
+ * distance prevents click events from being swallowed by drag listeners.
+ *
+ * Optimistic updates on drag: the UI updates immediately, then persists via the
+ * API. On failure, the column state rolls back to the previous snapshot.
+ *
+ * Columns are fetched from the board config API; falls back to default
+ * todo/in_progress/review/done if no config exists.
+ */
 export default function BoardView({ project, tasks, onTasksChange }: BoardViewProps) {
-  // dnd-kit sensors with an 8px activation distance so clicks fire onClick
-  // instead of being swallowed by the drag listeners.
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
@@ -487,14 +518,14 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [error, setError] = useState("");
 
-  // Bulk edit state
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkColumn, setBulkColumn] = useState("");
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [bulkPriority, setBulkPriority] = useState("");
 
-  // Fetch board config from API
+  // Fetch board columns from API — the DB stores them as JSON.stringify'd text,
+  // so we may need to parse them before sorting.
   useEffect(() => {
     api.tasks
       .boardConfig(project)
@@ -512,12 +543,10 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
           }
         }
       })
-      .catch(() => {
-        // Stay with defaults if config not found
-      });
+      .catch(() => {});
   }, [project]);
 
-  // Persist density preference
+  // Persist density preference to localStorage so it survives page reloads.
   const toggleDensity = useCallback(() => {
     setCompact((prev) => {
       const next = !prev;
@@ -526,7 +555,6 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     });
   }, []);
 
-  // Group by column_id
   const tasksByColumn = useMemo(() => {
     const map: Record<string, Task[]> = {};
     for (const col of columns) {
@@ -535,7 +563,6 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     return map;
   }, [tasks, columns]);
 
-  // Group by swimlane
   const swimlaneGroups = useMemo(() => {
     if (swimlane === "none") return { "": tasks };
     return groupTasks(tasks, swimlane);
@@ -549,7 +576,6 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     });
   }, [swimlaneGroups]);
 
-  // Find task by ID
   const findTask = useCallback(
     (id: string): Task | undefined => tasks.find((t) => t.id === id),
     [tasks]
@@ -557,7 +583,6 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
 
   const activeTask = activeId ? findTask(activeId) : null;
 
-  // Drag handlers
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string);
   };
@@ -574,7 +599,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
       const task = findTask(taskId);
       if (!task || !sourceCol) return;
 
-      // Determine target column
+      // Resolve the target column: the drop target may be a column or a card within a column.
       let targetCol: string | null = null;
       const overData = over.data.current;
       if (overData?.type === "column") {
@@ -585,25 +610,23 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
 
       if (!targetCol || targetCol === sourceCol) return;
 
-      // Optimistic update
+      // Optimistic update — the column swaps immediately, then persists.
       const updated = tasks.map((t) =>
         t.id === taskId ? { ...t, column_id: targetCol! } : t
       );
       onTasksChange(updated);
 
-      // Persist
       try {
         setError("");
         await api.tasks.move(taskId, targetCol, project);
       } catch {
         setError("Failed to move task. Please try again.");
-        onTasksChange(tasks); // rollback
+        onTasksChange(tasks); // rollback on failure
       }
     },
     [tasks, project, onTasksChange, findTask]
   );
 
-  // Task updated from detail overlay
   const handleTaskUpdated = useCallback(
     (updated: Task) => {
       onTasksChange(tasks.map((t) => (t.id === updated.id ? updated : t)));
@@ -611,12 +634,10 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     [tasks, onTasksChange]
   );
 
-  // Open a different task in the detail overlay (for dependency navigation)
   const handleOpenTask = useCallback((t: Task) => {
     setSelectedTask(t);
   }, []);
 
-  // Bulk edit toggle card selection
   const handleToggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -626,7 +647,6 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     });
   }, []);
 
-  // Bulk apply
   const handleBulkApply = useCallback(async () => {
     if (selectedIds.size === 0) return;
     const taskIds = Array.from(selectedIds);
@@ -638,7 +658,6 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
         assigned_to: bulkAssignee || undefined,
         priority: bulkPriority || undefined,
       }, project);
-      // Refresh from server
       const res = await api.tasks.list(project);
       onTasksChange(res.data ?? []);
       setSelectedIds(new Set());
@@ -647,10 +666,11 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     }
   }, [selectedIds, bulkColumn, bulkAssignee, bulkPriority, project, onTasksChange]);
 
-  // Inline add task to a specific column
   const handleAddTask = useCallback(async (columnId: string, title: string) => {
     setError("");
     const res = await api.tasks.create(title, project);
+    // Tasks created via inline "Add card" may target a column other than "todo";
+    // the API creates in "todo" by default, so move if necessary.
     if (columnId !== "todo") {
       await api.tasks.move(res.data.id, columnId, project);
     }
@@ -658,7 +678,6 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     onTasksChange(updated.data ?? []);
   }, [project, onTasksChange]);
 
-  // Delete a task
   const handleDeleteTask = useCallback(async (taskId: string) => {
     try {
       setError("");
@@ -669,7 +688,6 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
     }
   }, [tasks, project, onTasksChange]);
 
-  // Build column display order
   const columnWipMap = useMemo(() => {
     const map: Record<string, number | undefined> = {};
     for (const col of columns) map[col.id] = col.wip_limit;

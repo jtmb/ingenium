@@ -50,6 +50,7 @@ export default function ActivityTimeline({ items, loading }: ActivityTimelinePro
     );
   }
 
+  // Show first 10 by default; "Show all" reveals the full list
   const displayItems = showAll ? items : items.slice(0, 10);
 
   return (
@@ -139,10 +140,17 @@ const typeIconMap: Record<string, string> = {
   skill_consolidated: "\uD83E\uDDE0",
 };
 
+/** Look up the emoji icon for a given event type, falling back to a neutral blue circle. */
 function typeIcon(type: string): string {
   return typeIconMap[type] ?? "\uD83D\uDD35";
 }
 
+/**
+ * Timeline dot color derived from the event type via substring matching.
+ *
+ * Order matters — "failed" must be checked before "started" / "created"
+ * since long names like "extraction_failed" contain "started" / "created".
+ */
 function dotColor(type: string): string {
   if (type.includes("failed") || type.includes("error")) return "bg-red-500";
   if (type.includes("completed")) return "bg-green-500";

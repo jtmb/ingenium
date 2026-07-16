@@ -3,6 +3,9 @@
 /**
  * EmptyState — centered placeholder with an optional action button.
  * Used when there's no data to display (no accounts, no emails, etc.).
+ *
+ * @param message — The text to display in the empty state center.
+ * @param action — Optional action button (e.g., "Add Account", "Compose").
  */
 export default function EmptyState({
   message,

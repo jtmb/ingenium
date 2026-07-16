@@ -19,13 +19,25 @@ const PRIORITY_OPTIONS = [
   { id: "low", label: "Low" },
 ];
 
+/**
+ * Task creation modal with full form (title, status, assignee, priority,
+ * due date, issue type, estimate, description).
+ *
+ * Creation is a two-step process:
+ * 1. `api.tasks.create()` always creates with column_id="todo"
+ * 2. If a different status was selected, `api.tasks.move()` is called
+ *
+ * This avoids duplicating the creation logic server-side while still allowing
+ * the user to place the task in any column from the UI.
+ *
+ * The form is reset every time the modal opens via a `useEffect` keyed on `isOpen`.
+ */
 export default function TaskCreateModal({
   isOpen,
   project,
   onClose,
   onCreated,
 }: TaskCreateModalProps) {
-  // Form state
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState("todo");
@@ -39,7 +51,6 @@ export default function TaskCreateModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Fetch board config for column options
   useEffect(() => {
     if (!isOpen) return;
     api.tasks
@@ -52,9 +63,7 @@ export default function TaskCreateModal({
                 ? JSON.parse(r.data.columns)
                 : r.data.columns;
             if (Array.isArray(parsed) && parsed.length) {
-              setColumns(
-                parsed.sort((a: any, b: any) => a.order - b.order)
-              );
+              setColumns(parsed.sort((a: any, b: any) => a.order - b.order));
             }
           } catch {
             // Use defaults
@@ -64,7 +73,7 @@ export default function TaskCreateModal({
       .catch(() => {});
   }, [isOpen, project]);
 
-  // Reset form when modal opens
+  // Reset all form fields when the modal opens.
   useEffect(() => {
     if (isOpen) {
       setTitle("");
@@ -89,7 +98,6 @@ export default function TaskCreateModal({
     setError("");
 
     try {
-      // Step 1: Create the task
       const created = await api.tasks.create(title.trim(), project, {
         description: description || undefined,
         assigned_to: assignee || undefined,
@@ -101,9 +109,9 @@ export default function TaskCreateModal({
 
       let finalTask = created.data;
 
-      // DP#32 — Trace both branches:
-      //   status === "todo" → skip the move call (task already in the right column)
-      //   status !== "todo" → move to the chosen column before returning
+      // DP#32 — The API creates tasks in "todo" by default. If the user selected
+      // a different status, move the task to that column before returning it to
+      // the caller. This avoids an extra server-side endpoint for "create in column X".
       if (status !== "todo") {
         await api.tasks.move(created.data.id, status, project);
         finalTask = { ...created.data, column_id: status };

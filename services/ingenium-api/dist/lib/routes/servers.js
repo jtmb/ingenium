@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { servers, projects } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+/** Handles /api/v1/mcp-servers — child MCP server definitions (add, remove, update running state, bulk sync). */
 export const serversRouter = Router();
 serversRouter.get("/", (req, res) => {
     const projectId = requireProject(req, res);
@@ -28,6 +29,7 @@ serversRouter.patch("/:name", (req, res) => {
     servers.updateServer(projectId, req.params.name, { running });
     res.json({ data: { name: req.params.name, running } });
 });
+// Bulk-upserts the full server list — used by opencode.json config sync to reconcile disk state with DB
 serversRouter.post("/sync-all", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)

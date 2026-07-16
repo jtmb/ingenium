@@ -42,6 +42,15 @@ function safeParseJson(raw: string | undefined | null): object | null {
   }
 }
 
+/**
+ * ObservationsPage — Browse and inspect self-learning observations.
+ *
+ * Observations are the raw input to the synthesis pipeline. They have a
+ * lifecycle: pending → processed/skipped/failed. The two filter selectors
+ * (status + type) are applied server-side via the API, not client-side,
+ * because the observation set can grow large. FTS5-backed search is
+ * available via the API but this list page uses structured filters only.
+ */
 export default function ObservationsPage() {
   const router = useRouter();
   const project = useProject();

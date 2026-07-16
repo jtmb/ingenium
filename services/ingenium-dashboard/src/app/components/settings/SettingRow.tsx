@@ -4,6 +4,11 @@ interface SettingRowProps {
   children: React.ReactNode;
 }
 
+/**
+ * Reusable labelled row layout for settings panels — label + description on the
+ * left, arbitrary control (input, select, button) on the right. Consistent
+ * spacing and border-top separator across all panels.
+ */
 export default function SettingRow({ label, description, children }: SettingRowProps) {
   return (
     <div className="flex items-center justify-between gap-6 px-6 py-4 border-t border-[var(--color-border)]">

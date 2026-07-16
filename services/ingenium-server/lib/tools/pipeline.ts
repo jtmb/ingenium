@@ -1,5 +1,6 @@
 /**
  * MCP tool handlers for pipeline event observability.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports listing events, fetching grouped timelines, and logging new events.
  */
 import { api } from "../client.js";

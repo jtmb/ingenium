@@ -4,7 +4,16 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import hljs from "highlight.js/lib/common";
 import DOMPurify from "dompurify";
 
-/** Allowed HTML elements and attributes for rendered markdown. */
+/**
+ * DOMPurify configuration for rendered markdown.
+ *
+ * - `ALLOW_DATA_ATTR: false` — strips `data-*` attributes to prevent XSS via
+ *   dataset-based event handlers or custom element exploits
+ * - Uses `satisfies` for compile-time type checking of the DOMPurify config shape
+ *
+ * The tag/attribute allowlist is deliberately restrictive: only safe inline
+ * elements and structural tags are permitted. No `style`, `on*`, or `form` tags.
+ */
 const PURIFY_CONFIG = {
   ALLOWED_TAGS: [
     "h1", "h2", "h3", "h4", "h5", "h6",
@@ -32,8 +41,25 @@ type MarkdownViewerProps = {
   language?: string;
 };
 
+/**
+ * Render a restricted subset of Markdown to HTML.
+ *
+ * This is NOT a full CommonMark parser — it handles the subset needed for
+ * skills and observations: headings, bold/italic, code blocks, inline code,
+ * unordered lists, links, and horizontal rules. Built-in markdown libraries
+ * (marked, remark) were avoided to keep the bundle size small and to avoid
+ * the overhead of a full parser pipeline for this constrained use case.
+ *
+ * ⚠️ Order of regex operations matters:
+ *   1. HTML-escape first (prevent XSS from raw HTML in input)
+ *   2. Code blocks (fenced ```) — must be processed before inline code
+ *   3. Inline code — must be processed before bold/italic (to avoid matching `*` inside backticks)
+ *   4. Headings — processed before bold/italic (##bold is not a heading)
+ *   5. Bold/italic
+ *   6. Lists, HR, links, line breaks
+ */
 function renderSimpleMarkdown(text: string): string {
-  // Escape HTML to prevent XSS
+  // Escape HTML first to neutralise any raw tags — this is the primary XSS defence
   let html = text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -79,6 +105,18 @@ function renderSimpleMarkdown(text: string): string {
   return html;
 }
 
+/**
+ * Markdown content viewer with Preview/Source toggle and syntax highlighting.
+ *
+ * Preview mode renders a restricted subset of Markdown to HTML via
+ * `renderSimpleMarkdown`, sanitises it through DOMPurify, and applies
+ * highlight.js for code block syntax highlighting. Source mode shows
+ * the raw content in a monospace pre/code block with single-element
+ * highlighting.
+ *
+ * When `isMarkdown` is false, the toggle bar shows Preview as disabled
+ * and defaults to Source mode (useful for plain text or code files).
+ */
 export default function MarkdownViewer({ content, isMarkdown = true, language }: MarkdownViewerProps) {
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -87,10 +125,11 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
   const renderedHtml = useMemo(() => {
     if (!isMarkdown) return "";
     const rawHtml = renderSimpleMarkdown(content);
-    // Sanitize HTML to prevent XSS — strips javascript: URLs, event handlers, etc.
+    // Sanitize HTML via DOMPurify — strips javascript: URLs, event handlers, etc.
     const clean = DOMPurify.sanitize(rawHtml, PURIFY_CONFIG);
-    // Harden links: rel="noopener noreferrer" on all links, convert
-    // any leftover javascript: URLs to # (belt-and-suspenders after DOMPurify)
+    // Belt-and-suspenders: DOMPurify removes most javascript: URLs, but we
+    // post-process all <a> tags to add rel="noopener noreferrer" and convert
+    // any remaining javascript: hrefs to "#" (defence in depth).
     return clean.replace(
       /<a\s+[^>]*href="([^"]*)"([^>]*)>/gi,
       (_m, href, rest) => {
@@ -100,7 +139,7 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
     );
   }, [content, isMarkdown]);
 
-  // Apply syntax highlighting to code blocks in Preview mode
+  // Syntax highlight code blocks in Preview mode after content is rendered
   useEffect(() => {
     if (containerRef.current && isMarkdown && viewMode === "preview") {
       containerRef.current.querySelectorAll("pre code").forEach((block) => {
@@ -109,7 +148,7 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
     }
   }, [renderedHtml, isMarkdown, viewMode]);
 
-  // Apply syntax highlighting to entire Source view
+  // Syntax highlight the entire Source view when switching to Source mode
   useEffect(() => {
     if (sourceRef.current && viewMode === "source") {
       try { hljs.highlightElement(sourceRef.current); } catch {}

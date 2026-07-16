@@ -1,5 +1,6 @@
 /**
  * MCP tool handlers for command management.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports listing, creating, updating, and deleting commands on a per-project basis.
  */
 import { api } from "../client.js";

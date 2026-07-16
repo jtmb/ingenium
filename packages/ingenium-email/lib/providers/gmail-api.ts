@@ -9,6 +9,14 @@
  *
  * 🔴 Lesson 14: Any unhandled HTTP errors include the response body in the
  * error message so failures are diagnosable from logs alone.
+ *
+ * 🔴 Rate limits: Gmail API allows 250 quota units per second per user.
+ *   - messages.get = 5 units
+ *   - messages.list = 1 unit
+ *   - history.list = 1 unit
+ *   - attachments.get = 5 units
+ *   - messages.send = 100 units
+ *   - messages.modify = 5 units
  */
 
 const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1";
@@ -23,6 +31,14 @@ interface GmailRequestOptions {
   parseJson?: boolean;
 }
 
+/**
+ * Core fetch wrapper for all Gmail API calls.
+ *
+ * Uses `res.text()` + `JSON.parse` instead of `res.json()` because Bun/Node
+ * ReadableStream handling can fail on empty or malformed responses in ways that
+ * text-then-parse avoids. Also enables including partial response body in error
+ * messages for debuggability.
+ */
 async function gmailRequest<T>(
   token: string,
   path: string,
@@ -66,10 +82,10 @@ async function gmailRequest<T>(
     );
   }
 
-  // 204 No Content — no body to parse
+  // 204 No Content — no body to parse (e.g., modifyMessage success)
   if (res.status === 204) return undefined as T;
 
-  // Read as text, parse manually (avoids ReadableStream issues)
+  // Read as text, parse manually (avoids ReadableStream issues on empty responses)
   const text = await res.text();
   if (!text.trim()) return undefined as T;
   return JSON.parse(text) as T;

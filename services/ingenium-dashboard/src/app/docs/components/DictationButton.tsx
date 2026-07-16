@@ -2,10 +2,10 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
 interface DictationButtonProps {
+  /** Called with interim (isFinal=false) and final (isFinal=true) speech results. */
   onText: (text: string, isFinal: boolean) => void;
+  /** BCP 47 language tag, e.g. "en-US", "fr-FR". Passed directly to SpeechRecognition. */
   lang?: string;
 }
 
@@ -19,8 +19,11 @@ interface SpeechRecognitionErrorEvent extends Event {
   message: string;
 }
 
-// ── Browser SpeechRecognition API declaration ──────────────────────────────────
-
+/**
+ * Types for the non-standard Web Speech API (SpeechRecognition), available
+ * in Chromium-based browsers as `webkitSpeechRecognition` or unprefixed.
+ * Not part of any TS lib — declared here manually.
+ */
 interface BrowserSpeechRecognition extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
@@ -44,8 +47,7 @@ declare global {
   }
 }
 
-// ── Error messages by code ─────────────────────────────────────────────────────
-
+/** Maps native error codes to user-facing messages — avoids exposing raw error strings. */
 const ERROR_MESSAGES: Record<string, string> = {
   "not-allowed": "Microphone access denied. Please allow microphone access in your browser settings.",
   "no-speech": "No speech detected. Please try again.",
@@ -57,8 +59,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   "language-not-supported": "Speech recognition is not supported for this language.",
 };
 
-// ── Component ──────────────────────────────────────────────────────────────────
-
+/**
+ * DictationButton — browser speech-to-text toggle button.
+ * Uses the Web Speech API (Chromium-only). Hidden entirely when unsupported.
+ * Feeds interim and final text back through `onText` for realtime insertion.
+ */
 const DictationButton: React.FC<DictationButtonProps> = ({ onText, lang = "en-US" }) => {
   const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);

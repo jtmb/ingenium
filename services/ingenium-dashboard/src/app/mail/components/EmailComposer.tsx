@@ -21,7 +21,12 @@ function plainTextToHtml(text: string): string {
   return paragraphs.map((p) => `<p>${p.replace(/\n/g, "<br>") || "<br>"}</p>`).join("");
 }
 
-/** Strip HTML tags, decode entities, trim */
+/**
+ * Strip HTML tags, decode common entities, trim whitespace.
+ * Used to extract plain text from the editor's HTML output before sending
+ * the `text/plain` part of the email and before sending to the AI review endpoint.
+ * WARNING: This is a best-effort heuristic — does not handle all HTML entities.
+ */
 function stripHtml(html: string): string {
   return html
     .replace(/<[^>]*>/g, "")
@@ -86,7 +91,11 @@ export default function EmailComposer({
   // RichTextEditor ref for imperative API access
   const editorRef = useRef<RichTextEditorHandle>(null);
 
-  // Smart replies mode — fetched from settings (defaults to "auto")
+  /**
+   * Smart replies mode — fetched from mail_smart_replies_mode setting.
+   * "auto" (default): suggestions fetch automatically when email changes.
+   * "manual": user clicks "Generate Suggestions" to trigger the fetch.
+   * NOTE: This setting is project-scoped, cached on mount, not re-fetched per email. */
   const [smartRepliesMode, setSmartRepliesMode] = useState<"auto" | "manual">("auto");
 
   useEffect(() => {
@@ -146,13 +155,19 @@ export default function EmailComposer({
     }
   };
 
+  /** Applies the AI-improved text by re-wrapping as HTML (plainTextToHtml escapes first).
+   *  SECURITY: Never set raw AI output as innerHTML — always escape through plainTextToHtml
+   *  which calls escapeHtml() to prevent XSS from generated content. */
   const applyReview = (improved: string) => {
-    // Safety: escape before inserting as HTML
     setHtmlBody(plainTextToHtml(improved));
     setReviewResult(null);
   };
 
-  // ———— INLINE VARIANT (compact, Gmail-inspired reply box) ————
+  /**
+   * INLINE VARIANT — compact, Gmail-inspired reply box.
+   * Used in the EmailReader's side-by-side mode. Shorter fields, no labels above inputs,
+   * RichTextEditor with a smaller min-height. Shows SmartSuggest cards_variant when
+   * emailUid/accountId are provided. */
   if (inline) {
     const wrapperClass = sideBySide
       ? "flex-1 overflow-y-auto px-3 py-2 space-y-2"
@@ -309,7 +324,8 @@ export default function EmailComposer({
           </div>
         )}
 
-        {/* Smart Suggestions — prominent cards variant (below Review with AI in inline mode) */}
+        {/* Smart Suggestions — cards variant. Hidden when emailUid/accountId not provided
+            (e.g., composing a new message from scratch rather than replying). */}
         {emailUid && accountId && (
           <SmartSuggest
             emailUid={emailUid}

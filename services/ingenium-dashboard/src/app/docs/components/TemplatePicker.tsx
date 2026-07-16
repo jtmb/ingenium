@@ -9,10 +9,11 @@ import type { DocTemplate } from "@/lib/docs-types";
 type TemplatePickerProps = {
   isOpen: boolean;
   onClose: () => void;
+  /** Called when user clicks a template card or "Blank Page" */
   onSelect: (template: DocTemplate) => void;
 };
 
-/** Category hue map for template badges. */
+/** Category hue map for template badges — keeps badge colors consistent across sessions. */
 const CATEGORY_HUES: Record<string, string> = {
   meeting: "blue",
   project: "green",
@@ -27,6 +28,11 @@ function categoryHue(cat: string): string {
   return CATEGORY_HUES[cat.toLowerCase()] ?? "slate";
 }
 
+/**
+ * TemplatePicker — category-grouped template grid with a "Blank Page" entry.
+ * Fetches templates from the API on open. Groups by category for easier browsing.
+ * Uses createPortal for z-index stacking above the editor overlay.
+ */
 export default function TemplatePicker({ isOpen, onClose, onSelect }: TemplatePickerProps) {
   const [templates, setTemplates] = useState<DocTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,7 +121,7 @@ export default function TemplatePicker({ isOpen, onClose, onSelect }: TemplatePi
                     description: "Start with an empty page",
                     category: "general",
                     content: "",
-                    created_at: new Date().toISOString(),
+                    createdAt: new Date().toISOString(),
                   });
                 }}
               >

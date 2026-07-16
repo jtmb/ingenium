@@ -1,5 +1,9 @@
 export const dynamic = "force-dynamic";
 
+/**
+ * Custom 404 page — shown for any unmatched App Router route.
+ * `force-dynamic` ensures the error is not cached at build time.
+ */
 export default function NotFound() {
   return (
     <div className="text-center py-20">

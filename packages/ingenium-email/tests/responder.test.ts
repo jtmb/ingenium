@@ -83,7 +83,8 @@ describe("suggestResponse", () => {
     const { suggestResponse } = await import("../lib/responder.js");
     // suggestResponse now uses cache-based lookup (no IMAP).
     // A non-existent account + uid returns null gracefully — no error.
-    const result = await suggestResponse("test-project", "bad-account", 1);
+    // 🔴 HARD RULE #8: folder is required.
+    const result = await suggestResponse("test-project", "bad-account", 1, "INBOX");
     expect(result).toBeNull();
   });
 });

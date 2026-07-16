@@ -1,7 +1,8 @@
 /**
  * MCP tool handlers for system logs.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Retrieves buffered log entries from the unified logger via the API.
- * Enforces a hard cap of 1000 on log entries to prevent oversized responses.
+ * Enforces a hard cap of 1000 on log entries to prevent oversized MCP responses.
  */
 import { api } from "../client.js";
 
@@ -29,6 +30,8 @@ export async function logsList(
 }
 
 /** List active log sources */
+// NOTE: Uses limit=1 as a lightweight probe — the API returns source metadata
+// alongside the log entries, so a minimal fetch avoids transferring log bodies.
 export async function logsSources(project: string) {
   const res = await api.get("/logs", { project, limit: "1" });
   const sources = (res.data as any)?.sources ?? [];

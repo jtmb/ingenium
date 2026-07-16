@@ -31,6 +31,9 @@ export default function FolderSidebar({
   syncingFolders?: string[];
   folderSyncStatuses?: any[];
 }) {
+  /** Default folders displayed when the real folder list hasn't loaded yet.
+   *  NOTE: These are common IMAP folder names — actual folders may differ per provider
+   *  (e.g., "[Gmail]/Sent" for Gmail). The real list replaces these after the API responds. */
   const defaultFolders = [
     { name: "INBOX", path: "INBOX", unreadMessages: 0 },
     { name: "Sent", path: "Sent", unreadMessages: 0 },
@@ -96,6 +99,8 @@ export default function FolderSidebar({
             {accounts.length === 0 && (
               <div className="px-3 py-2 text-sm text-[var(--color-text-muted)]">No accounts</div>
             )}
+            {/** NOTE: Dedup by email — IMAP sync can create duplicate account entries with
+                different IDs for the same email address. We show only the first occurrence. */}
             {accounts.filter((acct: any, i: number, arr: any[]) =>
               arr.findIndex((a: any) => a.email === acct.email) === i
             ).map((acct: any) => (

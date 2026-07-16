@@ -51,7 +51,7 @@ export default function OpenCodePage() {
   const isLoaded = mode === "web" ? webLoaded : cliLoaded;
 
   return (
-    <div className="flex flex-col" style={{ height: "calc(100vh - 57px)" }}>
+    <div className="flex flex-col h-full min-h-0">
       <OpenCodeToolbar
         mode={mode}
         onModeChange={handleModeChange}

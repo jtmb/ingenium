@@ -47,4 +47,18 @@ export declare function projectSetGlobal(project: string, name: string, isGlobal
         text: string;
     }[];
 }>;
+/** Rename a project. */
+export declare function projectRename(_project: string, name: string, newName: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Get detailed info about a project by name (no project param needed). */
+export declare function projectDetail(name: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=projects.d.ts.map

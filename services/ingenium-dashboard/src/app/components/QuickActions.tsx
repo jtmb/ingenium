@@ -10,6 +10,13 @@ export default function QuickActions() {
   const [synthesisLoading, setSynthesisLoading] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
+  /**
+   * Trigger the synthesis pipeline and show a short-lived toast on completion.
+   *
+   * Uses a raw fetch (not the `api` client) because the URL construction is
+   * trivial here and we want simple success/failure feedback without error
+   * object parsing. The toast auto-dismisses after 3 seconds.
+   */
   const runSynthesis = async () => {
     setSynthesisLoading(true);
     try {

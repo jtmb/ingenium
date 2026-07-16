@@ -131,7 +131,17 @@ docker compose ps
 | [`references/wsl/models.md`](references/wsl/models.md) | Model cache cleanup — Ollama, LM Studio, HuggingFace |
 | [`references/wsl/workflow.md`](references/wsl/workflow.md) | Comprehensive cleanup workflow and post-flight report |
 
+## Migrated Sources (Phase 3 Taxonomy)
+
+| Source | Content Preserved At |
+|--------|---------------------|
+| `git-history-hygiene` | [`references/sources/git-history-hygiene/`](references/sources/git-history-hygiene/source-index.md) |
+| `github-cli` | [`references/sources/github-cli/`](references/sources/github-cli/source-index.md) |
+| `onboard-existing-repo` | [`references/sources/onboard-existing-repo/`](references/sources/onboard-existing-repo/source-index.md) |
+| `parallel-session-hygiene` | [`references/sources/parallel-session-hygiene/`](references/sources/parallel-session-hygiene/source-index.md) |
+
 ## Cross-References
 
-- **`development-conventions`** — Python/Next.js conventions that pair with Docker/K8s deployments
-- **`local-models`** — Command safety rules for CLI and dev server usage
+- **`@development-conventions`** — Python/Next.js conventions that pair with Docker/K8s deployments
+- **`@local-models`** — Command safety rules for CLI and dev server usage
+- **`@engineering-workflow`** — Agent configuration, orchestrator pipeline

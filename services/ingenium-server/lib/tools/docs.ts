@@ -2,6 +2,8 @@
  * MCP tool handlers for Documentation module.
  * Each function calls the Ingenium API via HTTP and returns MCP-formatted results.
  * The server has ZERO database access — all data goes through the API layer.
+ *
+ * All paths match the canonical API routes registered in services/ingenium-api/lib/routes/docs.ts.
  */
 import { api } from "../client.js";
 
@@ -99,9 +101,15 @@ export async function docsRestorePage(project: string, id: number) {
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Move a page to a different parent or position */
+/** Move a page to a different parent or position — POST /pages/:id/move */
 export async function docsMovePage(project: string, id: number, newParentId?: number, newSortOrder?: number) {
-  const res = await api.put(`/docs/pages/${id}/move`, { newParentId, newSortOrder }, { project });
+  const res = await api.post(`/docs/pages/${id}/move`, { newParentId, newSortOrder }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Publish a draft page — POST /pages/:id/publish */
+export async function docsPublishPage(project: string, id: number, expectedRevision?: number) {
+  const res = await api.post(`/docs/pages/${id}/publish`, { expectedRevision }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -124,8 +132,17 @@ export async function docsGetDraft(project: string, pageId: number) {
 }
 
 /** Save a draft for a documentation page */
-export async function docsSaveDraft(project: string, pageId: number, content: string) {
-  const res = await api.put(`/docs/pages/${pageId}/draft`, { content }, { project });
+export async function docsSaveDraft(project: string, pageId: number, content: string, title?: string, slug?: string, baseRevision?: number) {
+  const res = await api.put(`/docs/pages/${pageId}/draft`, { content, title, slug, baseRevision }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Delete a draft for a documentation page */
+export async function docsDeleteDraft(project: string, pageId: number) {
+  const res = await api.del(`/docs/pages/${pageId}/draft`, { project });
+  if (res.status === 204) {
+    return { content: [{ type: "text" as const, text: "Draft deleted" }] };
+  }
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
@@ -137,13 +154,13 @@ export async function docsListVersions(project: string, pageId: number) {
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Get a specific version of a page */
-export async function docsGetVersion(project: string, versionId: number) {
-  const res = await api.get(`/docs/versions/${versionId}`, { project });
+/** Get a specific version of a page — page-scoped: GET /pages/:pageId/versions/:versionId */
+export async function docsGetVersion(project: string, pageId: number, versionId: number) {
+  const res = await api.get(`/docs/pages/${pageId}/versions/${versionId}`, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Restore a page to a previous version */
+/** Restore a page to a previous version — POST /pages/:pageId/restore/:versionId */
 export async function docsRestoreVersion(project: string, pageId: number, versionId: number) {
   const res = await api.post(`/docs/pages/${pageId}/restore/${versionId}`, {}, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
@@ -163,15 +180,15 @@ export async function docsCreateComment(project: string, pageId: number, content
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Resolve a comment */
-export async function docsResolveComment(project: string, commentId: number) {
-  const res = await api.post(`/docs/comments/${commentId}/resolve`, {}, { project });
+/** Resolve a comment — PUT /pages/:pageId/comments/:commentId/resolve */
+export async function docsResolveComment(project: string, pageId: number, commentId: number) {
+  const res = await api.put(`/docs/pages/${pageId}/comments/${commentId}/resolve`, {}, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Delete a comment */
-export async function docsDeleteComment(project: string, commentId: number) {
-  const res = await api.del(`/docs/comments/${commentId}`, { project });
+/** Delete a comment — DELETE /pages/:pageId/comments/:commentId */
+export async function docsDeleteComment(project: string, pageId: number, commentId: number) {
+  const res = await api.del(`/docs/pages/${pageId}/comments/${commentId}`, { project });
   if (res.status === 204) {
     return { content: [{ type: "text" as const, text: "Comment deleted" }] };
   }
@@ -192,7 +209,7 @@ export async function docsGetPageTags(project: string, pageId: number) {
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Add a tag to a page */
+/** Add a tag to a page — sends { tagName } */
 export async function docsAddTag(project: string, pageId: number, tagName: string) {
   const res = await api.post(`/docs/pages/${pageId}/tags`, { tagName }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
@@ -223,13 +240,20 @@ export async function docsListAttachments(project: string, pageId: number) {
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Delete an attachment */
-export async function docsDeleteAttachment(project: string, attachmentId: number) {
-  const res = await api.del(`/docs/attachments/${attachmentId}`, { project });
+/** Delete an attachment — DELETE /pages/:pageId/attachments/:attId */
+export async function docsDeleteAttachment(project: string, pageId: number, attachmentId: number) {
+  const res = await api.del(`/docs/pages/${pageId}/attachments/${attachmentId}`, { project });
   if (res.status === 204) {
     return { content: [{ type: "text" as const, text: "Attachment deleted" }] };
   }
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Get attachment download metadata URL — GET /pages/:pageId/attachments/:attId/download */
+export async function docsGetAttachmentDownload(project: string, pageId: number, attachmentId: number) {
+  const apiBase = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
+  const url = `${apiBase}/docs/pages/${pageId}/attachments/${attachmentId}/download?project=${encodeURIComponent(project)}`;
+  return { content: [{ type: "text" as const, text: JSON.stringify({ downloadUrl: url }) }] };
 }
 
 // ── Templates ───────────────────────────────────────────
@@ -252,6 +276,12 @@ export async function docsCreateTemplate(project: string, name: string, content:
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
+/** Update a page template — PUT /templates/:id */
+export async function docsUpdateTemplate(project: string, id: number, name?: string, content?: string, description?: string, category?: string) {
+  const res = await api.put(`/docs/templates/${id}`, { name, content, description, category }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
 /** Delete a template */
 export async function docsDeleteTemplate(project: string, id: number) {
   const res = await api.del(`/docs/templates/${id}`, { project });
@@ -263,15 +293,15 @@ export async function docsDeleteTemplate(project: string, id: number) {
 
 // ── Project Links ───────────────────────────────────────
 
-/** Link a documentation page to a project */
-export async function docsLinkProject(project: string, pageId: number, linkedProjectId: number) {
-  const res = await api.post(`/docs/pages/${pageId}/link-project`, { linkedProjectId }, { project });
+/** Link a documentation page to a project — POST /pages/:pageId/projects */
+export async function docsLinkProject(project: string, pageId: number, projectId: string) {
+  const res = await api.post(`/docs/pages/${pageId}/projects`, { projectId }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Unlink a page from a project */
-export async function docsUnlinkProject(project: string, pageId: number, linkedProjectId: number) {
-  const res = await api.del(`/docs/pages/${pageId}/link-project`, { project, linkedProjectId: String(linkedProjectId) });
+/** Unlink a page from a project — DELETE /pages/:pageId/projects/:linkedProjectId */
+export async function docsUnlinkProject(project: string, pageId: number, linkedProjectId: string) {
+  const res = await api.del(`/docs/pages/${pageId}/projects/${encodeURIComponent(linkedProjectId)}`, { project });
   if (res.status === 204) {
     return { content: [{ type: "text" as const, text: "Project unlinked" }] };
   }
@@ -298,17 +328,36 @@ export async function docsGetFavorites(project: string) {
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-// ── Import / Export ─────────────────────────────────────
+// ── Trash ───────────────────────────────────────────────
 
-/** Import pages into a space */
-export async function docsImportPages(project: string, spaceId: number, format: string, data: string) {
-  const res = await api.post("/docs/import", { spaceId, format, data }, { project });
+/** List archived pages in space trash — GET /spaces/:spaceId/trash */
+export async function docsListTrash(project: string, spaceId: number) {
+  const res = await api.get(`/docs/spaces/${spaceId}/trash`, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 
-/** Export a space as JSON */
+/** Purge all archived pages in space — DELETE /spaces/:spaceId/trash */
+export async function docsPurgeTrash(project: string, spaceId: number) {
+  const res = await api.del(`/docs/spaces/${spaceId}/trash`, { project });
+  if (res.status === 204) {
+    return { content: [{ type: "text" as const, text: "Trash emptied" }] };
+  }
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+// ── Import / Export ─────────────────────────────────────
+
+/** Import pages into a space — POST /docs/import with JSON body { spaceId, format, data } */
+export async function docsImportPages(project: string, spaceId: number, format: string, data: string) {
+  let parsed: unknown;
+  try { parsed = JSON.parse(data); } catch { parsed = data; }
+  const res = await api.post("/docs/import", { spaceId, format, data: parsed }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Export a space as JSON — GET /docs/spaces/:spaceId/export */
 export async function docsExportSpace(project: string, spaceId: number) {
-  const res = await api.get(`/docs/export/${spaceId}`, { project });
+  const res = await api.get(`/docs/spaces/${spaceId}/export`, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
 

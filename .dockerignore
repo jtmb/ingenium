@@ -1,5 +1,9 @@
 # Secrets
-.env .env.* *.key *.pem secrets/
+.env
+.env.*
+*.key
+*.pem
+secrets/
 # Version control
 .git .gitignore .gitmodules
 # Dependencies (installed inside build)

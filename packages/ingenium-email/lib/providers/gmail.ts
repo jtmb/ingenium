@@ -448,6 +448,11 @@ export const GmailProvider: MailProvider = {
     };
   },
 
+  // NOTE: getBody fetches the "full" message format each time. For batch
+  // backfill, this means N API calls for N UIDs.  Perf could be improved
+  // by using batchGetMessages with "full" format, but that increases per-batch
+  // memory usage significantly (full messages can be multiple MB each).
+
   // ── getAttachment ───────────────────────────────────────────────────────
   async getAttachment(
     account: EmailAccount,
@@ -459,6 +464,8 @@ export const GmailProvider: MailProvider = {
 
     // Re-fetch the full message and walk its parts to find the matching
     // attachment by attachmentId OR partId (handles both old and new caches).
+    // PERF: This is a full message fetch per attachment — could be optimized
+    // by caching the part-list after the first getAttachment call for a message.
     const msg = await getMessage(token, id, "full");
     const parts = msg.payload?.parts ?? (msg.payload ? [msg.payload] : []);
     const result = walkParts(parts);
@@ -467,7 +474,8 @@ export const GmailProvider: MailProvider = {
     );
 
     // Use the real body.attachmentId if found, otherwise fall back to the
-    // parameter as a last resort (handles edge cases and legacy data).
+    // parameter as a last resort (handles edge cases and legacy data where
+    // the cached attachmentId differs from the actual Gmail attachmentId).
     let att: { data: string; size: number };
     if (found?.body?.attachmentId) {
       att = await apiGetAttachment(token, id, found.body.attachmentId);
@@ -537,6 +545,11 @@ export const GmailProvider: MailProvider = {
 /**
  * Build a minimal RFC822 message from send options.
  * Encoded as UTF-8 with base64url-ready output.
+ *
+ * Subject is RFC 2047-encoded (=?UTF-8?B?...?=) to handle non-ASCII characters.
+ * HTML body is base64-encoded with Content-Transfer-Encoding: base64.
+ * Line folding at 78 chars ensures RFC 5322 compliance (some MTAs reject
+ * lines longer than 998 chars, and 78 is the recommended limit).
  */
 function buildRfc822(account: EmailAccount, options: SendOptions): string {
   const lines: string[] = [];
@@ -546,6 +559,7 @@ function buildRfc822(account: EmailAccount, options: SendOptions): string {
   lines.push(`To: ${formatAddressList(options.to)}`);
   if (options.cc?.length) lines.push(`Cc: ${formatAddressList(options.cc)}`);
   if (options.bcc?.length) lines.push(`Bcc: ${formatAddressList(options.bcc)}`);
+  // RFC 2047 encoded-word for non-ASCII subject support
   lines.push(`Subject: =?UTF-8?B?${Buffer.from(options.subject, "utf-8").toString("base64")}?=`);
   if (options.inReplyTo) lines.push(`In-Reply-To: ${options.inReplyTo}`);
   if (options.references) lines.push(`References: ${options.references}`);
@@ -557,6 +571,7 @@ function buildRfc822(account: EmailAccount, options: SendOptions): string {
     lines.push("Content-Transfer-Encoding: base64");
     lines.push("");
     // Fold base64 content into 78-char lines for RFC compliance
+    // Some receiving MTAs reject lines > 998 chars; 78-char folding is safe.
     const encoded = Buffer.from(options.html, "utf-8").toString("base64");
     for (let i = 0; i < encoded.length; i += 78) {
       lines.push(encoded.slice(i, i + 78));

@@ -67,6 +67,9 @@ const EVENT_TYPE_LABEL: Record<string, string> = {
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+// 60-second window for collapsing consecutive observation_created events
+// into a single timeline entry with a "+N" badge. Prevents the timeline
+// from being dominated by rapid-fire observations during busy sessions.
 const WINDOW_MS = 60_000;
 
 function formatRelative(iso: string): string {
@@ -108,6 +111,23 @@ type DisplayItem =
 type FilterMode = "all" | "agent" | "plugin" | "synthesis" | "trait";
 
 // ── Page ─────────────────────────────────────────────────────────────────
+
+/**
+ * PipelinePage — Git-workflow-style timeline of pipeline events.
+ *
+ * Displays a vertical timeline with event dots, source badges, and
+ * relative timestamps. observation_created events are auto-collapsed
+ * into "+N" groups within 60-second windows to avoid visual noise.
+ *
+ * The synthesis countdown widget estimates time until the next scheduled
+ * synthesis run by finding the last synthesis_completed event and applying
+ * the configured `synthesis_interval_ms`. This is an estimate, not a
+ * guaranteed schedule — the actual timer lives in the API process.
+ *
+ * Polls every 3s for new events (faster for the timeline than the 2s logs
+ * because pipeline events are lower volume and the timeline is the primary
+ * debugging surface).
+ */
 export default function PipelinePage() {
   const project = useProject();
   const [events, setEvents] = useState<PipelineEvent[]>([]);

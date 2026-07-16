@@ -3,6 +3,14 @@ import { jobs, synthesisLlm, jobSuggestLlm } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { executeJobRun, killRunProcess } from "../job-runner.js";
 
+/**
+ * CRUD + execution routes for per-project scheduled jobs.
+ * Jobs are agent-powered tasks with cron/event triggers.
+ * Execution is fire-and-forget via executeJobRun, with run-level status tracking.
+ *
+ * 🔴 Route ordering matters: /runs/* and /suggest MUST be registered before
+ * /:id to prevent Express from capturing "runs" or "suggest" as the :id param.
+ */
 export const jobsRouter = Router();
 
 // ============================================================================
@@ -18,6 +26,7 @@ jobsRouter.get("/", (req, res) => {
 });
 
 // POST / — create a new job
+// 422 (not 400) since the request is well-formed but semantically invalid
 jobsRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -67,7 +76,8 @@ jobsRouter.post("/runs/:runId/cancel", (req, res) => {
   res.json({ data: run });
 });
 
-// GET /runs/:runId/logs — get logs for a run, supports tail polling
+// GET /runs/:runId/logs — get logs for a run, supports tail polling via ?after=<seq>
+// The `after` param returns only entries after that sequence number (for incremental UI updates)
 jobsRouter.get("/runs/:runId/logs", (req, res) => {
   const _projectId = requireProject(req, res);
   if (!_projectId) return;
@@ -136,6 +146,8 @@ jobsRouter.get("/:id", (req, res) => {
 });
 
 // PATCH /:id — update a job
+// SECURITY: explicit field allowlist prevents mass-assignment attacks.
+// Only these fields are accepted; all other body properties are silently ignored.
 jobsRouter.patch("/:id", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -192,7 +204,9 @@ jobsRouter.post("/:id/run", (req, res) => {
     return;
   }
 
-  // Fire-and-forget the actual execution
+  // NOTE: fire-and-forget — the HTTP response returns immediately. Job progress is
+  // tracked via run status (GET /runs/:id) and logs (GET /runs/:id/logs).
+  // The .catch() logs failures but the response has already been sent.
   executeJobRun(result.id, job, job.prompt_template).catch((err: Error) => {
     import("ingenium-core").then(({ logger }) => {
       logger.error("jobs-route", `Fire-and-forget executeJobRun failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });

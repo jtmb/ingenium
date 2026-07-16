@@ -9,8 +9,15 @@ import { api, type Agent } from "@/lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
 /**
- * Agent management page.
- * Full CRUD: create, edit, enable/disable, delete agent definitions synced to OpenCode.
+ * AgentsPage — Full CRUD for agent definitions synced to OpenCode.
+ *
+ * Agents are categorized into `categoryOrder`:
+ *   ["primary", "execution", "research", "security"]
+ * This ordering is hardcoded rather than alphabetical to reflect the
+ * logical hierarchy: orchestrator agents first, then support roles.
+ *
+ * Each agent maps to a `.opencode/agents/<name>.md` file on disk.
+ * Enable/disable toggles the agent's presence in the global opencode config.
  */
 export default function AgentsPage() {
   const project = useProject();
