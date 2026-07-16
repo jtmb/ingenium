@@ -13,12 +13,17 @@ permission:
   task:
     "*": "deny"
     "vision-bridge": "allow"
+  ingenium_docs_search: allow
+  ingenium_docs_get_page: allow
+  ingenium_docs_create_page: allow
+  ingenium_docs_update_page: allow
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
     "@debugging-patterns": allow
     "@configuring-opencode": allow
     "@mcp-tooling": allow
+    "@docs-workspace": allow
     "*": deny
 ---
 

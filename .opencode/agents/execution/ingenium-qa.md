@@ -15,12 +15,17 @@ permission:
   task:
     "*": "deny"
     "vision-bridge": "allow"
+  ingenium_docs_search: allow
+  ingenium_docs_get_page: allow
+  ingenium_docs_get_page_tree: allow
+  ingenium_docs_list_comments: allow
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
     "@debugging-patterns": allow
     "@local-models": allow
     "@mcp-tooling": allow
+    "@docs-workspace": allow
     "*": deny
 ---
 

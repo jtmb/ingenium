@@ -10,6 +10,9 @@ permission:
   glob: allow
   grep: allow
   playwright_*: deny
+  ingenium_docs_search: allow
+  ingenium_docs_get_page: allow
+  ingenium_docs_list_comments: allow
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow

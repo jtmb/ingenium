@@ -34,6 +34,7 @@ import * as pipelineTools from "../lib/tools/pipeline.js";
 import * as statusTools from "../lib/tools/status.js";
 import { healthCheck } from "../lib/tools/health.js";
 import { opencodeMessages } from "../lib/tools/opencode.js";
+import * as docsTools from "../lib/tools/docs.js";
 
 // ── Tool State Check Wrapper ──────────────────────────────
 const API_CLIENT = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
@@ -1444,6 +1445,305 @@ server.registerTool(
     const data = await res.json();
     return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
   }),
+);
+
+// ── Documentation ───────────────────────────────────────
+
+server.registerTool(
+  "ingenium_docs_list_spaces",
+  { description: "List all documentation spaces", inputSchema: { project: projectParam } },
+  wrapHandler("ingenium_docs_list_spaces", async ({ project }) => docsTools.docsListSpaces(project)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_space",
+  {
+    description: "Get a documentation space by ID or slug",
+    inputSchema: { project: projectParam, id: z.number().optional(), slug: z.string().optional() },
+  },
+  wrapHandler("ingenium_docs_get_space", async ({ project, id, slug }) => docsTools.docsGetSpace(project, id, slug)),
+);
+
+server.registerTool(
+  "ingenium_docs_create_space",
+  {
+    description: "Create a new documentation space",
+    inputSchema: { project: projectParam, name: z.string(), slug: z.string().optional(), description: z.string().optional(), icon: z.string().optional() },
+  },
+  wrapHandler("ingenium_docs_create_space", async ({ project, name, slug, description, icon }) => docsTools.docsCreateSpace(project, name, slug, description, icon)),
+);
+
+server.registerTool(
+  "ingenium_docs_update_space",
+  {
+    description: "Update a documentation space",
+    inputSchema: { project: projectParam, id: z.number(), name: z.string().optional(), description: z.string().optional() },
+  },
+  wrapHandler("ingenium_docs_update_space", async ({ project, id, name, description }) => docsTools.docsUpdateSpace(project, id, name, description)),
+);
+
+server.registerTool(
+  "ingenium_docs_delete_space",
+  { description: "Delete a documentation space", inputSchema: { project: projectParam, id: z.number() } },
+  wrapHandler("ingenium_docs_delete_space", async ({ project, id }) => docsTools.docsDeleteSpace(project, id)),
+);
+
+server.registerTool(
+  "ingenium_docs_list_pages",
+  {
+    description: "List pages in a documentation space",
+    inputSchema: { project: projectParam, spaceId: z.number(), parentPageId: z.number().optional() },
+  },
+  wrapHandler("ingenium_docs_list_pages", async ({ project, spaceId, parentPageId }) => docsTools.docsListPages(project, spaceId, parentPageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_page_tree",
+  { description: "Get the page tree for a space", inputSchema: { project: projectParam, spaceId: z.number() } },
+  wrapHandler("ingenium_docs_get_page_tree", async ({ project, spaceId }) => docsTools.docsGetPageTree(project, spaceId)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_page",
+  {
+    description: "Get a documentation page by ID or slug",
+    inputSchema: { project: projectParam, id: z.number().optional(), spaceId: z.number().optional(), slug: z.string().optional() },
+  },
+  wrapHandler("ingenium_docs_get_page", async ({ project, id, spaceId, slug }) => docsTools.docsGetPage(project, id, spaceId, slug)),
+);
+
+server.registerTool(
+  "ingenium_docs_create_page",
+  {
+    description: "Create a new documentation page",
+    inputSchema: { project: projectParam, spaceId: z.number(), title: z.string(), slug: z.string().optional(), content: z.string().optional(), parentPageId: z.number().optional() },
+  },
+  wrapHandler("ingenium_docs_create_page", async ({ project, spaceId, title, slug, content, parentPageId }) => docsTools.docsCreatePage(project, spaceId, title, slug, content, parentPageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_update_page",
+  {
+    description: "Update a documentation page. Requires expectedRevision for optimistic concurrency.",
+    inputSchema: { project: projectParam, id: z.number(), title: z.string().optional(), slug: z.string().optional(), content: z.string().optional(), expectedRevision: z.number().optional() },
+  },
+  wrapHandler("ingenium_docs_update_page", async ({ project, id, title, slug, content, expectedRevision }) => docsTools.docsUpdatePage(project, id, title, slug, content, expectedRevision)),
+);
+
+server.registerTool(
+  "ingenium_docs_delete_page",
+  { description: "Archive (soft-delete) a documentation page", inputSchema: { project: projectParam, id: z.number() } },
+  wrapHandler("ingenium_docs_delete_page", async ({ project, id }) => docsTools.docsDeletePage(project, id)),
+);
+
+server.registerTool(
+  "ingenium_docs_restore_page",
+  { description: "Restore an archived documentation page", inputSchema: { project: projectParam, id: z.number() } },
+  wrapHandler("ingenium_docs_restore_page", async ({ project, id }) => docsTools.docsRestorePage(project, id)),
+);
+
+server.registerTool(
+  "ingenium_docs_move_page",
+  {
+    description: "Move a page to a different parent or position",
+    inputSchema: { project: projectParam, id: z.number(), newParentId: z.number().optional(), newSortOrder: z.number().optional() },
+  },
+  wrapHandler("ingenium_docs_move_page", async ({ project, id, newParentId, newSortOrder }) => docsTools.docsMovePage(project, id, newParentId, newSortOrder)),
+);
+
+server.registerTool(
+  "ingenium_docs_search",
+  {
+    description: "Full-text search across documentation pages",
+    inputSchema: { project: projectParam, query: z.string(), spaceId: z.number().optional() },
+  },
+  wrapHandler("ingenium_docs_search", async ({ project, query, spaceId }) => docsTools.docsSearch(project, query, spaceId)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_draft",
+  { description: "Get the autosaved draft for a page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_get_draft", async ({ project, pageId }) => docsTools.docsGetDraft(project, pageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_save_draft",
+  { description: "Save a draft for a documentation page", inputSchema: { project: projectParam, pageId: z.number(), content: z.string() } },
+  wrapHandler("ingenium_docs_save_draft", async ({ project, pageId, content }) => docsTools.docsSaveDraft(project, pageId, content)),
+);
+
+server.registerTool(
+  "ingenium_docs_list_versions",
+  { description: "List version history for a page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_list_versions", async ({ project, pageId }) => docsTools.docsListVersions(project, pageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_version",
+  { description: "Get a specific version of a page", inputSchema: { project: projectParam, versionId: z.number() } },
+  wrapHandler("ingenium_docs_get_version", async ({ project, versionId }) => docsTools.docsGetVersion(project, versionId)),
+);
+
+server.registerTool(
+  "ingenium_docs_restore_version",
+  {
+    description: "Restore a page to a previous version",
+    inputSchema: { project: projectParam, pageId: z.number(), versionId: z.number() },
+  },
+  wrapHandler("ingenium_docs_restore_version", async ({ project, pageId, versionId }) => docsTools.docsRestoreVersion(project, pageId, versionId)),
+);
+
+server.registerTool(
+  "ingenium_docs_list_comments",
+  { description: "List comments on a documentation page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_list_comments", async ({ project, pageId }) => docsTools.docsListComments(project, pageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_create_comment",
+  {
+    description: "Add a comment to a documentation page",
+    inputSchema: { project: projectParam, pageId: z.number(), content: z.string(), parentCommentId: z.number().optional(), selectionText: z.string().optional(), selectionOffset: z.number().optional() },
+  },
+  wrapHandler("ingenium_docs_create_comment", async ({ project, pageId, content, parentCommentId, selectionText, selectionOffset }) => docsTools.docsCreateComment(project, pageId, content, parentCommentId, selectionText, selectionOffset)),
+);
+
+server.registerTool(
+  "ingenium_docs_resolve_comment",
+  { description: "Resolve a comment", inputSchema: { project: projectParam, commentId: z.number() } },
+  wrapHandler("ingenium_docs_resolve_comment", async ({ project, commentId }) => docsTools.docsResolveComment(project, commentId)),
+);
+
+server.registerTool(
+  "ingenium_docs_delete_comment",
+  { description: "Delete a comment", inputSchema: { project: projectParam, commentId: z.number() } },
+  wrapHandler("ingenium_docs_delete_comment", async ({ project, commentId }) => docsTools.docsDeleteComment(project, commentId)),
+);
+
+server.registerTool(
+  "ingenium_docs_list_tags",
+  { description: "List all tags", inputSchema: { project: projectParam } },
+  wrapHandler("ingenium_docs_list_tags", async ({ project }) => docsTools.docsListTags(project)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_page_tags",
+  { description: "Get tags for a page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_get_page_tags", async ({ project, pageId }) => docsTools.docsGetPageTags(project, pageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_add_tag",
+  { description: "Add a tag to a page", inputSchema: { project: projectParam, pageId: z.number(), tagName: z.string() } },
+  wrapHandler("ingenium_docs_add_tag", async ({ project, pageId, tagName }) => docsTools.docsAddTag(project, pageId, tagName)),
+);
+
+server.registerTool(
+  "ingenium_docs_remove_tag",
+  { description: "Remove a tag from a page", inputSchema: { project: projectParam, pageId: z.number(), tagId: z.number() } },
+  wrapHandler("ingenium_docs_remove_tag", async ({ project, pageId, tagId }) => docsTools.docsRemoveTag(project, pageId, tagId)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_backlinks",
+  { description: "Get pages linking to this page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_get_backlinks", async ({ project, pageId }) => docsTools.docsGetBacklinks(project, pageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_list_attachments",
+  { description: "List attachments on a page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_list_attachments", async ({ project, pageId }) => docsTools.docsListAttachments(project, pageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_delete_attachment",
+  { description: "Delete an attachment", inputSchema: { project: projectParam, attachmentId: z.number() } },
+  wrapHandler("ingenium_docs_delete_attachment", async ({ project, attachmentId }) => docsTools.docsDeleteAttachment(project, attachmentId)),
+);
+
+server.registerTool(
+  "ingenium_docs_list_templates",
+  { description: "List page templates", inputSchema: { project: projectParam } },
+  wrapHandler("ingenium_docs_list_templates", async ({ project }) => docsTools.docsListTemplates(project)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_template",
+  { description: "Get a template by ID", inputSchema: { project: projectParam, id: z.number() } },
+  wrapHandler("ingenium_docs_get_template", async ({ project, id }) => docsTools.docsGetTemplate(project, id)),
+);
+
+server.registerTool(
+  "ingenium_docs_create_template",
+  {
+    description: "Create a page template",
+    inputSchema: { project: projectParam, name: z.string(), content: z.string(), description: z.string().optional(), category: z.string().optional() },
+  },
+  wrapHandler("ingenium_docs_create_template", async ({ project, name, content, description, category }) => docsTools.docsCreateTemplate(project, name, content, description, category)),
+);
+
+server.registerTool(
+  "ingenium_docs_delete_template",
+  { description: "Delete a template", inputSchema: { project: projectParam, id: z.number() } },
+  wrapHandler("ingenium_docs_delete_template", async ({ project, id }) => docsTools.docsDeleteTemplate(project, id)),
+);
+
+server.registerTool(
+  "ingenium_docs_link_project",
+  {
+    description: "Link a documentation page to a project",
+    inputSchema: { project: projectParam, pageId: z.number(), linkedProjectId: z.number() },
+  },
+  wrapHandler("ingenium_docs_link_project", async ({ project, pageId, linkedProjectId }) => docsTools.docsLinkProject(project, pageId, linkedProjectId)),
+);
+
+server.registerTool(
+  "ingenium_docs_unlink_project",
+  {
+    description: "Unlink a page from a project",
+    inputSchema: { project: projectParam, pageId: z.number(), linkedProjectId: z.number() },
+  },
+  wrapHandler("ingenium_docs_unlink_project", async ({ project, pageId, linkedProjectId }) => docsTools.docsUnlinkProject(project, pageId, linkedProjectId)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_projects",
+  { description: "Get projects linked to a page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_get_projects", async ({ project, pageId }) => docsTools.docsGetProjects(project, pageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_toggle_favorite",
+  { description: "Toggle favorite status for a page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_toggle_favorite", async ({ project, pageId }) => docsTools.docsToggleFavorite(project, pageId)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_favorites",
+  { description: "Get favorite pages", inputSchema: { project: projectParam } },
+  wrapHandler("ingenium_docs_get_favorites", async ({ project }) => docsTools.docsGetFavorites(project)),
+);
+
+server.registerTool(
+  "ingenium_docs_import_pages",
+  {
+    description: "Import pages into a space",
+    inputSchema: { project: projectParam, spaceId: z.number(), format: z.string(), data: z.string() },
+  },
+  wrapHandler("ingenium_docs_import_pages", async ({ project, spaceId, format, data }) => docsTools.docsImportPages(project, spaceId, format, data)),
+);
+
+server.registerTool(
+  "ingenium_docs_export_space",
+  { description: "Export a space as JSON", inputSchema: { project: projectParam, spaceId: z.number() } },
+  wrapHandler("ingenium_docs_export_space", async ({ project, spaceId }) => docsTools.docsExportSpace(project, spaceId)),
+);
+
+server.registerTool(
+  "ingenium_docs_get_stats",
+  { description: "Get documentation statistics", inputSchema: { project: projectParam } },
+  wrapHandler("ingenium_docs_get_stats", async ({ project }) => docsTools.docsGetStats(project)),
 );
 
 // ── Start ───────────────────────────────────────────────

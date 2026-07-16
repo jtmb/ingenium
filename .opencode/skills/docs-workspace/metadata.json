@@ -1,0 +1,6 @@
+{
+  "name": "docs-workspace",
+  "description": "Documentation workspace conventions — creating, editing, and managing pages in the Ingenium Docs system.",
+  "tags": ["docs", "documentation", "markdown", "wiki"],
+  "alwaysApply": false
+}
