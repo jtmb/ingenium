@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENTS_DIR="$REPO_ROOT/.opencode/agents"
-SKILLS_DIR="$REPO_ROOT/.agents/skills"
+SKILLS_DIR="$REPO_ROOT/.opencode/skills"
 SKILL_INDEX="$REPO_ROOT/SKILL-INDEX.md"
 VERBOSE=false
 PASSED=0
@@ -302,7 +302,7 @@ test_permission_completeness() {
 # ═══════════════════════════════════════════════════════════
 # TEST 3 — No Stale Skill References
 # Every skill referenced in an agent's skills: list must exist
-# as .agents/skills/<skillname>/SKILL.md.
+# as .opencode/skills/<skillname>/SKILL.md.
 # ═══════════════════════════════════════════════════════════
 test_stale_skill_references() {
     section "TEST 3 — No Stale Skill References"
