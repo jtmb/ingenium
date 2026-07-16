@@ -243,10 +243,10 @@ async function getEmailClientStatus(): Promise<AppInfo> {
       name: "email-client",
       state: "healthy",
       description: `Mail sync engine — ${accounts.length} account(s) connected`,
-      detail: accounts.map(a => a.email).join(", "),
+      detail: `${accounts.length} account(s) connected`,
     };
-  } catch (err) {
-    return { name: "email-client", state: "error", description: "Mail sync engine", detail: (err as Error).message };
+  } catch {
+    return { name: "email-client", state: "error", description: "Mail sync engine", detail: "Internal error" };
   }
 }
 
