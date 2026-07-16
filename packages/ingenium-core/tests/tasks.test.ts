@@ -150,6 +150,35 @@ describe("tasks — FTS search", () => {
     const results = searchTasks(projectId, "security");
     expect(results.length).toBeGreaterThanOrEqual(1);
   });
+
+  it("handles FTS5 special characters without errors", () => {
+    createTask(projectId, "SQL injection audit", "Review SELECT * FROM queries for safety");
+    createTask(projectId, "Logic refactor", "Simplify AND/OR conditions");
+
+    // FTS5 operators — should NOT throw
+    const r1 = searchTasks(projectId, "SELECT * FROM");
+    expect(r1).toBeDefined();
+    expect(Array.isArray(r1)).toBe(true);
+
+    const r2 = searchTasks(projectId, "AND/OR conditions");
+    expect(r2).toBeDefined();
+    expect(Array.isArray(r2)).toBe(true);
+
+    const r3 = searchTasks(projectId, "(parens) -exclude +boost");
+    expect(r3).toBeDefined();
+    expect(Array.isArray(r3)).toBe(true);
+
+    // Quoted string
+    const r4 = searchTasks(projectId, 'has "quotes"');
+    expect(r4).toBeDefined();
+    expect(Array.isArray(r4)).toBe(true);
+
+    // Empty / whitespace returns empty
+    const r5 = searchTasks(projectId, "");
+    expect(r5).toEqual([]);
+    const r6 = searchTasks(projectId, "   ");
+    expect(r6).toEqual([]);
+  });
 });
 
 describe("tasks — comments and threading", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getDb } from "../lib/db.js";
@@ -8,6 +8,7 @@ import {
   createSkill, getSkill, listSkills, updateSkill, searchSkills,
   stripLeadingFrontmatter, writeSkillToDisk, syncSkillFromDisk,
 } from "../lib/tools/skills.js";
+import { getSkillsBase } from "../lib/tools/paths.js";
 
 let tempDir: string;
 let projectId: string;
@@ -57,6 +58,38 @@ describe("skills", () => {
     const results = searchSkills(projectId, "ZYXW");
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0]!.name).toBe("searchable-skill");
+  });
+
+  it("handles FTS5 special characters without errors", () => {
+    // Create skills with special characters in their content
+    createSkill(projectId, "fts-special-1", "SQL query uses SELECT * FROM", "# SQL tutorial");
+    createSkill(projectId, "fts-special-2", "Use AND/OR operators carefully", "# Logic");
+    createSkill(projectId, "fts-special-3", "Parentheses (group) expressions", "# Math");
+
+    // Search terms that would be FTS5 operators — should NOT throw
+    const r1 = searchSkills(projectId, "SELECT * FROM");
+    expect(r1).toBeDefined();
+    expect(Array.isArray(r1)).toBe(true);
+
+    const r2 = searchSkills(projectId, "AND/OR operators");
+    expect(r2).toBeDefined();
+    expect(Array.isArray(r2)).toBe(true);
+
+    const r3 = searchSkills(projectId, "(group)");
+    expect(r3).toBeDefined();
+    expect(Array.isArray(r3)).toBe(true);
+
+    // Quoted search should also work
+    const r4 = searchSkills(projectId, 'quoted "string" here');
+    expect(r4).toBeDefined();
+    expect(Array.isArray(r4)).toBe(true);
+
+    // Empty / whitespace-only query should return empty array, not throw
+    const r5 = searchSkills(projectId, "");
+    expect(r5).toEqual([]);
+
+    const r6 = searchSkills(projectId, "   ");
+    expect(r6).toEqual([]);
   });
 });
 
@@ -294,5 +327,107 @@ describe("writeSkillToDisk round-trip idempotency", () => {
       // Should remain byte-identical to first write
       expect(contents).toBe(firstWrite);
     }
+  });
+});
+
+// ============================================================
+// Security tests — path traversal prevention in writeSkillToDisk
+// ============================================================
+describe("writeSkillToDisk path traversal security", () => {
+  it("rejects absolute file_tree paths (e.g., /etc/passwd)", () => {
+    const skillName = "sec-absolute";
+    const skill = createSkill(projectId, skillName, "Absolute test", "# Body", undefined, undefined, undefined,
+      JSON.stringify({ "/etc/passwd": "malicious content" })
+    );
+
+    // The skill should exist but the file_tree entry should be rejected
+    expect(skill).not.toBeUndefined();
+    // Verify /etc/passwd was NOT written (it doesn't exist in the skill dir)
+    const skillsBase = getSkillsBase(projectId);
+    const skillDir = resolve(skillsBase, skillName);
+    // The malicious path should not exist at all
+    const outOfTree = resolve(skillDir, "/etc/passwd"); // resolve() will normalize to an absolute path outside
+    // Since resolve() strips the base when given an absolute path, we check the resolved doesn't exist in our temp tree
+    expect(existsSync(resolve(skillDir, "etc", "passwd"))).toBe(false);
+  });
+
+  it("rejects traversal file_tree paths (e.g., ../../../etc/passwd)", () => {
+    const skillName = "sec-traversal";
+    const skillsBase = getSkillsBase(projectId);
+    const skillDir = resolve(skillsBase, skillName);
+    // The traversal should escape to a sibling of the .opencode directory
+    const escapedDir = resolve(skillDir, "..", "..", "..", "sec-traversal-test");
+    mkdirSync(escapedDir, { recursive: true }); // ensure it exists if accidentally written
+
+    const skill = createSkill(projectId, skillName, "Traversal test", "# Body", undefined, undefined, undefined,
+      JSON.stringify({ "../../../sec-traversal-test/evil.txt": "malicious content" })
+    );
+
+    expect(skill).not.toBeUndefined();
+    // The escaped file should NOT have been created
+    expect(existsSync(resolve(escapedDir, "evil.txt"))).toBe(false);
+    // Clean up the test dir we created
+    try { rmSync(escapedDir, { recursive: true, force: true }); } catch {}
+  });
+
+  it("rejects nested traversal paths (e.g., foo/../../../etc/passwd)", () => {
+    const skillName = "sec-nested";
+    const skillsBase = getSkillsBase(projectId);
+    const skillDir = resolve(skillsBase, skillName);
+    const escapedDir = resolve(skillDir, "..", "..", "..", "sec-nested-test");
+    mkdirSync(escapedDir, { recursive: true });
+
+    const skill = createSkill(projectId, skillName, "Nested traversal", "# Body", undefined, undefined, undefined,
+      JSON.stringify({ "foo/../../../sec-nested-test/evil.txt": "malicious content" })
+    );
+
+    expect(skill).not.toBeUndefined();
+    expect(existsSync(resolve(escapedDir, "evil.txt"))).toBe(false);
+    try { rmSync(escapedDir, { recursive: true, force: true }); } catch {}
+  });
+
+  it("allows normal relative paths (e.g., references/guide.md)", () => {
+    const skillName = "sec-normal";
+    const skillsBase = getSkillsBase(projectId);
+    const skillDir = resolve(skillsBase, skillName);
+
+    const skill = createSkill(projectId, skillName, "Normal paths", "# Body", undefined, undefined, undefined,
+      JSON.stringify({ "references/guide.md": "# Guide content" })
+    );
+
+    expect(skill).not.toBeUndefined();
+    // The normal file should exist within the skill directory
+    expect(existsSync(resolve(skillDir, "references", "guide.md"))).toBe(true);
+    const content = readFileSync(resolve(skillDir, "references", "guide.md"), "utf-8");
+    expect(content).toBe("# Guide content");
+  });
+
+  it("allows writing to root of skill directory", () => {
+    const skillName = "sec-root";
+    const skillsBase = getSkillsBase(projectId);
+    const skillDir = resolve(skillsBase, skillName);
+
+    const skill = createSkill(projectId, skillName, "Root file", "# Body", undefined, undefined, undefined,
+      JSON.stringify({ "README.txt": "Readme content" })
+    );
+
+    expect(skill).not.toBeUndefined();
+    expect(existsSync(resolve(skillDir, "README.txt"))).toBe(true);
+    const content = readFileSync(resolve(skillDir, "README.txt"), "utf-8");
+    expect(content).toBe("Readme content");
+  });
+
+  it("rejects traversal that resolves to parent directory itself", () => {
+    const skillName = "sec-parent";
+    const skillsBase = getSkillsBase(projectId);
+    const skillDir = resolve(skillsBase, skillName);
+
+    const skill = createSkill(projectId, skillName, "Parent traversal", "# Body", undefined, undefined, undefined,
+      JSON.stringify({ "../evil.txt": "malicious" }) // writes to the skills/<skillName>/../evil.txt = skills/evil.txt
+    );
+
+    expect(skill).not.toBeUndefined();
+    // File should NOT exist in the parent skills directory
+    expect(existsSync(resolve(skillDir, "..", "evil.txt"))).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
 import { Observation } from "../schema.js";
 import { logEvent } from "./pipeline-events.js";
 
@@ -80,13 +80,15 @@ export function getObservations(
 
 export function searchObservations(projectId: string, query: string, limit = 50): Observation[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+  const sanitized = sanitizeFts5Query(query);
+  if (!sanitized) return [];
   return db.prepare(
     `SELECT o.* FROM observations o
      INNER JOIN observations_fts fts ON fts.rowid = o.id
      WHERE o.project_id = ? AND observations_fts MATCH ?
      ORDER BY rank
      LIMIT ?`
-  ).all(projectId, query, limit) as Observation[];
+  ).all(projectId, sanitized, limit) as Observation[];
 }
 
 export function getObservation(id: number): Observation | undefined {

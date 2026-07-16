@@ -62,6 +62,32 @@ describe("observations", () => {
     expect(results[0]!.content).toContain("snake_case");
   });
 
+  it("handles FTS5 special characters without errors", () => {
+    // Search terms that would be FTS5 operators — should NOT throw
+    const r1 = searchObservations(projectId, "SELECT * FROM");
+    expect(r1).toBeDefined();
+    expect(Array.isArray(r1)).toBe(true);
+
+    const r2 = searchObservations(projectId, "AND OR NOT test");
+    expect(r2).toBeDefined();
+    expect(Array.isArray(r2)).toBe(true);
+
+    const r3 = searchObservations(projectId, "(parens) ^boost");
+    expect(r3).toBeDefined();
+    expect(Array.isArray(r3)).toBe(true);
+
+    // Quoted search
+    const r4 = searchObservations(projectId, 'has "quotes" inside');
+    expect(r4).toBeDefined();
+    expect(Array.isArray(r4)).toBe(true);
+
+    // Empty / whitespace-only query returns empty
+    const r5 = searchObservations(projectId, "");
+    expect(r5).toEqual([]);
+    const r6 = searchObservations(projectId, "   ");
+    expect(r6).toEqual([]);
+  });
+
   it("gets a single observation by ID", () => {
     const obs = storeObservation(projectId, "insight", "Terminal works with glibc");
     const found = getObservation(obs.id);

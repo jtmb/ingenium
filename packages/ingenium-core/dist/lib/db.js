@@ -267,6 +267,21 @@ export function execTransaction(fn, retries = WRITE_MAX_RETRIES) {
 function sleep(ms) {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
+/**
+ * Sanitize user input for FTS5 literal matching.
+ * Escapes double-quotes (FTS5 convention: double them), then wraps the
+ * entire query in double-quotes so the FTS5 parser treats it as a literal
+ * phrase rather than interpreting operators like *, ^, (, ), -, +, AND, OR,
+ * NOT, NEAR.
+ */
+export function sanitizeFts5Query(input) {
+    if (!input || input.trim().length === 0)
+        return "";
+    // Escape double-quotes by doubling them per FTS5 spec
+    const escaped = input.replace(/"/g, '""');
+    // Wrap in double-quotes for literal matching
+    return `"${escaped}"`;
+}
 // WAL checkpoint every 50 writes
 let writeCount = 0;
 export function checkpointAfterWrite() {

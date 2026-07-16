@@ -1,10 +1,11 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
-import { logger, getDb } from "ingenium-core";
+import { logger, getDb, MAX_ATTACHMENT_SIZE } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
+import { rateLimit } from "../lib/middleware/rate-limit.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
@@ -56,6 +57,8 @@ const app = express();
 app.use(helmet());
 app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json({ limit: "2mb" }));
+app.use(express.urlencoded({ limit: `${Math.round(MAX_ATTACHMENT_SIZE / (1024 * 1024))}mb`, extended: true }));
+app.use(rateLimit);
 app.use(authMiddleware);
 
 // Health check
