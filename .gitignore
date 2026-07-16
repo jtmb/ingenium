@@ -67,6 +67,7 @@ session_*.md
 *.snapshot.yml
 
 # ── Plans and scratch notes ───────────────────────────────
+next-steps-plan/
 email-plan.md
 *.plan.md
 plan.md

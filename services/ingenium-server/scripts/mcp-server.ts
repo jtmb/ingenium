@@ -37,8 +37,14 @@ import { opencodeMessages } from "../lib/tools/opencode.js";
 import * as docsTools from "../lib/tools/docs.js";
 
 // ── Tool State Check Wrapper ──────────────────────────────
+// NOTE: Duplicates config.apiUrl because this is evaluated at module load time before config is imported.
 const API_CLIENT = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
 
+/**
+ * Checks whether a tool is enabled for the given project via the API.
+ * Fail-open on error (network blip, API down) — a disabled tool is a nuisance,
+ * but a false-negative blocks the user's workflow entirely.
+ */
 async function checkToolEnabled(toolName: string, project: string): Promise<boolean> {
   try {
     const res = await fetch(`${API_CLIENT}/mcp-tools/${encodeURIComponent(toolName)}/state?project=${encodeURIComponent(project)}`);
@@ -46,12 +52,16 @@ async function checkToolEnabled(toolName: string, project: string): Promise<bool
     const data = await res.json();
     return data.data?.enabled !== false;
   } catch {
-    return true; // default to enabled on error
+    return true;
   }
 }
 
-/** Wraps a tool handler to check if the tool is enabled for the project before executing.
- *  For tools without a project parameter, defaults to "global-default" for state checking. */
+/**
+ * Wraps a tool handler to check if the tool is enabled for the project before executing.
+ * For tools without a project parameter, defaults to "global-default" for state checking.
+ * This is the gateway through which ALL tool invocations flow — the enable/disable toggle
+ * in the dashboard is enforced here, not in individual tool handlers.
+ */
 function wrapHandler(toolName: string, handler: (args: any) => Promise<any>) {
   return async (args: any) => {
     const project = args?.project || "global-default";
@@ -67,7 +77,12 @@ function wrapHandler(toolName: string, handler: (args: any) => Promise<any>) {
   };
 }
 
-/** Shared required project parameter. Projects must be created explicitly via ingenium_project_init or the dashboard. */
+/**
+ * Shared required project parameter for all project-scoped tools.
+ * Projects are NOT auto-created on first use — they must be created explicitly
+ * via ingenium_project_init or the dashboard. "global-default" is the singleton
+ * global project created at container startup (see docker-entrypoint.sh).
+ */
 const projectParam = z.string();
 
 const server = new McpServer(
@@ -145,7 +160,7 @@ server.registerTool(
 
 server.registerTool(
   "ingenium_skill_delete",
-  { description: "Delete a skill by name.", inputSchema: { project: projectParam, name: z.string() } },
+  { description: "Delete a skill by name (archive-only semantics — soft-deletes to archived state, not permanent removal).", inputSchema: { project: projectParam, name: z.string() } },
   wrapHandler("ingenium_skill_delete", async ({ project, name }) => skillTools.skillDelete(project, name)),
 );
 
@@ -180,6 +195,179 @@ server.registerTool(
   "ingenium_skill_sync_all",
   { description: "Sync ALL skills disk↔DB for a project.", inputSchema: { project: projectParam } },
   wrapHandler("ingenium_skill_sync_all", async ({ project }) => skillTools.skillSyncAll(project)),
+);
+
+// ── Skills Governance (14) ─────────────────────────────────
+
+server.registerTool(
+  "ingenium_skill_archive",
+  {
+    description: "Archive a skill (soft-delete — moves to archived state, not permanent removal).",
+    inputSchema: { project: projectParam, name: z.string() },
+  },
+  wrapHandler("ingenium_skill_archive", async ({ project, name }) => skillTools.skillArchive(project, name)),
+);
+
+server.registerTool(
+  "ingenium_skill_restore",
+  {
+    description: "Restore a previously archived skill.",
+    inputSchema: { project: projectParam, name: z.string() },
+  },
+  wrapHandler("ingenium_skill_restore", async ({ project, name }) => skillTools.skillRestore(project, name)),
+);
+
+server.registerTool(
+  "ingenium_skill_list_archived",
+  {
+    description: "List all archived skills for a project.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler("ingenium_skill_list_archived", async ({ project }) => skillTools.skillListArchived(project)),
+);
+
+server.registerTool(
+  "ingenium_skill_versions",
+  {
+    description: "Get version history for a skill.",
+    inputSchema: { project: projectParam, name: z.string() },
+  },
+  wrapHandler("ingenium_skill_versions", async ({ project, name }) => skillTools.skillVersions(project, name)),
+);
+
+server.registerTool(
+  "ingenium_skill_rollback",
+  {
+    description: "Rollback a skill to a specific revision.",
+    inputSchema: { project: projectParam, name: z.string(), revision: z.number().int().min(0) },
+  },
+  wrapHandler("ingenium_skill_rollback", async ({ project, name, revision }) => skillTools.skillRollback(project, name, revision)),
+);
+
+server.registerTool(
+  "ingenium_skill_lineage_create",
+  {
+    description: "Create a skill provenance lineage relationship linking a source skill to a target.",
+    inputSchema: {
+      project: projectParam,
+      sourceProjectId: z.string(),
+      sourceName: z.string(),
+      targetSkillId: z.string().uuid(),
+      sourceHash: z.string().optional(),
+      mergedFilePaths: z.array(z.string()).optional(),
+      tombstonePath: z.string().optional(),
+      reason: z.string().optional(),
+    },
+  },
+  wrapHandler("ingenium_skill_lineage_create", async (args) =>
+    skillTools.skillLineageCreate(
+      args.project, args.sourceProjectId, args.sourceName, args.targetSkillId,
+      args.sourceHash, args.mergedFilePaths, args.tombstonePath, args.reason)),
+);
+
+server.registerTool(
+  "ingenium_skill_lineage_list",
+  {
+    description: "List provenance lineage relationships for a skill (source and target entries).",
+    inputSchema: { project: projectParam, name: z.string() },
+  },
+  wrapHandler("ingenium_skill_lineage_list", async ({ project, name }) => skillTools.skillLineageList(project, name)),
+);
+
+server.registerTool(
+  "ingenium_skill_proposal_create",
+  {
+    description: "Create a new skill governance proposal (type: create/update/merge/archive).",
+    inputSchema: {
+      project: projectParam,
+      proposalType: z.enum(["create", "update", "merge", "archive"]),
+      targetName: z.string(),
+      proposedState: z.object({
+        description: z.string().optional(),
+        content: z.string().optional(),
+        category: z.string().optional(),
+        tags: z.string().optional(),
+        alwaysApply: z.number().int().min(0).max(1).optional(),
+        fileTree: z.union([z.record(z.string(), z.string()), z.string()]).optional(),
+      }).strict(),
+      sourceProjectId: z.string().optional(),
+      sourceName: z.string().optional(),
+      expectedRevision: z.number().int().min(0).optional(),
+      evidence: z.array(z.unknown()).optional(),
+      observationIds: z.array(z.number()).optional(),
+      qualityScore: z.number().min(0).max(1).optional(),
+      noveltyScore: z.number().min(0).max(1).optional(),
+      contradictionFlag: z.boolean().optional(),
+      candidateGroupKey: z.string().optional(),
+      alwaysApply: z.number().int().min(0).max(1).optional(),
+      targetSkillId: z.string().uuid().optional(),
+    },
+  },
+  wrapHandler("ingenium_skill_proposal_create", async (args) =>
+    skillTools.skillProposalCreate(
+      args.project, args.proposalType, args.targetName,
+      args.proposedState as skillTools.ProposalProposedState,
+      args.sourceProjectId, args.sourceName, args.expectedRevision, args.evidence,
+      args.observationIds, args.qualityScore, args.noveltyScore,
+      args.contradictionFlag, args.candidateGroupKey,
+      args.alwaysApply, args.targetSkillId)),
+);
+
+server.registerTool(
+  "ingenium_skill_proposal_list",
+  {
+    description: "List all skill proposals for a project, optionally filtered by status (draft/pending/rejected/applied/rolled_back/stale).",
+    inputSchema: { project: projectParam, status: z.enum(["draft", "pending", "rejected", "applied", "rolled_back", "stale"]).optional() },
+  },
+  wrapHandler("ingenium_skill_proposal_list", async ({ project, status }) => skillTools.skillProposalList(project, status)),
+);
+
+server.registerTool(
+  "ingenium_skill_proposal_get",
+  {
+    description: "Get a single skill proposal by ID (UUID).",
+    inputSchema: { project: projectParam, proposalId: z.string().uuid() },
+  },
+  wrapHandler("ingenium_skill_proposal_get", async ({ project, proposalId }) => skillTools.skillProposalGet(project, proposalId)),
+);
+
+server.registerTool(
+  "ingenium_skill_proposal_submit",
+  {
+    description: "Submit a proposal for review (transitions from draft to pending).",
+    inputSchema: { project: projectParam, proposalId: z.string().uuid() },
+  },
+  wrapHandler("ingenium_skill_proposal_submit", async ({ project, proposalId }) => skillTools.skillProposalSubmit(project, proposalId)),
+);
+
+server.registerTool(
+  "ingenium_skill_proposal_approve",
+  {
+    description: "Approve a pending proposal. Reviewer is required; reason is optional.",
+    inputSchema: { project: projectParam, proposalId: z.string().uuid(), reviewer: z.string(), reason: z.string().optional() },
+  },
+  wrapHandler("ingenium_skill_proposal_approve", async ({ project, proposalId, reviewer, reason }) =>
+    skillTools.skillProposalApprove(project, proposalId, reviewer, reason)),
+);
+
+server.registerTool(
+  "ingenium_skill_proposal_reject",
+  {
+    description: "Reject a pending proposal. Reviewer is required; reason is optional.",
+    inputSchema: { project: projectParam, proposalId: z.string().uuid(), reviewer: z.string(), reason: z.string().optional() },
+  },
+  wrapHandler("ingenium_skill_proposal_reject", async ({ project, proposalId, reviewer, reason }) =>
+    skillTools.skillProposalReject(project, proposalId, reviewer, reason)),
+);
+
+server.registerTool(
+  "ingenium_skill_proposal_rollback",
+  {
+    description: "Rollback an applied proposal (reverts the changes made when it was approved). Reviewer is required; reason is optional.",
+    inputSchema: { project: projectParam, proposalId: z.string().uuid(), reviewer: z.string(), reason: z.string().optional() },
+  },
+  wrapHandler("ingenium_skill_proposal_rollback", async ({ project, proposalId, reviewer, reason }) =>
+    skillTools.skillProposalRollback(project, proposalId, reviewer, reason)),
 );
 
 // ── Observations ──────────────────────────────────────────
@@ -1437,6 +1625,10 @@ server.registerTool(
     description: "Get aggregated dashboard summary — learning stats, task counts, job counts, and mail status.",
     inputSchema: { project: projectParam },
   },
+  // NOTE: Uses bare fetch instead of the retrying `api` client because the summary
+  // endpoint aggregates from multiple sources and may be slower — the standard
+  // 10s timeout + 3 retries could cascade under load. A single quick failure is
+  // preferred over delaying the dashboard render.
   wrapHandler("ingenium_dashboard_summary", async ({ project }) => {
     const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
     const url = new URL("dashboard/summary", apiBase);
@@ -1525,7 +1717,7 @@ server.registerTool(
   "ingenium_docs_update_page",
   {
     description: "Update a documentation page. Requires expectedRevision for optimistic concurrency.",
-    inputSchema: { project: projectParam, id: z.number(), title: z.string().optional(), slug: z.string().optional(), content: z.string().optional(), expectedRevision: z.number().optional() },
+    inputSchema: { project: projectParam, id: z.number(), title: z.string().optional(), slug: z.string().optional(), content: z.string().optional(), expectedRevision: z.number() },
   },
   wrapHandler("ingenium_docs_update_page", async ({ project, id, title, slug, content, expectedRevision }) => docsTools.docsUpdatePage(project, id, title, slug, content, expectedRevision)),
 );
@@ -1540,6 +1732,15 @@ server.registerTool(
   "ingenium_docs_restore_page",
   { description: "Restore an archived documentation page", inputSchema: { project: projectParam, id: z.number() } },
   wrapHandler("ingenium_docs_restore_page", async ({ project, id }) => docsTools.docsRestorePage(project, id)),
+);
+
+server.registerTool(
+  "ingenium_docs_publish_page",
+  {
+    description: "Publish a draft documentation page. Optionally pass expectedRevision for concurrency control.",
+    inputSchema: { project: projectParam, id: z.number(), expectedRevision: z.number().optional() },
+  },
+  wrapHandler("ingenium_docs_publish_page", async ({ project, id, expectedRevision }) => docsTools.docsPublishPage(project, id, expectedRevision)),
 );
 
 server.registerTool(
@@ -1568,8 +1769,14 @@ server.registerTool(
 
 server.registerTool(
   "ingenium_docs_save_draft",
-  { description: "Save a draft for a documentation page", inputSchema: { project: projectParam, pageId: z.number(), content: z.string() } },
-  wrapHandler("ingenium_docs_save_draft", async ({ project, pageId, content }) => docsTools.docsSaveDraft(project, pageId, content)),
+  { description: "Save a draft for a documentation page", inputSchema: { project: projectParam, pageId: z.number(), content: z.string(), title: z.string().optional(), slug: z.string().optional(), baseRevision: z.number().optional() } },
+  wrapHandler("ingenium_docs_save_draft", async ({ project, pageId, content, title, slug, baseRevision }) => docsTools.docsSaveDraft(project, pageId, content, title, slug, baseRevision)),
+);
+
+server.registerTool(
+  "ingenium_docs_delete_draft",
+  { description: "Delete the autosaved draft for a page", inputSchema: { project: projectParam, pageId: z.number() } },
+  wrapHandler("ingenium_docs_delete_draft", async ({ project, pageId }) => docsTools.docsDeleteDraft(project, pageId)),
 );
 
 server.registerTool(
@@ -1580,8 +1787,11 @@ server.registerTool(
 
 server.registerTool(
   "ingenium_docs_get_version",
-  { description: "Get a specific version of a page", inputSchema: { project: projectParam, versionId: z.number() } },
-  wrapHandler("ingenium_docs_get_version", async ({ project, versionId }) => docsTools.docsGetVersion(project, versionId)),
+  {
+    description: "Get a specific version of a page",
+    inputSchema: { project: projectParam, pageId: z.number(), versionId: z.number() },
+  },
+  wrapHandler("ingenium_docs_get_version", async ({ project, pageId, versionId }) => docsTools.docsGetVersion(project, pageId, versionId)),
 );
 
 server.registerTool(
@@ -1610,14 +1820,20 @@ server.registerTool(
 
 server.registerTool(
   "ingenium_docs_resolve_comment",
-  { description: "Resolve a comment", inputSchema: { project: projectParam, commentId: z.number() } },
-  wrapHandler("ingenium_docs_resolve_comment", async ({ project, commentId }) => docsTools.docsResolveComment(project, commentId)),
+  {
+    description: "Resolve a comment",
+    inputSchema: { project: projectParam, pageId: z.number(), commentId: z.number() },
+  },
+  wrapHandler("ingenium_docs_resolve_comment", async ({ project, pageId, commentId }) => docsTools.docsResolveComment(project, pageId, commentId)),
 );
 
 server.registerTool(
   "ingenium_docs_delete_comment",
-  { description: "Delete a comment", inputSchema: { project: projectParam, commentId: z.number() } },
-  wrapHandler("ingenium_docs_delete_comment", async ({ project, commentId }) => docsTools.docsDeleteComment(project, commentId)),
+  {
+    description: "Delete a comment",
+    inputSchema: { project: projectParam, pageId: z.number(), commentId: z.number() },
+  },
+  wrapHandler("ingenium_docs_delete_comment", async ({ project, pageId, commentId }) => docsTools.docsDeleteComment(project, pageId, commentId)),
 );
 
 server.registerTool(
@@ -1658,8 +1874,11 @@ server.registerTool(
 
 server.registerTool(
   "ingenium_docs_delete_attachment",
-  { description: "Delete an attachment", inputSchema: { project: projectParam, attachmentId: z.number() } },
-  wrapHandler("ingenium_docs_delete_attachment", async ({ project, attachmentId }) => docsTools.docsDeleteAttachment(project, attachmentId)),
+  {
+    description: "Delete an attachment",
+    inputSchema: { project: projectParam, pageId: z.number(), attachmentId: z.number() },
+  },
+  wrapHandler("ingenium_docs_delete_attachment", async ({ project, pageId, attachmentId }) => docsTools.docsDeleteAttachment(project, pageId, attachmentId)),
 );
 
 server.registerTool(
@@ -1690,19 +1909,28 @@ server.registerTool(
 );
 
 server.registerTool(
+  "ingenium_docs_update_template",
+  {
+    description: "Update a page template",
+    inputSchema: { project: projectParam, id: z.number(), name: z.string().optional(), content: z.string().optional(), description: z.string().optional(), category: z.string().optional() },
+  },
+  wrapHandler("ingenium_docs_update_template", async ({ project, id, name, content, description, category }) => docsTools.docsUpdateTemplate(project, id, name, content, description, category)),
+);
+
+server.registerTool(
   "ingenium_docs_link_project",
   {
     description: "Link a documentation page to a project",
-    inputSchema: { project: projectParam, pageId: z.number(), linkedProjectId: z.number() },
+    inputSchema: { project: projectParam, pageId: z.number(), projectId: z.string() },
   },
-  wrapHandler("ingenium_docs_link_project", async ({ project, pageId, linkedProjectId }) => docsTools.docsLinkProject(project, pageId, linkedProjectId)),
+  wrapHandler("ingenium_docs_link_project", async ({ project, pageId, projectId }) => docsTools.docsLinkProject(project, pageId, projectId)),
 );
 
 server.registerTool(
   "ingenium_docs_unlink_project",
   {
     description: "Unlink a page from a project",
-    inputSchema: { project: projectParam, pageId: z.number(), linkedProjectId: z.number() },
+    inputSchema: { project: projectParam, pageId: z.number(), linkedProjectId: z.string() },
   },
   wrapHandler("ingenium_docs_unlink_project", async ({ project, pageId, linkedProjectId }) => docsTools.docsUnlinkProject(project, pageId, linkedProjectId)),
 );
@@ -1741,6 +1969,27 @@ server.registerTool(
 );
 
 server.registerTool(
+  "ingenium_docs_trash_list",
+  { description: "List archived pages in a space's trash", inputSchema: { project: projectParam, spaceId: z.number() } },
+  wrapHandler("ingenium_docs_trash_list", async ({ project, spaceId }) => docsTools.docsListTrash(project, spaceId)),
+);
+
+server.registerTool(
+  "ingenium_docs_trash_purge",
+  { description: "Permanently delete all archived pages in a space's trash", inputSchema: { project: projectParam, spaceId: z.number() } },
+  wrapHandler("ingenium_docs_trash_purge", async ({ project, spaceId }) => docsTools.docsPurgeTrash(project, spaceId)),
+);
+
+server.registerTool(
+  "ingenium_docs_attachment_download",
+  {
+    description: "Get attachment download metadata URL — the caller uses the URL to download the file. Never returns raw binary.",
+    inputSchema: { project: projectParam, pageId: z.number(), attachmentId: z.number() },
+  },
+  wrapHandler("ingenium_docs_attachment_download", async ({ project, pageId, attachmentId }) => docsTools.docsGetAttachmentDownload(project, pageId, attachmentId)),
+);
+
+server.registerTool(
   "ingenium_docs_get_stats",
   { description: "Get documentation statistics", inputSchema: { project: projectParam } },
   wrapHandler("ingenium_docs_get_stats", async ({ project }) => docsTools.docsGetStats(project)),
@@ -1748,6 +1997,13 @@ server.registerTool(
 
 // ── Start ───────────────────────────────────────────────
 
+/**
+ * Connects the MCP server via stdio transport.
+ *
+ * Stdio is the transport used by MCP hosts (OpenCode, VS Code, etc.) to
+ * communicate with child MCP servers. stdout carries JSON-RPC messages;
+ * stderr carries log output. NEVER write to stdout directly.
+ */
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
@@ -1760,13 +2016,17 @@ main().catch((err) => {
   process.exit(1);
 });
 
-// Graceful shutdown
+// Graceful shutdown: SIGTERM is sent by the parent process (or Docker) during
+// container stop. We must stop child MCP servers (e.g. Thread, Kaban) before
+// exiting to avoid orphaned processes.
 process.on("SIGTERM", () => {
   logger.info("SIGTERM received, shutting down");
   stopAll();
   process.exit(0);
 });
 
+// Hard exit on unhandled rejections — the MCP protocol has no error-recovery
+// mechanism for a corrupted runtime. Better to restart cleanly via the host.
 process.on("unhandledRejection", (reason) => {
   logger.fatal({ reason }, "Unhandled rejection");
   process.exit(1);

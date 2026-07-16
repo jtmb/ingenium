@@ -1,6 +1,6 @@
 # next-steps
 
-Append a bug, issue, or feature request to the tracking document `next-steps-plan/next-steps.md`.
+Suggest a bug, issue, or feature request based on the tracking template `next-steps-plan/next-steps-template.md`. This command is READ-ONLY — it never writes to disk.
 
 ## Usage
 
@@ -10,7 +10,7 @@ Append a bug, issue, or feature request to the tracking document `next-steps-pla
 
 ## What it does
 
-1. Reads the current `next-steps-plan/next-steps.md` to understand its structure (sections, subsections, and existing numbering)
+1. Reads `next-steps-plan/next-steps-template.md` to understand the target structure (sections, subsections, and existing numbering)
 2. Intelligently categorizes the input:
    - **Bug** (under `## Bugs`) if the description mentions a broken page, malfunction, error, or fix
    - **Feature** (under `## Features`) if the description describes new functionality, a new page, or new capability
@@ -28,16 +28,17 @@ Append a bug, issue, or feature request to the tracking document `next-steps-pla
    - If the page isn't recognized, add under a new subsection matching the page name
 4. For Features:
    - Creates a new `### FEATURE-NAME` subsection if one doesn't exist for that feature
-   - Appends the entry under the matching feature subsection
-5. Auto-numbers the new entry within its section (finds the highest existing number and adds +1)
-6. Appends the formatted entry at the end of its section using this format:
+   - Suggests the entry under the matching feature subsection
+5. Auto-numbers the suggested entry within its section (finds the highest existing number and adds +1)
+6. **Outputs the suggested entry as text in the chat response** using this format (DOES NOT WRITE TO DISK):
    - Bugs: `N. Description text here.`
    - Features: `N. Description text here.`
-7. Shows a confirmation message: `Added as Bug #N under ### /section: description` or `Added as Feature #N under ### FEATURE-NAME: description`
-8. After appending, regenerates the `# REQUEST/DIRECTIVE:` block at the top of the file. The directive must:
-   - Summarize ALL current bugs (count per section) and features into a one-shot directive
-   - Include the orchestrator weakness clause exactly: *"The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below."*
-   - End with a blank line before `## Bugs:`
+7. Shows a confirmation message: `Suggested Bug #N under ### /section: description` or `Suggested Feature #N under ### FEATURE-NAME: description`
+8. After displaying the suggestion, appends a note about the `# REQUEST/DIRECTIVE:` block that would be generated (summarizing ALL current bugs and features), reminding the user to add the orchestrator weakness clause: *"The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below."*
+
+## 🔴 HARD RULE — Read-Only
+
+**This command MUST NOT write to any file.** It reads the template for structure context and outputs the proposed entry as text in the chat response. The user decides whether to add the suggestion to the tracking document manually.
 
 ## Categorization rules
 
@@ -45,7 +46,7 @@ Append a bug, issue, or feature request to the tracking document `next-steps-pla
 - **Page/component detection**: Scan for `/projects`, `/skills`, `/logs`, `/mail`, `/mcp-servers`, `/observations`, `/personality`, `/tasks`, `/jobs`
 - **OpenCode client bugs**: References to "opencode client", "plugin error", "opencode.json", "package.json", "failed to install plugin", or OpenCode startup issues → `## opencode CLIENT BUGS`
 - **Feature detection**: Phrases like "add", "create", "new page", "build", "implement", "would like", "want a" (without error/bug language) indicate a feature
-- **New feature sections**: If the feature doesn't match an existing `###` heading under `## Features`, create a new `### FEATURE-NAME` section (e.g., `### ADD NEW PAGE: /jobs`, `### dark mode`)
+- **New feature sections**: If the feature doesn't match an existing `###` heading under `## Features`, suggest a new `### FEATURE-NAME` section (e.g., `### ADD NEW PAGE: /jobs`, `### dark mode`)
 
 ## When to use
 
@@ -57,13 +58,15 @@ Append a bug, issue, or feature request to the tracking document `next-steps-pla
 
 ## Important
 
-- **Do NOT overwrite or reformat** the existing `next-steps-plan/next-steps.md`. Only append new numbered entries at the end of their respective sections.
-- **Preserve existing numbering.** If the highest number in a section is `6`, the new entry gets `7`.
-- **Match formatting exactly.** Bugs use `N. Description.` under `### /section`. Features use `N. Description.` under `### FEATURE-NAME`.
-- If an `## Bugs` or `## Features` heading doesn't exist yet, create it at the top of the file.
-- Add the Documentation References table (from the template) only if the file is empty or newly created.
+- **Do NOT read `next-steps-plan/next-steps.md`** — only read the template at `next-steps-plan/next-steps-template.md` for structural context.
+- **Preserve existing numbering logic in the displayed output.** If the highest number in a section is `6`, the suggested entry gets `7`.
+- **Match formatting exactly in the output.** Bugs use `N. Description.` under `### /section`. Features use `N. Description.` under `### FEATURE-NAME`.
+- If an `## Bugs` or `## Features` heading doesn't exist in the template, note that it would be created.
+- Add the Documentation References table (from the template) only if providing full template context to the user.
+- **Never write to `next-steps-plan/` or any other file.**
 
 ## Related
 
-- `next-steps-plan/next-steps.md` — The tracking document this command appends to
+- `next-steps-plan/next-steps-template.md` — The template this command reads for structure (read-only)
+- `next-steps-plan/next-steps.md` — The tracking document the user manually maintains
 - `next-steps-plan/BIG-PLAN.md` — Orchestration plan for executing the accumulated items

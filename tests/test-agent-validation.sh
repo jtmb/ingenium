@@ -475,7 +475,10 @@ test_task_block_safety() {
         local fm
         fm=$(extract_frontmatter "$file")
 
-        # Determine if this agent is read-only
+        # Determine agent mode and permissions
+        local agent_mode
+        agent_mode=$(get_field_value "$fm" "mode" | tr -d '[:space:]')
+
         local perm_block
         perm_block=$(extract_yaml_block "permission" <<< "$fm")
 
@@ -483,6 +486,13 @@ test_task_block_safety() {
         edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}') || true
         local write_val
         write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}') || true
+
+        # Primary/coordinator agents are exempt — their job is to spawn
+        # write-capable subagents for privileged operations
+        if [[ "$agent_mode" == "primary" ]]; then
+            info "$name — primary/coordinator agent, exempt from task block safety check"
+            continue
+        fi
 
         # Only check read-only agents (not write-capable)
         # An agent is write-capable if edit: allow OR write: allow

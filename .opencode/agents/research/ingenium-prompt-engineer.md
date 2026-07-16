@@ -5,6 +5,7 @@ mode: subagent
 model: deepseek/deepseek-v4-pro
 permission:
   read: allow
+  edit: deny
   write: deny
   bash: deny
   playwright_*: deny
