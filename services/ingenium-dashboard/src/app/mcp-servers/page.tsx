@@ -12,6 +12,16 @@ interface CategorizedTool {
   tools: Array<{ tool_name: string; enabled: boolean }>;
 }
 
+/**
+ * MCPServersPage — Dual-tab page for managing MCP servers and their tools.
+ *
+ * "Servers" tab: Register/unregister child MCP server processes.
+ * "Tools" tab: Browse 212 catalog tools across 24 categories with search,
+ * category filter, and individual tool toggles (enable/disable).
+ *
+ * Category-level enable/disable is an optimistic update that flips all
+ * tools in a category at once via a single API call.
+ */
 export default function MCPServersPage() {
   const project = useProject();
   const [tab, setTab] = useState<"servers" | "tools">("servers");
@@ -138,8 +148,8 @@ export default function MCPServersPage() {
           {/* Stats bar */}
           <div className="flex items-center justify-between">
             <div className="flex gap-3 items-center">
-              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tools..." className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm w-56" />
-              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search tools..." className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm w-full max-w-xs" />
+              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer min-w-[140px]">
                 <option value="All">All categories</option>
                 {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>

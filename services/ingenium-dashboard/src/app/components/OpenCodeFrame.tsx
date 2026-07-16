@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef, useEffect } from "react";
+
 interface OpenCodeFrameProps {
   mode: "web" | "cli";
   cliMounted: boolean;
@@ -14,7 +16,9 @@ interface OpenCodeFrameProps {
  * (once mounted). Inactive iframes are hidden via opacity/visibility/pointer-events
  * instead of display:none to prevent xterm dimension zeroing on the CLI side.
  *
- * Positioning is "absolute inset-0" — the parent container must be "relative".
+ * A ResizeObserver monitors the container and sets CSS custom properties
+ * (--iframe-width / --iframe-height) so ttyd/OpenCode always receives
+ * stable, non-zero dimensions even during layout transitions.
  */
 export default function OpenCodeFrame({
   mode,
@@ -22,11 +26,32 @@ export default function OpenCodeFrame({
   onWebLoaded,
   onCliLoaded,
 }: OpenCodeFrameProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Observe container size changes to provide stable dimensions to ttyd / OpenCode
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        // Set CSS custom properties so iframes' children can read stable dimensions
+        // even during layout transitions that would otherwise report 0.
+        el.style.setProperty("--iframe-width", `${Math.round(width)}px`);
+        el.style.setProperty("--iframe-height", `${Math.round(height)}px`);
+      }
+    });
+
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <>
+    <div ref={containerRef} className="absolute inset-0">
       {/* Web iframe — always mounted */}
       <iframe
-        src="http://localhost:4098/"
+        src="/opencode-proxy/"
         className="absolute inset-0 w-full h-full border-0"
         style={{
           opacity: mode === "web" ? 1 : 0,
@@ -59,6 +84,6 @@ export default function OpenCodeFrame({
           onLoad={onCliLoaded}
         />
       )}
-    </>
+    </div>
   );
 }

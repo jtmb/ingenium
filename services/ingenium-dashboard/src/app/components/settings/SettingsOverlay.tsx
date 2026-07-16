@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ALL_TABS, tabForPathname } from "./tabs";
@@ -10,7 +10,11 @@ import PlaceholderPanel from "./PlaceholderPanel";
 import { GeneralPanel, MailPanel, PipelinePanel, ConfigPanel } from "./panels";
 import type { ComponentType } from "react";
 
-/** Registry mapping tab IDs to their real panel components. */
+/**
+ * Registry mapping tab IDs to their real panel components.
+ * Tabs without a registered component fall back to PlaceholderPanel.
+ * Extend this record when adding a new settings panel.
+ */
 const TAB_PANELS: Record<string, ComponentType> = {
   general: GeneralPanel,
   mail: MailPanel,
@@ -18,11 +22,23 @@ const TAB_PANELS: Record<string, ComponentType> = {
   config: ConfigPanel,
 };
 
+/** Resolves a tab ID to either a registered panel component or the generic placeholder. */
 function TabPanel({ tabId, activeTab }: { tabId: string; activeTab: SettingsTab }) {
   const Panel = TAB_PANELS[tabId];
   return Panel ? <Panel /> : <PlaceholderPanel tab={activeTab} />;
 }
 
+/**
+ * Full-screen settings overlay rendered via portal to `document.body`.
+ *
+ * State is driven entirely by the `?settings=<tabId>` URL search param —
+ * no separate React state. This enables deep-linking and back-button support.
+ * If the param is missing or invalid, the tab is derived from the current page
+ * pathname via `tabForPathname`.
+ *
+ * `useCallback` wrappers around `close`/`selectTab` are required because they
+ * appear in the `useEffect` dependency chain (Escape key handler).
+ */
 export default function SettingsOverlay() {
   const pathname = usePathname();
   const router = useRouter();
@@ -37,6 +53,9 @@ export default function SettingsOverlay() {
 
   const activeTab: SettingsTab = ALL_TABS.find((t) => t.id === currentTabId) ?? ALL_TABS[0]!;
 
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+
   const close = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("settings");
@@ -50,13 +69,44 @@ export default function SettingsOverlay() {
   }, [pathname, router, searchParams]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === "Escape") close();
+    if (e.key === "Escape") {
+      close();
+      return;
+    }
+    if (e.key === "Tab") {
+      const modal = document.querySelector('[role="dialog"]');
+      if (!modal) return;
+      const focusable = modal.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
+      
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
   }, [close]);
 
   useEffect(() => {
     if (isOpen) {
+      previousFocus.current = document.activeElement as HTMLElement;
+      // Focus the close button after a tick (wait for render)
+      setTimeout(() => closeBtnRef.current?.focus(), 0);
       document.addEventListener("keydown", handleKeyDown);
+      // Lock background scroll while overlay is open (prevents double-scroll)
       document.body.style.overflow = "hidden";
+    } else {
+      // Return focus on close
+      if (previousFocus.current) {
+        previousFocus.current.focus();
+        previousFocus.current = null;
+      }
     }
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
@@ -68,24 +118,25 @@ export default function SettingsOverlay() {
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
       <div className="absolute inset-0 bg-black/50" onClick={close} />
 
-      {/* Panel */}
-      <div className="relative w-[calc(100%-32px)] h-[calc(100%-32px)] m-4 flex bg-[var(--color-surface)] rounded-lg shadow-2xl overflow-hidden">
-        {/* Sidebar */}
+      <div 
+        className="relative w-11/12 max-w-7xl max-h-[85vh] flex bg-[var(--color-surface)] rounded-lg shadow-2xl overflow-hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+      >
         <SettingsSidebar
           tabs={ALL_TABS}
           activeTab={currentTabId}
           onSelect={selectTab}
         />
 
-        {/* Content */}
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Header */}
           <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] shrink-0">
-            <h2 className="text-xl font-bold text-[var(--color-text-primary)]">Settings</h2>
+            <h2 id="settings-title" className="text-xl font-bold text-[var(--color-text-primary)]">Settings</h2>
             <button
+              ref={closeBtnRef}
               onClick={close}
               className="ml-4 p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] rounded-full shrink-0"
               aria-label="Close settings"
@@ -96,21 +147,36 @@ export default function SettingsOverlay() {
             </button>
           </div>
 
-          {/* Body */}
+          {/* Mobile tab selector — visible only below md breakpoint */}
+          <select
+            value={activeTab.id}
+            onChange={(e) => selectTab(e.target.value)}
+            className="md:hidden mx-6 mt-3 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)]"
+            aria-label="Settings category"
+          >
+            {ALL_TABS.map(tab => (
+              <option key={tab.id} value={tab.id}>{tab.label}</option>
+            ))}
+          </select>
+
           <div className="flex-1 overflow-y-auto">
             <TabPanel tabId={activeTab.id} activeTab={activeTab} />
           </div>
         </div>
       </div>
 
-      {/* Fade-in animation */}
       <style jsx>{`
         @keyframes fadeIn {
           from { opacity: 0; transform: scale(0.95); }
           to { opacity: 1; transform: scale(1); }
         }
-        div :global(.relative) {
+        div :global([role="dialog"]) {
           animation: fadeIn 200ms ease-out;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          div :global([role="dialog"]) {
+            animation: none;
+          }
         }
       `}</style>
     </div>,

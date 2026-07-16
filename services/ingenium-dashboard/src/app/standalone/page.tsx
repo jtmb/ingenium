@@ -1,18 +1,24 @@
 "use client";
 
-import { Suspense, useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { Suspense, useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import WorkspaceControl from "../components/WorkspaceControl";
 import type { WorkspaceControlProps } from "../components/WorkspaceControl";
+import { api, type DocSpace } from "@/lib/api";
 
 /**
- * Standalone page — renders page content WITHOUT the full layout chrome
+ * StandalonePage — Renders page content WITHOUT the full layout chrome
  * (no sidebar nav, ProjectDropdown, or Settings gear).
  *
  * URL format:
  *   /standalone?page=opencode
  *   /standalone?page=mail&account=gmail&folder=INBOX
  *   /standalone?page=docs
+ *
+ * Used by external embedding contexts (e.g., tiling window managers,
+ * Electron BrowserView) where only the content pane is desired.
+ * The sub-components replicate their /app/ equivalents but skip the
+ * MainContainer + Navigation wrappers.
  */
 export default function StandalonePage() {
   return (
@@ -127,7 +133,7 @@ function StandaloneOpenCode() {
     <div className="relative w-full h-full">
       {/* Web iframe */}
       <iframe
-        src="http://localhost:4098/"
+        src="/opencode-proxy/"
         className="absolute inset-0 w-full h-full border-0"
         style={{
           opacity: mode === "web" ? 1 : 0,
@@ -138,6 +144,7 @@ function StandaloneOpenCode() {
         tabIndex={mode === "web" ? 0 : -1}
         title="OpenCode Web"
         allow="clipboard-write"
+        sandbox="allow-scripts allow-same-origin"
       />
 
       {/* CLI iframe — lazy-mounted */}
@@ -152,9 +159,10 @@ function StandaloneOpenCode() {
           }}
           aria-hidden={mode !== "cli"}
           tabIndex={mode === "cli" ? 0 : -1}
-          title="OpenCode Terminal"
-          allow="clipboard-write"
-        />
+        title="OpenCode Terminal"
+        allow="clipboard-write"
+        sandbox="allow-scripts allow-same-origin"
+      />
       )}
 
       {/* Mode toggle — simplified standalone version */}
@@ -239,17 +247,307 @@ function StandaloneMail() {
 }
 
 /**
- * Standalone Docs view — placeholder with WorkspaceControl.
+ * Standalone Docs view — focused Docs entry/landing experience.
+ *
+ * Fetches available spaces from the API, allows choosing or creating a
+ * documentation space, and navigates to the full /docs workspace when
+ * a space is selected. Supports loading, empty, error, and create-flow
+ * states. Does NOT duplicate the full rich editor or mock data.
  */
 function StandaloneDocs() {
+  const router = useRouter();
+
+  const [spaces, setSpaces] = useState<DocSpace[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  /** Generate a URL-safe slug from an arbitrary string. */
+  const slugify = useCallback((s: string) => {
+    return s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 80) || "untitled";
+  }, []);
+
+  const fetchSpaces = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    api.docs.spaces
+      .list()
+      .then(({ data }) => {
+        setSpaces(data ?? []);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Failed to load docs spaces");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    fetchSpaces();
+  }, [fetchSpaces]);
+
+  // Focus name input when create form opens
+  useEffect(() => {
+    if (showCreate && nameInputRef.current) {
+      nameInputRef.current.focus();
+    }
+  }, [showCreate]);
+
+  // ── Space selection — navigate to /docs workspace ──────────────────────
+  const handleSelect = useCallback(
+    (spaceId: number) => {
+      router.push(`/docs?space=${spaceId}`);
+    },
+    [router],
+  );
+
+  // ── Create space ───────────────────────────────────────────────────────
+  const handleCreate = useCallback(async () => {
+    const name = newName.trim();
+    if (!name) return;
+
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const { data } = await api.docs.spaces.create(
+        name,
+        slugify(name),
+        newDescription.trim() || undefined,
+      );
+      router.push(`/docs?space=${data.id}`);
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create space");
+    } finally {
+      setCreating(false);
+    }
+  }, [newName, newDescription, slugify, router]);
+
+  const handleCancelCreate = useCallback(() => {
+    setShowCreate(false);
+    setNewName("");
+    setNewDescription("");
+    setCreateError(null);
+  }, []);
+
+  // ── Loading state ──────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="flex flex-col items-center gap-3 text-[var(--color-text-muted)]">
+          <svg className="animate-spin w-6 h-6" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="text-sm">Loading spaces…</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Error state ────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center space-y-4 max-w-sm">
+          <svg className="w-12 h-12 mx-auto text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          </svg>
+          <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>
+          <button
+            type="button"
+            onClick={fetchSpaces}
+            className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Empty state (no spaces exist) ──────────────────────────────────────
+  if (spaces.length === 0 && !showCreate) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center space-y-4 max-w-sm">
+          <svg className="w-16 h-16 mx-auto text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.2}
+              d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+            No docs spaces yet
+          </h2>
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Create a documentation space to organise your pages.
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+          >
+            Create your first space
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Data state — list + create form ────────────────────────────────────
   return (
-    <div className="flex items-center justify-center h-full">
-      <div className="text-center space-y-3">
-        <svg className="w-12 h-12 mx-auto text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-        <p className="text-[var(--color-text-muted)]">Docs coming soon</p>
+    <div className="h-full flex flex-col">
+      {/* Scrollable space list */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-5">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+              Documentation Spaces
+            </h2>
+            <p className="text-sm text-[var(--color-text-muted)] mt-0.5">
+              Select a space to browse and edit its pages.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setShowCreate(true);
+              setCreateError(null);
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+            aria-label="Create new space"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            New Space
+          </button>
+        </div>
+
+        {/* Create-space form */}
+        {showCreate && (
+          <div
+            className="mb-6 p-4 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-muted)]"
+            role="form"
+            aria-label="Create new documentation space"
+          >
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="standalone-docs-new-name" className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
+                  Name
+                </label>
+                <input
+                  ref={nameInputRef}
+                  id="standalone-docs-new-name"
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Project Docs"
+                  className="w-full px-3 py-2 text-sm bg-[var(--color-surface)] border border-[var(--color-border)] rounded text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-text-link)] focus:border-transparent"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); if (e.key === "Escape") handleCancelCreate(); }}
+                  aria-required="true"
+                />
+              </div>
+              <div>
+                <label htmlFor="standalone-docs-new-desc" className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
+                  Description <span className="font-normal normal-case text-[var(--color-text-muted)]">(optional)</span>
+                </label>
+                <input
+                  id="standalone-docs-new-desc"
+                  type="text"
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder="Brief description of this space"
+                  className="w-full px-3 py-2 text-sm bg-[var(--color-surface)] border border-[var(--color-border)] rounded text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-text-link)] focus:border-transparent"
+                />
+              </div>
+              {createError && (
+                <p className="text-sm text-red-600 dark:text-red-400" role="alert">{createError}</p>
+              )}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleCreate}
+                  disabled={creating || !newName.trim()}
+                  className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+                >
+                  {creating ? "Creating…" : "Create Space"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelCreate}
+                  disabled={creating}
+                  className="px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] bg-transparent rounded hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Space cards grid */}
+        <div
+          className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+          role="list"
+          aria-label="Documentation spaces"
+        >
+          {spaces.map((space) => (
+            <button
+              key={space.id}
+              type="button"
+              onClick={() => handleSelect(space.id)}
+              className="flex items-start gap-4 p-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] hover:border-[var(--color-text-link)] transition-all text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
+              role="listitem"
+              aria-label={`Open ${space.name}`}
+            >
+              {/* Space icon */}
+              <span
+                className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-[var(--color-surface-muted)] text-lg"
+                aria-hidden="true"
+              >
+                {space.icon || (
+                  <svg className="w-5 h-5 text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                      d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
+                  </svg>
+                )}
+              </span>
+
+              {/* Space info */}
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-semibold text-[var(--color-text-primary)] truncate">
+                  {space.name}
+                </h3>
+                {space.description && (
+                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5 line-clamp-2">
+                    {space.description}
+                  </p>
+                )}
+                <p className="text-[10px] text-[var(--color-text-muted)] mt-1.5">
+                  /{space.slug}
+                </p>
+              </div>
+
+              {/* Chevron indicator */}
+              <svg className="shrink-0 w-4 h-4 text-[var(--color-text-muted)] mt-2" fill="none" stroke="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

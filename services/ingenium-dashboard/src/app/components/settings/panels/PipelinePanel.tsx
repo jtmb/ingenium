@@ -8,7 +8,11 @@ function providerModels(p: any): [string, any][] {
   return Object.entries(p?.models || {}) as [string, any][];
 }
 
-/** Sort providers: pinned first, then alphabetically. */
+/**
+ * Sort providers for the dropdown: known providers first with a fixed ranking
+ * (OpenCode free → Pro → Zen → Go → DeepSeek → Zen), then alphabetically.
+ * Filters out providers with no models.
+ */
 function sortProviders(providers: any[]): any[] {
   const pinned: [string, number][] = [
     ["opencode zen", 0],
@@ -35,6 +39,14 @@ function sortProviders(providers: any[]): any[] {
     });
 }
 
+/**
+ * Synthesis pipeline settings: LLM provider selection (primary + backup),
+ * API key management, custom endpoint support, and polling interval.
+ *
+ * Providers are fetched directly from the OpenCode HTTP API (port 4098) rather
+ * than from the Ingenium API because OpenCode is the source of truth for
+ * available LLM providers and their model listings.
+ */
 export default function PipelinePanel() {
   // Providers
   const [providers, setProviders] = useState<any[]>([]);
@@ -72,7 +84,6 @@ export default function PipelinePanel() {
   const [showPw, setShowPw] = useState<Record<string, boolean>>({});
   const togglePw = (name: string) => setShowPw((prev) => ({ ...prev, [name]: !prev[name] }));
 
-  // Toast
   const [toast, setToast] = useState("");
   useEffect(() => {
     if (!toast) return;
@@ -87,16 +98,18 @@ export default function PipelinePanel() {
   const backupModels = providerModels(backupProvider);
   const sortedProviders = sortProviders(providers);
 
-  // ── Fetch providers ──
+  // Fetch providers from OpenCode's own HTTP API (port 4098).
+  // This is the canonical source for available LLM providers + their models.
   useEffect(() => {
-    fetch("http://localhost:4098/provider?directory=/workspace")
+    fetch("/opencode-proxy/provider?directory=/workspace")
       .then((r) => r.json())
       .then((d) => setProviders(d.all || []))
       .catch(() => setProviders([]))
       .finally(() => setLoadingProviders(false));
   }, []);
 
-  // ── Load saved synthesis config (re-runs when providers arrive for model matching) ──
+  // Load saved synthesis config — re-runs when providers arrive so we can
+  // match the stored model ID against the provider's model list.
   useEffect(() => {
     Promise.all([
       api.settings.get("synthesis_provider", "global-default"),
@@ -114,7 +127,6 @@ export default function PipelinePanel() {
           if (m.data?.value) setCustomModel(m.data.value);
           setShowCustom(true);
         }
-        // Restore selected model for non-custom providers
         if (pid && pid !== "__custom__" && m.data?.value) {
           const prov = providers.find((x) => x.id === pid);
           if (prov) {
@@ -129,7 +141,7 @@ export default function PipelinePanel() {
       .finally(() => setLoadingConfig(false));
   }, [providers]);
 
-  // ── Load backup config (re-runs when providers arrive) ──
+  // Load backup synthesis config — same re-run pattern as primary.
   useEffect(() => {
     Promise.all([
       api.settings.get("synthesis_backup_provider", "global-default"),
@@ -161,7 +173,7 @@ export default function PipelinePanel() {
       .catch(() => {});
   }, [providers]);
 
-  // ── Load interval ──
+  // Load synthesis polling interval.
   useEffect(() => {
     api.settings
       .get("synthesis_interval_ms", "global-default")
@@ -184,6 +196,11 @@ export default function PipelinePanel() {
     }
   };
 
+  /**
+   * Save both primary and backup LLM configuration to the global-default project.
+   * For non-custom providers, extracts the model ID and endpoint URL from the
+   * provider metadata. The `__custom__` sentinel signals ad-hoc provider details.
+   */
   const saveLlmConfig = async () => {
     setSaving(true);
     setLlmStatus("");
@@ -208,7 +225,6 @@ export default function PipelinePanel() {
       await api.settings.set("synthesis_endpoint", ep, "global-default");
       setEndpoint(ep);
 
-      // Save backup config
       if (backupProviderId) {
         await api.settings.set("synthesis_backup_provider", backupProviderId, "global-default");
         if (backupIsCustom) {
@@ -243,11 +259,14 @@ export default function PipelinePanel() {
     setSaving(false);
   };
 
+  /**
+   * Test both primary and backup LLM connections sequentially via the API's
+   * `testLlm` endpoint. Reports combined status (e.g., "✅ Primary OK | ✅ Backup OK").
+   */
   const testLlmConnection = async () => {
     setTesting(true);
     setLlmStatus("");
     try {
-      // Primary
       const modelId = isCustom
         ? customModel
         : (() => {
@@ -255,13 +274,11 @@ export default function PipelinePanel() {
             const match = models.find(([k]) => k === selectedModel) || models[0];
             return match?.[1]?.id || selectedModel || providerId;
           })();
-      const ep = isCustom ? endpoint : endpoint;
 
       let status = "";
-      const pr = await api.settings.testLlm(ep, modelId, apiKeyState);
+      const pr = await api.settings.testLlm(endpoint, modelId, apiKeyState);
       status = pr.ok ? "✅ Primary OK" : `❌ Primary: ${pr.status || "error"} ${pr.message || ""}`;
 
-      // Backup
       if (backupProviderId) {
         const bModelId = backupIsCustom
           ? backupCustomModel
@@ -286,7 +303,10 @@ export default function PipelinePanel() {
     setTesting(false);
   };
 
-  /** Password input with show/hide toggle */
+  /**
+   * Reusable password input with show/hide toggle.
+   * Defined inline because it captures `showPw` and `togglePw` from the panel scope.
+   */
   function PwInput({
     value,
     onChange,
@@ -318,11 +338,8 @@ export default function PipelinePanel() {
     );
   }
 
-  // ── Render ──
-
   return (
     <div>
-      {/* Info */}
       <div className="px-6 pt-5 pb-2">
         <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Synthesis LLM</h3>
         <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
@@ -341,7 +358,6 @@ export default function PipelinePanel() {
         </div>
       ) : null}
 
-      {/* Provider select */}
       <SettingRow label="Provider" description="Choose an LLM provider for synthesis">
         <select
           value={providerId}
@@ -381,7 +397,6 @@ export default function PipelinePanel() {
         </select>
       </SettingRow>
 
-      {/* Model select (non-custom) */}
       {!isCustom && providerId && primaryModels.length > 0 && (
         <SettingRow label="Model" description="Select a specific model from this provider">
           <select
@@ -398,7 +413,6 @@ export default function PipelinePanel() {
         </SettingRow>
       )}
 
-      {/* API Key (non-custom) */}
       {!isCustom && providerId && (
         <SettingRow
           label="API Key"
@@ -417,7 +431,7 @@ export default function PipelinePanel() {
         </SettingRow>
       )}
 
-      {/* Custom provider (collapsible) */}
+      {/* Custom provider (collapsible) — uses __custom__ sentinel to toggle between predefined and ad-hoc provider */}
       <div className="border-t border-[var(--color-border)]">
         <button
           type="button"
@@ -472,7 +486,6 @@ export default function PipelinePanel() {
         )}
       </div>
 
-      {/* Run interval */}
       {loadingInterval ? (
         <div className="px-6 py-4 text-sm text-[var(--color-text-muted)] animate-pulse">
           Loading interval...
@@ -500,7 +513,7 @@ export default function PipelinePanel() {
         </SettingRow>
       )}
 
-      {/* Backup Provider (collapsible) */}
+      {/* Backup Provider (collapsible) — fallback if primary LLM is unreachable */}
       <div className="border-t border-[var(--color-border)]">
         <button
           type="button"
@@ -511,7 +524,6 @@ export default function PipelinePanel() {
         </button>
         {showBackup && (
           <div className="px-6 pb-4 space-y-3">
-            {/* Backup Provider */}
             <div>
               <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
                 Provider
@@ -548,7 +560,6 @@ export default function PipelinePanel() {
               </select>
             </div>
 
-            {/* Backup custom fields */}
             {backupIsCustom && (
               <div className="space-y-3 p-3 bg-[var(--color-surface-muted)] rounded border border-[var(--color-border)]">
                 <div>
@@ -578,7 +589,6 @@ export default function PipelinePanel() {
               </div>
             )}
 
-            {/* Backup model (non-custom) */}
             {backupProviderId && backupModels.length > 0 && !backupIsCustom && (
               <div>
                 <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
@@ -598,7 +608,6 @@ export default function PipelinePanel() {
               </div>
             )}
 
-            {/* Backup API Key */}
             {backupProviderId && (
               <div>
                 <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
@@ -621,7 +630,6 @@ export default function PipelinePanel() {
         )}
       </div>
 
-      {/* Save + Test buttons */}
       <div className="px-6 py-4 border-t border-[var(--color-border)] flex items-center gap-3">
         <button
           onClick={saveLlmConfig}
@@ -650,7 +658,6 @@ export default function PipelinePanel() {
         )}
       </div>
 
-      {/* Status footer */}
       {!loadingProviders && !loadingConfig && (
         <div className="px-6 py-3 text-xs text-[var(--color-text-muted)] space-y-1">
           {isCustom && customModel && endpoint && (
@@ -679,7 +686,6 @@ export default function PipelinePanel() {
         </div>
       )}
 
-      {/* Toast */}
       {toast && (
         <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg z-50 text-sm">
           {toast}
