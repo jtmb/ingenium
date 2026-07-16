@@ -104,6 +104,38 @@ services/
 
 **API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer.
 
+## Agent Table
+
+**12 agents total: 1 primary + 11 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
+
+| Agent | Type | Model | Skills Allowed |
+|-------|------|-------|----------------|
+| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` |
+| **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | `local-models` |
+| **ingenium-scout** | Subagent | `deepseek/deepseek-v4-flash` | `local-models` |
+| **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-pro` | — |
+| **vision-bridge** | Subagent | `lmstudio/qwen/qwen3.5-9b` | `local-models` |
+| **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
+| **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
+| **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
+| **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
+| **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
+| **browser-agent** | Subagent | `opencode/deepseek-v4-flash-free` | `mcp-tooling`, `engineering-workflow` |
+
+> Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter. `browser-agent-errors.md` lives at `.opencode/agents/browser-agent-errors.md`.
+
+### MCP Tool Naming Convention
+
+All Ingenium MCP tools use a **single `ingenium_` prefix**:
+
+| Scope | Pattern | Example |
+|-------|---------|---------|
+| Transport name | Unprefixed (server key only) | `ingenium` (server name in `opencode.json`) |
+| Catalog name | `ingenium_`-prefixed | `ingenium_skill_list` |
+| Exposed tool name | `ingenium_<noun>_<verb>` | `ingenium_task_create` |
+
+The full pattern is `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `ingenium_task_create`). The prefix appears exactly once — never `ingenium_ingenium_`. See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md) for the complete catalog.
+
 ### Dashboard Pages
 
 The Ingenium Dashboard (http://localhost:3000) provides 17 primary routes plus the Settings overlay (18 user-facing views):
@@ -192,6 +224,8 @@ if (!parent) return; // parent removed — skip silently
 - 🔴 **Never hand-write RFC 2822 address-parsing regexes** — Always use a tested library (`mailparser`, `addressparser`, `simpleParser`).
 - 🔴 **Zod schemas are NOT runtime enforcement gates** — SQL CHECK constraints are the actual gate. Client-side validation or `try/catch` for `SQLITE_CONSTRAINT` is required.
 
+**Mail Engine**: The sync engine now includes an auth error circuit breaker. After 3 consecutive authentication failures on a folder, the folder state transitions to `error` with a re-authentication message, and the service health reports `degraded`. Gmail DRAFT and All Mail (Archive) labels are now supported.
+
 ---
 
 ## Docker Deployment
@@ -223,6 +257,7 @@ docker compose exec ingenium npm run test   # Execute inside container
 - **Volumes**: `ingenium-data` (/app/.ingenium), `opencode-config`, `opencode-data`. Workspace bind-mount: `~/repos` → `/workspace`.
 - **OpenCode Web/CLI**: Dashboard `/opencode` page has dual-mode iframes (Web: :4098, CLI: ttyd :4099). Glass tab toggle with `Ctrl+Shift+\``. Mode persisted in `localStorage`.
 - **Direct terminal attachment**: `opencode attach http://localhost:4098 --dir /workspace`
+- **OpenCode Access**: The Dashboard iframe connects directly to OpenCode Web at `http://localhost:4098/`. OpenCode Web enforces HTTP Basic Auth via the `OPENCODE_SERVER_PASSWORD` environment variable. The browser's native auth prompt handles credentials — no custom proxy middleware needed.
 - 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks in the API Express process. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts).
 - 🔴 **Docker sudo**: `appuser` has passwordless sudo for package installs.
 - 🔴 **Docker git**: `git` package installed for OpenCode repo creation.
@@ -235,7 +270,7 @@ docker compose exec ingenium npm run test   # Execute inside container
 bash tests/test-self-improving.sh        # All 4 detection pipeline tests
 bash tests/test-self-improving.sh -v     # Verbose output
 bash tests/enforce-no-db-leaks.sh        # CI gate: verify no DB access leaks
-bash tests/test-agent-validation.sh      # Agent validation checks (10 agents)
+bash tests/test-agent-validation.sh      # Agent validation checks (12 agents)
 bash tests/test-append-only-files.sh     # Verify append-only file constraints
 
 npm run test --workspace=packages/ingenium-core          # Unit tests
@@ -271,6 +306,7 @@ Commands are captured in the DB alongside skills, agents, and plugins:
 | `/synthesize` | `.opencode/commands/synthesize.md` | Trigger synthesis pipeline to process pending observations |
 | `/sync-skills` | `.opencode/commands/sync-skills.md` | Bidirectional disk↔DB skill sync |
 | `/init-project` | `.opencode/commands/init-project.md` | Initialize a new project with skills, agents, plugins |
+| `/repo-context` | `.opencode/commands/repo-context.md` | Load project identity — reads `.opencode.json`, identifies workspace, and loads relevant context files |
 
 **Commands MCP Tools:** `ingenium_command_list`, `ingenium_command_get`, `ingenium_command_create`, `ingenium_command_update`, `ingenium_command_delete`
 

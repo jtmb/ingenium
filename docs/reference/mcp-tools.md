@@ -9,6 +9,18 @@ All **212 tools** across **24 categories** (210 server tools + 2 extension tools
 
 The canonical catalog (source of truth) lives at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
+### Naming Convention
+
+Ingenium MCP tools use a three-layer naming system:
+
+| Layer | Format | Example |
+|-------|--------|---------|
+| Transport (internal registration) | `noun_verb` (unprefixed) | `skill_create` |
+| Catalog (application state) | `ingenium_noun_verb` | `ingenium_skill_create` |
+| Exposed (OpenCode) | `ingenium_noun_verb` | `ingenium_skill_create` |
+
+OpenCode applies the server key (`ingenium`) as a prefix. Transport names are unprefixed to avoid double-prefixing (`ingenium_ingenium_*`).
+
 ## PROJECTS — Managing workspaces
 
 | Tool | What it does |

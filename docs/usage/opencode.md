@@ -7,7 +7,7 @@ description: Using the embedded OpenCode Web/CLI dual-mode interface in the Inge
 
 ## Overview
 
-The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode toggle** for interacting with the Ingenium MCP tools.
+The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode toggle** for interacting with the Ingenium MCP tools. The OpenCode Dashboard embeds Web and CLI modes as iframes. Authentication is handled by the OpenCode Web server's native HTTP Basic Auth (configured via `OPENCODE_SERVER_PASSWORD`). The browser presents a single auth prompt, then caches credentials for the session. Ports 4098 and 4099 are bound to host loopback (127.0.0.1) for security.
 
 ## OpenCode Web/CLI Mode Switch
 
