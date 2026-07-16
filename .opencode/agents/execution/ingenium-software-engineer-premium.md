@@ -5,8 +5,15 @@ mode: subagent
 model: deepseek/deepseek-v4-pro
 permission:
   read: allow
-  edit: allow
-  bash: allow
+  edit:
+    "*": allow
+    "next-steps-plan/**": deny
+  write:
+    "*": allow
+    "next-steps-plan/**": deny
+  bash:
+    "*": allow
+    "next-steps-plan/**": deny
   glob: allow
   grep: allow
   webfetch: allow
@@ -24,10 +31,9 @@ permission:
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
-    "@debugging-patterns": allow
-    "@configuring-opencode": allow
+    "@engineering-workflow": allow
     "@mcp-tooling": allow
-    "@docs-workspace": allow
+    "@documentation": allow
     "*": deny
 ---
 

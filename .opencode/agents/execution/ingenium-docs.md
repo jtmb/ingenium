@@ -2,12 +2,19 @@
 name: ingenium-docs
 description: "Documentation and skill management agent. Creates and updates README, API docs, ADRs, and skill system files."
 mode: subagent
-model: opencode/deepseek-v4-flash-free
+model: deepseek/deepseek-v4-flash
 # model: opencode/deepseek-v4-flash-free  # only if Zen free tier ;also available: lmstudio/qwen/qwen3.5-9b
 permission:
   read: allow
-  edit: allow
-  bash: deny
+  edit:
+    "*": allow
+    "next-steps-plan/**": deny
+  write:
+    "*": allow
+    "next-steps-plan/**": deny
+  bash:
+    "*": deny
+    "next-steps-plan/**": deny
   glob: allow
   grep: allow
   playwright_*: deny
@@ -48,11 +55,11 @@ permission:
   ingenium_docs_get_stats: allow
   skill:
     "@development-conventions": allow
-    "@debugging-patterns": allow
+    "@engineering-workflow": allow
     "@local-models": allow
     "@mcp-tooling": allow
     "@skill-maintenance": allow
-    "@docs-workspace": allow
+    "@documentation": allow
     "*": deny
 ---
 

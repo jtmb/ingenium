@@ -54,8 +54,8 @@ const CONSOLIDATED_SOURCES: { legacy: string; canonical: string }[] = [
   { legacy: "onboard-existing-repo", canonical: "devops-conventions" },
   { legacy: "parallel-session-hygiene", canonical: "devops-conventions" },
   { legacy: "database-migration-management", canonical: "database-conventions" },
-  { legacy: "SQLite-migration-patterns", canonical: "database-conventions" },
-  { legacy: "SQLite-wal-safety", canonical: "database-conventions" },
+  { legacy: "sqlite-migration-patterns", canonical: "database-conventions" },
+  { legacy: "sqlite-wal-safety", canonical: "database-conventions" },
   { legacy: "agent-execution-quality", canonical: "engineering-workflow" },
   { legacy: "agent-workflow-patterns", canonical: "engineering-workflow" },
   { legacy: "debugging-patterns", canonical: "engineering-workflow" },
@@ -79,8 +79,6 @@ function proposalStatusHue(status: string): string {
   switch (status) {
     case "draft": return "gray";
     case "pending": return "amber";
-    case "approved": return "blue";
-    case "rejected": return "red";
     case "applied": return "green";
     case "rolledBack": return "orange";
     case "stale": return "slate";

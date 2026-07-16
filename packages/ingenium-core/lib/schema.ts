@@ -82,7 +82,7 @@ export type SkillLineage = z.infer<typeof SkillLineageSchema>;
 export const SkillProposalSchema = z.object({
   id: z.string().uuid(),
   project_id: z.string(),
-  status: z.enum(["draft", "pending", "approved", "rejected", "applied", "rolled_back", "stale"]).default("draft"),
+  status: z.enum(["draft", "pending", "rejected", "applied", "rolled_back", "stale"]).default("draft"),
   proposal_type: z.enum(["create", "update", "merge", "archive"]),
   target_skill_id: z.string().optional().nullable(),
   target_name: z.string(),
