@@ -48,7 +48,7 @@ Before any browser automation task, you MUST:
    ```bash
    head -25 .opencode/skills/mcp-tooling/references/dev-browser/wsl-chrome-connect.sh
    ```
-4. Verify you can write to `.opencode/agents/execution/browser-agent-errors.md`
+4. Verify you can write to `.opencode/agents/browser-agent-errors.md`
 
 ---
 
@@ -158,7 +158,7 @@ Output to the user/orchestrator as clean JSON:
 
 - **Full success** (all errors resolved, task complete):
   ```bash
-  rm .opencode/agents/execution/browser-agent-errors.md
+  rm .opencode/agents/browser-agent-errors.md
   ```
 - **Partial failure or gave up:**
   ```bash
