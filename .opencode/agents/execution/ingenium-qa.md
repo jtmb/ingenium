@@ -9,8 +9,8 @@ permission:
   bash: allow
   glob: allow
   grep: allow
-  edit: allow
-  write: allow
+  edit: deny
+  write: deny
   playwright_*: allow
   task:
     "*": "deny"
@@ -22,10 +22,10 @@ permission:
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
-    "@debugging-patterns": allow
+    "@engineering-workflow": allow
     "@local-models": allow
     "@mcp-tooling": allow
-    "@docs-workspace": allow
+    "@documentation": allow
     "*": deny
 ---
 

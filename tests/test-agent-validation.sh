@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ───────────────────────────────────────────────────────────
-# test-agent-validation.sh — Validate ALL 11 agent .md files
-# under .opencode/agents/.
+# test-agent-validation.sh — Validate ALL agent .md files
+# under .opencode/agents/.  Agent count is determined dynamically at runtime.
 #
 # Tests:
 #   1. Agent frontmatter validity (name, description, model)
@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 AGENTS_DIR="$REPO_ROOT/.opencode/agents"
 SKILLS_DIR="$REPO_ROOT/.opencode/skills"
-SKILL_INDEX="$REPO_ROOT/SKILL-INDEX.md"
+SKILL_INDEX="$REPO_ROOT/.opencode/SKILL-INDEX.md"
 VERBOSE=false
 PASSED=0
 FAILED=0
@@ -67,9 +67,21 @@ section() {
 }
 
 # ── Agent File Discovery ──────────────────────────────────
-# Returns all agent .md files sorted by path
+# Returns all agent .md files sorted by path.
+# Skips .md files that don't start with --- (non-agent files like
+# browser-agent-errors.md).
 find_agent_files() {
-    find "$AGENTS_DIR" -name "*.md" -type f | sort
+    local all_files
+    all_files=$(find "$AGENTS_DIR" -name "*.md" -type f | sort)
+    for f in $all_files; do
+        local first_line
+        first_line=$(head -1 "$f")
+        if [[ "$first_line" == "---" ]]; then
+            echo "$f"
+        else
+            yellow "  ⚠ WARNING: Skipping non-agent file (no --- frontmatter): $(basename "$f")" >&2
+        fi
+    done
 }
 
 # Returns just the agent name (basename without .md)
@@ -129,12 +141,14 @@ is_agent_write_capable() {
 }
 
 # ── Skill List Extraction ─────────────────────────────────
-# Extract skill names from the skills: block in frontmatter
-# Returns one skill name per line
+# Extract skill names from the agent frontmatter.
+# Supports both a top-level skills: block (legacy) and the
+# permission.skill: nested block (standard agent format).
+# Returns one bare skill name per line (no @ prefix).
 extract_skill_list() {
     local fm="$1"
 
-    # Check for inline empty list
+    # Check for inline empty list (legacy top-level skills: [])
     if echo "$fm" | grep -q '^skills: \[\]' 2>/dev/null; then
         return 0
     fi
@@ -147,21 +161,33 @@ extract_skill_list() {
         return 0
     fi
 
-    # Extract multi-line skills block
+    # Extract multi-line top-level skills block (legacy)
     local skills_block
     skills_block=$(extract_yaml_block "skills" <<< "$fm")
-
-    # If no skills block was found or it's empty, return success
-    if [[ -z "$skills_block" ]]; then
-        return 0
+    if [[ -n "$skills_block" ]]; then
+        # Parse YAML list items: "  - skillname" or "- skillname"
+        local result
+        result=$(echo "$skills_block" | grep -- '- ' 2>/dev/null \
+            | sed 's/^[[:space:]]*- //' \
+            | sed 's/[[:space:]]*#.*//' \
+            | sed 's/[[:space:]]*$//' || true)
+        if [[ -n "$result" ]]; then
+            echo "$result"
+            return 0
+        fi
     fi
 
-    # Parse YAML list items: "  - skillname" or "- skillname"
-    # Strip inline YAML comments (# ...) and trim whitespace
-    echo "$skills_block" | grep -- '- ' 2>/dev/null \
-        | sed 's/^[[:space:]]*- //' \
-        | sed 's/[[:space:]]*#.*//' \
-        | sed 's/[[:space:]]*$//' || true
+    # NEW: Extract from permission.skill nested block (standard agent format)
+    # Agent frontmatter uses: permission: → skill: → "@skill-name": allow
+    local perm_block
+    perm_block=$(extract_yaml_block "permission" <<< "$fm")
+    if [[ -n "$perm_block" ]]; then
+        # Extract skill names from lines matching: "@skill-name": allow
+        # These appear under the "skill:" sub-key within the permission block.
+        # Strip the @ prefix and surrounding quotes to get bare skill names.
+        echo "$perm_block" | grep -E '^\s+"@[^"]+":\s*allow' \
+            | sed 's/.*"@\([^"]*\)".*/\1/' || true
+    fi
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -243,7 +269,10 @@ test_frontmatter_validity() {
 
 # ═══════════════════════════════════════════════════════════
 # TEST 2 — Permission Completeness
-# Every agent must have explicit edit: and write: in permission.
+# Every agent must have explicit edit: in permission.
+# write: is required only for write-capable agents
+# (edit: allow OR write: allow). Read-only agents
+# (edit: deny AND not write: allow) may omit write:.
 # ═══════════════════════════════════════════════════════════
 test_permission_completeness() {
     section "TEST 2 — Permission Completeness"
@@ -272,30 +301,40 @@ test_permission_completeness() {
         local perm_block
         perm_block=$(extract_yaml_block "permission" <<< "$fm")
 
-        # Check edit: field
+        # Check edit: field (always required)
         if ! echo "$perm_block" | grep -q "^  edit:"; then
             fail "$name" "Missing 'edit:' in permission block"
             errors=$((errors + 1))
             continue
         fi
 
-        # Check write: field
-        if ! echo "$perm_block" | grep -q "^  write:"; then
-            fail "$name" "Missing 'write:' in permission block"
-            errors=$((errors + 1))
-            continue
-        fi
-
         local edit_val
         edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}')
-        local write_val
-        write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}')
 
-        info "$name — edit: $edit_val, write: $write_val"
+        # Determine if agent has an explicit write: field
+        local has_write=false
+        local write_val=""
+        if echo "$perm_block" | grep -q "^  write:"; then
+            has_write=true
+            write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}')
+        fi
+
+        # write: is required for write-capable agents (edit: allow OR write: allow)
+        # Read-only agents (edit: deny AND not write: allow) may omit write:
+        if [[ "$edit_val" == "allow" || "$write_val" == "allow" ]]; then
+            # This agent is write-capable — must have write: field
+            if ! $has_write; then
+                fail "$name" "Missing 'write:' in permission block (write-capable agent: edit=$edit_val)"
+                errors=$((errors + 1))
+                continue
+            fi
+        fi
+
+        info "$name — edit: $edit_val, write: ${write_val:-<none>}"
     done
 
     if [[ "$errors" -eq 0 ]]; then
-        pass "All $count agent files have explicit edit: and write: in permission block"
+        pass "All $count agent files have valid permission blocks"
     fi
 }
 
@@ -441,12 +480,13 @@ test_task_block_safety() {
         perm_block=$(extract_yaml_block "permission" <<< "$fm")
 
         local edit_val
-        edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}')
+        edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}') || true
         local write_val
-        write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}')
+        write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}') || true
 
-        # Only check read-only agents (edit: deny AND write: deny)
-        if [[ "$edit_val" != "deny" || "$write_val" != "deny" ]]; then
+        # Only check read-only agents (not write-capable)
+        # An agent is write-capable if edit: allow OR write: allow
+        if [[ "$edit_val" == "allow" || "$write_val" == "allow" ]]; then
             info "$name — write-capable, skipping task block safety check"
             continue
         fi
