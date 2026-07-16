@@ -1,26 +1,29 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-
 interface OpenCodeFrameProps {
   mode: "web" | "cli";
   cliMounted: boolean;
+  onWebLoaded?: () => void;
+  onCliLoaded?: () => void;
 }
 
 /**
  * Renders two stable, full-size iframes for OpenCode Web and CLI modes.
+ *
  * Both iframes stay at full viewport dimensions in the DOM at all times
- * (once mounted). Inactive iframes are hidden via opacity/visibility/padding
+ * (once mounted). Inactive iframes are hidden via opacity/visibility/pointer-events
  * instead of display:none to prevent xterm dimension zeroing on the CLI side.
+ *
+ * Positioning is "absolute inset-0" — the parent container must be "relative".
  */
-export default function OpenCodeFrame({ mode, cliMounted }: OpenCodeFrameProps) {
-  const pathname = usePathname();
-  const isOpenCode = pathname === "/opencode";
-
-  if (!isOpenCode) return null;
-
+export default function OpenCodeFrame({
+  mode,
+  cliMounted,
+  onWebLoaded,
+  onCliLoaded,
+}: OpenCodeFrameProps) {
   return (
-    <div className="fixed inset-0 top-[57px]">
+    <>
       {/* Web iframe — always mounted */}
       <iframe
         src="http://localhost:4098/"
@@ -34,6 +37,7 @@ export default function OpenCodeFrame({ mode, cliMounted }: OpenCodeFrameProps) 
         tabIndex={mode === "web" ? 0 : -1}
         title="OpenCode Web"
         allow="clipboard-write"
+        onLoad={onWebLoaded}
       />
 
       {/* CLI iframe — lazy-mounted on first CLI activation */}
@@ -50,8 +54,9 @@ export default function OpenCodeFrame({ mode, cliMounted }: OpenCodeFrameProps) 
           tabIndex={mode === "cli" ? 0 : -1}
           title="OpenCode Terminal"
           allow="clipboard-write"
+          onLoad={onCliLoaded}
         />
       )}
-    </div>
+    </>
   );
 }

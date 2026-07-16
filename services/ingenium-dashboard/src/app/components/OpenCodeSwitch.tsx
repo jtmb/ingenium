@@ -1,3 +1,5 @@
+// DEPRECATED — replaced by OpenCodeToolbar.tsx
+
 "use client";
 
 import { useEffect } from "react";

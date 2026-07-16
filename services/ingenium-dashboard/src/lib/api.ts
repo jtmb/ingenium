@@ -302,11 +302,60 @@ interface MailSummary {
   engineHealthy: boolean;
 }
 
+export interface AttentionItem {
+  id: string;
+  type: string;
+  title: string;
+  description: string;
+  severity: "critical" | "warning" | "info";
+  timestamp: string;
+  action?: { label: string; route: string };
+}
+
+export interface AttentionData {
+  items: AttentionItem[];
+  count: number;
+}
+
+export interface ResumeData {
+  lastVisitedPages: Array<{
+    route: string;
+    label: string;
+    timestamp: string;
+  }>;
+  activeSession?: {
+    type: "opencode" | "mail" | "docs";
+    label: string;
+    detail?: string;
+  };
+}
+
+export interface ActivityItem {
+  id: string;
+  type: string;
+  title: string;
+  description: string;
+  timestamp: string;
+  route?: string;
+}
+
+export interface HealthData {
+  api: { status: "ok" | "degraded" | "down"; uptime: number };
+  dashboard: { status: "ok" | "down" };
+  opencode: { status: "ok" | "down" };
+  docker: { status: "healthy" | "unhealthy" | "unknown" };
+  services: Array<{ name: string; status: string; uptime?: number }>;
+}
+
 export interface DashboardSummary {
   learning: LearningSummary | null;
   tasks: TasksSummary | null;
   jobs: JobsSummary | null;
   mail: MailSummary | null;
+  attention: AttentionData | null;
+  resume: ResumeData | null;
+  activity: ActivityItem[] | null;
+  health: HealthData | null;
   generatedAt: string;
 }
 
