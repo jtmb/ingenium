@@ -127,9 +127,11 @@ export function getCategory(toolName: string): string {
   const entry = catalogMap.get(toolName);
   if (entry) return entry.category;
 
-  // Fallback for any tool not in the catalog (shouldn't happen, but guard)
+  // Fallback for any tool not in the catalog (shouldn't happen, but guard).
+  // If the tool name starts with "ingenium_", the category prefix is parts[1];
+  // for unprefixed names, the prefix is parts[0].
   const parts = toolName.split("_");
-  const prefix = parts.length > 1 ? parts[1] : parts[0];
+  const prefix = toolName.startsWith("ingenium_") ? (parts.length > 1 ? parts[1] : parts[0]) : parts[0];
   if (prefix && CATEGORY_PREFIX[prefix]) {
     return CATEGORY_PREFIX[prefix];
   }

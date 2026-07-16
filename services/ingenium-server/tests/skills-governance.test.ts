@@ -598,8 +598,8 @@ describe("Skills Governance Tools", () => {
 
     it("does not use versionId in rollback registration — uses revision with int+min(0)", () => {
       const rollbackBlock = mcpSource.slice(
-        mcpSource.indexOf('"ingenium_skill_rollback"'),
-        mcpSource.indexOf('ingenium_skill_lineage_create'),
+        mcpSource.indexOf('"skill_rollback"'),
+        mcpSource.indexOf('skill_lineage_create'),
       );
       expect(rollbackBlock).not.toMatch(/versionId/);
       expect(rollbackBlock).toMatch(/revision:\s*z\.number\(\)\.int\(\)\.min\(0\)/);
@@ -607,8 +607,8 @@ describe("Skills Governance Tools", () => {
 
     it("does not use numeric proposal IDs", () => {
       const proposalSection = mcpSource.slice(
-        mcpSource.indexOf('"ingenium_skill_proposal_create"'),
-        mcpSource.indexOf('ingenium_observe'),
+        mcpSource.indexOf('"skill_proposal_create"'),
+        mcpSource.indexOf('observe'),
       );
       expect(proposalSection).not.toMatch(/proposalId:\s*z\.number\(\)/);
       expect(proposalSection).toMatch(/proposalId:\s*z\.string\(\)\.uuid\(\)/);
@@ -616,8 +616,8 @@ describe("Skills Governance Tools", () => {
 
     it("does not use parentName/childName/relationshipType in lineage create registration", () => {
       const lineageBlock = mcpSource.slice(
-        mcpSource.indexOf('"ingenium_skill_lineage_create"'),
-        mcpSource.indexOf('ingenium_skill_lineage_list'),
+        mcpSource.indexOf('"skill_lineage_create"'),
+        mcpSource.indexOf('skill_lineage_list'),
       );
       expect(lineageBlock).not.toMatch(/parentName/);
       expect(lineageBlock).not.toMatch(/childName/);
@@ -629,8 +629,8 @@ describe("Skills Governance Tools", () => {
 
     it("does not use unstructured z.record for proposedState", () => {
       const proposalBlock = mcpSource.slice(
-        mcpSource.indexOf('"ingenium_skill_proposal_create"'),
-        mcpSource.indexOf('ingenium_skill_proposal_list'),
+        mcpSource.indexOf('"skill_proposal_create"'),
+        mcpSource.indexOf('skill_proposal_list'),
       );
       expect(proposalBlock).not.toMatch(/proposedState:\s*z\.record/);
       expect(proposalBlock).toMatch(/proposedState:\s*z\.object/);
@@ -638,16 +638,16 @@ describe("Skills Governance Tools", () => {
 
     it("has evidence typed as unknown[] not string[]", () => {
       const proposalBlock = mcpSource.slice(
-        mcpSource.indexOf('"ingenium_skill_proposal_create"'),
-        mcpSource.indexOf('ingenium_skill_proposal_list'),
+        mcpSource.indexOf('"skill_proposal_create"'),
+        mcpSource.indexOf('skill_proposal_list'),
       );
       expect(proposalBlock).not.toMatch(/evidence:\s*z\.array\(z\.string\(\)\)/);
     });
 
     it("has status enum with rolled_back (DB status) not rolledBack (response)", () => {
       const listBlock = mcpSource.slice(
-        mcpSource.indexOf('"ingenium_skill_proposal_list"'),
-        mcpSource.indexOf('ingenium_skill_proposal_get'),
+        mcpSource.indexOf('"skill_proposal_list"'),
+        mcpSource.indexOf('skill_proposal_get'),
       );
       expect(listBlock).toMatch(/rolled_back/);
       expect(listBlock).not.toMatch(/rolledBack/);
