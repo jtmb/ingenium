@@ -30,7 +30,7 @@ Before interacting with a site, glob `.opencode/skills/browsing-the-web/referenc
 
 ### 🔴 Log Every Error to browser-agent-errors.md as It Happens
 
-Write each error to `.opencode/agents/execution/browser-agent-errors.md` immediately — do NOT batch errors at the end. Include timestamp, site domain, step description, error message, and attempt number.
+Write each error to `.opencode/agents/browser-agent-errors.md` immediately — do NOT batch errors at the end. Include timestamp, site domain, step description, error message, and attempt number.
 
 ### 🔴 On Task Success: Update Site Recipe, Then Delete Errors File
 

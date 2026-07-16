@@ -47,11 +47,11 @@ When you restructure a skill, search all agent files for references: `grep -r "<
 
 Before making any skill system changes, commit the current state:
 ```bash
-git add -A
+git add <explicit-changed-files>
 git commit -m "skill-maintenance: snapshot before fixes"
 BEFORE=$(git rev-parse --short HEAD)
 # make changes...
-git add -A
+git add <explicit-changed-files>
 git commit -m "skill-maintenance: {summary of what changed}"
 AFTER=$(git rev-parse --short HEAD)
 ```
