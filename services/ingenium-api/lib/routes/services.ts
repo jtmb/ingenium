@@ -226,6 +226,19 @@ async function getEmailClientStatus(): Promise<AppInfo> {
     if (accounts.length === 0) {
       return { name: "email-client", state: "idle", description: "Mail sync engine running, no accounts", detail: "Add an email account to begin syncing" };
     }
+    // Check if any account has all folders in error state
+    const allErrorAccounts = accounts.filter((a: any) => 
+      a.folders && a.folders.length > 0 && 
+      a.folders.every((f: any) => f.state === "error")
+    );
+    if (allErrorAccounts.length === accounts.length) {
+      return { 
+        name: "email-client", 
+        state: "degraded", 
+        description: "Mail sync engine", 
+        detail: `${allErrorAccounts.length} account(s) with auth errors — re-authentication needed` 
+      };
+    }
     return {
       name: "email-client",
       state: "healthy",

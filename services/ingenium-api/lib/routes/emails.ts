@@ -1035,13 +1035,16 @@ emailsRouter.get("/", async (req, res) => {
   }
 
   // ── Cache miss — return empty, let engine populate asynchronously ──
-  // No live IMAP, no setImmediate, no background sync from this route.
   const folderState = getFolderEngineState(account.id, folder);
+  const engineState = folderState?.state;
+  const engineCompleted = engineState === "complete" || engineState === "error";
   res.json({
     data: [],
     total: 0,
-    source: "pending",
-    message: "Syncing this folder. Data will appear shortly — click Refresh to retry, or check back in a few seconds.",
+    source: engineCompleted ? "cache" : "pending",
+    message: engineCompleted 
+      ? (engineState === "error" ? folderState?.lastError || "Folder sync failed" : "No messages in this folder")
+      : "Syncing this folder. Data will appear shortly.",
     engineState: folderState,
   });
 });

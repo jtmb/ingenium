@@ -82,6 +82,12 @@ const BODY_BATCH_YIELD_MS = 200;          // yield between body fetch groups to 
 const LOOP_YIELD_MS = 1000;               // yield between full account loop ticks (gives other workers CPU)
 const TASK_PROCESS_YIELD_MS = 100;        // yield between individual tasks in a loop (cooperative scheduling)
 
+// ── Auth error circuit breaker ───────────────────────────────────────────────
+
+/** Track consecutive auth errors per folder to implement circuit breaking. */
+const authErrorCount = new Map<string, number>();
+const MAX_AUTH_ERRORS = 3;
+
 // ── Engine singleton state ──────────────────────────────────────────────────
 
 interface AccountWorker {
@@ -533,8 +539,18 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
 
       // ── Generate maintenance tasks if queue is empty ─────────────────
       if (worker.taskQueue.length === 0) {
+        // Skip folders with tripped circuit breaker
+        const trippedFolders = new Set<string>();
+        for (const [key, count] of authErrorCount) {
+          if (count >= MAX_AUTH_ERRORS) {
+            const folderKey = key.split(":").slice(1).join(":");
+            if (folderKey) trippedFolders.add(folderKey);
+          }
+        }
+
         // P1: Check boosted folders first
         for (const folder of worker.boostedFolders) {
+          if (trippedFolders.has(folder)) continue;
           enqueueTask(worker, {
             priority: 1,
             type: "sync-folder",
@@ -545,7 +561,7 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
         worker.boostedFolders.clear();
 
         // P2: INBOX if stale
-        if (!isFolderFresh(worker.accountId, "INBOX")) {
+        if (!trippedFolders.has("INBOX") && !isFolderFresh(worker.accountId, "INBOX")) {
           enqueueTask(worker, {
             priority: 2,
             type: "sync-folder",
@@ -554,11 +570,11 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
           });
         }
 
-        // P3: Round-robin all folders (skip fresh)
+        // P3: Round-robin all folders (skip fresh and tripped)
         if (folders.length > 0) {
           const folder = folders[roundRobinIndex % folders.length]!;
           roundRobinIndex++;
-          if (!isFolderFresh(worker.accountId, folder)) {
+          if (!trippedFolders.has(folder) && !isFolderFresh(worker.accountId, folder)) {
             enqueueTask(worker, {
               priority: 3,
               type: "sync-folder",
@@ -723,6 +739,20 @@ async function executeSyncFolder(
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn("sync-engine", `executeSyncFolder FAILED for ${worker.email}/${folder}: ${msg}`);
     setFolderState(worker, folder, { state: "error", lastError: msg });
+    
+    // Circuit breaker: track consecutive auth errors
+    if (msg.includes("Unsupported state or unable to authenticate data")) {
+      const key = `${worker.email}:${folder}`;
+      const count = (authErrorCount.get(key) || 0) + 1;
+      authErrorCount.set(key, count);
+      if (count >= MAX_AUTH_ERRORS) {
+        logger.warn("sync-engine", `Circuit breaker TRIPPED for ${worker.email}/${folder} after ${count} auth errors — marking account as needing re-auth`);
+        setFolderState(worker, folder, { state: "error", lastError: "Account needs re-authentication — visit /mail to reconnect" });
+      }
+    } else {
+      // Reset counter for non-auth errors (the folder might recover)
+      authErrorCount.delete(`${worker.email}:${folder}`);
+    }
   }
 }
 
