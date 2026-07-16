@@ -11,12 +11,48 @@ permission:
   glob: allow
   grep: allow
   playwright_*: deny
+  ingenium_docs_search: allow
+  ingenium_docs_get_page: allow
+  ingenium_docs_create_page: allow
+  ingenium_docs_update_page: allow
+  ingenium_docs_delete_page: allow
+  ingenium_docs_restore_page: allow
+  ingenium_docs_move_page: allow
+  ingenium_docs_list_spaces: allow
+  ingenium_docs_get_space: allow
+  ingenium_docs_create_space: allow
+  ingenium_docs_get_page_tree: allow
+  ingenium_docs_get_draft: allow
+  ingenium_docs_save_draft: allow
+  ingenium_docs_list_versions: allow
+  ingenium_docs_restore_version: allow
+  ingenium_docs_list_tags: allow
+  ingenium_docs_get_page_tags: allow
+  ingenium_docs_add_tag: allow
+  ingenium_docs_remove_tag: allow
+  ingenium_docs_get_backlinks: allow
+  ingenium_docs_list_comments: allow
+  ingenium_docs_create_comment: allow
+  ingenium_docs_resolve_comment: allow
+  ingenium_docs_delete_comment: allow
+  ingenium_docs_list_templates: allow
+  ingenium_docs_get_template: allow
+  ingenium_docs_create_template: allow
+  ingenium_docs_toggle_favorite: allow
+  ingenium_docs_get_favorites: allow
+  ingenium_docs_link_project: allow
+  ingenium_docs_unlink_project: allow
+  ingenium_docs_get_projects: allow
+  ingenium_docs_import_pages: allow
+  ingenium_docs_export_space: allow
+  ingenium_docs_get_stats: allow
   skill:
     "@development-conventions": allow
     "@debugging-patterns": allow
     "@local-models": allow
     "@mcp-tooling": allow
     "@skill-maintenance": allow
+    "@docs-workspace": allow
     "*": deny
 ---
 
