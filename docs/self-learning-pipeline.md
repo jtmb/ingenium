@@ -662,11 +662,11 @@ The `/pipeline` dashboard page displays events as a connected vertical timeline:
 | `observer-core.ts` — `triggerSynthesis()` | `synthesis_triggered` |
 | `auto-observer.ts` — thin trigger | POSTs `/api/v1/extraction/run` (no pipeline events — extraction engine logs its own events) |
 | `skill-sync.ts` — `syncSkillsFromApi()` | `plugin_initialized` (skill sync completed) |
-| **API Server** (scheduled) | Auto-runs extraction → synthesis → skill sync every 15 minutes for ALL active projects |
+| **API Server** (scheduled) | Auto-runs extraction → synthesis every 15 minutes for all active projects |
 
 ### Scheduled Synthesis
 
-The API server automatically runs the full pipeline every **15 minutes** (configurable via `SYNTHESIS_INTERVAL_MS` environment variable, default: 900000ms). The cycle runs extraction → synthesis → skill sync in sequence for all active projects. Extraction runs BEFORE synthesis so freshly extracted observations are consolidated in the same cycle.
+The API server automatically runs extraction → synthesis every **15 minutes** (configurable via `SYNTHESIS_INTERVAL_MS` environment variable, default: 900000ms) for all active projects. Extraction runs before synthesis so freshly extracted observations are consolidated in the same cycle. Resource sync is not an API scheduler step; the extension runs it on `session.created` and throttled `session.idle` events.
 
 **Configuration:**
 ```typescript
@@ -809,8 +809,10 @@ When configured, the 15-minute synthesis pipeline runs two phases:
 **Phase 2: LLM Skill Synthesis** (only if model configured)
 - Groups processed observations from the current batch
 - Sends them along with existing skills and traits to the LLM
-- LLM analyzes patterns and returns structured JSON
-- Pipeline executes skill create/update operations
+- LLM analyzes patterns and returns structured JSON with **proposal candidates** instead of direct mutations
+- Proposals are created as **drafts** on the backend, submitted as **pending** for review
+- Human review via **Dashboard Proposals tab** approves or rejects each proposal
+- Only approved proposals are applied to the target skill
 - Results appear on the `/pipeline` timeline
 
 ### Implementation Details
@@ -821,15 +823,23 @@ The LLM must return JSON matching this shape:
 
 ```typescript
 interface SynthesisLLMResult {
-  skills_to_create: Array<{
-    name: string;        // kebab-case, max 64 chars
-    description: string; // one-line, max 200 chars
-    content: string;     // full SKILL.md markdown
-  }>;
-  skills_to_update: Array<{
-    name: string;
-    patch: string;       // markdown to append
-    patch_type: "add-rule" | "update-section" | "add-pattern";
+  proposal_candidates: Array<{
+    proposal_type: "create" | "update" | "merge" | "archive";
+    target_skill_id?: string;  // for update/merge/archive proposals
+    target_name: string;       // kebab-case, max 64 chars
+    description: string;       // one-line, max 200 chars
+    content?: string;          // full SKILL.md markdown (for create)
+    patch?: string;            // markdown to append (for update)
+    patch_type?: "add-rule" | "update-section" | "add-pattern";
+    reference_files?: Array<{ path: string; content: string }>;
+    evidence_json: Array<{
+      observation_id: number;
+      excerpt: string;
+      confidence: number;
+    }>;
+    quality_score: number;     // 0.0–1.0
+    novelty_score: number;     // 0.0–1.0
+    contradiction_flag: boolean;
   }>;
   personality_traits?: Array<{
     trait_type: string;
@@ -849,9 +859,11 @@ The prompt sent to the LLM includes four sections:
 2. **Existing Personality Traits** — Current traits with confidence percentages for context
 3. **Recent Pending Observations** — Each observation with type, importance, and content (truncated to 200 chars)
 4. **Task Instructions** — Guidelines to:
-   - Create new skills for uncovered patterns
-   - Extend existing skills for reinforced patterns
+   - Create proposal candidates for uncovered patterns (proposal_type: "create")
+   - Extend existing skills via proposals for reinforced patterns (proposal_type: "update")
    - Suggest personality traits for new observations
+   - Include evidence-backed JSON with observation_id, excerpt, and confidence per candidate
+   - Provide quality_score, novelty_score, and contradiction_flag for each proposal
    - Output ONLY valid JSON (no markdown, no code blocks)
 
 The LLM uses `temperature: 0.3` and `max_tokens: 4096` for consistent structured output.
@@ -876,23 +888,29 @@ This ensures the LLM's output is parsed correctly even if it wraps JSON in markd
 
 #### Response Validation (`validateResponse`)
 
-The response is strictly validated before any operations are performed:
+The response is strictly validated before any proposals are created:
 
 | Field | Cap | Sanitization |
 |-------|-----|-------------|
-| `skills_to_create` | Max 5 | Name: kebab-case, ≤64 chars. Description: ≤200 chars. Filter: requires both name AND content |
-| `skills_to_update` | Max 5 | Name: required. Patch: required. patch_type defaults to "add-rule" |
+| `proposal_candidates` | Max 5 | proposal_type: one of create/update/merge/archive. Name: kebab-case, ≤64 chars. Description: ≤200 chars. Filter: requires name AND (content OR patch). |
+| `proposal_candidates[].evidence_json` | Max 10 per candidate | Each entry requires observation_id (number), excerpt (string), confidence (0–1) |
+| `proposal_candidates[].quality_score` | — | Clamped to [0, 1], default 0.5 |
+| `proposal_candidates[].novelty_score` | — | Clamped to [0, 1], default 0.5 |
 | `personality_traits` | Max 3 | Confidence clamped to [0, 1], default 0.3 |
 | `insights` | Max 5 | Strings only, no length limit |
 
-#### Skill Execution
+#### Proposal Execution
 
-After validation, the synthesis orchestrator executes the LLM's recommendations:
+After validation, the synthesis orchestrator creates proposal candidates rather than directly mutating skills:
 
-- **Skill Creation**: Calls `skills.createSkill()` with category "learning", tags "llm-synthesized,auto-generated", always_apply=1
-- **Skill Updates**: Appends the patch content to the existing skill's content and calls `skills.updateSkill()`
-- **Logging**: Each create/update fires a pipeline event (`trait_created` / `trait_updated`) with `via_llm: true` metadata, linked to the parent synthesis event
-- **Error handling**: Failed operations are collected in `result.errors` but don't block the rest
+- **Draft Creation**: Calls `createProposal()` for each candidate with status `draft`, populated with `evidence_json`, `quality_score`, `novelty_score`, and `contradiction_flag` from the LLM output
+- **Proposal Submission**: Drafts are promoted to `pending` status via the proposal workflow
+- **Human Review**: The **Dashboard Proposals tab** displays pending proposals with evidence, quality scores, and diff previews. Reviewers can approve or reject each proposal
+- **Approval**: Approved proposals are applied to the target skill — creates new skills, updates existing skills, or merges content depending on `proposal_type`
+- **Logging**: Each proposal lifecycle event (created, submitted, approved, rejected, applied) fires a pipeline event (`proposal_created`, `proposal_submitted`, `proposal_approved`, `proposal_rejected`, `proposal_applied`) with `via_llm: true` metadata, linked to the parent synthesis event
+- **Error handling**: Failed operations are collected in `result.errors` but don't block the remaining proposals
+
+> **Note**: Prior to Phase 5, the automatic synthesis pipeline wrote skills directly. The proposal workflow replaces this with a human-in-the-loop governance model. See `next-steps-plan/SKILL-SYSTEM-MIGRATION.md` for the Phase 5 migration plan.
 
 #### Configuration Check
 
@@ -909,8 +927,9 @@ Two utility functions control Phase 2 execution:
 |----------|----------|
 | LLM not configured (no model set) | Pipeline skips Phase 2 entirely |
 | LLM API error (network, timeout, bad key) | Error logged in `result.errors`, Phase 1 trait results still saved |
-| LLM returns invalid/empty JSON | Returns empty result, no skills created/updated |
+| LLM returns invalid/empty JSON | Returns empty result, no proposals created |
 | LLM synthesis cancelled (AbortSignal) | Returns cancelled summary, no side effects |
+| Duplicate proposal candidate | Caught via SQLITE_CONSTRAINT on candidate group key, mapped to DUPLICATE_PROPOSAL error |
 
 ### Settings Reference
 
@@ -1036,7 +1055,7 @@ function applyTimeDecay(trait: Trait): number {
 | `lib/routes/synthesis.ts` | REST endpoints for synthesis pipeline | `services/ingenium-api/lib/routes/` |
 | `lib/routes/pipeline.ts` | REST endpoints for pipeline events (timeline, filtering) | `services/ingenium-api/lib/routes/` |
 | `lib/middleware/auth.ts` | Authentication middleware for protected routes | `services/ingenium-api/lib/middleware/` |
-| `scripts/api-server.ts` | API server with scheduled synthesis + skill sync every 15 min | `services/ingenium-api/scripts/` |
+| `scripts/api-server.ts` | API server with scheduled extraction + synthesis every 15 min | `services/ingenium-api/scripts/` |
 
 ### MCP Server Files
 
@@ -1369,4 +1388,6 @@ curl -X POST http://localhost:4097/api/v1/skills/sync-all?project=gh-llm-bootstr
 
 ---
 
-*Last updated: July 13, 2026 (v4.1.0 — extraction hardening, per-folder cache invalidation, skipFresh option)*
+**v4.2.0 (2026-07-16) — Scheduler/resource-sync boundary:** API scheduled maintenance runs extraction → synthesis under the skills lease. Bidirectional resource sync is no longer an API scheduler step; the extension runs it on `session.created` and throttled `session.idle` events.
+
+*Last updated: July 16, 2026 (v4.2.0 — scheduler/resource-sync boundary)*

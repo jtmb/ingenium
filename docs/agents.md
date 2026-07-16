@@ -45,7 +45,7 @@ flowchart TB
 
 | Agent | Type | Model | Provider | Access | Purpose |
 |-------|------|-------|----------|--------|---------|
-| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Full R/W | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
+| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Full R/W (`edit: deny, write: deny`) | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
 | **ingenium-prompt-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
 | **ingenium-explore** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
@@ -53,7 +53,7 @@ flowchart TB
 | **vision-bridge** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only (`read: allow`) | Vision analysis — reads screenshot files and produces structured technical descriptions for non-vision models |
 | **ingenium-software-engineer-fast** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes, performance-critical code |
-| **ingenium-qa** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit (`edit: allow`) | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code |
+| **ingenium-qa** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code or author tests |
 | **ingenium-docs** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates — observations are auto-extracted by the server-side engine |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | Security audit + git-history leak scanning |
 
@@ -168,7 +168,7 @@ flowchart LR
 
 | Layer | Mechanism | Frequency |
 |-------|-----------|-----------|
-| 1. Always-visible primer | `opencode.json` → `orchestrator-primer/SKILL.md` injected into system prompt | Every turn |
+| 1. Always-visible primer | `opencode.json` → `engineering-workflow/SKILL.md` (absorbed former orchestrator-primer content) injected into system prompt | Every turn |
 | 2. ⚡ Pre-Action Gate | "Should a subagent do this?" check before ANY tool use | Every tool call |
 | 3. 🔴 Anti-Patterns table | 7 common violations with before/after examples | Read at session start |
 | 4. 🔴 Periodic Self-Audit | "Am I following delegation rules?" — includes task board check | Every 5 tool calls |
@@ -273,7 +273,7 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 | Property | Value |
 |----------|-------|
 | **Model** | qwen3.5-9b (LM Studio) |
-| **Access** | Edit (`edit: allow`) |
+| **Access** | Read-only |
 | **Invoked by** | Orchestrator only |
 | **Triggers** | "Review code X", "Verify tests for Y", "QA check on Z" |
 
@@ -303,9 +303,9 @@ Model assignments are defined per-agent in their `.md` agent profile file (store
 | Phase | Action | Tools |
 |-------|--------|-------|
 | 1. Receive context | Parse changed files, what changed, which docs need updating | — |
-| 2. Map changes | Use trigger table from generic-conventions to determine affected docs | `read` |
+| 2. Map changes | Use trigger table from development-conventions to determine affected docs | `read` |
 | 3. Update docs | Targeted updates — never regenerate entire docs | `write`, `edit` |
-| 4. Run skill workflows | `update-skills`, `update-skill-index`, `audit-skills` | `read` + `write` |
+| 4. Run skill workflows | `skill-maintenance` (absorbed update-skills patterns) | `read` + `write` |
 | 5. Observations | Observations automatically captured by server-side extraction engine | extraction engine |
 | 6. Report | Tell orchestrator what was updated | — |
 
@@ -402,7 +402,7 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
 | ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Read/Write | orchestrator only |
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |
-| ingenium-qa | `@ingenium-qa` | Edit (`edit: allow`) | orchestrator only |
+| ingenium-qa | `@ingenium-qa` | Read-only | orchestrator only |
 | ingenium-docs | `@ingenium-docs` | Edit + Write (`edit: allow, write: allow, bash: deny`) | orchestrator only |
 
 ## How to Use the Pipeline

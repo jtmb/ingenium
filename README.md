@@ -7,10 +7,10 @@
 ### Your complete AI agent development workspace. Agent orchestration, Kanban tasks, email with AI drafting, self-learning pipeline, MCP tool management, OpenCode browser integration — fully pluggable, local, and cost-effective.
 
 <p>
-  <img src="https://img.shields.io/badge/skills-25-green?style=flat-square" alt="25 skills" />
-  <img src="https://img.shields.io/badge/MCP%20tools-73-blue?style=flat-square" alt="73 MCP tools" />
+  <img src="https://img.shields.io/badge/skills-10-green?style=flat-square" alt="10 skills" />
+  <img src="https://img.shields.io/badge/MCP%20tools-212-blue?style=flat-square" alt="212 MCP tools" />
   <img src="https://img.shields.io/badge/agents-10-orange?style=flat-square" alt="10 agents" />
-  <img src="https://img.shields.io/badge/dashboard%20pages-16-8A2BE2?style=flat-square" alt="16 dashboard pages" />
+  <img src="https://img.shields.io/badge/dashboard%20views-18-8A2BE2?style=flat-square" alt="18 dashboard views" />
   <img src="https://img.shields.io/badge/self--learning-%F0%9F%8C%B1-a371f7?style=flat-square" alt="Self-learning" />
 </p>
 
@@ -21,13 +21,13 @@
 **Ingenium** is a complete AI agent development workspace. It combines agent orchestration (10 subagent profiles), a Kanban task board, a full email client with AI auto-drafting, a self-learning pipeline with LLM-powered extraction and synthesis, an MCP server manager with per-tool toggles, OpenCode browser embedding, and project management — all accessible through a single MCP stdio transport. Pluggable into any MCP-compatible client (OpenCode, Cline, Claude Desktop, any provider), fully local and cost-effective. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
 ### OpenCode Web UI Embedded in Dashboard
-The dashboard includes an embedded OpenCode service at `/opencode` — a shared single OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
+The dashboard includes an embedded OpenCode service at `/opencode` — a shared single OpenCode instance on `:4098`, protected by the required `OPENCODE_SERVER_PASSWORD`, that connects to the Ingenium MCP server via a direct iframe mount. The session persists across tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
 
-Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to **150 tools** spanning project management, skill management, observations, personality, synthesis pipeline, task boards, full-text knowledge search, plugin lifecycle, commands, config management, agent management, server configuration, email client integration with Gmail/Outlook OAuth2 + IMAP/SMTP support, and settings. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
+Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to **210 server tools** spanning project management, skill management, observations, personality, synthesis pipeline, task boards, full-text knowledge search, plugin lifecycle, commands, config management, agent management, server configuration, email client integration with Gmail/Outlook OAuth2 + IMAP/SMTP support, and settings. The complete catalog contains **212 tools** when the two extension-registered tools are included. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
-**The system learns from you.** Patterns you teach, conventions you establish, and decisions you make are processed through a self-learning pipeline. The server-side extraction engine reads your OpenCode messages and uses the synthesis LLM to extract durable behavior rules. The synthesis pipeline (LLM consolidation + optional skill synthesis) transforms observations into personality traits and skills, and the `/pipeline` timeline provides full observability into every step. A 15-minute scheduler runs the complete chain — extraction → synthesis → skill-sync — autonomously in the background. The system supports cross-project synthesis, sharing learned patterns across all your projects.
+**The system learns from you.** Patterns you teach, conventions you establish, and decisions you make are processed through a self-learning pipeline. The server-side extraction engine reads your OpenCode messages and uses the synthesis LLM to extract durable behavior rules. The synthesis pipeline (LLM consolidation + optional skill synthesis) transforms observations into personality traits and skills, and the `/pipeline` timeline provides full observability into every step. A 15-minute API scheduler runs extraction → synthesis autonomously; the extension resource-sync plugin separately reconciles disk and API state on `session.created` and throttled `session.idle` events. The system supports cross-project synthesis, sharing learned patterns across all your projects.
 
-16 dashboard pages provide visual management for every feature. Each page is a standalone feature with its own documentation.
+17 primary dashboard routes plus the Settings overlay provide visual management for every feature.
 
 ## Quick Start
 
@@ -78,7 +78,7 @@ Plugins ship inside the `@ingenium/extension` package. Reference them from your 
 }
 ```
 
-**Other MCP clients** — Point your client's `command` to `npx -y @ingenium/extension`. The server speaks stdio MCP with **150 tools**. No HTTP port, no network config.
+**Other MCP clients** — Point your client's `command` to `npx -y @ingenium/extension`. The server speaks stdio MCP with **210 tools**. No HTTP port, no network config.
 
 **Docker Deployment** — Single-container deployment via `docker compose up --build` manages four processes: API (`:4097`), Dashboard (`:3000`), opencode-web (`:4098`), and ttyd-opencode (`:4099`) via supervisord. Build-time UID matching ensures write access to workspace. Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
@@ -107,7 +107,7 @@ AI agent conventions engine — 25+ skills covering debugging, testing, security
 </p>
 
 ### 🧠 Self-Learning Pipeline
-Self-improving knowledge base with observation collection, synthesis processing, and personality trait aggregation. Three plugins in the `@ingenium/extension` package handle the pipeline: **observer.ts** (session events, observation import, synthesis trigger), **skill-sync.ts** (bidirectional disk↔DB skill sync), and **auto-observer.ts** (thin trigger that POSTs to the server-side extraction engine on `session.idle` — extraction and detection run server-side in the API). The extraction engine reads OpenCode messages, uses a regex pre-filter for candidate selection, batches candidates to the synthesis LLM, and creates observations from extracted behavior rules. The synthesis pipeline runs LLM consolidation (Phase 1) and optional skill synthesis (Phase 2) with backup provider fallback. The 15-minute scheduler runs the full chain — extraction → synthesis → skill-sync — autonomously. 10 observation types, 6 developer-specific personality trait dimensions with a confidence model (display threshold ≥0.30, time decay, dismiss support).
+Self-improving knowledge base with observation collection, synthesis processing, and personality trait aggregation. Three plugins in the `@ingenium/extension` package handle the client-side pipeline: **observer.ts** (session events, observation import, synthesis trigger), **skill-sync.ts** (compatibility wrapper around bidirectional resource sync), and **auto-observer.ts** (thin trigger that POSTs to the server-side extraction engine on `session.idle` — extraction and detection run server-side in the API). The extraction engine reads OpenCode messages, uses a regex pre-filter for candidate selection, batches candidates to the synthesis LLM, and creates observations from extracted behavior rules. The synthesis pipeline runs LLM consolidation (Phase 1) and optional skill synthesis (Phase 2) with backup provider fallback. The 15-minute API scheduler runs extraction → synthesis; extension session events run resource sync separately. 10 observation types, 6 developer-specific personality trait dimensions with a confidence model (display threshold ≥0.30, time decay, dismiss support).
 → [docs/HOW-TO/self-learning.md](docs/HOW-TO/self-learning.md)
 
 > 🔴 **Note:** The old `ingenium_learning_log` is deprecated. The auto-observer plugin now POSTs to the server-side extraction engine — no manual `ingenium_observe` calls needed.
@@ -133,7 +133,7 @@ Full email client with inbox, compose, search, and AI auto-responses. Smart repl
 <p align="center"><img src="docs/assets/screenshot-mail.png" alt="Mail" width="600" /></p>
 
 ### 🖥️ MCP (Servers + Tools)
-MCP server configuration and tool management — dual-tab page with **Servers** (add, start, stop MCP servers with source badges) and **Tools** (150 tools in 23 categories, per-tool and per-category enable/disable toggles, search, category filter). Disabled tools return a `TOOL_DISABLED` error at the MCP server level before execution.
+MCP server configuration and tool management — dual-tab page with **Servers** (add, start, stop MCP servers with source badges) and **Tools** (212 catalog tools in 24 categories, per-tool and per-category enable/disable toggles, search, category filter). Disabled tools return a `TOOL_DISABLED` error at the MCP server level before execution.
 → [docs/HOW-TO/servers.md](docs/HOW-TO/servers.md)
 
 <p align="center">
@@ -196,7 +196,7 @@ Real-time log dashboard for monitoring API, dashboard, and MCP server activity. 
 <p align="center"><img src="docs/assets/screenshot-logs.png" alt="Logs" width="600" /></p>
 
 ### 🌐 OpenCode
-Embedded OpenCode web UI at `/opencode` — a shared single OpenCode instance running on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across dashboard tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
+Embedded OpenCode web UI at `/opencode` — a shared single OpenCode instance running on `:4098`, protected by the required `OPENCODE_SERVER_PASSWORD`, that connects to the Ingenium MCP server via a direct iframe mount. The session persists across dashboard tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
 
 <p align="center"><img src="docs/assets/screenshot-opencode.png" alt="OpenCode" width="600" /></p>
 
@@ -213,8 +213,8 @@ ingenium/
 │   └── ingenium-extension/   # Client-side OpenCode package (MCP server, observer + skill-sync + auto-observer plugins, ARCHITECTURE.md). Installable via `npx -y @ingenium/extension`
 ├── services/
 │   ├── ingenium-api/          # Express REST gateway on port 4097. Sole database authority.
-│   ├── ingenium-server/       # MCP stdio server with 150 tools. Calls API via HTTP. Zero DB access.
-│   └── ingenium-dashboard/    # Next.js 16 App Router frontend with 16 route-based pages. Calls API via HTTP. Zero DB access.
+│   ├── ingenium-server/       # MCP stdio server with 210 tools. Calls API via HTTP. Zero DB access.
+│   └── ingenium-dashboard/    # Next.js 16 App Router frontend with 17 primary routes plus Settings overlay. Calls API via HTTP. Zero DB access.
 ├── seed/
 │   ├── skills/                # Canonical skill sources in split-skill format (SKILL.md + metadata.json + references/)
 │   └── plugins/               # Seed plugins (.ts files)
@@ -233,12 +233,12 @@ ingenium/
 
 ```mermaid
 graph LR
-    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>150 tools]
+    A[MCP Client<br/>OpenCode, Cline, Claude] -->|stdio MCP| B[ingenium-server<br/>210 tools]
     B -->|HTTP| C[ingenium-api<br/>port 4097]
     D[Browser<br/>Dashboard] -->|HTTP| C
     C -->|SQLite WAL| E[(SQLite<br/>FTS5)]
     
-    F[Agent Session] -->|skill-load| G[.opencode/skills/<br/>25 skills]
+    F[Agent Session] -->|skill-load| G[.opencode/skills/<br/>project skills]
     G -->|self-learning| H[Synthesis<br/>Pipeline]
     H -->|observations| E
     H -->|traits| E
@@ -262,7 +262,7 @@ graph LR
 | [docs/VARIABLES.md](docs/VARIABLES.md) | All environment variables with defaults |
 | [docs/agents.md](docs/agents.md) | Agent profiles and pipeline lifecycle |
 | [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | Quick start guide with Docker, local dev, and MCP config |
-| [docs/USAGE.md](docs/USAGE.md) | Comprehensive dashboard user guide for all 16 pages |
+| [docs/USAGE.md](docs/USAGE.md) | Comprehensive dashboard user guide for all 17 pages |
 | [docs/self-learning-pipeline.md](docs/self-learning-pipeline.md) | Full self-learning pipeline reference (observations, personality, synthesis) |
 | [AGENTS.md](AGENTS.md) | Skill system protocol — agent entry point with all conventions |
 | [docs/HOW-TO/projects.md](docs/HOW-TO/projects.md) | Project management (create, archive, global vs regular, cross-project) |
@@ -288,14 +288,16 @@ services:
       - "4097:4097"   # API
       - "3000:3000"   # Dashboard
       - "127.0.0.1:4098:4098"   # opencode-web (host loopback only)
+      - "127.0.0.1:4099:4099"   # ttyd-opencode (host loopback only)
     volumes:
       - ingenium_data:/app/.ingenium/data
 ```
 
-Inside the container, **supervisord** manages three processes:
+Inside the container, **supervisord** manages four processes:
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads
-2. **Dashboard** (Next.js on :3000) — 16 route-based pages with highlight.js syntax highlighting
+2. **Dashboard** (Next.js on :3000) — 17 primary routes plus the Settings overlay
 3. **opencode-web** (on :4098) — OpenCode web server (loopback only)
+4. **ttyd-opencode** (on :4099) — OpenCode CLI terminal attached to opencode-web
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 

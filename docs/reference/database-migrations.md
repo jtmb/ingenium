@@ -14,7 +14,7 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 
 ---
 
-## Migration File List (001–039)
+## Migration File List (001–045)
 
 ### Foundation (001–014)
 
@@ -64,7 +64,7 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 | 027 | `027_email_summaries.sql` | Creates `email_summaries` table for cached AI-generated email summaries. Same PK shape and FK cascade as `email_suggestions`. | **Low** — Same defensive pattern as 026 |
 | 028 | `028_email_suggestion_queue.sql` | Creates `email_suggestion_queue` for background suggestion generation | **Low** |
 
-### Docs Workspace (029–039)
+### Docs Workspace (029–040)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -76,13 +76,58 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 | 034 | `034_docs_tags.sql` | Creates `docs_tags` and `docs_page_tags` tables for page tagging |
 | 035 | `035_docs_links.sql` | Creates `docs_page_links` table — backlinks between pages (`[[page-slug]]` references) |
 | 036 | `036_docs_comments.sql` | Creates `docs_comments` table — inline comments with selection tracking, threaded replies, resolve state |
-| 037 | `037_docs_project_links.sql` | Creates `docs_page_projects` table — optional project associations for pages |
+| 037 | `037_docs_project_links.sql` | Creates `docs_page_projects` table — optional project associations for pages. **Defect**: project_id declared as `INTEGER` but `projects.id` is `TEXT`. |
 | 038 | `038_docs_attachments.sql` | Creates `docs_attachments` table — file attachments per page with MIME type, size, storage path |
 | 039 | `039_docs_templates.sql` | Creates `docs_templates` table — reusable page templates with category |
+| 040 | `040_docs_integrity.sql` | **W0/W1A contract repair migration.** Rebuilds `docs_page_projects.project_id` as TEXT (FK to projects.id), deduplicates `docs_page_versions` and adds `UNIQUE(page_id, revision)` index, adds `title`, `slug`, `base_revision` columns to `docs_page_drafts` for draft-first lifecycle. Guard: checks for `title` column in `docs_page_drafts` (applied by `db.ts` lines 443–453). Runs inside `PRAGMA foreign_keys = OFF/ON`. |
+
+### Maintenance Locks (041)
+
+| # | File | Purpose | Risk |
+|---|------|---------|------|
+| 041 | `041_skill_maintenance_locks.sql` | Creates `maintenance_locks` table for atomic lease-based skill maintenance coordination. Enables project/global locks with conflict rules: project lock conflicts with active global lock on same resource; global lock conflicts with ANY active lock. UUID-scoped owner token with expiry. All upserts use application-level acquire/release — no `INSERT OR REPLACE`. SQL CHECK constraints enforce input validation at DB level. `db.ts` runs post-migration FTS integrity check: verifies `skills_fts` virtual table + all 3 migration-024 triggers exist, throws actionable error if missing. | **Low** — additive table only, no rebuilds. FTS check is diagnostic-only (no data mutation). |
+
+### Skill Lifecycle — Versions (042)
+
+| # | File | Purpose | Risk |
+|---|------|---------|------|
+| 042 | `042_skill_versions.sql` | Adds `revision` (non-negative integer, default 0) and `archived_at` (nullable ISO timestamp) columns to `skills`. Creates `skill_versions` table for immutable version snapshots: `skill_id TEXT FK`, `revision INTEGER`, `name`, `description`, `content`, `category`, `tags`, `always_apply`, `file_tree`, `enabled`, `archived_at`, `created_at`. An `AFTER INSERT` trigger snapshots revision 0 for new skills; an `AFTER UPDATE` trigger snapshots whenever `revision` changes. `BEFORE UPDATE` and `BEFORE DELETE` triggers reject modification of version rows. Seeds revision 0 for all pre-existing skills. | **Low** — additive columns + new table. Comment marker `-- 042_versions` prevents re-apply. The seed uses `ON CONFLICT(skill_id,revision) DO NOTHING` to avoid duplicating revision 0 rows. |
+
+### Skill Lineage — Provenance (043)
+
+| # | File | Purpose | Risk |
+|---|------|---------|------|
+| 043 | `043_skill_lineage.sql` | Creates `skill_lineage` table for provenance tracking: `id INTEGER PK AUTOINCREMENT`, `project_id TEXT`, `source_project_id TEXT`, `source_name TEXT`, `target_skill_id TEXT FK`, `source_hash TEXT`, `merged_file_paths TEXT NOT NULL` (JSON array of strings, default `[]`), `tombstone_path TEXT`, `reason TEXT`, `created_at`, `updated_at`. UNIQUE constraint on `(project_id, source_project_id, source_name, target_skill_id)`. `ON CONFLICT DO UPDATE` for upsert (sets `source_hash`, `merged_file_paths`, `tombstone_path`, `reason`, `updated_at`). Comment marker `-- 043_lineage`. | **Low** — additive only, no rebuilds. |
+
+### Skill Proposals — Governance State Machine (044)
+
+| # | File | Purpose | Risk |
+|---|------|---------|------|
+| 044 | `044_skill_proposals.sql` | Creates `skill_proposals` table for the full proposal lifecycle: `id TEXT PK` (UUID), `project_id TEXT`, `status TEXT` (CHECK: draft/pending/approved/rejected/applied/rolled_back/stale), `proposal_type TEXT` (CHECK: create/update/merge/archive), `target_skill_id TEXT FK`, `target_name TEXT`, `source_project_id TEXT`, `source_name TEXT`, `expected_revision INTEGER`, `expected_source_revision INTEGER`, `target_revision_before INTEGER`, `source_revision_before INTEGER`, `target_created INTEGER` (boolean), `proposed_state TEXT` (JSON), `evidence_json TEXT` (JSON array, default `[]`), `observation_ids TEXT` (JSON array, default `[]`), `quality_score REAL`, `novelty_score REAL`, `contradiction_flag INTEGER` (boolean), `candidate_group_key TEXT`, `always_apply INTEGER` (boolean), `reviewer TEXT`, `review_reason TEXT`, `reviewed_at TEXT`, `applied_at TEXT`, `created_at`, `updated_at`. The application transitions pending proposals directly to `applied`; `approved` remains allowed by the SQL constraint and active-candidate dedup index for compatibility. Partial indexes on `(project_id, status)` and `(project_id, candidate_group_key)` allow one draft/pending/approved proposal per candidate group key. Comment marker `-- 044_proposals`. | **Low** — additive only, no rebuilds. Partial unique index provides dedup guard at DB level. |
+
+### Pipeline Event Types (045)
+
+| # | File | Purpose | Risk |
+|---|------|---------|------|
+| 045 | `045_pipeline_event_types.sql` | Expands the `pipeline_events` event_type CHECK constraint to include `skill_created`, `skill_updated`, `proposal_created`, `proposal_submitted`, `proposal_approved`, `proposal_rejected`, `proposal_applied`, and `proposal_rolled_back` event types. The TypeScript `PipelineEventSchema` already included `skill_created` and `skill_updated`, but the SQL CHECK constraint was missing them, causing `synthesis.ts` emissions to be silently swallowed by `SQLITE_CONSTRAINT`. Uses the standard safe rebuild pattern: PRAGMA foreign_keys=OFF, RENAME old table, CREATE new table with updated CHECK, COPY data, RECREATE indexes, DROP old table. Comment marker `-- 045_pipeline_event_types`. | **Medium** — table rebuild pattern (safe when done correctly). All existing event types are compatible with the new constraint. |
+
+### Partial-State Guard (044)
+
+When a pending proposal is approved, the `approveProposal()` function in `skill-governance.ts` checks for stale state before applying: target revision mismatch, target missing, or target archived each transition the proposal to `stale` with the system cause recorded. A successful approval applies the mutation and sets status to `applied`. This prevents applying proposals against a changed baseline. Race-time candidate-group duplicates are also caught via SQLITE_CONSTRAINT in `createProposal()` and mapped to a `DUPLICATE_PROPOSAL` error.
 
 ---
 
 ## Critical Migration Sequences
+
+### Post-Migration 041 FTS Integrity Verification
+
+After migration 041 applies, `db.ts` performs a **diagnostic FTS integrity check** (not a migration, but part of the startup sequence):
+
+1. Queries `sqlite_master` to verify `skills_fts` virtual table exists
+2. Queries `sqlite_master` to verify all 3 migration-024 triggers exist: `skills_fts_insert`, `skills_fts_delete`, `skills_fts_update`
+3. If any are missing, `db.ts` throws an actionable error with the exact missing object name
+
+This is NOT an automatic rebuild — it only verifies and reports. Manual repair follows the [failed 024 migration pattern](#repair-a-failed-024-migration).
 
 ### The 015 → 017 → 019 Chain
 
@@ -112,9 +157,17 @@ Both require FTS trigger recreation verification.
 
 All use the defensive parent-existence check pattern.
 
-### The 029 → 039 Chain (Docs Workspace)
+### The 029 → 040 Chain (Docs Workspace)
 
-Migrations 029–039 are additive and independent (each creates new tables). They were designed to be applied in any order, though the canonical order is:
+Migrations 029–039 are additive and independent (each creates new tables). Migration **040** is a **contract repair** that fixes schema defects discovered during W0/W1A audit:
+
+| Migration | Fix | Reason |
+|-----------|-----|--------|
+| 040 (Section 1) | Rebuilds `docs_page_projects.project_id` as TEXT | `projects.id` is TEXT PRIMARY KEY; FK must match type |
+| 040 (Section 2) | Deduplicates `docs_page_versions` + adds UNIQUE index | Guard against duplicate version rows from race conditions |
+| 040 (Section 3) | Adds `title`, `slug`, `base_revision` to `docs_page_drafts` | Enables draft-first lifecycle with title/slug preview before publish |
+
+Canonical order:
 
 1. `029_docs_spaces.sql` — spaces (containers)
 2. `030_docs_pages.sql` — pages (content units)
@@ -124,9 +177,10 @@ Migrations 029–039 are additive and independent (each creates new tables). The
 6. `034_docs_tags.sql` — tagging system
 7. `035_docs_links.sql` — backlinks
 8. `036_docs_comments.sql` — inline comments
-9. `037_docs_project_links.sql` — project associations
+9. `037_docs_project_links.sql` — project associations (INTEGER defect — fixed by 040)
 10. `038_docs_attachments.sql` — file attachments
 11. `039_docs_templates.sql` — page templates
+12. `040_docs_integrity.sql` — contract repair (TEXT FK, dedup, draft metadata)
 
 ---
 
@@ -196,7 +250,8 @@ PRAGMA foreign_keys = OFF;  -- Before table rebuild
 PRAGMA foreign_keys = ON;   -- After table rebuild and data copy
 ```
 
-Used in migrations: 015, 017, 019, 024, 025
+Used in migrations: 015, 017, 019, 024, 025, 040
+**Not needed for additive migrations** (e.g., 041 `maintenance_locks` creates a new table with no FK references to rebuild).
 
 > 🔴 **Always re-enable after any OFF.** If `foreign_keys = OFF` is left on, the DB will silently accept invalid FK references.
 
@@ -327,3 +382,5 @@ SELECT sql FROM sqlite_master WHERE type='table' AND name='personality_traits';
 4. **Always wrap table rebuilds in `PRAGMA foreign_keys = OFF/ON`**
 5. **Mark rebuilt tables** with a unique comment marker (`-- NNN_rebuilt`) to prevent re-application
 6. **Re-read create SQL after 015** so subsequent migrations detect the updated schema correctly
+7. **Verify FTS integrity after migration 041** — `db.ts` checks `skills_fts` virtual table + all 3 triggers exist on startup; throws actionable error if missing
+8. **Never manually write `skills_fts` in application code** — migration 024 triggers are the sole authority; manual writes cause dual-write corruption
