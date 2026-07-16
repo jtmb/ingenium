@@ -101,7 +101,6 @@ function renderMarkdown(content: string): string {
   const html = marked.parse(processed, { async: false }) as string;
   return DOMPurify.sanitize(html, {
     ADD_ATTR: ["target", "data-internal"],
-    ADD_TAGS: ["iframe"],
   });
 }
 

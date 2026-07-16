@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { docs } from "ingenium-core";
-import { MAX_ATTACHMENT_SIZE } from "ingenium-core";
+import { MAX_ATTACHMENT_SIZE, MAX_IMPORT_SIZE } from "ingenium-core";
 import formidable from "formidable";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
@@ -574,6 +574,20 @@ router.post("/pages/:id/attachments", async (req, res) => {
       return;
     }
 
+    // MIME type allowlist
+    const ALLOWED_MIMES = new Set([
+      "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+      "application/pdf", "text/plain", "text/csv", "text/markdown",
+      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/zip", "application/json",
+    ]);
+    const mimeType = uploadedFile.mimetype || "application/octet-stream";
+    if (!ALLOWED_MIMES.has(mimeType)) {
+      res.status(415).json({ error: { code: "UNSUPPORTED_MEDIA_TYPE", message: `File type '${mimeType}' is not allowed` } });
+      return;
+    }
+
     const originalName = uploadedFile.originalFilename || "untitled";
     const uuid = randomUUID();
     const ext = extname(originalName);
@@ -786,6 +800,13 @@ router.post("/import", (req, res) => {
     const { spaceId, format, data } = req.body;
     if (!spaceId || !format || !data) {
       res.status(400).json({ error: { code: "BAD_REQUEST", message: "spaceId, format, and data are required" } });
+      return;
+    }
+
+    // Guard against oversized imports
+    const serialized = JSON.stringify(data);
+    if (Buffer.byteLength(serialized) > MAX_IMPORT_SIZE) {
+      res.status(413).json({ error: { code: "PAYLOAD_TOO_LARGE", message: "Import data exceeds maximum size" } });
       return;
     }
 
