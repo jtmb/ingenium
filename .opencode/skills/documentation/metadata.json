@@ -1,0 +1,6 @@
+{
+  "name": "documentation",
+  "description": "Documentation workspace, architecture conventions, and audit workflow — creating, editing, organizing, and auditing documentation.",
+  "tags": ["documentation", "docs", "workspace", "audit", "architecture"],
+  "alwaysApply": true
+}

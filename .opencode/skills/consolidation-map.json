@@ -1,0 +1,229 @@
+{
+  "version": "1.0.0",
+  "migrationId": "phase3-taxonomy-consolidation",
+  "migrationDate": "2026-07-16T16:52:04.190862+00:00",
+  "preMigrationSnapshot": "4639e3851cb6d7d5f46e9c2f3ca481c6298ebda5",
+  "summary": {
+    "legacySkills": 36,
+    "canonicalSkills": 10,
+    "canonicalRetained": 8,
+    "canonicalCreated": 2,
+    "sourcesMigrated": 28,
+    "lineageRecords": 28,
+    "archivedDdRows": 22,
+    "absentFromGlobalDefault": 6,
+    "accounting": "36 original = 8 retained canonical + 28 absorbed legacy (+2 created canonical = 10 active)",
+    "verifiedAt": "2026-07-16T19:00:00.000Z",
+    "verifiedBy": "phase3-reconciliation"
+  },
+  "canonicalSkills": [
+    "development-conventions",
+    "devops-conventions",
+    "database-conventions",
+    "engineering-workflow",
+    "mcp-tooling",
+    "local-models",
+    "security-audit",
+    "documentation",
+    "self-learning",
+    "skill-maintenance"
+  ],
+  "mappings": [
+    {
+      "source": "api-aggregation-patterns",
+      "target": "development-conventions",
+      "sourcePath": ".opencode/skills/development-conventions/references/sources/api-aggregation-patterns/source-index.md",
+      "sourceHash": "073dbe328f4db33cde5701e9ddc7da2e2ec265f815bba7d779eab6c37f49ade1",
+      "migratedAt": "2026-07-16T16:52:04.190175+00:00"
+    },
+    {
+      "source": "ingenium-ops",
+      "target": "development-conventions",
+      "sourcePath": ".opencode/skills/development-conventions/references/sources/ingenium-ops/source-index.md",
+      "sourceHash": "d823cd8a06fa67eff1eb84ab0547a6609b62ba9abbe1c2cd67da26bcfef4cb22",
+      "migratedAt": "2026-07-16T16:52:04.190282+00:00"
+    },
+    {
+      "source": "language-conventions",
+      "target": "development-conventions",
+      "sourcePath": ".opencode/skills/development-conventions/references/sources/language-conventions/source-index.md",
+      "sourceHash": "5f9b2f5761f4ec34d5c468c1c1860026e6491ee24e8cac39669119659fcb9951",
+      "migratedAt": "2026-07-16T16:52:04.190308+00:00"
+    },
+    {
+      "source": "mail-app-ui-conventions",
+      "target": "development-conventions",
+      "sourcePath": ".opencode/skills/development-conventions/references/sources/mail-app-ui-conventions/source-index.md",
+      "sourceHash": "7ec2c37bd82e3ee8ddc42f6210fbd0d751aa2bfaa9a7ccd690fa785e391b4b0f",
+      "migratedAt": "2026-07-16T16:52:04.190330+00:00"
+    },
+    {
+      "source": "visual-standards-conventions",
+      "target": "development-conventions",
+      "sourcePath": ".opencode/skills/development-conventions/references/sources/visual-standards-conventions/source-index.md",
+      "sourceHash": "07f8fd6df422877daf7aded10ee32da8acc9278ca53ac623d39e276c778b8dfc",
+      "migratedAt": "2026-07-16T16:52:04.190357+00:00"
+    },
+    {
+      "source": "git-history-hygiene",
+      "target": "devops-conventions",
+      "sourcePath": ".opencode/skills/devops-conventions/references/sources/git-history-hygiene/source-index.md",
+      "sourceHash": "da76b6e9b14f4c000e55ad9c4e0c3b1ad5e25075745ac650effa8139ae4ce012",
+      "migratedAt": "2026-07-16T16:52:04.190381+00:00"
+    },
+    {
+      "source": "github-cli",
+      "target": "devops-conventions",
+      "sourcePath": ".opencode/skills/devops-conventions/references/sources/github-cli/source-index.md",
+      "sourceHash": "a10889560dc2ca76d30869ff6ae2ec88470c681aae5464ba46d8e19ed6748646",
+      "migratedAt": "2026-07-16T16:52:04.190401+00:00"
+    },
+    {
+      "source": "onboard-existing-repo",
+      "target": "devops-conventions",
+      "sourcePath": ".opencode/skills/devops-conventions/references/sources/onboard-existing-repo/source-index.md",
+      "sourceHash": "605cb5b35272c77610544276188c5ddf609cc15e5ba01e89377c6a67daf539b1",
+      "migratedAt": "2026-07-16T16:52:04.190421+00:00"
+    },
+    {
+      "source": "parallel-session-hygiene",
+      "target": "devops-conventions",
+      "sourcePath": ".opencode/skills/devops-conventions/references/sources/parallel-session-hygiene/source-index.md",
+      "sourceHash": "4378dfbae19126feb31a7c6cbc4c2e146ad26f6d47d1ef3a9056cd102ebabf5f",
+      "migratedAt": "2026-07-16T16:52:04.190439+00:00"
+    },
+    {
+      "source": "database-migration-management",
+      "target": "database-conventions",
+      "sourcePath": ".opencode/skills/database-conventions/references/sources/database-migration-management/source-index.md",
+      "sourceHash": "5723aca436147a3c48a5527e7518576876fab84b942a6c52534b547f6259a13d",
+      "migratedAt": "2026-07-16T16:52:04.190477+00:00"
+    },
+    {
+      "source": "sqlite-migration-patterns",
+      "target": "database-conventions",
+      "sourcePath": ".opencode/skills/database-conventions/references/sources/sqlite-migration-patterns/source-index.md",
+      "sourceHash": "f19da459cddc0ca814b537186f3017abd18b6795af1c20f63c1792ab6cfede56",
+      "migratedAt": "2026-07-16T16:52:04.190502+00:00"
+    },
+    {
+      "source": "sqlite-wal-safety",
+      "target": "database-conventions",
+      "sourcePath": ".opencode/skills/database-conventions/references/sources/sqlite-wal-safety/source-index.md",
+      "sourceHash": "a47860fc77e6c99271daf095f14ef3c723f7e8997753de77d215dda2e3643908",
+      "migratedAt": "2026-07-16T16:52:04.190522+00:00"
+    },
+    {
+      "source": "agent-execution-quality",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/agent-execution-quality/source-index.md",
+      "sourceHash": "344c4ee7b99839b8ad91667734b2430c4c06cae1ac557c90f541dfde0592c3c8",
+      "migratedAt": "2026-07-16T16:52:04.190542+00:00"
+    },
+    {
+      "source": "agent-workflow-patterns",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/source-index.md",
+      "sourceHash": "5596f91abc0830956799f15d30e9a8e4b4a8eb81f7a10be09b7fcca6a80e6f68",
+      "migratedAt": "2026-07-16T16:52:04.190564+00:00"
+    },
+    {
+      "source": "debugging-patterns",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/debugging-patterns/source-index.md",
+      "sourceHash": "c4ad7dd05daeeec5e4aba4e1d640430f9e0833a4732302ace53ea657cd331fea",
+      "migratedAt": "2026-07-16T16:52:04.190584+00:00"
+    },
+    {
+      "source": "configuring-opencode",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/configuring-opencode/source-index.md",
+      "sourceHash": "abd783b920953eb37650288e206b250095d194f09b65664d2179a1e556cc0fbb",
+      "migratedAt": "2026-07-16T16:52:04.190604+00:00"
+    },
+    {
+      "source": "logging-visibility",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/logging-visibility/source-index.md",
+      "sourceHash": "c9a0e89a01ac6b1deb251401e5d315282948350d7a0065f12f4fa1696d8a92f8",
+      "migratedAt": "2026-07-16T16:52:04.190623+00:00"
+    },
+    {
+      "source": "orchestrator-primer",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/orchestrator-primer/source-index.md",
+      "sourceHash": "b34580d74eca36a76e203842578370db778e22c9429739b32bba4e20e630845b",
+      "migratedAt": "2026-07-16T16:52:04.190642+00:00"
+    },
+    {
+      "source": "per-project-scoping",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/per-project-scoping/source-index.md",
+      "sourceHash": "ea103d5e4aaf0d5320135a6576abfc8bc86e9f55798a6e2fd131a40985b2442c",
+      "migratedAt": "2026-07-16T16:52:04.190660+00:00"
+    },
+    {
+      "source": "supervision-logging",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/supervision-logging/source-index.md",
+      "sourceHash": "b50abce3b8aebdb75682114577df54a70b67b9b468330e47e43f213bc84ee5f2",
+      "migratedAt": "2026-07-16T16:52:04.190683+00:00"
+    },
+    {
+      "source": "uncensored-direct-response",
+      "target": "engineering-workflow",
+      "sourcePath": ".opencode/skills/engineering-workflow/references/sources/uncensored-direct-response/source-index.md",
+      "sourceHash": "0a7c6f343a85d149d5f2914b76a75cacd538002b76e58cbd55bec9ec27931e79",
+      "migratedAt": "2026-07-16T16:52:04.190703+00:00"
+    },
+    {
+      "source": "browsing-the-web",
+      "target": "mcp-tooling",
+      "sourcePath": ".opencode/skills/mcp-tooling/references/sources/browsing-the-web/source-index.md",
+      "sourceHash": "eebd628acc8077f429d334c673050b92d202060944068547575d82ddb0dd7658",
+      "migratedAt": "2026-07-16T16:52:04.190727+00:00"
+    },
+    {
+      "source": "dashboard-screenshots",
+      "target": "mcp-tooling",
+      "sourcePath": ".opencode/skills/mcp-tooling/references/sources/dashboard-screenshots/source-index.md",
+      "sourceHash": "1a47793338607a440a51b34877167174f1d71adc1608ad7e6c53b9ff39f833f7",
+      "migratedAt": "2026-07-16T16:52:04.190750+00:00"
+    },
+    {
+      "source": "security-audit-workflow",
+      "target": "security-audit",
+      "sourcePath": ".opencode/skills/security-audit/references/sources/security-audit-workflow/source-index.md",
+      "sourceHash": "9904557bde9841a127736ad22d5baecee6a8950930f8aa1322bdc94e5ca767ea",
+      "migratedAt": "2026-07-16T16:52:04.190771+00:00"
+    },
+    {
+      "source": "docs-workspace",
+      "target": "documentation",
+      "sourcePath": ".opencode/skills/documentation/references/sources/docs-workspace/source-index.md",
+      "sourceHash": "924539116bf3f2aa0c9e78207ff092bccb266974fd44ab28314a0afc5c8ca6c6",
+      "migratedAt": "2026-07-16T16:52:04.190792+00:00"
+    },
+    {
+      "source": "documentation-architecture",
+      "target": "documentation",
+      "sourcePath": ".opencode/skills/documentation/references/sources/documentation-architecture/source-index.md",
+      "sourceHash": "954f83a931b31988c2b26d42582d2a8ca46cc1f1e60086f847bd1aaafc61e4e7",
+      "migratedAt": "2026-07-16T16:52:04.190816+00:00"
+    },
+    {
+      "source": "documentation-audit-workflow",
+      "target": "documentation",
+      "sourcePath": ".opencode/skills/documentation/references/sources/documentation-audit-workflow/source-index.md",
+      "sourceHash": "eb6234c330b7ed17ed3d923e2fca143bf79e2d56a92aec3094b00ed456711ab0",
+      "migratedAt": "2026-07-16T16:52:04.190836+00:00"
+    },
+    {
+      "source": "local-persistence",
+      "target": "skill-maintenance",
+      "sourcePath": ".opencode/skills/skill-maintenance/references/sources/local-persistence/source-index.md",
+      "sourceHash": "6ad981cd155019a5b568af3e658fb55dda1eddfa17a8857a098bde94821af56d",
+      "migratedAt": "2026-07-16T16:52:04.190860+00:00"
+    }
+  ]
+}
