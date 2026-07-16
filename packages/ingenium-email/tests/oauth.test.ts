@@ -19,6 +19,7 @@ vi.mock("ingenium-core", () => {
           }
           return entries;
         }),
+        get: vi.fn(() => ({ id: "global-project-id" })),
         run: vi.fn((...bindParams: string[]) => {
           // Sync DELETE statements back to the store Map
           if (sql.startsWith("DELETE FROM settings")) {
