@@ -193,8 +193,22 @@ server.registerTool(
 
 server.registerTool(
   "ingenium_skill_sync_all",
-  { description: "Sync ALL skills disk↔DB for a project.", inputSchema: { project: projectParam } },
+  {
+    description:
+      "Sync ALL skills disk→DB for a project. Returns per-skill status (created/updated/unchanged/skipped_archived/error). Use ?write_to_disk=true to also push DB skills back to disk.",
+    inputSchema: { project: projectParam },
+  },
   wrapHandler("ingenium_skill_sync_all", async ({ project }) => skillTools.skillSyncAll(project)),
+);
+
+server.registerTool(
+  "ingenium_skill_sync_all_preview",
+  {
+    description:
+      "Preview what sync-all would change without modifying anything. Returns lists of skills that would be created, updated, or skipped.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler("ingenium_skill_sync_all_preview", async ({ project }) => skillTools.skillSyncAllPreview(project)),
 );
 
 // ── Skills Governance (14) ─────────────────────────────────
