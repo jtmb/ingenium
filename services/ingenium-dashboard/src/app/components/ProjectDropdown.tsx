@@ -4,6 +4,12 @@ import { usePathname } from "next/navigation";
 import { useProject, persistProject } from "@/lib/ProjectContext";
 import { api } from "@/lib/api";
 
+/**
+ * Project switcher dropdown in the top navigation bar.
+ *
+ * Disabled on `/mail` and `/opencode` pages because those views operate on the
+ * global project context and switching projects mid-session would break the UX.
+ */
 export default function ProjectDropdown() {
   const pathname = usePathname();
   const disabled = pathname?.startsWith("/mail") || pathname?.startsWith("/opencode");
@@ -12,10 +18,12 @@ export default function ProjectDropdown() {
   const [projects, setProjects] = useState<any[]>([]);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Lazy-load project list only when the dropdown opens
   useEffect(() => {
     if (open) api.projects.list().then((r) => setProjects(r.data ?? [])).catch(() => {});
   }, [open]);
 
+  // Close the dropdown when clicking outside (mousedown fires before click, avoids race with toggle)
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
@@ -24,9 +32,11 @@ export default function ProjectDropdown() {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
 
+  /** Switch the active project and reload the current page to pick up the new context. */
   function selectProject(name: string) {
     persistProject(name);
     setOpen(false);
+    // Full page reload to re-initialise all data-fetching hooks with the new project
     window.location.href = window.location.pathname;
   }
 

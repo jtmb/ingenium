@@ -1,9 +1,11 @@
 /**
- * MCP tool handlers for service status.
+ * MCP tool handlers for service status via supervisord.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports fetching overall health, application detail, process detail, and process logs.
  */
 import { api } from "../client.js";
 
+/** Hard cap on log chunk size (10KB) to prevent oversized MCP responses and memory pressure. */
 const MAX_LOG_BYTES = 10000;
 
 /** Get overall service health — supervisord process states + application health */
@@ -33,13 +35,13 @@ export async function serviceProcessLogs(
 ) {
   const params: Record<string, string> = { project };
   if (offset !== undefined) params.offset = String(offset);
-  // Enforce byte-size cap: max 10000 bytes
+  // Defense in depth: enforce byte cap at both request (limit param) and response (truncation below)
   const effectiveLimit = Math.min(limit ?? 4096, MAX_LOG_BYTES);
   params.limit = String(effectiveLimit);
 
   const res = await api.get(`/services/${encodeURIComponent(name)}/logs`, params);
 
-  // Truncate log content to MAX_LOG_BYTES for safety
+  // Second line of defense: truncate response regardless of what the server returned
   const data = res.data as any;
   if (data?.log && Buffer.byteLength(data.log, "utf8") > MAX_LOG_BYTES) {
     const truncated = Buffer.from(data.log, "utf8").subarray(0, MAX_LOG_BYTES).toString("utf8");

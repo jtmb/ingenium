@@ -1,6 +1,14 @@
 "use client";
 import { useTheme } from "./ThemeProvider";
 
+/**
+ * One-click theme toggle button.
+ *
+ * Cycles between the current resolved theme and its opposite.
+ * `suppressHydrationWarning` is needed because the server renders "light"
+ * (default) while the client may have a different resolved theme from
+ * localStorage — without this, React would warn about the mismatch.
+ */
 export default function ThemeToggle() {
   const { resolved, setTheme } = useTheme();
   return (

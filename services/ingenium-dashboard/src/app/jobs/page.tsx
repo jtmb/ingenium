@@ -479,7 +479,9 @@ function LiveLogConsole({ run, project }: { run: JobRun; project: string }) {
     maxSeqRef.current = undefined;
   }, [run.id]);
 
-  // Poll logs every 2s while running; stop when finished
+  // Poll logs every 2s while running; stop when finished.
+  // 2s is tight enough to feel "live" without excessive API pressure
+  // during long-running agent jobs that may produce output infrequently.
   useEffect(() => {
     const fetchLogs = async () => {
       try {
@@ -602,6 +604,7 @@ function JobDetailView({
 
   // Poll run list every 2s only while a run is actively running.
   // Dependencies track id + status (not the full object) to avoid re-renders.
+  // The `fetchRuns` callback is stable via useCallback with [job.id, project].
   useEffect(() => {
     // Initial fetch on mount
     fetchRuns();
@@ -802,6 +805,20 @@ function JobDetailView({
 /*  Main Jobs Page                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * JobsPage — Scheduled and triggered agent job management.
+ *
+ * Sub-components:
+ *   - JobFormOverlay: Create/edit form with AI-assisted auto-generation
+ *     ("wand" button) that derives cron/trigger/prompt from description.
+ *   - JobDetailView: Single-job view with run history table + live log
+ *     console that polls every 2s while a run is active.
+ *   - JobCard: Grid tile showing name, description, last-run status dot.
+ *
+ * Live log polling interval (2s) balances responsiveness vs. API load.
+ * The cancel-run path uses fire-and-forget and re-fetches the run list
+ * on the next poll cycle.
+ */
 export default function JobsPage() {
   const project = useProject();
 

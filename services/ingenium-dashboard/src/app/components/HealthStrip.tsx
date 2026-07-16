@@ -43,7 +43,10 @@ export default function HealthStrip({ data, loading }: HealthStripProps) {
     return <span className={`inline-block w-2 h-2 rounded-full ${bg} shrink-0`} />;
   };
 
-  // Compute overall summary
+  // Compute overall summary — three-tier health assessment:
+  // - All green  → "All systems operational"
+  // - Partial    → "N service(s) degraded" (counts API + OpenCode + individual services)
+  // - Total      → "Multiple services down" (API + OpenCode + ALL services non-running)
   const allServicesOk = data.services.every(
     (s) => s.status === "running" || s.status === "healthy"
   );

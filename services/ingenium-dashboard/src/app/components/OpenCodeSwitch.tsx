@@ -1,4 +1,9 @@
-// DEPRECATED — replaced by OpenCodeToolbar.tsx
+/**
+ * @deprecated Replaced by {@link import("./OpenCodeToolbar").default}.
+ * Kept for reference — the glass-tab design is now integrated into the
+ * top toolbar bar (OpenCodeToolbar) for a more compact UX.
+ */
+// TODO: Remove this component after confirming no external references exist
 
 "use client";
 
@@ -27,7 +32,8 @@ export default function OpenCodeSwitch({ mode, onModeChange }: OpenCodeSwitchPro
     onModeChange(isWeb ? "cli" : "web");
   };
 
-  // Global keyboard shortcut: Ctrl+Shift+`
+  // Global keyboard shortcut: Ctrl+Shift+` toggles Web/CLI mode from anywhere
+  // Intentionally no dependency array — we always want the latest modeRef value
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === "`") {

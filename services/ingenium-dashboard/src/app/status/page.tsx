@@ -58,6 +58,8 @@ interface StatusResponse {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4097/api/v1";
+// 2s poll matches supervisord's native XML-RPC update cadence and gives
+// near-real-time feedback for process start/stop/restart cycles.
 const POLL_INTERVAL = 2000;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -203,6 +205,20 @@ function healthBanner(
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+/**
+ * StatusPage — Real-time service monitoring via supervisord XML-RPC.
+ *
+ * Two tiers of services:
+ *   1. supervisord-managed processes (API, Dashboard, opencode-web, ttyd)
+ *   2. In-process application services (synthesis-engine, email-client)
+ *
+ * `effectiveOverall` flags degradation when application services are in
+ * error/stopped state even if supervisord reports "healthy" — this matters
+ * because the in-process services are not tracked by supervisord.
+ *
+ * The ServiceOverlay component (lazy-loaded) provides PID, exit status,
+ * spawn error details, and recent log tail.
+ */
 export default function StatusPage() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);

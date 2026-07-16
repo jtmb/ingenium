@@ -33,6 +33,11 @@ export interface SynthesisLLMResult {
 /**
  * Build the prompt sent to the LLM.
  */
+/**
+ * Build the LLM synthesis prompt with observations, existing skills/traits context.
+ * The prompt instructs the LLM to return ONLY valid JSON (no markdown wrapping)
+ * because several providers (e.g. LM Studio) reject `response_format: { "type": "json_object" }`.
+ */
 function buildPrompt(
   observations: Observation[],
   existingSkills: Pick<Skill, "name" | "description">[],
@@ -264,6 +269,8 @@ export async function callSynthesisLLM(
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown error");
       logger.warn("synthesis-llm", "LLM synthesis API returned error", { status: response.status, error: errText });
+      // HACK: The fallback prompt is nearly identical to the primary except
+      // the system message is reworded. Both paths should use a shared format.
       // Try parsing as non-JSON response format
       const fallbackResponse = await fetch(`${baseEndpoint}/v1/chat/completions`, {
         method: "POST",
@@ -301,6 +308,13 @@ export async function callSynthesisLLM(
   }
 }
 
+/**
+ * Attempt to parse JSON from an LLM response, handling both raw JSON and
+ * markdown-wrapped JSON (```json ... ```). Returns null if all strategies fail.
+ *
+ * TODO: Deduplicate — this logic is duplicated in `callConsolidationLLM`.
+ *       Extract to a shared utility.
+ */
 function tryParseJSON(text: string): any {
   try {
     // Strip markdown code blocks if present
@@ -310,7 +324,7 @@ function tryParseJSON(text: string): any {
     }
     return JSON.parse(cleaned);
   } catch {
-    // Try to extract JSON from markdown
+    // Try to extract JSON from markdown — LLMs sometimes wrap even when told not to
     const match = text.match(/\{[\s\S]*\}/);
     if (match) {
       try { return JSON.parse(match[0]); } catch {}

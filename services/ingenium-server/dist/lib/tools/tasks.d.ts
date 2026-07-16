@@ -103,4 +103,67 @@ export declare function taskNotifications(project: string, recipient: string, un
         text: string;
     }[];
 }>;
+/** Get a single task by ID. */
+export declare function taskGet(project: string, taskId: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** List comments for a task. */
+export declare function taskCommentsList(project: string, taskId: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Edit an existing comment on a task. */
+export declare function taskCommentEdit(project: string, taskId: string, commentId: string, body: string, actor?: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Add a reaction to a task comment. */
+export declare function taskCommentReact(project: string, taskId: string, commentId: string, reaction: string, actor: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** List task links (blocks, relates_to, duplicates). */
+export declare function taskLinksList(project: string, taskId: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Delete a task link by ID. */
+export declare function taskLinkDelete(project: string, taskId: string, linkId: string, actor?: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Get the full task tree (parent + subtasks + linked tasks). */
+export declare function taskTree(project: string, taskId: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Mark a notification as read. */
+export declare function taskNotificationRead(project: string, notificationId: string): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Bulk update multiple tasks with the same fields. */
+export declare function taskBulkUpdate(project: string, taskIds: string[], fields: Record<string, unknown>): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=tasks.d.ts.map

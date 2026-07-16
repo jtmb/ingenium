@@ -26,6 +26,16 @@ function relativeTime(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+/**
+ * Notification bell with polling, toast popups, and a dropdown panel.
+ *
+ * Polls every 30s for new notifications assigned to the "orchestrator" agent.
+ * New notifications detected between polls trigger a toast (auto-dismissed after 5s).
+ * The dropdown closes on outside click via a mousedown listener.
+ *
+ * Uses a ref (`prevIdsRef`) to track already-seen notification IDs for toast
+ * deduplication across polling cycles.
+ */
 export default function NotificationBell({ project, onTaskClick }: NotificationBellProps) {
   const [notifications, setNotifications] = useState<TaskNotification[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -39,14 +49,12 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
       const fresh = r.data ?? [];
       const prevIds = prevIdsRef.current;
 
-      // Detect new notifications for toast
       const newOnes = fresh.filter((n) => !prevIds.has(n.id));
       if (newOnes.length > 0 && !panelOpen) {
         setToast(newOnes[newOnes.length - 1]!);
         setTimeout(() => setToast(null), 5000);
       }
 
-      // Update prev ids
       prevIdsRef.current = new Set(fresh.map((n) => n.id));
       setNotifications(fresh);
     } catch {
@@ -54,14 +62,13 @@ export default function NotificationBell({ project, onTaskClick }: NotificationB
     }
   }, [project, panelOpen]);
 
-  // Poll every 30s
   useEffect(() => {
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30_000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
 
-  // Close panel on outside click
+  // Close dropdown on click outside the panel.
   useEffect(() => {
     if (!panelOpen) return;
     const handler = (e: MouseEvent) => {

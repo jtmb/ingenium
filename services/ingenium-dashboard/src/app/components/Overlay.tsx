@@ -12,6 +12,13 @@ type OverlayProps = {
   children: React.ReactNode;
 };
 
+/**
+ * Full-screen settings overlay with backdrop, Escape-to-close, and body scroll lock.
+ *
+ * Uses `createPortal` to render outside the component tree so the overlay
+ * sits above all other content regardless of z-index stacking context.
+ * Body scroll is locked while open to prevent background scrolling on mobile.
+ */
 export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, children }: OverlayProps) {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.key === "Escape") onClose();
@@ -24,7 +31,7 @@ export default function Overlay({ isOpen, onClose, title, subtitle, fullScreen, 
     }
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
-      document.body.style.overflow = "";
+      document.body.style.overflow = ""; // Restore scrolling on unmount
     };
   }, [isOpen, handleKeyDown]);
 

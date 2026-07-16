@@ -10,13 +10,18 @@ import { useProject } from "../lib/ProjectContext";
 import { api, type DashboardSummary } from "../lib/api";
 
 /**
- * Operational Cockpit Home Page.
+ * Home — Operational Cockpit Page.
  *
  * Layout (top to bottom):
  *   1. Quick Actions — row of compact icon buttons
  *   2. Attention Queue + Resume Work — side-by-side on desktop
  *   3. Activity Timeline — vertical timeline of recent events
  *   4. Health Strip — compact service health indicators
+ *
+ * The `unavailableModules` array lets individual sections gracefully degrade
+ * when the backend reports feature-level unavailability (e.g., synthesis
+ * engine not configured). Each section receives a `loading` boolean that
+ * replaces its content with a skeleton when true, instead of hiding it.
  */
 export default function Home() {
   const project = useProject();
@@ -46,7 +51,9 @@ export default function Home() {
     fetchSummary();
   }, [fetchSummary]);
 
-  // Optional 60-second auto-refresh
+  // 60s polling is appropriate for an operational dashboard — fast enough to
+  // reflect recent activity but slow enough to avoid hammering the API backend
+  // which aggregates data from multiple internal services.
   useEffect(() => {
     if (paused) return;
     const interval = setInterval(fetchSummary, 60_000);

@@ -15,6 +15,7 @@ import { logger } from "../logger.js";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+/** Resolve the SQLite DB path from env var or fall back to the default location. */
 function dbPath(): string {
   return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
 }

@@ -89,6 +89,15 @@ function StateBadge({ state }: { state: string }) {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+/**
+ * SyncProgress — full-page mailbox sync status display.
+ * Shows per-folder progress (headers → bodies), overall completion percentage,
+ * and error states. Rendered during initial mailbox setup before the user
+ * can interact with their email.
+ *
+ * This screen is replaced by the normal mail UI when all folders have
+ * initial cached data (cachedCount > 0).
+ */
 export default function SyncProgress({
   folders,
   syncingFolders,

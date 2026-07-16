@@ -2,9 +2,12 @@ import { Router } from "express";
 import { commands, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
+/**
+ * CRUD routes for per-project slash-commands (e.g. /synthesize, /sync-skills).
+ * Commands are simple name→content mappings the agent invokes via the MCP tool interface.
+ */
 export const commandsRouter = Router();
 
-// GET / — list commands
 commandsRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -12,7 +15,6 @@ commandsRouter.get("/", (req, res) => {
   res.json({ data: list });
 });
 
-// POST / — create a new command
 commandsRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -22,15 +24,18 @@ commandsRouter.post("/", (req, res) => {
       res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "name and file_path are required" } });
       return;
     }
+    // content is optional — if omitted, the command reads from disk on first invocation
     const cmd = commands.createCommand(projectId, name, file_path, content);
     res.status(201).json({ data: cmd });
   } catch (err: any) {
+    // Structured error with first 5 stack frames — enough to debug without
+    // leaking the full trace (which may include internal paths) to the client.
     logger.error("commands", `Command creation failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
   }
 });
 
-// GET /:name — get a single command
+// `!` non-null assertion on params.name is safe — Express route matching guarantees the param exists
 commandsRouter.get("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -42,7 +47,6 @@ commandsRouter.get("/:name", (req, res) => {
   res.json({ data: cmd });
 });
 
-// PUT /:name — update a command
 commandsRouter.put("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -59,7 +63,6 @@ commandsRouter.put("/:name", (req, res) => {
   }
 });
 
-// DELETE /:name — delete a command
 commandsRouter.delete("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;

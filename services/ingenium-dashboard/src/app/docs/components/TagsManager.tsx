@@ -9,7 +9,7 @@ type TagsManagerProps = {
   pageId: number;
 };
 
-/** Cycle through badge hues for visual variety. */
+/** Cycles through badge hues for visual variety per tag (not per name — avoids clash on duplicate hues). */
 const TAG_HUES = [
   "purple", "blue", "green", "amber", "red", "teal",
   "indigo", "pink", "orange", "cyan",
@@ -19,6 +19,11 @@ function tagHue(idx: number): string {
   return TAG_HUES[idx % TAG_HUES.length]!;
 }
 
+/**
+ * TagsManager — inline tag editor with autocomplete from all known tags.
+ * Loads both page-specific tags (via list) and global tag set (via allUnique) on mount.
+ * Keyboard support: Enter to add (selects from suggestions if active), Arrow/Up/Down/Escape.
+ */
 export default function TagsManager({ pageId }: TagsManagerProps) {
   const [tags, setTags] = useState<DocTag[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,7 +42,8 @@ export default function TagsManager({ pageId }: TagsManagerProps) {
         api.docs.tags.allUnique(),
       ]);
       setTags(tagsRes?.data ?? []);
-      setAllTags(allRes?.data ?? []);
+      const allTagsData = allRes?.data ?? [];
+      setAllTags(allTagsData.map((t: DocTag) => t.name));
     } catch {
       setTags([]);
     } finally {

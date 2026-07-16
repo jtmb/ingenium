@@ -1,6 +1,7 @@
 /**
  * MCP tool handlers for project management.
- * Supports listing, initializing, and deleting projects.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
+ * Supports listing, initializing, deleting, restoring, purging, and renaming projects.
  */
 import { api } from "../client.js";
 /** List all projects known to the Ingenium API. */
@@ -36,5 +37,17 @@ export async function projectPurge(project, retentionDays) {
 /** Mark a project as global (or unmark). */
 export async function projectSetGlobal(project, name, isGlobal) {
     const res = await api.patch(`/projects/${encodeURIComponent(name)}/global`, { is_global: isGlobal }, { project });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Rename a project. */
+// NOTE: `_project` is unused — the rename endpoint is global, not scoped to the caller's project.
+// The param is required by the tool-registration shim for consistent handler signatures.
+export async function projectRename(_project, name, newName) {
+    const res = await api.patch(`/projects/${encodeURIComponent(name)}`, { name: newName });
+    return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
+}
+/** Get detailed info about a project by name (no project param needed). */
+export async function projectDetail(name) {
+    const res = await api.get(`/projects/${encodeURIComponent(name)}/detail`);
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }

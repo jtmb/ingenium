@@ -22,16 +22,23 @@ export default function OpenCodeToolbar({
   onModeChange,
   isLoaded,
 }: OpenCodeToolbarProps) {
-  // Refs to avoid stale closures in the keyboard shortcut listener
+  /**
+   * Refs to avoid stale closures in the keyboard shortcut listener.
+   *
+   * The `useEffect` with `[]` deps only runs once, so the callback would
+   * capture the initial values of `mode` and `onModeChange`. Using refs
+   * ensures the handler always reads the latest values without re-registering
+   * the listener on every render.
+   */
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const onModeChangeRef = useRef(onModeChange);
   onModeChangeRef.current = onModeChange;
 
-  // Global keyboard shortcut: Ctrl+Shift+`
+  // Global keyboard shortcut: Ctrl+Shift+` — registered once, reads refs for current values
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.ctrlKey && e.shiftKey && e.key === "`") {
+      if (e.ctrlKey && e.shiftKey && e.code === "Backquote") {
         e.preventDefault();
         const next = modeRef.current === "web" ? "cli" : "web";
         onModeChangeRef.current(next);
@@ -68,6 +75,7 @@ export default function OpenCodeToolbar({
         <div className="flex rounded-md border border-[var(--color-border)] overflow-hidden">
           <button
             type="button"
+            role="button"
             onClick={() => onModeChange("web")}
             className={[
               "px-3 py-1 text-xs font-medium transition-colors",
@@ -76,11 +84,13 @@ export default function OpenCodeToolbar({
                 : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]",
             ].join(" ")}
             aria-pressed={mode === "web"}
+            aria-label="Switch to Web mode"
           >
             Web
           </button>
           <button
             type="button"
+            role="button"
             onClick={() => onModeChange("cli")}
             className={[
               "px-3 py-1 text-xs font-medium transition-colors border-l border-[var(--color-border)]",
@@ -89,6 +99,7 @@ export default function OpenCodeToolbar({
                 : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]",
             ].join(" ")}
             aria-pressed={mode === "cli"}
+            aria-label="Switch to CLI mode"
           >
             CLI
           </button>

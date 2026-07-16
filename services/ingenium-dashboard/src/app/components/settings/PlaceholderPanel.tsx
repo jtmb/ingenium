@@ -5,6 +5,11 @@ interface PlaceholderPanelProps {
   tab: SettingsTab;
 }
 
+/**
+ * Fallback panel shown when a settings tab has no dedicated panel component
+ * registered in TAB_PANELS inside SettingsOverlay. Keeps the sidebar consistent
+ * even for unimplemented sections.
+ */
 export default function PlaceholderPanel({ tab }: PlaceholderPanelProps) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-3 py-16">

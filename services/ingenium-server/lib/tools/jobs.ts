@@ -1,5 +1,6 @@
 /**
  * MCP tool handlers for the Jobs feature.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports job CRUD, manual triggering, run history, log streaming, and run cancellation.
  */
 import { api } from "../client.js";

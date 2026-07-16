@@ -3,9 +3,13 @@
  *
  * Delegates disk→API push logic to resource-sync.ts. The server sync (MCP servers
  * from opencode.json mcp{} block) is handled inline since resource-sync.ts does
- * not manage servers.
+ * not manage servers (MCP servers are OpenCode-specific, not general resources).
  *
  * Published to npm for existing installations — do NOT delete.
+ *
+ * NOTE: Server sync is kept inline because MCP server definitions live in the
+ * opencode.json "mcp" block, which is OpenCode-specific configuration, not a
+ * general resource like skills/agents/plugins.
  */
 import { pushDiskToApi } from "./resource-sync.js";
 import { existsSync, readFileSync } from "node:fs";
@@ -14,14 +18,20 @@ import { resolve } from "node:path";
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 const DEFAULT_PROJECT = process.env.INGENIUM_PROJECT || "global-default";
 
-// ── Server sync (inline — not in resource-sync.ts since it's MCP-specific) ─
-
 type UpsertResult = { created: number; skipped: number; errors: number };
 
 function logResult(service: string, result: UpsertResult): string {
   return `onboarding-sync/${service}: created ${result.created}, skipped ${result.skipped}, errors ${result.errors}`;
 }
 
+/**
+ * Sync MCP servers from opencode.json mcp{} block to the API.
+ * MCP servers are read from the project's opencode.json "mcp" section and upserted
+ * via the API's sync-all endpoint (create new, skip existing).
+ *
+ * HACK: JSONC-style comments are stripped before parsing because opencode.json
+ * is technically JSONC, not strict JSON.
+ */
 async function syncServers(worktree: string): Promise<UpsertResult> {
   const result: UpsertResult = { created: 0, skipped: 0, errors: 0 };
   try {
@@ -34,6 +44,7 @@ async function syncServers(worktree: string): Promise<UpsertResult> {
     const mcpBlock = config.mcp;
     if (!mcpBlock || typeof mcpBlock !== "object") return result;
 
+    // Fetch existing servers to distinguish created vs skipped
     const listRes = await fetch(`${API_BASE}/servers?project=${encodeURIComponent(DEFAULT_PROJECT)}`);
     const existing = new Set<string>();
     if (listRes.ok) {
@@ -45,6 +56,7 @@ async function syncServers(worktree: string): Promise<UpsertResult> {
     if (serverEntries.length === 0) return result;
 
     const serverPayloads = serverEntries.map(([name, entry]) => {
+      // entry.command can be a string or array (command + args)
       const cmdArray: string[] = Array.isArray(entry.command) ? entry.command : [String(entry.command ?? "")];
       const command = cmdArray[0] || "";
       const args = cmdArray.length > 1 ? JSON.stringify(cmdArray.slice(1)) : undefined;
@@ -52,6 +64,7 @@ async function syncServers(worktree: string): Promise<UpsertResult> {
       return { name, command, args, env, source: "opencode" as const };
     });
 
+    // Upsert all servers in a single API call
     const syncRes = await fetch(`${API_BASE}/servers/sync-all?project=${encodeURIComponent(DEFAULT_PROJECT)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -69,8 +82,6 @@ async function syncServers(worktree: string): Promise<UpsertResult> {
   return result;
 }
 
-// ── Plugin export ──────────────────────────────────────────────────────────
-
 export const OnboardingSyncPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
 
@@ -78,10 +89,10 @@ export const OnboardingSyncPlugin = async (ctx: { worktree: string; client: any 
     event: async ({ event }: { event: any }) => {
       if (event.type !== "session.created") return;
 
-      // Delegate disk→API push to resource-sync.ts
       const pushResult = await pushDiskToApi(worktree);
 
-      // Server sync handled inline (not part of resource-sync.ts)
+      // Server sync is handled inline (not in resource-sync.ts) because MCP server
+      // definitions are OpenCode-specific config, not general resources
       const srvR = await syncServers(worktree);
 
       const parts: string[] = [];

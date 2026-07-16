@@ -46,6 +46,7 @@ export default function AttentionQueue({ data, loading }: AttentionQueueProps) {
   }
 
   // ── Severity helpers ───────────────────────────────────────────────────────
+  // Left-border accent colours map severity directly to recognisable visual cues
   const severityStyles: Record<string, string> = {
     critical: "border-l-4 border-l-red-500 bg-[var(--color-error-bg)]",
     warning: "border-l-4 border-l-amber-500 bg-[var(--color-warning-bg)]",
@@ -58,6 +59,7 @@ export default function AttentionQueue({ data, loading }: AttentionQueueProps) {
     info: "\u2139\uFE0F",
   };
 
+  /** Maps attention item type to a short human-readable label shown before the title. */
   const severityLabels: Record<string, string> = {
     task_blocked: "Blocked",
     task_overdue: "Overdue",

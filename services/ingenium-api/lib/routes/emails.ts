@@ -68,7 +68,7 @@ function getFolderEngineState(accountId: string, folder: string): FolderEngineSt
   return acct.folders.find(f => f.folder === folder) ?? null;
 }
 
-/** Promise-based sleep helper for timeout races. */
+/** Promise-based sleep helper for timeout races in on-demand body/refresh fetches. */
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
 export const emailsRouter = Router();
@@ -472,7 +472,13 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     return;
   }
 
-  const folder = (req.query.folder as string) ?? "INBOX";
+  const folder = req.query.folder as string | undefined;
+  if (!folder || typeof folder !== 'string') {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "folder query parameter is required" },
+    });
+    return;
+  }
   const { account } = result;
   const projectId = resolveEmailProject();
 
@@ -594,7 +600,8 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
 /** GET /summarize/:uid?project=&account=&folder= — LLM-generated email summary.
  *  Cache-first: returns cached summary instantly.
  *  If miss + body cached + LLM configured → generates via LLM.
- *  No noreply gate — summarization works for ALL emails regardless of sender. */
+ *  No noreply gate — summarization works for ALL emails regardless of sender.
+ *  🔴 HARD RULE #8: folder is REQUIRED — UIDs are only unique within a folder. */
 emailsRouter.get("/summarize/:uid", async (req, res) => {
   const accountId = req.query.account as string | undefined;
   const result = await getAccountAuthOrError(res, accountId);
@@ -608,7 +615,13 @@ emailsRouter.get("/summarize/:uid", async (req, res) => {
     return;
   }
 
-  const folder = (req.query.folder as string) ?? "INBOX";
+  const folder = req.query.folder as string | undefined;
+  if (!folder || typeof folder !== 'string') {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "folder query parameter is required" },
+    });
+    return;
+  }
   const { account } = result;
   const projectId = resolveEmailProject();
 
@@ -968,7 +981,8 @@ emailsRouter.get("/", async (req, res) => {
   if (refresh) {
     try {
       const freshToken = await getFreshGmailToken(account.id);
-      const REFRESH_WINDOW = 50; // reasonable batch for a UI refresh
+      const REFRESH_WINDOW = 50; // Gmail API returns 50-100 by default; 50 keeps the UI snappy
+      // 10s timeout: Gmail API is typically <2s; 10s gives headroom for rate-limiting backoff
       const messages = await Promise.race([
         GmailProvider.listMessages(
           account,
@@ -1096,7 +1110,8 @@ emailsRouter.post("/", async (req, res) => {
   }
 });
 
-/** GET /:id/attachments/:attachmentId?account=&folder= — Download an attachment by its part ID. */
+/** GET /:id/attachments/:attachmentId?account=&folder= — Download an attachment by its part ID.
+ *  🔴 HARD RULE #8: folder is REQUIRED — attachment lookups are uid-specific. */
 emailsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
   const accountId = req.query.account as string;
   const result = await getAccountAuthOrError(res, accountId);
@@ -1105,7 +1120,13 @@ emailsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
   const { account } = result;
   const id = req.params.id!;
   const attachmentId = req.params.attachmentId!;
-  const folder = (req.query.folder as string) ?? "INBOX";
+  const folder = req.query.folder as string | undefined;
+  if (!folder || typeof folder !== 'string') {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "folder query parameter is required" },
+    });
+    return;
+  }
 
   // 🔴 L29: The Gmail REST API re-fetched full message in getAttachment()
   // may have a different structure than the original cached message.  When
@@ -1155,6 +1176,8 @@ emailsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
  * On-demand: listing cached, body NOT cached → live Gmail getBody (12s timeout)
  *   → persist → 200 "live". Fallback: 202 only on timeout/error.
  * Cold miss: neither cached → 202 (engine hint).
+ *
+ * 🔴 HARD RULE #8: folder is REQUIRED — UIDs are only unique within a folder.
  */
 emailsRouter.get("/:uid", async (req, res) => {
   const accountId = req.query.account as string | undefined;
@@ -1169,7 +1192,13 @@ emailsRouter.get("/:uid", async (req, res) => {
     return;
   }
 
-  const folder = (req.query.folder as string) ?? "INBOX";
+  const folder = req.query.folder as string | undefined;
+  if (!folder || typeof folder !== 'string') {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "folder query parameter is required" },
+    });
+    return;
+  }
   const { account } = result;
 
   // ── 1. Fast path: both body and listing cached ─────────────────────
@@ -1188,6 +1217,9 @@ emailsRouter.get("/:uid", async (req, res) => {
   }
 
   // ── 2. On-demand body fetch: listing cached, body missing ──────────
+  // 12s timeout: Gmail API body fetch is typically <3s but large threads with
+  // many attachments can take longer. 12s is the max before we fall back
+  // to async engine sync.
   if (cachedListing) {
     try {
       const freshToken = await getFreshGmailToken(account.id);
@@ -1323,7 +1355,8 @@ emailsRouter.patch("/:uid/flags", async (req, res) => {
   }
 });
 
-/** DELETE /:uid?project= — Delete an email. (WRITE op — uses IMAP) */
+/** DELETE /:uid?project= — Delete an email. (WRITE op — uses IMAP)
+ *  🔴 HARD RULE #8: folder is REQUIRED in body — UID is ambiguous without folder. */
 emailsRouter.delete("/:uid", async (req, res) => {
   const accountId = req.body.account;
   const result = await getAccountAuthOrError(res, accountId);
@@ -1337,7 +1370,13 @@ emailsRouter.delete("/:uid", async (req, res) => {
     return;
   }
 
-  const folder = req.body.folder ?? "INBOX";
+  const folder = req.body.folder;
+  if (!folder || typeof folder !== 'string') {
+    res.status(422).json({
+      error: { code: "VALIDATION_ERROR", message: "folder is required in request body" },
+    });
+    return;
+  }
   const { account, auth } = result;
 
   try {
@@ -1356,6 +1395,10 @@ emailsRouter.delete("/:uid", async (req, res) => {
 /**
  * 🔴 Migration: copy email accounts from any non-global project to global-default.
  * Runs once at first import (lazy, triggered from api-server.ts startup).
+ *
+ * Email accounts used to be project-scoped (pre-v2.3). This migration coalesces
+ * them into the global-default project so accounts are available across sessions.
+ * Source rows are DELETED (not kept) to prevent resurrection on container rebuilds.
  */
 export async function migrateEmailAccountsToGlobal(): Promise<number> {
   try {
@@ -1460,6 +1503,7 @@ export async function migrateEmailAccountsToGlobal(): Promise<number> {
  * 🔴 DEPRECATED — use startEngine(projectId) instead.
  * The sync engine now owns all IMAP I/O via its priority-queue background workers.
  * Kept for backward compatibility: just delegates to startEngine.
+ * TODO(v3): remove this function and update all callers.
  */
 export async function prefetchAllAccounts(): Promise<void> {
   const projectId = resolveEmailProject();

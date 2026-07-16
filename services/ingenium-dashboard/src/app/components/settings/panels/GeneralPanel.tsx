@@ -4,6 +4,12 @@ import { api } from "../../../../lib/api";
 import { useTheme } from "../../ThemeProvider";
 import SettingRow from "../SettingRow";
 
+/**
+ * General settings panel — theme selection and archive retention config.
+ *
+ * Reads/writes settings through the API's settings endpoints, targeting the
+ * global-default project since these are instance-wide preferences.
+ */
 export default function GeneralPanel() {
   const { theme, setTheme } = useTheme();
   const [retentionDays, setRetentionDays] = useState<number | null>(null);
@@ -11,13 +17,13 @@ export default function GeneralPanel() {
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
 
+  // Auto-dismiss toast notification after 3s.
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(""), 3000);
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Load archive retention
   useEffect(() => {
     api.settings.get("archive_retention_days", "global-default")
       .then((r) => {
@@ -77,7 +83,6 @@ export default function GeneralPanel() {
         )}
       </SettingRow>
 
-      {/* Toast */}
       {toast && (
         <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg z-50 text-sm">
           {toast}

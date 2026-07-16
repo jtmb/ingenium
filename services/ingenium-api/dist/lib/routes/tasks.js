@@ -1,9 +1,33 @@
 import { Router } from "express";
 import { tasks, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+/** Handles /api/v1/tasks — full Kanban board with comments, links, activity, notifications, and bulk operations. */
 export const tasksRouter = Router();
+/**
+ * Maps SQLite CHECK constraint violation substrings to user-facing 422 messages.
+ * Prevents raw SQL error propagation to the client (security: information hiding).
+ */
+const TASK_CHECK_CONSTRAINTS = [
+    { match: "issue_type", message: "issue_type must be one of: epic, story, task, subtask" },
+];
+function handleCheckConstraintError(err, res) {
+    const msg = err?.message || "";
+    if (!msg.includes("CHECK constraint failed"))
+        return false;
+    for (const c of TASK_CHECK_CONSTRAINTS) {
+        if (msg.includes(c.match)) {
+            res.status(422).json({ error: { code: "VALIDATION_ERROR", message: c.message } });
+            return true;
+        }
+    }
+    // Fallback for any future CHECK constraint
+    const match = msg.match(/CHECK constraint failed:\s*(\w+)/);
+    const field = match ? match[1] : "field";
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: `Validation constraint violated on ${field}` } });
+    return true;
+}
 // ============================================================================
-// Literal-path routes — MUST be registered BEFORE /:id
+// Literal-path routes — MUST be registered BEFORE /:id (Express route capture)
 // ============================================================================
 // GET /search?q=X&limit=N
 tasksRouter.get("/search", (req, res) => {
@@ -94,8 +118,23 @@ tasksRouter.post("/bulk", (req, res) => {
         res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "at least one field to update is required" } });
         return;
     }
-    const count = tasks.bulkUpdateTasks(projectId, task_ids, cleanFields);
-    res.json({ data: { updated: count } });
+    try {
+        const count = tasks.bulkUpdateTasks(projectId, task_ids, cleanFields);
+        res.json({ data: { updated: count } });
+    }
+    catch (err) {
+        if (handleCheckConstraintError(err, res)) {
+            logger.error("tasks", `CHECK constraint failed on POST /bulk: ${err.message}`, {
+                error: err.message,
+                name: err.name,
+                stack: err.stack?.split("\n").slice(0, 5).join("\n"),
+                method: "POST",
+                path: req.originalUrl,
+            });
+            return;
+        }
+        throw err;
+    }
 });
 // GET /next — must be before /:id
 tasksRouter.get("/next", (req, res) => {
@@ -109,10 +148,7 @@ tasksRouter.get("/next", (req, res) => {
     }
     res.json({ data: task });
 });
-// ============================================================================
-// Collection routes
-// ============================================================================
-// GET /
+// GET /tasks — list tasks, optionally filtered by column
 tasksRouter.get("/", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)
@@ -131,20 +167,32 @@ tasksRouter.post("/", (req, res) => {
         res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "title is required" } });
         return;
     }
-    const task = tasks.createTask(projectId, title, description, assigned_to, {
-        parent_id,
-        issue_type,
-        priority,
-        due_date,
-        start_date,
-        estimate_minutes,
-        custom_fields: custom_fields !== undefined ? (typeof custom_fields === "string" ? custom_fields : JSON.stringify(custom_fields)) : undefined,
-    });
-    res.status(201).json({ data: task });
+    try {
+        const task = tasks.createTask(projectId, title, description, assigned_to, {
+            parent_id,
+            issue_type,
+            priority,
+            due_date,
+            start_date,
+            estimate_minutes,
+            custom_fields: custom_fields !== undefined ? (typeof custom_fields === "string" ? custom_fields : JSON.stringify(custom_fields)) : undefined,
+        });
+        res.status(201).json({ data: task });
+    }
+    catch (err) {
+        if (handleCheckConstraintError(err, res)) {
+            logger.error("tasks", `CHECK constraint failed on POST /: ${err.message}`, {
+                error: err.message,
+                name: err.name,
+                stack: err.stack?.split("\n").slice(0, 5).join("\n"),
+                method: "POST",
+                path: req.originalUrl,
+            });
+            return;
+        }
+        throw err;
+    }
 });
-// ============================================================================
-// Per-task routes (/:id)
-// ============================================================================
 // GET /:id
 tasksRouter.get("/:id", (req, res) => {
     const projectId = requireProject(req, res);
@@ -189,12 +237,28 @@ tasksRouter.patch("/:id", (req, res) => {
             ? fields.custom_fields
             : JSON.stringify(fields.custom_fields);
     }
-    const updated = tasks.updateTask(projectId, req.params.id, updateFields, actor);
-    if (!updated) {
-        res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
-        return;
+    try {
+        const updated = tasks.updateTask(projectId, req.params.id, updateFields, actor);
+        if (!updated) {
+            res.status(404).json({ error: { code: "NOT_FOUND", message: "Task not found" } });
+            return;
+        }
+        res.json({ data: updated });
     }
-    res.json({ data: updated });
+    catch (err) {
+        if (handleCheckConstraintError(err, res)) {
+            logger.error("tasks", `CHECK constraint failed on PATCH /:id: ${err.message}`, {
+                error: err.message,
+                name: err.name,
+                stack: err.stack?.split("\n").slice(0, 5).join("\n"),
+                taskId: req.params.id,
+                method: "PATCH",
+                path: req.originalUrl,
+            });
+            return;
+        }
+        throw err;
+    }
 });
 // DELETE /:id
 tasksRouter.delete("/:id", (req, res) => {
@@ -291,6 +355,7 @@ tasksRouter.post("/:id/links", (req, res) => {
         res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "linked_task_id and link_type are required" } });
         return;
     }
+    // Server-side whitelist — must match SQL CHECK constraint on task_links.link_type
     if (!["blocks", "blocked_by", "relates_to"].includes(link_type)) {
         res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "link_type must be blocks, blocked_by, or relates_to" } });
         return;

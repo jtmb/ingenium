@@ -3,6 +3,8 @@
  *
  * Delegates to resource-sync.ts for skills-only synchronisation on session.created
  * and session.idle. Published to npm for existing installations — do NOT delete.
+ *
+ * NOTE: Exists solely for npm backward compatibility. New code should use ResourceSyncPlugin directly.
  */
 import { skillsOnlySync } from "./resource-sync.js";
 
@@ -24,7 +26,7 @@ export const SkillSyncPlugin = async (ctx: { worktree: string; client: any }) =>
             });
           }
         } catch {
-          /* non-fatal */
+          /* non-fatal — sync failures must never break session startup */
         }
       }
 

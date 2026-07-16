@@ -1,6 +1,7 @@
 /**
  * MCP tool handler for OpenCode message access.
- * Reads user messages from the host OpenCode SQLite DB via the API.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
+ * Reads user messages from the host OpenCode SQLite DB via the API (used by the extraction engine).
  */
 import { api } from "../client.js";
 

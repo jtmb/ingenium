@@ -54,7 +54,7 @@ export default function DashboardCard({
           : "border-[var(--color-border)]"
       }`}
     >
-      {/* Header row */}
+      {/* Header row — icon, title, and optional degraded/unavailable badge */}
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
           {icon && <span className="text-[var(--color-text-muted)]">{icon}</span>}
@@ -67,12 +67,12 @@ export default function DashboardCard({
         )}
       </div>
 
-      {/* Content */}
+      {/* Content slot — children render their own empty/loading/data states */}
       <div className="text-sm text-[var(--color-text-secondary)] space-y-2">
         {children}
       </div>
 
-      {/* CTA link */}
+      {/* Optional CTA link below a separator line */}
       {cta && (
         <div className="mt-4 pt-3 border-t border-[var(--color-border-muted)]">
           <Link

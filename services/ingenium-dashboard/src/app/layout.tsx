@@ -16,7 +16,18 @@ export const metadata: Metadata = {
   description: "Manage your AI agent skill system",
 };
 
-/** Root layout — top bar with sidebar navigation and main content area. */
+/**
+ * Root layout — top bar with sidebar navigation and main content area.
+ *
+ * The inline `<script>` in `<head>` applies the correct `dark` class BEFORE
+ * React hydrates, preventing a flash of unstyled content (FOUC) on page load.
+ * It reads from both cookies (SSR-first) and localStorage (user preference)
+ * with system-color-scheme fallback.
+ *
+ * Suspense boundaries around ProjectDropdown, SettingsLauncher, and
+ * SettingsOverlay prevent blocking the main content during these async
+ * component renders.
+ */
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
   const themeCookie = cookieStore.get("theme")?.value;
@@ -34,7 +45,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="min-h-screen bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] overflow-x-hidden flex flex-col">
         <ThemeProvider>
         <NavigationProvider>
-          {/* ---- Top bar ---- */}
           <nav className="shrink-0 bg-[var(--color-surface)] border-b border-[var(--color-border)] px-6 py-3 flex items-center gap-4">
             <NavigationTrigger />
             <a href="/" className="font-bold text-lg text-[var(--color-text-primary)]">Ingenium</a>
@@ -44,13 +54,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </div>
           </nav>
 
-          {/* ---- Body: sidebar + main content ---- */}
           <div className="flex flex-1 min-h-0">
             <Navigation />
-            <div className="flex-1 min-w-0 overflow-auto">
-              <MainContainer>
-                <Suspense>{children}</Suspense>
-              </MainContainer>
+            <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-auto">
+              <div className="flex-1 min-h-0 grid grid-rows-[1fr]">
+                <MainContainer>
+                  <Suspense>{children}</Suspense>
+                </MainContainer>
+              </div>
             </div>
           </div>
 

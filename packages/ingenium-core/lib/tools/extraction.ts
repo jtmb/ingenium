@@ -50,17 +50,31 @@ function hashText(text: string): string {
 
 // ── Candidate pre-filter regexes ─────────────────────────
 
-/** Message is too short or too long to contain a meaningful behavioral signal */
+/**
+ * Message length gate: reject very short messages (< 30 chars, too terse for
+ * meaningful extraction) and very long messages (> 6000 chars, likely code dumps
+ * or conversation transcripts that overwhelm the context window).
+ */
 function isReasonableLength(text: string): boolean {
   return text.length >= 30 && text.length <= 6000;
 }
 
-/** Messages that start with obvious task/technical markers */
+/** Messages that start with obvious task/technical markers — reject these */
 const TASK_MARKER_RE = /^(EXECUTION task|Operation:|##|```|@ingenium-|Upload the full)/i;
 
-/** Must contain at least one first-person or directive signal (permissive) */
+/**
+ * Permissive signal check: message must contain at least one first-person pronoun
+ * (I, we), correction (don't, never, stop), directive (use, make sure), or
+ * preference signal (prefer, rather, instead). This is intentionally broad —
+ * false positives just cost a cheap LLM call, false negatives miss durable rules.
+ */
 const SIGNAL_RE = /\b(i |i'd|i want|i prefer|we |don'?t|do not|never|always|use |call it|instead|rather|make sure|stop|note that|remember)\b/i;
 
+/**
+ * Pre-filter: is this message worth sending to the LLM for extraction?
+ * Three gates: length, task-marker exclusion, signal presence.
+ * This is a cost-cutting step — the LLM does the actual quality judgment.
+ */
 function isCandidate(text: string): boolean {
   if (!isReasonableLength(text)) return false;
   if (TASK_MARKER_RE.test(text)) return false;
@@ -70,8 +84,15 @@ function isCandidate(text: string): boolean {
 
 // ── Seen-hash dedup ──────────────────────────────────────
 
+/**
+ * Maximum number of seen message hashes to track.
+ * 2000 is enough for ~100 extraction runs of 15-message batches before recycling
+ * old hashes. Beyond this, old hashes are dropped — re-processing a message from
+ * months ago is a minor waste, not a correctness issue.
+ */
 const MAX_SEEN_HASHES = 2000;
 
+/** Load the dedup set from persistent settings (JSON-encoded array). */
 function getSeenHashes(projectId: string): Set<string> {
   try {
     const raw = getSetting(projectId, "extraction_seen_hashes");
@@ -84,6 +105,7 @@ function getSeenHashes(projectId: string): Set<string> {
   }
 }
 
+/** Persist the dedup set, capped at MAX_SEEN_HASHES to prevent unbounded growth. */
 function saveSeenHashes(projectId: string, hashes: Set<string>): void {
   const arr = Array.from(hashes).slice(-MAX_SEEN_HASHES);
   setSetting(projectId, "extraction_seen_hashes", JSON.stringify(arr));
@@ -91,6 +113,11 @@ function saveSeenHashes(projectId: string, hashes: Set<string>): void {
 
 // ── Watermark ────────────────────────────────────────────
 
+/**
+ * Watermark tracks the highest message timestamp we've already processed.
+ * On each run we only fetch messages *after* the watermark, making extraction
+ * incremental. Stored as a setting so it persists across restarts.
+ */
 function getWatermark(projectId: string): number {
   const raw = getSetting(projectId, "extraction_watermark");
   if (!raw) return 0;
@@ -98,12 +125,18 @@ function getWatermark(projectId: string): number {
   return isNaN(n) ? 0 : n;
 }
 
+/** Advance the watermark to a new timestamp. Only moves forward. */
 function setWatermark(projectId: string, ts: number): void {
   setSetting(projectId, "extraction_watermark", String(ts));
 }
 
 // ── Fetch messages from the OpenCode endpoint ────────────
 
+/**
+ * Fetch messages from the OpenCode message history via the local API.
+ * Only fetches messages *after* the watermark (incremental).
+ * Returns empty array on any HTTP error — the caller treats empty as "nothing to do".
+ */
 async function fetchMessages(
   watermark: number,
   limit: number,
@@ -145,7 +178,15 @@ Return STRICT JSON:
 
 Return {"rules":[]} if nothing qualifies. Each content MUST be a complete sentence starting with 'User'. Do not echo the raw message.`;
 
+/**
+ * Concatenate candidate messages into a single LLM prompt,
+ * numbered [1], [2], ... for reference in the LLM response.
+ * Each message is truncated to 4000 chars to keep batch prompts within
+ * the model's context window (15 messages × 4K ≈ 60K tokens).
+ */
 function buildBatchUserPrompt(messages: CandidateMessage[]): string {
+  // 4000 chars per message ≈ 1000 tokens; 15 messages × 1000 = 15K tokens,
+  // well within typical 8K-128K context windows even with the system prompt.
   const MAX_MSG_LEN = 4000;
   return messages
     .map((m, i) => `[${i + 1}] ${m.text.length > MAX_MSG_LEN ? m.text.slice(0, MAX_MSG_LEN) + "…" : m.text}`)

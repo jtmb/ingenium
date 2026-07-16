@@ -1,9 +1,13 @@
 "use client";
 
 /**
- * EmailList — search bar + scrollable email rows with pagination.
- * Shows sender, subject, snippet, and date. Distinguishes read/unread.
- * When source is "pending", displays a syncing indicator instead of an empty void.
+ * EmailList — search bar + scrollable email rows with pagination (50 per page).
+ * Shows sender, subject, snippet, and date. Distinguishes read/unread via \\Seen flag.
+ * When source is "pending", displays a syncing indicator with refresh instructions.
+ *
+ * PERF: The email list can be large — individual emails are rendered as simple divs
+ * (not tr) to avoid table layout overhead. No virtualization — assumes < 50k total emails
+ * in the IMAP folder. If perf becomes an issue, switch to react-window.
  */
 export default function EmailList({
   emails,
@@ -35,6 +39,11 @@ export default function EmailList({
   const pageSize = 50;
   const totalPages = Math.ceil(total / pageSize);
 
+  /**
+   * Smart date formatting: shows time for today's emails, date for older ones.
+   * NOTE: Uses toLocaleTimeString/toLocaleDateString — respects user's system locale
+   * but does NOT handle timezone offsets stored with the email date.
+   */
   const formatDate = (dateStr: string) => {
     const d = new Date(dateStr);
     const now = new Date();

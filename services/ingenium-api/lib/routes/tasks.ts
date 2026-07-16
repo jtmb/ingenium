@@ -2,11 +2,13 @@ import { Router, Response } from "express";
 import { tasks, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
-// ============================================================================
-// CHECK constraint error helper for the tasks table
-// ============================================================================
+/** Handles /api/v1/tasks — full Kanban board with comments, links, activity, notifications, and bulk operations. */
+export const tasksRouter = Router();
 
-/** Known CHECK constraints on the `tasks` table — maps error substring to 422 message */
+/**
+ * Maps SQLite CHECK constraint violation substrings to user-facing 422 messages.
+ * Prevents raw SQL error propagation to the client (security: information hiding).
+ */
 const TASK_CHECK_CONSTRAINTS: Array<{ match: string; message: string }> = [
   { match: "issue_type", message: "issue_type must be one of: epic, story, task, subtask" },
 ];
@@ -29,10 +31,8 @@ function handleCheckConstraintError(err: unknown, res: Response): boolean {
   return true;
 }
 
-export const tasksRouter = Router();
-
 // ============================================================================
-// Literal-path routes — MUST be registered BEFORE /:id
+// Literal-path routes — MUST be registered BEFORE /:id (Express route capture)
 // ============================================================================
 
 // GET /search?q=X&limit=N
@@ -152,11 +152,7 @@ tasksRouter.get("/next", (req, res) => {
   res.json({ data: task });
 });
 
-// ============================================================================
-// Collection routes
-// ============================================================================
-
-// GET /
+// GET /tasks — list tasks, optionally filtered by column
 tasksRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -199,10 +195,6 @@ tasksRouter.post("/", (req, res) => {
     throw err;
   }
 });
-
-// ============================================================================
-// Per-task routes (/:id)
-// ============================================================================
 
 // GET /:id
 tasksRouter.get("/:id", (req, res) => {
@@ -365,6 +357,7 @@ tasksRouter.post("/:id/links", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "linked_task_id and link_type are required" } });
     return;
   }
+  // Server-side whitelist — must match SQL CHECK constraint on task_links.link_type
   if (!["blocks", "blocked_by", "relates_to"].includes(link_type)) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "link_type must be blocks, blocked_by, or relates_to" } });
     return;

@@ -1,1 +1,1 @@
-{"version":3,"file":"plugins.d.ts","sourceRoot":"","sources":["../../../lib/routes/plugins.ts"],"names":[],"mappings":"AAMA,eAAO,MAAM,aAAa,4CAAW,CAAC"}
+{"version":3,"file":"plugins.d.ts","sourceRoot":"","sources":["../../../lib/routes/plugins.ts"],"names":[],"mappings":"AAMA;;;;GAIG;AACH,eAAO,MAAM,aAAa,4CAAW,CAAC"}

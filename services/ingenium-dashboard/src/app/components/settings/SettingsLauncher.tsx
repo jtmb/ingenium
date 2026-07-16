@@ -3,6 +3,15 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { tabForPathname } from "./tabs";
 
+/**
+ * Gear-button in the nav bar that opens the settings overlay.
+ *
+ * Uses the current pathname to auto-select the relevant tab via `tabForPathname`,
+ * enabling deep-linking: e.g., clicking the gear icon while on `/mail` opens
+ * Settings → Mail directly. The `?settings=<tab>` search param drives the overlay.
+ *
+ * `scroll: false` prevents the page from jumping when the URL search param changes.
+ */
 export default function SettingsLauncher() {
   const pathname = usePathname();
   const router = useRouter();

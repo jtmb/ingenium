@@ -11,6 +11,10 @@ type SearchDialogProps = {
   onSelectPage: (pageId: number, spaceId: number) => void;
 };
 
+/**
+ * highlightMatch — splits text on query (case-insensitive) and wraps matches
+ * in <mark> elements. Uses regex escaping to avoid injection from user input.
+ */
 function highlightMatch(text: string, query: string): React.ReactNode {
   if (!query) return text;
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -26,6 +30,12 @@ function highlightMatch(text: string, query: string): React.ReactNode {
   );
 }
 
+/**
+ * SearchDialog — FTS5-backed full-text search with keyboard navigation.
+ * Debounces at 300ms to avoid hammering the API on every keystroke.
+ * Arrow keys navigate results; Enter selects the active result; Escape closes.
+ * Uses createPortal for proper z-index stacking above the editor.
+ */
 export default function SearchDialog({ isOpen, onClose, onSelectPage }: SearchDialogProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DocSearchResult[]>([]);
@@ -82,7 +92,7 @@ export default function SearchDialog({ isOpen, onClose, onSelectPage }: SearchDi
         setActiveIndex((i) => Math.max(i - 1, 0));
       } else if (e.key === "Enter" && results[activeIndex]) {
         const r = results[activeIndex]!;
-        onSelectPage(r.page_id, r.space_id);
+        onSelectPage(r.id, r.spaceId);
         onClose();
       }
     },
@@ -90,7 +100,7 @@ export default function SearchDialog({ isOpen, onClose, onSelectPage }: SearchDi
   );
 
   const handleSelect = (r: DocSearchResult) => {
-    onSelectPage(r.page_id, r.space_id);
+    onSelectPage(r.id, r.spaceId);
     onClose();
   };
 
@@ -145,7 +155,7 @@ export default function SearchDialog({ isOpen, onClose, onSelectPage }: SearchDi
           {!loading &&
             results.map((r, idx) => (
               <button
-                key={r.page_id}
+                key={r.id}
                 className={`w-full text-left px-4 py-3 border-b border-[var(--color-border-muted)] last:border-b-0 transition-colors ${
                   idx === activeIndex
                     ? "bg-[var(--color-surface-selected)]"
@@ -159,11 +169,11 @@ export default function SearchDialog({ isOpen, onClose, onSelectPage }: SearchDi
                     {r.title}
                   </span>
                   <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]">
-                    {r.space_name}
+                    {`Space ${r.spaceId}`}
                   </span>
                 </div>
                 <p className="text-xs text-[var(--color-text-secondary)] line-clamp-2">
-                  {highlightMatch(r.snippet, query.trim())}
+                  {highlightMatch(r.content.slice(0, 150) + (r.content.length > 150 ? "…" : ""), query.trim())}
                 </p>
               </button>
             ))}

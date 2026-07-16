@@ -4,6 +4,14 @@ import React from "react";
 interface Props { children: React.ReactNode; emailSubject?: string; }
 interface State { hasError: boolean; errorMessage: string; }
 
+/**
+ * EmailErrorBoundary — catches rendering errors in any child component
+ * (primarily the HTML email body iframe or the EmailReader).
+ *
+ * SECURITY: Crashes can be caused by malicious HTML/JS in email bodies
+ * that somehow bypasses iframe sandboxing or causes React to throw.
+ * This boundary prevents the entire mail UI from going blank.
+ */
 export default class EmailErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);

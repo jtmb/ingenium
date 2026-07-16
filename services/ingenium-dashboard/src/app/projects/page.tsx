@@ -17,6 +17,17 @@ function formatRelative(iso: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+/**
+ * ProjectsPage — Multi-project management (create, rename, archive, restore, delete).
+ *
+ * Fetches project detail (skills count, observation stats, pipeline events)
+ * for ALL active projects in parallel on mount via Promise.all. This is a
+ * deliberate design choice: the project list is small (typically < 20) and
+ * showing rich stats inline avoids the complexity of lazy-loading per card.
+ *
+ * Archived projects are kept separate — restore brings them back to active.
+ * Purge is a soft-delete confirmation with a warning overlay.
+ */
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [archived, setArchived] = useState<Project[]>([]);

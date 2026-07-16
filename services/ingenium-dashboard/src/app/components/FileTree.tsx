@@ -19,18 +19,29 @@ type TreeNode = {
   children: TreeNode[];
 };
 
+/**
+ * Parse the DB `file_tree` JSON into a tree of TreeNode objects.
+ *
+ * The API stores file trees as a flat `Record<relativePath, content>` map.
+ * We reconstruct a folder hierarchy by splitting each path on "/", using a
+ * `folderMap` to de-duplicate directory nodes. Two synthetic roots are always
+ * injected: `SKILL.md` (from skill content) and `metadata.json` (generated
+ * from skill metadata fields — not stored in the DB file_tree).
+ *
+ * O(n*d) where n = file count, d = max path depth.
+ */
 function parseTree(json: string | undefined, skillContent: string, skillName: string, tags?: string, alwaysApply?: number): TreeNode[] {
   const nodes: TreeNode[] = [];
   
-  // Root: SKILL.md
+  // Root: SKILL.md — always present
   nodes.push({ name: "SKILL.md", path: "SKILL.md", content: skillContent, children: [] });
   
-  // Root: metadata.json — generated from skill fields
+  // Root: metadata.json — synthesised from skill fields, not from file_tree JSON
   const tagList = tags ? tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [];
   const metaContent = JSON.stringify({ tags: tagList, alwaysApply: alwaysApply === 1 }, null, 2);
   nodes.push({ name: "metadata.json", path: "metadata.json", content: metaContent, children: [] });
   
-  // Parse file_tree JSON
+  // Parse file_tree JSON — silently skip malformed data
   if (!json) return nodes;
   try {
     const tree = JSON.parse(json) as Record<string, string>;
@@ -39,6 +50,7 @@ function parseTree(json: string | undefined, skillContent: string, skillName: st
     for (const [relPath, fileContent] of Object.entries(tree) as [string, string][]) {
       const parts = relPath.split("/");
       
+      // Walk or create each path segment, attaching children to the parent folder
       for (let i = 0; i < parts.length; i++) {
         const part = parts[i]!;
         const isFile = i === parts.length - 1;
@@ -65,10 +77,13 @@ function parseTree(json: string | undefined, skillContent: string, skillName: st
         }
       }
     }
-  } catch {}
+  } catch {
+    // Malformed JSON — render SKILL.md + metadata.json only
+  }
   return nodes;
 }
 
+/** Recursive tree node renderer. Supports expand/collapse for directories and file selection for leaf nodes. */
 function TreeNodeItem({ node, depth, onSelect, selectedFile }: { node: TreeNode; depth: number; onSelect: (path: string, content: string) => void; selectedFile: string }) {
   const [expanded, setExpanded] = useState(true);
   const isFolder = node.children.length > 0;
@@ -98,6 +113,14 @@ function TreeNodeItem({ node, depth, onSelect, selectedFile }: { node: TreeNode;
   );
 }
 
+/**
+ * Sidebar file tree for a skill's reference files.
+ *
+ * Parses the skill's `file_tree` JSON (a flat map of paths → content) into
+ * a navigable folder hierarchy, prepending the synthetic `SKILL.md` and
+ * `metadata.json` roots. Clicking a file calls `onSelectFile` with its
+ * path and content for display in a companion editor/preview pane.
+ */
 export default function FileTree({ fileTreeJson, skillContent, skillName, tags, alwaysApply, onSelectFile, selectedFile }: FileTreeProps) {
   const tree = parseTree(fileTreeJson, skillContent, skillName, tags, alwaysApply);
 

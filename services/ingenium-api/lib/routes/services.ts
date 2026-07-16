@@ -1,9 +1,10 @@
 import { Router } from "express";
 import { logger, settings, pipelineEvents, synthesis } from "ingenium-core";
 
+/** Handles /api/v1/services — supervisord process status, logs, and application health checks (email-client, synthesis-engine). */
 export const servicesRouter = Router();
 
-// ── Types ────────────────────────────────────────────────────────────────────
+/* ── Types ── */
 
 interface ServiceInfo {
   name: string;
@@ -32,8 +33,7 @@ interface AppInfo {
 
 type OverallHealth = "healthy" | "degraded" | "down";
 
-// ── Constants ────────────────────────────────────────────────────────────────
-
+/** Supervisord XML-RPC endpoint — localhost:9001, container-internal only. */
 const SUPERVISOR_RPC = "http://127.0.0.1:9001/RPC2";
 
 const PORT_MAP: Record<string, number> = {
@@ -64,10 +64,9 @@ const STATE_MAP: Record<string, ServiceInfo["state"]> = {
   STOPPED: "stopped",
 };
 
-// ── XML-RPC Helpers ──────────────────────────────────────────────────────────
-
 /**
  * Extract a member value from a supervisord XML-RPC struct snippet.
+ * Uses regex to avoid heavyweight XML parser dependency.
  * Handles both `<string>` and `<i4>` value types.
  */
 function extractMember(struct: string, memberName: string): string {
@@ -181,8 +180,6 @@ function parseReadLog(xml: string): string {
   return match[1] ?? "";
 }
 
-// ── Common helper: build a ServiceDetail from a parsed getProcessInfo struct ──
-
 function buildServiceDetail(info: Record<string, string>): ServiceDetail {
   const name = info["name"] || "";
   const statename = info["statename"] || "";
@@ -207,8 +204,6 @@ function buildServiceDetail(info: Record<string, string>): ServiceDetail {
     stop: stop || undefined,
   };
 }
-
-// ── Application Health Checks ───────────────────────────────────────────────
 
 /**
  * Email-client health: checks the sync engine status and heartbeat.
@@ -288,8 +283,6 @@ async function getSynthesisStatus(): Promise<AppInfo> {
     return { name: "synthesis-engine", state: "error", description: "Synthesis pipeline", detail: (err as Error).message };
   }
 }
-
-// ── Routes ───────────────────────────────────────────────────────────────────
 
 /** GET /api/v1/services/status — live supervisord process states + application health */
 servicesRouter.get("/status", async (_req, res): Promise<void> => {

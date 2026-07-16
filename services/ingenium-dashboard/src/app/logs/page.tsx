@@ -7,6 +7,8 @@ import { api, type LogEntry } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
 // ── Constants ────────────────────────────────────────────────────────────
+// 500-entry cap prevents unbounded memory growth in long-running sessions.
+// 2s poll interval gives near-real-time log display without saturating the API.
 const MAX_ENTRIES = 500;
 const POLL_MS = 2_000;
 
@@ -72,6 +74,18 @@ function dedupeKey(e: LogEntry): string {
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────
+
+/**
+ * LogsPage — Live system log stream with source/level filters and search.
+ *
+ * Uses timestamp-based cursor pagination (`since` param) for the polling
+ * loop rather than page numbers, ensuring no gaps or duplicates when logs
+ * arrive between poll cycles. The `seenKeys` deduplication set provides a
+ * second safety net against duplicate entries.
+ *
+ * Default filters show only info/warn/error to reduce noise; debug is
+ * opt-in via the level checkboxes.
+ */
 export default function LogsPage() {
   const project = useProject();
   const [entries, setEntries] = useState<LogEntry[]>([]);

@@ -2,8 +2,6 @@
 
 import { useState, useCallback } from "react";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
 export type AIAction =
   | "outline"
   | "continue"
@@ -15,9 +13,12 @@ export type AIAction =
   | "tone_technical";
 
 interface AIActionsProps {
+  /** Currently selected text in the editor — enables action requiring selection */
   selectedText?: string;
+  /** Full page content sent as context for AI transformations */
   fullContent: string;
   pageTitle: string;
+  /** Called with the AI-generated content when user clicks Apply */
   onApply: (newContent: string) => void;
 }
 
@@ -27,8 +28,6 @@ interface AIActionDef {
   description: string;
   requiresSelection?: boolean;
 }
-
-// ── Action definitions ─────────────────────────────────────────────────────────
 
 const ACTIONS: AIActionDef[] = [
   { action: "outline", label: "Outline", description: "Generate an outline for this page" },
@@ -40,8 +39,6 @@ const ACTIONS: AIActionDef[] = [
   { action: "tone_casual", label: "Casual", description: "Rewrite with casual tone" },
   { action: "tone_technical", label: "Technical", description: "Rewrite with technical tone" },
 ];
-
-// ── API call helper ────────────────────────────────────────────────────────────
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 
@@ -75,16 +72,21 @@ async function callDocAI(
   return data.data?.result || "";
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
-
+/**
+ * AIActions — dropdown of AI-powered document transformations.
+ * Calls /docs/ai endpoint with the action name and page content.
+ * Results are previewed in a panel below the dropdown before applying.
+ */
 const AIActions: React.FC<AIActionsProps> = ({ selectedText, fullContent, pageTitle, onApply }) => {
   const [loading, setLoading] = useState<AIAction | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 
+  /** Stable reference via useCallback — dependencies (fullContent, pageTitle, selectedText) are
+   *  snapshots from the parent editor, not stale closures.
+   *  PERF: We intentionally avoid debouncing here; actions are user-initiated clicks. */
   const handleAction = useCallback(async (actionDef: AIActionDef) => {
-    // Check selection requirement
     if (actionDef.requiresSelection && !selectedText) {
       setError("Please select some text first.");
       return;
@@ -125,7 +127,6 @@ const AIActions: React.FC<AIActionsProps> = ({ selectedText, fullContent, pageTi
 
   return (
     <div className="relative">
-      {/* Trigger button */}
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
@@ -136,17 +137,14 @@ const AIActions: React.FC<AIActionsProps> = ({ selectedText, fullContent, pageTi
             : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
           }`}
       >
-        {/* Sparkle icon */}
-        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
         </svg>
         <span className="hidden sm:inline">AI</span>
       </button>
 
-      {/* Dropdown panel */}
       {isOpen && (
         <div className="absolute right-0 top-full mt-1 w-64 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg z-50 p-2">
-          {/* Action buttons */}
           <div className="space-y-1">
             {ACTIONS.map((actionDef) => {
               const isDisabled = actionDef.requiresSelection && !selectedText;
@@ -181,7 +179,8 @@ const AIActions: React.FC<AIActionsProps> = ({ selectedText, fullContent, pageTi
         </div>
       )}
 
-      {/* Result preview panel */}
+      {/* Dual-purpose result/error overlay — appears below the AI button, shows either
+          an error with dismiss or the AI-generated content with Apply/Discard actions */}
       {(result || error) && (
         <div className="absolute right-0 top-full mt-1 w-96 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg shadow-lg z-50 p-3">
           {error ? (

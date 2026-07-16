@@ -1,11 +1,20 @@
 "use client";
 
-import { Suspense, useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import DocsShell from "./components/DocsShell";
-import PageTree from "./components/PageTree";
+import PageTree, { collectDescendantIds } from "./components/PageTree";
 import DocsEditor from "./components/DocsEditor";
+import SearchDialog from "./components/SearchDialog";
+import TemplatePicker from "./components/TemplatePicker";
+import ImportExportDialog from "./components/ImportExportDialog";
+import TagsManager from "./components/TagsManager";
+import BacklinksPanel from "./components/BacklinksPanel";
+import CommentsPanel from "./components/CommentsPanel";
+import HistoryPanel from "./components/HistoryPanel";
+import TrashPanel from "./components/TrashPanel";
 import { api, type DocSpace, type DocPage } from "@/lib/api";
+import type { DocProjectLink, DocAttachment, DocPageTree } from "@/lib/docs-types";
 
 // ---------------------------------------------------------------------------
 // Inline SVG icons
@@ -14,38 +23,25 @@ import { api, type DocSpace, type DocPage } from "@/lib/api";
 function IconFile() {
   return (
     <svg className="w-16 h-16 mx-auto text-[var(--color-text-muted)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.2}
-        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-      />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.2}
+        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
     </svg>
   );
 }
 
-function IconEdit() {
+function IconCloseSmall() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <path
-        d="M2 10.5V12h1.5l7.37-7.37-1.5-1.5L2 10.5zm9.96-6.96a.5.5 0 000-.71l-.79-.79a.5.5 0 00-.71 0l-.73.73 1.5 1.5.73-.73z"
-        fill="currentColor"
-      />
+      <path d="M3.5 3.5l7 7M10.5 3.5l-7 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   );
 }
 
-function IconEye() {
+function IconAlert() {
   return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-      <path
-        d="M1 7s2-4.5 6-4.5S13 7 13 7s-2 4.5-6 4.5S1 7 1 7z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="7" cy="7" r="1.75" stroke="currentColor" strokeWidth="1.2" />
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M8 5v3.5M8 11v.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }
@@ -54,50 +50,73 @@ function IconEye() {
 // Right sidebar tabs
 // ---------------------------------------------------------------------------
 
-type SidebarTab = "metadata" | "comments" | "history";
+type SidebarTab = "metadata" | "tags" | "backlinks" | "comments" | "history" | "projects" | "attachments" | "trash";
+
+const SIDEBAR_TABS: { key: SidebarTab; label: string; pageScoped: boolean }[] = [
+  { key: "metadata", label: "Info", pageScoped: true },
+  { key: "tags", label: "Tags", pageScoped: true },
+  { key: "projects", label: "Linked", pageScoped: true },
+  { key: "attachments", label: "Files", pageScoped: true },
+  { key: "backlinks", label: "Backlinks", pageScoped: true },
+  { key: "comments", label: "Comments", pageScoped: true },
+  { key: "history", label: "History", pageScoped: true },
+  { key: "trash", label: "Trash", pageScoped: false },
+];
 
 function RightSidebar({
   page,
   selectedTab,
   onSelectTab,
+  selectedSpaceId,
+  onPageMutated,
 }: {
-  page: DocPage;
+  page: DocPage | null;
   selectedTab: SidebarTab;
   onSelectTab: (tab: SidebarTab) => void;
+  selectedSpaceId: number | null;
+  onPageMutated: () => void;
 }) {
-  const tabs: { key: SidebarTab; label: string }[] = [
-    { key: "metadata", label: "Metadata" },
-    { key: "comments", label: "Comments" },
-    { key: "history", label: "History" },
-  ];
-
   return (
     <div className="h-full flex flex-col">
       {/* Tab bar */}
-      <div className="flex border-b border-[var(--color-border)] shrink-0">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => onSelectTab(tab.key)}
-            className={`
-              flex-1 py-2 text-xs font-medium transition-colors
-              ${selectedTab === tab.key
-                ? "text-[var(--color-text-link)] border-b-2 border-[var(--color-text-link)]"
-                : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] border-b-2 border-transparent"
-              }
-            `}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="flex border-b border-[var(--color-border)] shrink-0 overflow-x-auto" role="tablist" aria-label="Page details">
+        {SIDEBAR_TABS.map((tab) => {
+          // Skip page-scoped tabs when no page is selected (except trash, which is space-level)
+          const disabled = tab.pageScoped && !page;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => !disabled && onSelectTab(tab.key)}
+              disabled={disabled}
+              role="tab"
+              aria-selected={selectedTab === tab.key}
+              className={`
+                flex-1 py-2 text-xs font-medium transition-colors whitespace-nowrap px-2
+                ${selectedTab === tab.key
+                  ? "text-[var(--color-text-link)] border-b-2 border-[var(--color-text-link)]"
+                  : disabled
+                    ? "text-[var(--color-text-muted)] opacity-40 cursor-not-allowed border-b-2 border-transparent"
+                    : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] border-b-2 border-transparent"
+                }
+              `}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="flex-1 overflow-y-auto">
         {selectedTab === "metadata" && <MetadataTab page={page} />}
-        {selectedTab === "comments" && <CommentsTab />}
-        {selectedTab === "history" && <HistoryTab />}
+        {selectedTab === "tags" && page && <TagsManager pageId={page.id} />}
+        {selectedTab === "backlinks" && page && <BacklinksPanel pageId={page.id} />}
+        {selectedTab === "comments" && page && <CommentsPanel pageId={page.id} pageContent={page.content} />}
+        {selectedTab === "history" && page && <HistoryPanel pageId={page.id} onRestore={() => onPageMutated()} />}
+        {selectedTab === "projects" && page && <ProjectLinksTab pageId={page.id} />}
+        {selectedTab === "attachments" && page && <AttachmentsTab pageId={page.id} />}
+        {selectedTab === "trash" && selectedSpaceId && <TrashPanel spaceId={selectedSpaceId} />}
       </div>
     </div>
   );
@@ -107,9 +126,16 @@ function RightSidebar({
 // Tab content components
 // ---------------------------------------------------------------------------
 
-function MetadataTab({ page }: { page: DocPage }) {
+function MetadataTab({ page }: { page: DocPage | null }) {
+  if (!page) {
+    return (
+      <div className="flex items-center justify-center h-full py-8">
+        <p className="text-sm text-[var(--color-text-muted)]">Select a page to view details</p>
+      </div>
+    );
+  }
   return (
-    <div className="space-y-4">
+    <div className="p-3 space-y-4">
       <div>
         <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
           Title
@@ -120,7 +146,7 @@ function MetadataTab({ page }: { page: DocPage }) {
         <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
           Slug
         </label>
-        <p className="text-sm text-[var(--color-text-secondary)] font-mono">{page.slug}</p>
+        <p className="text-sm text-[var(--color-text-secondary)] font-mono break-all">{page.slug}</p>
       </div>
       <div>
         <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
@@ -130,9 +156,9 @@ function MetadataTab({ page }: { page: DocPage }) {
           className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${
             page.status === "published"
               ? "bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300"
-              : page.status === "draft"
-                ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
-                : "bg-slate-100 text-slate-700 dark:bg-slate-500/20 dark:text-slate-300"
+              : page.status === "archived"
+                ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"
+                : "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
           }`}
         >
           {page.status}
@@ -146,10 +172,22 @@ function MetadataTab({ page }: { page: DocPage }) {
       </div>
       <div>
         <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
+          Parent
+        </label>
+        <p className="text-sm text-[var(--color-text-secondary)]">{page.parentPageId ? `Page #${page.parentPageId}` : "None (root)"}</p>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
+          Sort Order
+        </label>
+        <p className="text-sm text-[var(--color-text-secondary)]">{page.sortOrder}</p>
+      </div>
+      <div>
+        <label className="block text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-1">
           Created
         </label>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {new Date(page.created_at).toLocaleDateString(undefined, {
+          {new Date(page.createdAt).toLocaleDateString(undefined, {
             year: "numeric",
             month: "short",
             day: "numeric",
@@ -161,7 +199,7 @@ function MetadataTab({ page }: { page: DocPage }) {
           Updated
         </label>
         <p className="text-sm text-[var(--color-text-secondary)]">
-          {new Date(page.updated_at).toLocaleDateString(undefined, {
+          {new Date(page.updatedAt).toLocaleDateString(undefined, {
             year: "numeric",
             month: "short",
             day: "numeric",
@@ -172,24 +210,240 @@ function MetadataTab({ page }: { page: DocPage }) {
   );
 }
 
-function CommentsTab() {
+function ProjectLinksTab({ pageId }: { pageId: number }) {
+  const [links, setLinks] = useState<DocProjectLink[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [linkInput, setLinkInput] = useState("");
+  const [linking, setLinking] = useState(false);
+
+  const fetchLinks = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await api.docs.projectLinks.list(pageId);
+      setLinks(res?.data ?? []);
+    } catch {
+      setLinks([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [pageId]);
+
+  useEffect(() => {
+    fetchLinks();
+  }, [fetchLinks]);
+
+  const handleLink = async () => {
+    const projectId = linkInput.trim();
+    if (!projectId) return;
+    setLinking(true);
+    setError("");
+    try {
+      const res = await api.docs.projectLinks.link(pageId, projectId);
+      if (res?.data) {
+        setLinks((prev) => [...prev, res.data]);
+        setLinkInput("");
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to link project");
+    } finally {
+      setLinking(false);
+    }
+  };
+
+  const handleUnlink = async (linkedProjectId: string) => {
+    try {
+      await api.docs.projectLinks.unlink(pageId, linkedProjectId);
+      setLinks((prev) => prev.filter((l) => l.projectId !== linkedProjectId));
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to unlink project");
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-3 space-y-2">
+        {[1, 2].map((i) => (
+          <div key={i} className="animate-pulse h-8 bg-[var(--color-surface-hover)] rounded" />
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center justify-center h-full py-8">
-      <p className="text-sm text-[var(--color-text-muted)]">Comments coming soon</p>
+    <div className="p-3 space-y-3">
+      {/* Add link */}
+      <div className="flex gap-1.5">
+        <input
+          type="text"
+          value={linkInput}
+          onChange={(e) => setLinkInput(e.target.value)}
+          placeholder="Project ID…"
+          className="flex-1 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2 py-1.5 placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500"
+          onKeyDown={(e) => { if (e.key === "Enter") handleLink(); }}
+        />
+        <button
+          type="button"
+          onClick={handleLink}
+          disabled={linking || !linkInput.trim()}
+          className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 shrink-0"
+        >
+          {linking ? "…" : "Link"}
+        </button>
+      </div>
+
+      {/* Error */}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+
+      {/* Links list */}
+      {links.length === 0 ? (
+        <p className="text-xs text-[var(--color-text-muted)] text-center py-4">No linked projects</p>
+      ) : (
+        <div className="space-y-1">
+          {links.map((link) => (
+            <div key={link.projectId} className="flex items-center justify-between px-2 py-1.5 bg-[var(--color-surface-muted)] rounded text-xs">
+              <span className="text-[var(--color-text-primary)] font-mono">{link.projectId}</span>
+              {link.projectName && (
+                <span className="text-[var(--color-text-muted)] ml-1 truncate">({link.projectName})</span>
+              )}
+              <button
+                type="button"
+                onClick={() => handleUnlink(link.projectId)}
+                className="ml-auto text-[var(--color-text-muted)] hover:text-red-600 p-0.5"
+                title="Unlink project"
+                aria-label={`Unlink project ${link.projectId}`}
+              >
+                <IconCloseSmall />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function HistoryTab() {
+function AttachmentsTab({ pageId }: { pageId: number }) {
+  const [attachments, setAttachments] = useState<DocAttachment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchAttachments = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await api.docs.attachments.list(pageId);
+      setAttachments(res?.data ?? []);
+    } catch {
+      setAttachments([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [pageId]);
+
+  useEffect(() => {
+    fetchAttachments();
+  }, [fetchAttachments]);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await api.docs.attachments.upload(pageId, fd);
+      if (res?.data) {
+        setAttachments((prev) => [...prev, res.data]);
+      }
+    } catch {
+      // silently fail
+    } finally {
+      setUploading(false);
+      // Reset input so the same file can be re-uploaded
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDelete = async (attId: number) => {
+    try {
+      await api.docs.attachments.delete(pageId, attId);
+      setAttachments((prev) => prev.filter((a) => a.id !== attId));
+    } catch {
+      // silently fail
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-3 space-y-2">
+        {[1, 2].map((i) => (
+          <div key={i} className="animate-pulse h-8 bg-[var(--color-surface-hover)] rounded" />
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center justify-center h-full py-8">
-      <p className="text-sm text-[var(--color-text-muted)]">Version history coming soon</p>
+    <div className="p-3 space-y-3">
+      {/* Upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        onChange={handleUpload}
+        className="hidden"
+        aria-label="Upload attachment"
+      />
+      <button
+        type="button"
+        onClick={() => fileInputRef.current?.click()}
+        disabled={uploading}
+        className="w-full px-3 py-2 text-xs border border-dashed border-[var(--color-border)] rounded hover:border-blue-400 text-[var(--color-text-muted)] hover:text-[var(--color-text-link)] transition-colors disabled:opacity-50"
+      >
+        {uploading ? "Uploading…" : "+ Upload file"}
+      </button>
+
+      {/* List */}
+      {attachments.length === 0 ? (
+        <p className="text-xs text-[var(--color-text-muted)] text-center py-4">No attachments</p>
+      ) : (
+        <div className="space-y-1">
+          {attachments.map((att) => (
+            <div key={att.id} className="flex items-center justify-between px-2 py-1.5 bg-[var(--color-surface-muted)] rounded text-xs">
+              <span className="text-[var(--color-text-primary)] truncate flex-1">{att.originalName}</span>
+              <span className="text-[var(--color-text-muted)] ml-1 shrink-0">{formatBytes(att.sizeBytes)}</span>
+              <a
+                href={api.docs.attachments.downloadUrl(pageId, att.id)}
+                className="ml-2 text-[var(--color-text-link)] hover:underline shrink-0"
+                title="Download"
+              >
+                ↓
+              </a>
+              <button
+                type="button"
+                onClick={() => handleDelete(att.id)}
+                className="ml-1 text-[var(--color-text-muted)] hover:text-red-600 p-0.5 shrink-0"
+                title="Delete attachment"
+                aria-label={`Delete ${att.originalName}`}
+              >
+                <IconCloseSmall />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
 // ---------------------------------------------------------------------------
-// Welcome screen
+// Welcome / error / loading screens
 // ---------------------------------------------------------------------------
 
 function WelcomeScreen() {
@@ -208,10 +462,6 @@ function WelcomeScreen() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Page loading skeleton
-// ---------------------------------------------------------------------------
-
 function PageLoadingSkeleton() {
   return (
     <div className="p-8 space-y-4 animate-pulse">
@@ -227,76 +477,185 @@ function PageLoadingSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Docs editor fallback (while DocsEditor is built by another agent)
+// Create page dialog
 // ---------------------------------------------------------------------------
 
-interface DocsEditorProps {
-  page: DocPage;
-  mode: "view" | "edit" | "source" | "split";
-  onSave: (content: string) => Promise<void>;
-  draftContent?: string;
-}
+function CreatePageDialog({
+  isOpen,
+  onClose,
+  onCreate,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreate: (title: string, parentPageId?: number) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
-/**
- * Temporary fallback editor until DocsEditor component is implemented by another agent.
- * Renders page content as simple Markdown text (View) or a textarea (Edit).
- *
- * Once DocsEditor is available, replace this component with:
- *   import { DocsEditor } from "./components/DocsEditor";
- */
-function DocsEditorFallback({ page, mode, onSave }: DocsEditorProps) {
-  const [editing, setEditing] = useState(false);
-  const [content, setContent] = useState(page.content ?? "");
+  useEffect(() => {
+    if (isOpen) {
+      setTitle("");
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, [isOpen]);
 
-  if (mode === "view" || mode === "source" || mode === "split") {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-bold text-[var(--color-text-primary)] mb-4">{page.title}</h1>
-        <div className="prose prose-sm max-w-none text-[var(--color-text-secondary)] whitespace-pre-wrap">
-          {page.content || <span className="text-[var(--color-text-muted)] italic">This page is empty. Switch to Edit mode to add content.</span>}
+  const handleSubmit = () => {
+    const trimmed = title.trim();
+    if (trimmed) {
+      onCreate(trimmed);
+      onClose();
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-50 bg-black/50" onClick={onClose} aria-hidden="true" />
+      <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh]">
+        <div className="w-full max-w-sm bg-[var(--color-surface)] rounded-lg shadow-2xl border border-[var(--color-border)] mx-4 p-5" role="dialog" aria-modal="true" aria-label="Create new page">
+          <h3 className="text-base font-semibold text-[var(--color-text-primary)] mb-4">Create New Page</h3>
+          <label htmlFor="new-page-title" className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+            Page title
+          </label>
+          <input
+            id="new-page-title"
+            ref={inputRef}
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSubmit();
+              if (e.key === "Escape") onClose();
+            }}
+            className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] px-3 py-2 placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--color-text-link)]"
+            placeholder="e.g. Getting Started"
+          />
+          <div className="flex gap-2 mt-4 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-[var(--color-text-secondary)] border border-[var(--color-border)] rounded hover:bg-[var(--color-surface-hover)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!title.trim()}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              Create
+            </button>
+          </div>
         </div>
       </div>
-    );
-  }
-
-  // Edit mode
-  return (
-    <div className="p-6 flex flex-col h-full">
-      <input
-        type="text"
-        value={page.title}
-        readOnly
-        className="text-2xl font-bold text-[var(--color-text-primary)] mb-4 bg-transparent border-none outline-none w-full"
-      />
-      <textarea
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        className="flex-1 min-h-[300px] w-full bg-[var(--color-surface-muted)] border border-[var(--color-border)] rounded p-4 text-sm text-[var(--color-text-primary)] font-mono resize-none focus:outline-none focus:ring-2 focus:ring-[var(--color-text-link)] focus:border-transparent"
-        placeholder="Start writing…"
-      />
-      <div className="flex justify-end mt-3">
-        <button
-          type="button"
-          onClick={async () => {
-            setEditing(true);
-            try {
-              await onSave(content);
-            } finally {
-              setEditing(false);
-            }
-          }}
-          disabled={editing}
-          className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {editing ? "Saving…" : "Save"}
-        </button>
-      </div>
-    </div>
+    </>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Inner content component (reads search params)
+// Move page dialog
+// ---------------------------------------------------------------------------
+
+function MovePageDialog({
+  isOpen,
+  onClose,
+  pages,
+  disabledIds,
+  onMove,
+  currentTitle,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  pages: DocPageTree[];
+  disabledIds: Set<number>;
+  onMove: (newParentId: number | undefined) => void;
+  currentTitle: string;
+}) {
+  const [selectedId, setSelectedId] = useState<number | undefined>(undefined);
+
+  const flattened = useMemo(() => {
+    const result: { id: number; title: string; depth: number; disabled: boolean }[] = [];
+    function walk(nodes: DocPageTree[], depth: number) {
+      for (const n of nodes) {
+        result.push({ id: n.id, title: n.title, depth, disabled: disabledIds.has(n.id) });
+        if (n.children) walk(n.children, depth + 1);
+      }
+    }
+    walk(pages, 0);
+    return result;
+  }, [pages, disabledIds]);
+
+  if (!isOpen) return null;
+
+  return (
+    <>
+      <div className="fixed inset-0 z-50 bg-black/50" onClick={onClose} aria-hidden="true" />
+      <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]">
+        <div className="w-full max-w-sm bg-[var(--color-surface)] rounded-lg shadow-2xl border border-[var(--color-border)] mx-4 p-5" role="dialog" aria-modal="true" aria-label="Move page">
+          <h3 className="text-base font-semibold text-[var(--color-text-primary)] mb-2">
+            Move &ldquo;{currentTitle}&rdquo;
+          </h3>
+          <p className="text-xs text-[var(--color-text-muted)] mb-3">Select a new parent (or root):</p>
+          <div className="max-h-64 overflow-y-auto border border-[var(--color-border)] rounded mb-3">
+            {/* Root option */}
+            <button
+              type="button"
+              onClick={() => setSelectedId(undefined)}
+              className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${
+                selectedId === undefined
+                  ? "bg-[var(--color-surface-selected)] text-[var(--color-text-link)]"
+                  : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+              }`}
+            >
+              (root — no parent)
+            </button>
+            {flattened.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => { if (!item.disabled) setSelectedId(item.id); }}
+                disabled={item.disabled}
+                className={`w-full text-left px-3 py-1.5 text-sm transition-colors ${
+                  item.disabled
+                    ? "opacity-30 cursor-not-allowed text-[var(--color-text-muted)] italic"
+                    : selectedId === item.id
+                      ? "bg-[var(--color-surface-selected)] text-[var(--color-text-link)]"
+                      : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
+                }`}
+                style={{ paddingLeft: `${item.depth * 16 + 12}px` }}
+              >
+                {item.title}
+                {item.disabled && " (self/child)"}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-[var(--color-text-secondary)] border border-[var(--color-border)] rounded hover:bg-[var(--color-surface-hover)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => { onMove(selectedId); onClose(); }}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+            >
+              Move
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DocsContent — main orchestrator
 // ---------------------------------------------------------------------------
 
 function DocsContent() {
@@ -309,6 +668,7 @@ function DocsContent() {
   const selectedSpaceId = spaceIdParam ? Number(spaceIdParam) : null;
   const selectedPageId = pageIdParam ? Number(pageIdParam) : null;
 
+  // ---- Data state ----
   const [spaces, setSpaces] = useState<DocSpace[]>([]);
   const [spacesLoading, setSpacesLoading] = useState(true);
   const [spacesError, setSpacesError] = useState<string | null>(null);
@@ -317,10 +677,36 @@ function DocsContent() {
   const [pageLoading, setPageLoading] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
 
+  // ---- UI state ----
   const [mode, setMode] = useState<"view" | "edit" | "source" | "split">("view");
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("metadata");
+  const [sidebarVisible, setSidebarVisible] = useState(true);
 
-  // Fetch spaces for the shell
+  /** Incremented to force PageTree re-fetch after mutations. */
+  const [treeRefreshKey, setTreeRefreshKey] = useState(0);
+
+  // ---- Dialog state ----
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [importExportOpen, setImportExportOpen] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [moveDialogOpen, setMoveDialogOpen] = useState(false);
+  const [moveTargetPageId, setMoveTargetPageId] = useState<number | null>(null);
+
+  // ---- Inline action state ----
+  const [actionToast, setActionToast] = useState<string | null>(null);
+  /** Currently being renamed: {pageId, currentTitle} */
+  const [renameState, setRenameState] = useState<{ pageId: number; title: string } | null>(null);
+
+  // ---- Tree data ref (for move dialog) ----
+  const treePagesRef = useRef<DocPageTree[]>([]);
+
+  const showToast = useCallback((msg: string) => {
+    setActionToast(msg);
+    setTimeout(() => setActionToast(null), 3000);
+  }, []);
+
+  // ---- Fetch spaces ----
   useEffect(() => {
     let cancelled = false;
     api.docs.spaces
@@ -328,7 +714,6 @@ function DocsContent() {
       .then(({ data }) => {
         if (cancelled) return;
         setSpaces(data ?? []);
-        // Auto-select first space if none in URL
         if (data && data.length > 0 && data[0] && !selectedSpaceId) {
           const params = new URLSearchParams(searchParams.toString());
           params.set("space", String(data[0].id));
@@ -345,10 +730,11 @@ function DocsContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch page when pageId changes
+  // ---- Fetch page when pageId changes ----
   useEffect(() => {
     if (!selectedPageId) {
       setPage(null);
+      setPageError(null);
       return;
     }
     let cancelled = false;
@@ -370,7 +756,7 @@ function DocsContent() {
     return () => { cancelled = true; };
   }, [selectedPageId]);
 
-  // Navigation handlers
+  // ---- Navigation helpers ----
   const navigate = useCallback(
     (spaceId: number | null, pageId: number | null) => {
       const params = new URLSearchParams();
@@ -383,9 +769,14 @@ function DocsContent() {
 
   const handleSelectSpace = useCallback(
     (spaceId: number) => {
-      navigate(spaceId, null);
+      // Switch sidebar to trash if on trash tab (space-level)
+      if (sidebarTab === "trash") {
+        navigate(spaceId, null);
+      } else {
+        navigate(spaceId, null);
+      }
     },
-    [navigate],
+    [navigate, sidebarTab],
   );
 
   const handleSelectPage = useCallback(
@@ -395,39 +786,174 @@ function DocsContent() {
     [navigate, selectedSpaceId],
   );
 
-  const handleNewPage = useCallback(async () => {
-    if (!selectedSpaceId) return;
-    try {
-      const { data } = await api.docs.pages.create(selectedSpaceId, {
-        title: "Untitled",
-        slug: `untitled-${Date.now()}`,
-        content: "",
-        status: "draft",
-      });
-      navigate(selectedSpaceId, data.id);
-    } catch {
-      // Silently fail — user can retry
-    }
-  }, [selectedSpaceId, navigate]);
-
-  const handleSearch = useCallback(() => {
-    // Placeholder — search modal will be implemented in a future phase
+  // ---- Tree mutation signal ----
+  const refreshTree = useCallback(() => {
+    setTreeRefreshKey((k) => k + 1);
   }, []);
 
+  // ---- Track tree pages ref for move dialog ----
+  const handleTreePagesLoaded = useCallback((pages: DocPageTree[]) => {
+    treePagesRef.current = pages;
+  }, []);
+
+  // ---- Actions ----
+
+  /** Create a new page (called from CreatePageDialog onSubmit). */
+  const handleCreatePage = useCallback(async (title: string, parentPageId?: number) => {
+    if (!selectedSpaceId) return;
+    try {
+      const slug = title.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "") + "-" + Date.now().toString(36);
+      const { data } = await api.docs.pages.create(selectedSpaceId, {
+        title,
+        slug,
+        content: "",
+        status: "draft",
+        parentPageId,
+      });
+      refreshTree();
+      navigate(selectedSpaceId, data.id);
+      showToast(`Page "${title}" created`);
+    } catch {
+      showToast("Failed to create page");
+    }
+  }, [selectedSpaceId, navigate, refreshTree, showToast]);
+
+  const handleNewPageClick = useCallback(() => {
+    setCreateDialogOpen(true);
+  }, []);
+
+  /** Publish the current page. */
+  const handlePublish = useCallback(async () => {
+    if (!page) return;
+    try {
+      const { data } = await api.docs.pages.publish(page.id, page.revision);
+      setPage(data);
+      refreshTree();
+      showToast("Page published");
+    } catch (e: any) {
+      showToast(e?.message ?? "Failed to publish");
+    }
+  }, [page, refreshTree, showToast]);
+
+  /** Archive (soft-delete) a page. */
+  const handleArchive = useCallback(async (pageId: number) => {
+    try {
+      await api.docs.pages.delete(pageId);
+      refreshTree();
+      // If the archived page was selected, clear selection
+      if (selectedPageId === pageId) {
+        navigate(selectedSpaceId, null);
+      }
+      showToast("Page archived (moved to trash)");
+    } catch {
+      showToast("Failed to archive page");
+    }
+  }, [selectedSpaceId, selectedPageId, navigate, refreshTree, showToast]);
+
+  /** Move a page to a new parent. */
+  const handleMove = useCallback(async (newParentId: number | undefined) => {
+    if (!moveTargetPageId) return;
+    try {
+      await api.docs.pages.move(moveTargetPageId, newParentId);
+      setMoveTargetPageId(null);
+      refreshTree();
+      showToast("Page moved");
+    } catch {
+      showToast("Failed to move page");
+    }
+  }, [moveTargetPageId, refreshTree, showToast]);
+
+  const handleMoveClick = useCallback((pageId: number) => {
+    setMoveTargetPageId(pageId);
+    setMoveDialogOpen(true);
+  }, []);
+
+  /** Rename a page (inline via tree context). */
+  const handleRename = useCallback(async (pageId: number, newTitle: string) => {
+    if (!newTitle.trim()) return;
+    try {
+      const { data } = await api.docs.pages.update(pageId, { title: newTitle.trim() });
+      if (selectedPageId === pageId) setPage(data);
+      setRenameState(null);
+      refreshTree();
+      showToast(`Renamed to "${data.title}"`);
+    } catch {
+      showToast("Failed to rename");
+    }
+  }, [selectedPageId, refreshTree, showToast]);
+
+  const handleRenameClick = useCallback((pageId: number, currentTitle: string) => {
+    setRenameState({ pageId, title: currentTitle });
+  }, []);
+
+  /** Save page content with optimistic revision bump and robust error handling. */
   const handleSave = useCallback(
     async (content: string) => {
       if (!page) return;
-      const { data } = await api.docs.pages.update(page.id, { content }, page.revision);
-      setPage(data);
+      // Optimistic revision for snappy UX — the API will provide the authoritative revision
+      const prevRevision = page.revision;
+      setPage((prev) => prev ? { ...prev, revision: prev.revision + 1 } : prev);
+      try {
+        const { data } = await api.docs.pages.update(page.id, { content }, prevRevision);
+        setPage(data);
+      } catch (e: any) {
+        // Rollback to the pre-save revision on failure
+        setPage((prev) => prev ? { ...prev, revision: prevRevision } : prev);
+        // Only show a toast if this wasn't a revision-conflict (which the editor handles separately)
+        if (e?.message && !/revision/i.test(e.message)) {
+          showToast(`Save failed: ${e.message}`);
+        } else {
+          showToast("Failed to save page");
+        }
+      }
     },
-    [page],
+    [page, showToast],
   );
 
-  // Error state for spaces (full-page error)
+  /** Handle search result selection. */
+  const handleSearchSelect = useCallback(
+    (pageId: number, spaceId: number) => {
+      navigate(spaceId, pageId);
+    },
+    [navigate],
+  );
+
+  /** Handle template selection. */
+  const handleTemplateSelect = useCallback(
+    (template: { name: string; content: string }) => {
+      setTemplateOpen(false);
+      if (selectedSpaceId) {
+        handleCreatePage(
+          template.name,
+        );
+      }
+    },
+    [selectedSpaceId, handleCreatePage],
+  );
+
+  // ---- Self+descendant IDs for move exclusion ----
+  const moveDisabledIds = useMemo(() => {
+    if (!moveTargetPageId) return new Set<number>();
+    // Find the node in tree and collect its descendants
+    function findAndCollect(nodes: DocPageTree[]): Set<number> | null {
+      for (const n of nodes) {
+        if (n.id === moveTargetPageId) return collectDescendantIds(n);
+        if (n.children) {
+          const found = findAndCollect(n.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+    return findAndCollect(treePagesRef.current) ?? new Set<number>([moveTargetPageId]);
+  }, [moveTargetPageId]);
+
+  // ---- Full-page error state for spaces ----
   if (spacesError && !spacesLoading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex items-center justify-center h-full bg-[var(--color-surface)]">
         <div className="text-center space-y-3">
+          <IconAlert />
           <p className="text-sm text-red-600 dark:text-red-400">{spacesError}</p>
           <button
             type="button"
@@ -441,48 +967,172 @@ function DocsContent() {
     );
   }
 
+  // ---- Build top-bar actions ----
+  const topBarActions = (
+    <>
+      {page && (
+        <>
+          {/* Publish button */}
+          {page.status !== "published" && (
+            <button
+              type="button"
+              onClick={handlePublish}
+              className="px-2.5 py-1 text-xs font-medium bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+              title="Publish this page"
+              aria-label="Publish page"
+            >
+              Publish
+            </button>
+          )}
+          {/* Archive button */}
+          <button
+            type="button"
+            onClick={() => handleArchive(page.id)}
+            className="px-2.5 py-1 text-xs font-medium text-red-600 border border-red-300 rounded hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+            title="Archive (soft-delete) this page"
+            aria-label="Archive page"
+          >
+            Archive
+          </button>
+        </>
+      )}
+    </>
+  );
+
   return (
-    <DocsShell
-      spaces={spaces}
-      selectedSpaceId={selectedSpaceId}
-      onSelectSpace={handleSelectSpace}
-      onSearch={handleSearch}
-      onNewPage={handleNewPage}
-      tree={
-        <PageTree
-          selectedPageId={selectedPageId}
-          selectedSpaceId={selectedSpaceId}
-          onSelectSpace={handleSelectSpace}
-          onSelectPage={handleSelectPage}
-          onNewPage={handleNewPage}
-        />
-      }
-      main={
-        <div className="h-full flex flex-col">
-          {/* Main content */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {pageLoading ? (
-              <PageLoadingSkeleton />
-            ) : pageError ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center space-y-3">
-                  <p className="text-sm text-[var(--color-text-muted)]">{pageError}</p>
-                </div>
+    <>
+      <DocsShell
+        spaces={spaces}
+        selectedSpaceId={selectedSpaceId}
+        onSelectSpace={handleSelectSpace}
+        onSearch={() => setSearchOpen(true)}
+        onNewPage={handleNewPageClick}
+        onTemplate={() => setTemplateOpen(true)}
+        onImportExport={() => setImportExportOpen(true)}
+        spacesLoading={spacesLoading}
+        sidebarVisible={sidebarVisible}
+        onToggleSidebar={() => setSidebarVisible((v) => !v)}
+        topBarActions={topBarActions}
+        tree={
+          <PageTree
+            selectedPageId={selectedPageId}
+            selectedSpaceId={selectedSpaceId}
+            onSelectSpace={handleSelectSpace}
+            onSelectPage={handleSelectPage}
+            onNewPage={handleNewPageClick}
+            refreshKey={treeRefreshKey}
+            onRenamePage={handleRenameClick}
+            onArchivePage={handleArchive}
+            onMovePage={handleMoveClick}
+            disabledMoveTargets={moveTargetPageId ? moveDisabledIds : undefined}
+            key={treeRefreshKey}
+          />
+        }
+        main={
+          <div className="h-full flex flex-col">
+            {/* Rename inline bar */}
+            {renameState && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-[var(--color-surface-hover)] border-b border-[var(--color-border)] shrink-0">
+                <input
+                  type="text"
+                  value={renameState.title}
+                  onChange={(e) => setRenameState({ ...renameState, title: e.target.value })}
+                  className="flex-1 border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2 py-1 focus:outline-none focus:ring-2 focus:ring-[var(--color-text-link)]"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleRename(renameState.pageId, renameState.title);
+                    if (e.key === "Escape") setRenameState(null);
+                  }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => handleRename(renameState.pageId, renameState.title)}
+                  disabled={!renameState.title.trim()}
+                  className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRenameState(null)}
+                  className="px-3 py-1 text-xs text-[var(--color-text-muted)] border border-[var(--color-border)] rounded hover:bg-[var(--color-surface-hover)]"
+                >
+                  Cancel
+                </button>
               </div>
-            ) : page ? (
-              <DocsEditor page={page} mode={mode} onSave={handleSave} onModeChange={setMode} />
-            ) : (
-              <WelcomeScreen />
             )}
+
+            {/* Main content */}
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {pageLoading ? (
+                <PageLoadingSkeleton />
+              ) : pageError ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center space-y-3">
+                    <IconAlert />
+                    <p className="text-sm text-[var(--color-text-muted)]">{pageError}</p>
+                  </div>
+                </div>
+              ) : page ? (
+                <DocsEditor page={page} mode={mode} onSave={handleSave} onModeChange={setMode} />
+              ) : (
+                <WelcomeScreen />
+              )}
+            </div>
           </div>
+        }
+        sidebar={
+          <RightSidebar
+            page={page}
+            selectedTab={sidebarTab}
+            onSelectTab={setSidebarTab}
+            selectedSpaceId={selectedSpaceId}
+            onPageMutated={refreshTree}
+          />
+        }
+      />
+
+      {/* Toast notification */}
+      {actionToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded shadow-lg text-sm text-[var(--color-text-primary)] animate-pulse" role="status" aria-live="polite">
+          {actionToast}
         </div>
-      }
-      sidebar={
-        page ? (
-          <RightSidebar page={page} selectedTab={sidebarTab} onSelectTab={setSidebarTab} />
-        ) : undefined
-      }
-    />
+      )}
+
+      {/* Dialogs */}
+      <SearchDialog
+        isOpen={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onSelectPage={handleSearchSelect}
+      />
+
+      <TemplatePicker
+        isOpen={templateOpen}
+        onClose={() => setTemplateOpen(false)}
+        onSelect={handleTemplateSelect}
+      />
+
+      <ImportExportDialog
+        isOpen={importExportOpen}
+        onClose={() => setImportExportOpen(false)}
+        spaceId={selectedSpaceId ?? 0}
+      />
+
+      <CreatePageDialog
+        isOpen={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        onCreate={handleCreatePage}
+      />
+
+      <MovePageDialog
+        isOpen={moveDialogOpen}
+        onClose={() => { setMoveDialogOpen(false); setMoveTargetPageId(null); }}
+        pages={treePagesRef.current}
+        disabledIds={moveDisabledIds}
+        onMove={handleMove}
+        currentTitle={page?.title ?? ""}
+      />
+    </>
   );
 }
 
@@ -492,7 +1142,7 @@ function DocsContent() {
 
 export default function DocsPage() {
   return (
-    <div className="-m-6 h-[calc(100dvh-56px)]">
+    <div className="h-[calc(100dvh-56px)]">
       <Suspense
         fallback={
           <div className="h-full flex items-center justify-center bg-[var(--color-surface)]">

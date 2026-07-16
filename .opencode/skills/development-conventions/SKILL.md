@@ -133,7 +133,18 @@ tags: ["development", "conventions", "readme", "api", "nextjs", "python"]
 |------|---------|
 | [`references/useful-comments/guidelines.md`](references/useful-comments/guidelines.md) | When and how to write comments: explain WHY not WHAT, avoid redundant/obsolete comments, annotation conventions, quality checklist |
 
+## Migrated Sources (Phase 3 Taxonomy)
+
+| Source | Content Preserved At |
+|--------|---------------------|
+| `api-aggregation-patterns` | [`references/sources/api-aggregation-patterns/`](references/sources/api-aggregation-patterns/source-index.md) |
+| `ingenium-ops` | [`references/sources/ingenium-ops/`](references/sources/ingenium-ops/source-index.md) |
+| `language-conventions` | [`references/sources/language-conventions/`](references/sources/language-conventions/source-index.md) |
+| `mail-app-ui-conventions` | [`references/sources/mail-app-ui-conventions/`](references/sources/mail-app-ui-conventions/source-index.md) |
+| `visual-standards-conventions` | [`references/sources/visual-standards-conventions/`](references/sources/visual-standards-conventions/source-index.md) |
+
 ## Cross-References
 
-- **`local-models`** — Command safety rules and model profiles for running dev servers
-- **`devops-conventions`** — Shell scripting safety flags and Docker/K8s for running docs examples
+- **`@local-models`** — Command safety rules and model profiles for running dev servers
+- **`@devops-conventions`** — Shell scripting safety flags and Docker/K8s for running docs examples
+- **`@engineering-workflow`** — Agent execution quality, debugging, configuration

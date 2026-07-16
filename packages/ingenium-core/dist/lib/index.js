@@ -1,5 +1,6 @@
 export * from "./db.js";
 export * as skills from "./tools/skills.js";
+export * as skillGovernance from "./tools/skill-governance.js";
 export { getSkillsBase, getPluginsBase, getCommandsBase } from "./tools/paths.js";
 export * as tasks from "./tools/tasks.js";
 export * as context from "./tools/context.js";
@@ -25,3 +26,4 @@ export * as mcpToolStates from "./tools/mcp-tool-states.js";
 export * as emailCache from "./tools/email-cache.js";
 export * as emailSuggestionQueue from "./tools/email-suggestion-queue.js";
 export * as docs from "./tools/docs.js";
+export * as maintenanceLocks from "./tools/maintenance-locks.js";

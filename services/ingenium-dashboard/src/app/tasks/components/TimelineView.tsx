@@ -4,10 +4,9 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { api, Task } from "../../../lib/api";
 import TaskDetail from "./TaskDetail";
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Color per column for the timeline bars. */
 const COLUMN_COLORS: Record<string, string> = {
   todo: "#9ca3af",
   in_progress: "#3b82f6",
@@ -15,6 +14,10 @@ const COLUMN_COLORS: Record<string, string> = {
   done: "#22c55e",
 };
 
+/**
+ * Days between two dates using UTC to avoid DST/timezone shifts.
+ * The 86_400_000 constant = 24h × 60m × 60s × 1000ms.
+ */
 function daysBetween(d1: Date, d2: Date): number {
   const utc1 = Date.UTC(d1.getFullYear(), d1.getMonth(), d1.getDate());
   const utc2 = Date.UTC(d2.getFullYear(), d2.getMonth(), d2.getDate());
@@ -31,9 +34,7 @@ function parseDate(s?: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Timeline View                                                     */
-/* ------------------------------------------------------------------ */
+// ── Timeline View ──────────────────────────────────────────────────────────
 
 type TimelineViewProps = {
   project: string;
@@ -41,11 +42,22 @@ type TimelineViewProps = {
   onTasksChange: (tasks: Task[]) => void;
 };
 
+/**
+ * Gantt-like timeline view showing tasks as horizontal bars on a date grid.
+ *
+ * The date range spans from today to the latest due date + 7 days (buffer).
+ * Tasks are grouped hierarchically: epics → stories → uncategorized.
+ * Bars are positioned using CSS grid `colStart` / `colSpan`, computed from
+ * the task's start_date and due_date.
+ *
+ * Date axis labels are sparse: only the 1st of each month and Sundays are shown
+ * to avoid visual clutter.
+ */
 export default function TimelineView({ project, tasks, onTasksChange }: TimelineViewProps) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Compute date range
+  // Compute the visible date range — from today to the latest due date + 7 days.
   const { startDate, endDate, totalDays, dateLabels } = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -55,7 +67,6 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
       const dd = parseDate(t.due_date);
       if (dd && dd > latest) latest = dd;
     }
-    // extend end by 7 days
     const end = new Date(latest);
     end.setDate(end.getDate() + 7);
     end.setHours(0, 0, 0, 0);
@@ -71,7 +82,7 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
     return { startDate: today, endDate: end, totalDays: total, dateLabels: labels };
   }, [tasks]);
 
-  // Group tasks: epics → stories → subtasks
+  // Group tasks hierarchically: epics contain stories, everything else is uncategorized.
   const { epics, uncategorized } = useMemo(() => {
     const epicMap: Record<string, { epic: Task; stories: Task[] }> = {};
     const others: Task[] = [];
@@ -93,12 +104,10 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
       }
     }
 
-    // Build ordered list: each epic with its stories, then uncategorized
     const result: { epic: Task; stories: Task[] }[] = Object.values(epicMap);
     return { epics: result, uncategorized: others };
   }, [tasks]);
 
-  // Build rows
   const rows = useMemo(() => {
     const r: { indent: number; task: Task; type: "epic" | "story" | "other" }[] = [];
     for (const { epic, stories } of epics) {
@@ -117,7 +126,12 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
     onTasksChange(tasks.map((t) => (t.id === updated.id ? updated : t)));
   };
 
-  // Calculate bar position for a task
+  /**
+   * Compute the CSS grid position (colStart / colSpan) for a task's bar.
+   * - Tasks with neither start_date nor due_date get a single-cell bar on "today".
+   * - Tasks entirely before or after the visible range return null (hidden).
+   * - Partial overlaps clamp to the visible range boundaries.
+   */
   function getBarPosition(task: Task): { colStart: number; colSpan: number; hasDates: boolean } | null {
     const sd = parseDate(task.start_date);
     const dd = parseDate(task.due_date);
@@ -125,14 +139,13 @@ export default function TimelineView({ project, tasks, onTasksChange }: Timeline
     today.setHours(0, 0, 0, 0);
 
     if (!sd && !dd) {
-      // No dates: single cell on today
       return { colStart: 1, colSpan: 1, hasDates: false };
     }
 
     const start = sd || today;
     const due = dd || new Date(today.getTime() + 86_400_000);
-    if (due < startDate) return null; // entirely before range
-    if (start > endDate) return null; // entirely after range
+    if (due < startDate) return null;
+    if (start > endDate) return null;
 
     const effectiveStart = start < startDate ? startDate : start;
     const effectiveEnd = due > endDate ? endDate : due;

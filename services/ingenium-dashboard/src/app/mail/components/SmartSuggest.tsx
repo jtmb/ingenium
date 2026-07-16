@@ -234,6 +234,7 @@ export default function SmartSuggest({
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchSuggestionsRef = useRef<(() => void) | null>(null);
 
+  /** Legacy compat: `compact` prop maps to "compact" variant if no explicit variant is set. */
   const resolvedVariant = variant ?? (compact ? "compact" : "standalone");
 
   useEffect(() => {
@@ -266,7 +267,13 @@ export default function SmartSuggest({
           if (cancelledRef.current) return;
           const d = data.data || data;
 
-          // Retry if the backend needs more time to cache the email body
+          /**
+           * Retry polling: If the backend is still caching the email body,
+           * it returns `retry: true` or `pending: true`. We poll at 2s intervals
+           * up to 2 times (total ~6s max wait). After that, we show whatever
+           * we got (empty suggestions with configured: true = nothing to show).
+           * NOTE: The retry count is reset per emailUid via the useEffect cleanup.
+           */
           const hasSuggestions = d.suggestions && d.suggestions.length > 0;
           if (!hasSuggestions && (d.retry === true || d.pending === true) && retryCountRef.current < 2) {
             retryCountRef.current++;

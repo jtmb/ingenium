@@ -6,6 +6,16 @@ import { useProject } from "../../../lib/ProjectContext";
 /**
  * AccountSetup — two modes: provider selection grid and manual (app password) form.
  * OAuth buttons redirect to the backend for provider-based auth.
+ *
+ * OAuth flow:
+ *   1. Fetch OAuth URL from backend (GET /emails/accounts/oauth/url?provider=xxx).
+ *   2. Store provider in localStorage so the callback page knows which OAuth to complete.
+ *   3. Redirect the browser to the provider's consent page.
+ *   4. Backend callback handles token exchange — the dashboard polls the accounts list.
+ *
+ * SECURITY: OAuth tokens never touch the frontend — the backend handles the entire
+ * authorization code flow. The frontend only stores the provider name in localStorage
+ * for redirect context.
  */
 export default function AccountSetup({
   onComplete,
@@ -60,11 +70,17 @@ export default function AccountSetup({
     }
   };
 
+  /** HACK: Create-then-test-then-delete pattern. Testing requires an existing
+   *  account record (the API validates the connection by ID), but we also don't
+   *  want to leave a broken account in the DB if the connection fails.
+   *  If connection succeeds, the account stays (user just needs to hit "Add Account"
+   *  which effectively creates a duplicate — but the backend handles dedup by email).
+   *  NOTE: This means a successful test + failure to add creates a dangling account.
+   *  TODO: Replace with a dedicated test-endpoint that doesn't require an account ID. */
   const handleTestConnection = async () => {
     setTesting(true);
     setTestResult(null);
     try {
-      // Create the account first, then test with the returned ID
       const createRes = await fetch(`${apiBase}/emails/accounts?project=${project}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -94,7 +110,6 @@ export default function AccountSetup({
         return;
       }
 
-      // Test the connection using the account ID
       const testRes = await fetch(`${apiBase}/emails/accounts/${accountId}/test?project=${project}`, {
         method: "POST",
       });
@@ -103,7 +118,6 @@ export default function AccountSetup({
         setTestResult("Connection successful");
       } else {
         setTestResult(testData.data?.error || testData.error?.message || "Connection failed");
-        // Remove the account since connection failed
         await fetch(`${apiBase}/emails/accounts/${accountId}?project=${project}`, {
           method: "DELETE",
         });

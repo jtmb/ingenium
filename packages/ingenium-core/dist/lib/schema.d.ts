@@ -1,4 +1,16 @@
 import { z } from "zod";
+/**
+ * Zod schemas for the Ingenium domain model.
+ *
+ * NOTE: Zod schemas are NOT the primary runtime enforcement gate (see AGENTS.md rule #13).
+ * SQL CHECK constraints in the migration files serve as the actual data integrity layer.
+ * These schemas provide TypeScript type inference and API-layer validation.
+ *
+ * `z.coerce.boolean()` / `z.coerce.number()` are used throughout because SQLite
+ * represents booleans as INTEGER 0/1 — without `coerce`, a raw DB row would fail
+ * TypeScript-level validation.
+ */
+/** A workspace project. Supports soft-delete via `archived_at` and cross-project identity via `is_global`. */
 export declare const ProjectSchema: z.ZodObject<{
     id: z.ZodString;
     name: z.ZodString;
@@ -8,23 +20,24 @@ export declare const ProjectSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     name: string;
     is_global: boolean;
     created_at: string;
-    updated_at: string;
     path?: string | undefined;
     archived_at?: string | undefined;
 }, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     path?: string | undefined;
     archived_at?: string | undefined;
     is_global?: boolean | undefined;
 }>;
 export type Project = z.infer<typeof ProjectSchema>;
+/** A learned or authored skill with full-text content, metadata, and file_tree for disk sync. */
 export declare const SkillSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -34,38 +47,222 @@ export declare const SkillSchema: z.ZodObject<{
     category: z.ZodOptional<z.ZodString>;
     tags: z.ZodOptional<z.ZodString>;
     always_apply: z.ZodDefault<z.ZodNumber>;
-    file_tree: z.ZodOptional<z.ZodString>;
+    file_tree: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     enabled: z.ZodDefault<z.ZodBoolean>;
+    revision: z.ZodDefault<z.ZodNumber>;
+    archived_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     description: string;
     content: string;
     always_apply: number;
     enabled: boolean;
+    revision: number;
+    archived_at?: string | null | undefined;
     category?: string | undefined;
     tags?: string | undefined;
-    file_tree?: string | undefined;
+    file_tree?: string | null | undefined;
 }, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     description: string;
     content: string;
+    archived_at?: string | null | undefined;
     category?: string | undefined;
     tags?: string | undefined;
     always_apply?: number | undefined;
-    file_tree?: string | undefined;
+    file_tree?: string | null | undefined;
     enabled?: boolean | undefined;
+    revision?: number | undefined;
 }>;
 export type Skill = z.infer<typeof SkillSchema>;
+/** An immutable snapshot of a skill's complete state at a specific revision. Created automatically by DB triggers. */
+export declare const SkillVersionSchema: z.ZodObject<{
+    id: z.ZodNumber;
+    skill_id: z.ZodString;
+    revision: z.ZodNumber;
+    name: z.ZodString;
+    description: z.ZodString;
+    content: z.ZodString;
+    category: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    tags: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    always_apply: z.ZodDefault<z.ZodNumber>;
+    file_tree: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    enabled: z.ZodDefault<z.ZodBoolean>;
+    archived_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    created_by: z.ZodDefault<z.ZodString>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: number;
+    name: string;
+    created_at: string;
+    description: string;
+    content: string;
+    always_apply: number;
+    enabled: boolean;
+    revision: number;
+    skill_id: string;
+    created_by: string;
+    archived_at?: string | null | undefined;
+    category?: string | null | undefined;
+    tags?: string | null | undefined;
+    file_tree?: string | null | undefined;
+}, {
+    id: number;
+    name: string;
+    created_at: string;
+    description: string;
+    content: string;
+    revision: number;
+    skill_id: string;
+    archived_at?: string | null | undefined;
+    category?: string | null | undefined;
+    tags?: string | null | undefined;
+    always_apply?: number | undefined;
+    file_tree?: string | null | undefined;
+    enabled?: boolean | undefined;
+    created_by?: string | undefined;
+}>;
+export type SkillVersion = z.infer<typeof SkillVersionSchema>;
+/** A lineage record mapping a source skill (by project + name) to a canonical target skill. */
+export declare const SkillLineageSchema: z.ZodObject<{
+    id: z.ZodNumber;
+    project_id: z.ZodString;
+    source_project_id: z.ZodString;
+    source_name: z.ZodString;
+    target_skill_id: z.ZodString;
+    source_hash: z.ZodDefault<z.ZodString>;
+    merged_file_paths: z.ZodDefault<z.ZodString>;
+    tombstone_path: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    reason: z.ZodDefault<z.ZodString>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    updated_at: string;
+    id: number;
+    created_at: string;
+    project_id: string;
+    source_project_id: string;
+    source_name: string;
+    target_skill_id: string;
+    source_hash: string;
+    merged_file_paths: string;
+    reason: string;
+    tombstone_path?: string | null | undefined;
+}, {
+    updated_at: string;
+    id: number;
+    created_at: string;
+    project_id: string;
+    source_project_id: string;
+    source_name: string;
+    target_skill_id: string;
+    source_hash?: string | undefined;
+    merged_file_paths?: string | undefined;
+    tombstone_path?: string | null | undefined;
+    reason?: string | undefined;
+}>;
+export type SkillLineage = z.infer<typeof SkillLineageSchema>;
+/** A governance proposal for a skill mutation: create, update, merge, or archive. */
+export declare const SkillProposalSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    status: z.ZodDefault<z.ZodEnum<["draft", "pending", "rejected", "applied", "rolled_back", "stale"]>>;
+    proposal_type: z.ZodEnum<["create", "update", "merge", "archive"]>;
+    target_skill_id: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    target_name: z.ZodString;
+    source_project_id: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    source_name: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    expected_revision: z.ZodNullable<z.ZodOptional<z.ZodNumber>>;
+    expected_source_revision: z.ZodNullable<z.ZodOptional<z.ZodNumber>>;
+    target_revision_before: z.ZodNullable<z.ZodOptional<z.ZodNumber>>;
+    source_revision_before: z.ZodNullable<z.ZodOptional<z.ZodNumber>>;
+    target_created: z.ZodDefault<z.ZodNumber>;
+    proposed_state: z.ZodString;
+    evidence_json: z.ZodDefault<z.ZodString>;
+    observation_ids: z.ZodDefault<z.ZodString>;
+    quality_score: z.ZodDefault<z.ZodNumber>;
+    novelty_score: z.ZodDefault<z.ZodNumber>;
+    contradiction_flag: z.ZodDefault<z.ZodNumber>;
+    candidate_group_key: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    reviewer: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    review_reason: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    always_apply: z.ZodDefault<z.ZodNumber>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+    reviewed_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    applied_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    rolled_back_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+}, "strip", z.ZodTypeAny, {
+    target_created: number;
+    updated_at: string;
+    id: string;
+    created_at: string;
+    status: "draft" | "pending" | "rejected" | "applied" | "rolled_back" | "stale";
+    project_id: string;
+    always_apply: number;
+    proposal_type: "create" | "update" | "merge" | "archive";
+    target_name: string;
+    proposed_state: string;
+    evidence_json: string;
+    observation_ids: string;
+    quality_score: number;
+    novelty_score: number;
+    contradiction_flag: number;
+    target_revision_before?: number | null | undefined;
+    source_revision_before?: number | null | undefined;
+    expected_source_revision?: number | null | undefined;
+    source_project_id?: string | null | undefined;
+    source_name?: string | null | undefined;
+    target_skill_id?: string | null | undefined;
+    expected_revision?: number | null | undefined;
+    candidate_group_key?: string | null | undefined;
+    reviewer?: string | null | undefined;
+    review_reason?: string | null | undefined;
+    reviewed_at?: string | null | undefined;
+    applied_at?: string | null | undefined;
+    rolled_back_at?: string | null | undefined;
+}, {
+    updated_at: string;
+    id: string;
+    created_at: string;
+    project_id: string;
+    proposal_type: "create" | "update" | "merge" | "archive";
+    target_name: string;
+    proposed_state: string;
+    target_revision_before?: number | null | undefined;
+    source_revision_before?: number | null | undefined;
+    target_created?: number | undefined;
+    expected_source_revision?: number | null | undefined;
+    status?: "draft" | "pending" | "rejected" | "applied" | "rolled_back" | "stale" | undefined;
+    always_apply?: number | undefined;
+    source_project_id?: string | null | undefined;
+    source_name?: string | null | undefined;
+    target_skill_id?: string | null | undefined;
+    expected_revision?: number | null | undefined;
+    evidence_json?: string | undefined;
+    observation_ids?: string | undefined;
+    quality_score?: number | undefined;
+    novelty_score?: number | undefined;
+    contradiction_flag?: number | undefined;
+    candidate_group_key?: string | null | undefined;
+    reviewer?: string | null | undefined;
+    review_reason?: string | null | undefined;
+    reviewed_at?: string | null | undefined;
+    applied_at?: string | null | undefined;
+    rolled_back_at?: string | null | undefined;
+}>;
+export type SkillProposal = z.infer<typeof SkillProposalSchema>;
+/** A learning entry — a tagged, prioritised record of a decision, pattern, bug, or other context. */
 export declare const LearningSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
@@ -78,9 +275,9 @@ export declare const LearningSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: number;
     created_at: string;
-    updated_at: string;
     status: "pending" | "processed" | "failed";
     project_id: string;
     content: string;
@@ -89,9 +286,9 @@ export declare const LearningSchema: z.ZodObject<{
     tags?: string | undefined;
     session_id?: string | undefined;
 }, {
+    updated_at: string;
     id: number;
     created_at: string;
-    updated_at: string;
     project_id: string;
     content: string;
     entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "learning" | "plugin" | "architecture" | "implementation" | "code_change" | "enhancement" | "observation" | "ops" | "question" | "review" | "documentation" | "improvement" | "milestone";
@@ -101,6 +298,7 @@ export declare const LearningSchema: z.ZodObject<{
     session_id?: string | undefined;
 }>;
 export type Learning = z.infer<typeof LearningSchema>;
+/** A kanban task with sub-tasking, scheduling, and time-tracking support. */
 export declare const TaskSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -125,9 +323,9 @@ export declare const TaskSchema: z.ZodObject<{
     updated_at: z.ZodString;
     completed_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     priority: number;
     title: string;
@@ -148,9 +346,9 @@ export declare const TaskSchema: z.ZodObject<{
     custom_fields?: string | null | undefined;
     completed_at?: string | null | undefined;
 }, {
+    updated_at: string;
     id: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     title: string;
     description?: string | undefined;
@@ -172,6 +370,7 @@ export declare const TaskSchema: z.ZodObject<{
     completed_at?: string | null | undefined;
 }>;
 export type Task = z.infer<typeof TaskSchema>;
+/** A threaded comment on a task, with parent_comment_id for nested replies. */
 export declare const TaskCommentSchema: z.ZodObject<{
     id: z.ZodString;
     task_id: z.ZodString;
@@ -201,6 +400,7 @@ export declare const TaskCommentSchema: z.ZodObject<{
     edited_at?: string | null | undefined;
 }>;
 export type TaskComment = z.infer<typeof TaskCommentSchema>;
+/** An audit event recording state transitions on a task (e.g., column move, assignment change). */
 export declare const TaskActivitySchema: z.ZodObject<{
     id: z.ZodString;
     task_id: z.ZodString;
@@ -224,6 +424,7 @@ export declare const TaskActivitySchema: z.ZodObject<{
     payload?: string | null | undefined;
 }>;
 export type TaskActivity = z.infer<typeof TaskActivitySchema>;
+/** A dependency link between two tasks: blocks, blocked_by, or relates_to. */
 export declare const TaskLinkSchema: z.ZodObject<{
     id: z.ZodString;
     task_id: z.ZodString;
@@ -241,6 +442,7 @@ export declare const TaskLinkSchema: z.ZodObject<{
     link_type: "blocks" | "blocked_by" | "relates_to";
 }>;
 export type TaskLink = z.infer<typeof TaskLinkSchema>;
+/** A notification targeting a specific user about a task event (mention, assignment, watch status change). */
 export declare const TaskNotificationSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -267,6 +469,7 @@ export declare const TaskNotificationSchema: z.ZodObject<{
     read_at?: string | null | undefined;
 }>;
 export type TaskNotification = z.infer<typeof TaskNotificationSchema>;
+/** Kanban board layout: column definitions and custom field config stored as JSON strings. */
 export declare const BoardConfigSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -275,21 +478,22 @@ export declare const BoardConfigSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     columns: string;
     custom_field_defs: string;
 }, {
+    updated_at: string;
     id: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     columns: string;
     custom_field_defs?: string | undefined;
 }>;
 export type BoardConfig = z.infer<typeof BoardConfigSchema>;
+/** A recurring or event-triggered job definition with agent assignment and scheduling config. */
 export declare const JobSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -304,10 +508,10 @@ export declare const JobSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     enabled: boolean;
     agent: string;
@@ -317,10 +521,10 @@ export declare const JobSchema: z.ZodObject<{
     schedule_cron?: string | null | undefined;
     trigger_event?: string | null | undefined;
 }, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     agent: string;
     prompt_template: string;
@@ -331,6 +535,7 @@ export declare const JobSchema: z.ZodObject<{
     timeout_minutes?: number | undefined;
 }>;
 export type Job = z.infer<typeof JobSchema>;
+/** A single execution of a job, tracking its lifecycle from queued through completion or failure. */
 export declare const JobRunSchema: z.ZodObject<{
     id: z.ZodString;
     job_id: z.ZodString;
@@ -360,6 +565,7 @@ export declare const JobRunSchema: z.ZodObject<{
     exit_code?: number | null | undefined;
 }>;
 export type JobRun = z.infer<typeof JobRunSchema>;
+/** An individual line of stdout/stderr output from a job run, ordered by sequence number. */
 export declare const JobRunLogSchema: z.ZodObject<{
     id: z.ZodNumber;
     run_id: z.ZodString;
@@ -383,6 +589,7 @@ export declare const JobRunLogSchema: z.ZodObject<{
     line: string;
 }>;
 export type JobRunLog = z.infer<typeof JobRunLogSchema>;
+/** A contextual memory entry with priority ranking — used by agents to recall past session context. */
 export declare const ContextSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
@@ -409,6 +616,7 @@ export declare const ContextSchema: z.ZodObject<{
     session_id?: string | undefined;
 }>;
 export type ContextEntry = z.infer<typeof ContextSchema>;
+/** A registered child MCP server with its command, arguments, environment, and origin source tracking. */
 export declare const ServerSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -444,6 +652,7 @@ export declare const ServerSchema: z.ZodObject<{
     env?: string | undefined;
 }>;
 export type Server = z.infer<typeof ServerSchema>;
+/** An observation about user behavior — the raw input to the self-learning pipeline. */
 export declare const ObservationSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
@@ -458,9 +667,9 @@ export declare const ObservationSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     source: "auto-observer" | "agent" | "manual" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import";
+    updated_at: string;
     id: number;
     created_at: string;
-    updated_at: string;
     status: "pending" | "processed" | "failed" | "skipped";
     project_id: string;
     content: string;
@@ -469,9 +678,9 @@ export declare const ObservationSchema: z.ZodObject<{
     session_id?: string | undefined;
     context?: string | undefined;
 }, {
+    updated_at: string;
     id: number;
     created_at: string;
-    updated_at: string;
     project_id: string;
     content: string;
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
@@ -482,6 +691,7 @@ export declare const ObservationSchema: z.ZodObject<{
     context?: string | undefined;
 }>;
 export type Observation = z.infer<typeof ObservationSchema>;
+/** A consolidated personality trait derived from observations by the synthesis pipeline. Confidence reflects corroboration strength. */
 export declare const PersonalityTraitSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
@@ -498,9 +708,9 @@ export declare const PersonalityTraitSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     source: string;
+    updated_at: string;
     id: number;
     created_at: string;
-    updated_at: string;
     project_id: string;
     trait_type: "terminology" | "communication_style" | "code_preference" | "workflow_pattern" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
     trait_value: string;
@@ -511,9 +721,9 @@ export declare const PersonalityTraitSchema: z.ZodObject<{
     exemplar_text?: string | undefined;
     metadata?: string | undefined;
 }, {
+    updated_at: string;
     id: number;
     created_at: string;
-    updated_at: string;
     project_id: string;
     trait_type: "terminology" | "communication_style" | "code_preference" | "workflow_pattern" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
     trait_value: string;
@@ -526,6 +736,7 @@ export declare const PersonalityTraitSchema: z.ZodObject<{
     metadata?: string | undefined;
 }>;
 export type PersonalityTrait = z.infer<typeof PersonalityTraitSchema>;
+/** An OpenCode plugin with file path and optional source content cache for disk-write operations. */
 export declare const PluginSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -536,25 +747,26 @@ export declare const PluginSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     enabled: boolean;
     file_path: string;
     source_content?: string | undefined;
 }, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     file_path: string;
     enabled?: boolean | undefined;
     source_content?: string | undefined;
 }>;
 export type Plugin = z.infer<typeof PluginSchema>;
+/** Per-tool enable/disable state for child MCP servers — allows toggling individual tools at runtime. */
 export declare const MCPToolStateSchema: z.ZodObject<{
     id: z.ZodOptional<z.ZodNumber>;
     project_id: z.ZodString;
@@ -563,21 +775,22 @@ export declare const MCPToolStateSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    created_at: string;
     updated_at: string;
+    created_at: string;
     project_id: string;
     enabled: boolean;
     tool_name: string;
     id?: number | undefined;
 }, {
-    created_at: string;
     updated_at: string;
+    created_at: string;
     project_id: string;
     tool_name: string;
     id?: number | undefined;
     enabled?: boolean | undefined;
 }>;
 export type MCPToolState = z.infer<typeof MCPToolStateSchema>;
+/** A slash-command definition with an associated file path and optional content. */
 export declare const CommandSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -587,23 +800,24 @@ export declare const CommandSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     file_path: string;
     content?: string | undefined;
 }, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     file_path: string;
     content?: string | undefined;
 }>;
 export type Command = z.infer<typeof CommandSchema>;
+/** An agent profile with category, model, permission, and skill assignments. */
 export declare const AgentSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -620,10 +834,10 @@ export declare const AgentSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     description: string;
     content: string;
@@ -635,10 +849,10 @@ export declare const AgentSchema: z.ZodObject<{
     model?: string | undefined;
     reasoning_effort?: string | undefined;
 }, {
+    updated_at: string;
     id: string;
     name: string;
     created_at: string;
-    updated_at: string;
     project_id: string;
     content: string;
     description?: string | undefined;
@@ -651,6 +865,7 @@ export declare const AgentSchema: z.ZodObject<{
     skills?: string | undefined;
 }>;
 export type Agent = z.infer<typeof AgentSchema>;
+/** Project-level or global `opencode.json` configuration stored in the DB for API-driven editing. */
 export declare const ConfigSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
@@ -659,25 +874,26 @@ export declare const ConfigSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    updated_at: string;
     id: string;
     created_at: string;
-    updated_at: string;
     type: "project" | "global";
     project_id: string;
     content: string;
 }, {
+    updated_at: string;
     id: string;
     created_at: string;
-    updated_at: string;
     type: "project" | "global";
     project_id: string;
     content: string;
 }>;
 export type Config = z.infer<typeof ConfigSchema>;
+/** An event in the self-learning pipeline timeline — tracks extraction, synthesis, and trait/skill lifecycle. */
 export declare const PipelineEventSchema: z.ZodObject<{
     id: z.ZodNumber;
     project_id: z.ZodString;
-    event_type: z.ZodEnum<["session_created", "session_idle", "observation_created", "observation_imported", "observation_detected", "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed", "extraction_completed", "extraction_failed", "trait_created", "trait_updated", "skill_created", "skill_updated", "plugin_initialized", "plugin_error"]>;
+    event_type: z.ZodEnum<["session_created", "session_idle", "observation_created", "observation_imported", "observation_detected", "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed", "extraction_completed", "extraction_failed", "trait_created", "trait_updated", "skill_created", "skill_updated", "proposal_created", "proposal_submitted", "proposal_approved", "proposal_rejected", "proposal_applied", "proposal_rolled_back", "plugin_initialized", "plugin_error"]>;
     event_source: z.ZodEnum<["agent", "plugin", "synthesis", "system"]>;
     title: z.ZodString;
     description: z.ZodOptional<z.ZodString>;
@@ -691,9 +907,9 @@ export declare const PipelineEventSchema: z.ZodObject<{
     created_at: string;
     project_id: string;
     title: string;
-    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "plugin_initialized" | "plugin_error";
+    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "proposal_created" | "proposal_submitted" | "proposal_approved" | "proposal_rejected" | "proposal_applied" | "proposal_rolled_back" | "plugin_initialized" | "plugin_error";
     importance: number;
-    event_source: "agent" | "plugin" | "synthesis" | "system";
+    event_source: "system" | "agent" | "plugin" | "synthesis";
     description?: string | undefined;
     session_id?: string | undefined;
     data?: string | undefined;
@@ -703,8 +919,8 @@ export declare const PipelineEventSchema: z.ZodObject<{
     created_at: string;
     project_id: string;
     title: string;
-    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "plugin_initialized" | "plugin_error";
-    event_source: "agent" | "plugin" | "synthesis" | "system";
+    event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "proposal_created" | "proposal_submitted" | "proposal_approved" | "proposal_rejected" | "proposal_applied" | "proposal_rolled_back" | "plugin_initialized" | "plugin_error";
+    event_source: "system" | "agent" | "plugin" | "synthesis";
     description?: string | undefined;
     session_id?: string | undefined;
     importance?: number | undefined;

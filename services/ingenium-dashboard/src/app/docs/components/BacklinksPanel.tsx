@@ -5,9 +5,14 @@ import { api } from "@/lib/api";
 import type { DocBacklink } from "@/lib/docs-types";
 
 type BacklinksPanelProps = {
+  /** Page ID for which to fetch backlinks */
   pageId: number;
 };
 
+/**
+ * BacklinksPanel — shows inbound wiki-links from other pages.
+ * Uses [[slug]] syntax: pages referencing this page via its slug appear here.
+ */
 export default function BacklinksPanel({ pageId }: BacklinksPanelProps) {
   const [backlinks, setBacklinks] = useState<DocBacklink[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,7 +33,6 @@ export default function BacklinksPanel({ pageId }: BacklinksPanelProps) {
     fetchBacklinks();
   }, [fetchBacklinks]);
 
-  // Loading skeleton
   if (loading) {
     return (
       <div className="p-4 space-y-3">
@@ -64,7 +68,7 @@ export default function BacklinksPanel({ pageId }: BacklinksPanelProps) {
           <div className="divide-y divide-[var(--color-border-muted)]">
             {backlinks.map((bl, idx) => (
               <div
-                key={`${bl.page_id}-${idx}`}
+                key={`${bl.sourcePageId}-${idx}`}
                 className="p-3 hover:bg-[var(--color-surface-hover)] transition-colors"
               >
                 <div className="flex items-center gap-2 mb-0.5">
@@ -72,15 +76,15 @@ export default function BacklinksPanel({ pageId }: BacklinksPanelProps) {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                   <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                    {bl.title}
+                    {bl.sourceTitle}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 ml-5.5">
                   <span className="text-xs text-[var(--color-text-muted)]">
-                    via &ldquo;{bl.link_text}&rdquo;
+                    via &ldquo;{bl.linkText}&rdquo;
                   </span>
                   <span className="px-1.5 py-0.5 text-[10px] rounded bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]">
-                    {bl.space_name}
+                    {bl.sourceSlug}
                   </span>
                 </div>
               </div>

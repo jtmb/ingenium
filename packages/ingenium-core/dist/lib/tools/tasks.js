@@ -11,6 +11,9 @@ function dbPath() {
 }
 /**
  * Log activity for a task. Internal helper — called from every mutation.
+ *
+ * NOTE: Takes a `_projectId` param for API compatibility but does not store it —
+ *      the activity is keyed by task_id only.
  */
 function logTaskActivity(_projectId, taskId, actor, eventType, payload) {
     // Activity logging runs in its own transaction so it doesn't nest
@@ -24,6 +27,13 @@ function logTaskActivity(_projectId, taskId, actor, eventType, payload) {
 // ============================================================================
 // Task CRUD
 // ============================================================================
+/**
+ * Create a task in the "todo" column.
+ *
+ * `estimate_minutes` is also written to `remaining_minutes` (the two diverge
+ * as work progresses). `spent_minutes` starts at 0. The callbacks are
+ * responsible for deciding whether to create a parent (epic/story) first.
+ */
 export function createTask(projectId, title, description, assignedTo, fields) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -40,10 +50,13 @@ export function createTask(projectId, title, description, assignedTo, fields) {
         return db.prepare("SELECT * FROM tasks WHERE id = ?").get(id);
     });
     checkpointAfterWrite();
-    // Log activity outside transaction
     logTaskActivity(projectId, result.id, "system", "created", { title });
     return result;
 }
+/**
+ * List tasks for a project, optionally filtered by column.
+ * Results ordered by priority DESC then FIFO creation time.
+ */
 export function listTasks(projectId, columnId) {
     const db = getDb(dbPath());
     if (columnId) {
@@ -51,6 +64,10 @@ export function listTasks(projectId, columnId) {
     }
     return db.prepare("SELECT * FROM tasks WHERE project_id = ? ORDER BY priority DESC, created_at").all(projectId);
 }
+/**
+ * Move a task to a new column. `completed_at` is set only when moving to "done".
+ * Returns the updated task (or undefined if the task doesn't exist).
+ */
 export function moveTask(taskId, columnId, actor) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -70,20 +87,31 @@ export function moveTask(taskId, columnId, actor) {
     }
     return result.task;
 }
+/** Convenience wrapper — delegates to moveTask(…, "done"). */
 export function completeTask(taskId, actor) {
     return moveTask(taskId, "done", actor);
 }
+/**
+ * Return the highest-priority task in the "todo" column.
+ * Priority-first, then FIFO (oldest first) for tiebreaking.
+ */
 export function getNextTask(projectId) {
     const db = getDb(dbPath());
     return db.prepare(`SELECT * FROM tasks WHERE project_id = ? AND column_id = 'todo'
      ORDER BY priority DESC, created_at ASC LIMIT 1`).get(projectId);
 }
+/** Get a single task by ID. Returns undefined if not found. */
 export function getTask(taskId) {
     const db = getDb(dbPath());
     return db.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId);
 }
 /**
- * Update task fields. Only provided fields are updated (partial update).
+ * Partial update of task fields. Builds a dynamic SET clause from the provided
+ * keys so callers only send the fields they intend to change.
+ *
+ * When `column_id` is set to "done", `completed_at` is stamped automatically.
+ * `expectedRevision` is NOT supported here (unlike docs pages) — this is a
+ * last-writer-wins model.
  */
 export function updateTask(projectId, taskId, fields, actor) {
     const result = execTransaction(() => {
@@ -137,12 +165,14 @@ export function updateTask(projectId, taskId, fields, actor) {
     return result;
 }
 /**
- * Hard delete a task + all related records (cascade manually).
+ * Hard delete a task + all related records (cascade manually because
+ * SQLite FK enforcement may not cascade on TEXT PKs).
+ * Deletion order: comments → activity → links → notifications → task.
+ * FTS triggers fire automatically on the task delete.
  */
 export function deleteTask(projectId, taskId, actor) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
-        // Check task exists
         const task = db.prepare("SELECT id FROM tasks WHERE id = ?").get(taskId);
         if (!task)
             return false;
@@ -165,7 +195,9 @@ export function deleteTask(projectId, taskId, actor) {
     return result;
 }
 /**
- * FTS5 search across task titles and descriptions.
+ * FTS5 full-text search across task titles and descriptions.
+ * Returns results ranked by BM25 relevance, scoped to the given project.
+ * Returns an empty array if the query sanitizes to nothing (stop-words only, etc.).
  */
 export function searchTasks(projectId, query, limit = 50) {
     const db = getDb(dbPath());
@@ -184,6 +216,9 @@ export function searchTasks(projectId, query, limit = 50) {
 /**
  * Get the task tree: root epics → stories → subtasks.
  * If parentId is provided, return only children of that parent.
+ *
+ * PERF: Uses recursive N+1 queries (one per parent). Fine for typical
+ *       3-level hierarchies but will be slow with very deep trees.
  */
 export function getTaskTree(projectId, parentId) {
     const db = getDb(dbPath());
@@ -205,6 +240,11 @@ export function getTaskTree(projectId, parentId) {
 // ============================================================================
 // Comments
 // ============================================================================
+/**
+ * Add a comment to a task. Supports threaded replies via `parentCommentId`.
+ * `actor` is distinct from `author` — the author is the commenter, while
+ * actor is who performed the action (for activity log), defaulting to author.
+ */
 export function addComment(projectId, taskId, author, body, parentCommentId, actor) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -218,6 +258,9 @@ export function addComment(projectId, taskId, author, body, parentCommentId, act
     logTaskActivity(projectId, taskId, actor ?? author, "commented", { commentId: result.id });
     return result;
 }
+/**
+ * Edit an existing comment body. Stamps `edited_at` timestamp.
+ */
 export function editComment(projectId, commentId, body, actor) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -233,10 +276,17 @@ export function editComment(projectId, commentId, body, actor) {
     }
     return result;
 }
+/**
+ * Add a reaction (emoji) to a comment. Reactions are stored as a JSON map:
+ * `{ "👍": 2, "🚀": 1 }`. Each call increments the counter for that emoji.
+ *
+ * HACK: Read-modify-write on the JSON blob — not safe under concurrent access.
+ *       Two callers reacting at the same time can lose one increment.
+ *       A proper fix would extract reactions to a separate table.
+ */
 export function reactComment(projectId, commentId, reaction, actor) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
-        // Read existing reactions
         const comment = db.prepare("SELECT reactions, task_id FROM task_comments WHERE id = ?").get(commentId);
         if (!comment)
             return undefined;
@@ -256,6 +306,7 @@ export function reactComment(projectId, commentId, reaction, actor) {
     }
     return result;
 }
+/** Get all comments for a task, ordered chronologically. */
 export function getComments(_projectId, taskId) {
     const db = getDb(dbPath());
     return db.prepare("SELECT * FROM task_comments WHERE task_id = ? ORDER BY created_at").all(taskId);
@@ -263,6 +314,11 @@ export function getComments(_projectId, taskId) {
 // ============================================================================
 // Activity
 // ============================================================================
+/**
+ * Get activity timeline for a task.
+ * Maps the DB column `event_type` → the frontend-facing `action` field
+ * so the API can expose a uniform interface without renaming columns.
+ */
 export function getTaskActivity(_projectId, taskId, limit = 50) {
     const db = getDb(dbPath());
     const rows = db.prepare("SELECT * FROM task_activity WHERE task_id = ? ORDER BY created_at DESC LIMIT ?").all(taskId, limit);
@@ -275,6 +331,12 @@ export function getTaskActivity(_projectId, taskId, limit = 50) {
 // ============================================================================
 // Links
 // ============================================================================
+/**
+ * Create a link between two tasks.
+ * - Self-links are rejected explicitly.
+ * - Duplicate links (same pair + type) return the existing link silently.
+ * - Activity is logged on BOTH tasks so both timelines show the link.
+ */
 export function linkTasks(projectId, taskId, linkedTaskId, linkType, actor) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -307,6 +369,10 @@ export function linkTasks(projectId, taskId, linkedTaskId, linkType, actor) {
     }
     return result;
 }
+/**
+ * Remove a task link. Reads the link before deleting so we can log
+ * the activity with context (knowing which two tasks were involved).
+ */
 export function unlinkTasks(projectId, linkId, actor) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -328,6 +394,10 @@ export function unlinkTasks(projectId, linkId, actor) {
     }
     return result.deleted;
 }
+/**
+ * Get all links for a task (both directions — where taskId is either
+ * source or target).
+ */
 export function getTaskLinks(_projectId, taskId) {
     const db = getDb(dbPath());
     return db.prepare("SELECT * FROM task_links WHERE task_id = ? OR linked_task_id = ?").all(taskId, taskId);
@@ -335,6 +405,11 @@ export function getTaskLinks(_projectId, taskId) {
 // ============================================================================
 // Notifications
 // ============================================================================
+/**
+ * Create a notification for a user about a task event.
+ * Deduplicates: if an unread notification already exists for the same
+ * recipient + task + kind, no duplicate is created.
+ */
 export function notifyTask(projectId, recipient, taskId, kind) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -350,6 +425,10 @@ export function notifyTask(projectId, recipient, taskId, kind) {
     checkpointAfterWrite();
     return result;
 }
+/**
+ * List notifications for a recipient. Optionally filter to unread only.
+ * Ordered most-recent-first.
+ */
 export function getNotifications(projectId, recipient, unreadOnly) {
     const db = getDb(dbPath());
     if (unreadOnly) {
@@ -357,6 +436,7 @@ export function getNotifications(projectId, recipient, unreadOnly) {
     }
     return db.prepare("SELECT * FROM task_notifications WHERE project_id = ? AND recipient = ? ORDER BY created_at DESC").all(projectId, recipient);
 }
+/** Mark a single notification as read by setting `read_at` timestamp. */
 export function markNotificationRead(_projectId, notificationId) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -376,6 +456,13 @@ const DEFAULT_COLUMNS = JSON.stringify([
     { id: "review", name: "Review", wip_limit: 3 },
     { id: "done", name: "Done", wip_limit: null },
 ]);
+/**
+ * Get the board configuration for a project. If none exists, creates one
+ * with the default columns (Todo → In Progress → Review → Done) with WIP
+ * limits on In Progress (5) and Review (3).
+ *
+ * Uses INSERT OR IGNORE so concurrent calls don't cause constraint errors.
+ */
 export function getBoardConfig(projectId) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -388,6 +475,11 @@ export function getBoardConfig(projectId) {
     checkpointAfterWrite();
     return result;
 }
+/**
+ * Update board configuration. If no config exists yet for the project,
+ * one is created with defaults before applying the update.
+ * Only the provided fields are changed (partial update).
+ */
 export function updateBoardConfig(projectId, updates) {
     const result = execTransaction(() => {
         const db = getDb(dbPath());
@@ -446,6 +538,13 @@ export function validateWipLimit(projectId, columnId) {
 // ============================================================================
 // Bulk operations
 // ============================================================================
+/**
+ * Apply the same field changes to multiple tasks in a single transaction.
+ * Uses an SQL `IN (...)` clause. Returns the number of affected rows.
+ *
+ * NOTE: Shares the dynamic SET-builder pattern with `updateTask` — any
+ *       change to the field mapping should be mirrored in both places.
+ */
 export function bulkUpdateTasks(_projectId, taskIds, fields) {
     if (taskIds.length === 0)
         return 0;

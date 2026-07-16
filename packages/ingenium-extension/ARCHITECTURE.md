@@ -18,9 +18,9 @@ Container runs via `docker compose up --build`. These are server-side processes 
 
 | Process | Port | What it does |
 |---------|------|-------------|
-| ingenium-api | :4097 | Express REST API. Sole database authority. All CRUD operations for skills, plugins, commands, configs, agents, servers, settings, tasks, observations, personality traits, pipeline events, and synthesis pipeline. Also runs the **server-side extraction engine** (reads OpenCode messages, LLM extraction) and the **scheduler** (extraction → synthesis → skill-sync every 15 minutes). |
+| ingenium-api | :4097 | Express REST API. Sole database authority. All CRUD operations for skills, plugins, commands, configs, agents, servers, settings, tasks, observations, personality traits, pipeline events, and synthesis pipeline. Also runs the **server-side extraction engine** (reads OpenCode messages, LLM extraction) and the **scheduler** (extraction → synthesis every 15 minutes). Resource sync runs separately in the extension on session events. |
 | ingenium-dashboard | :3000 | Next.js 16 App Router frontend. Calls API over HTTP. Zero database access. |
-| opencode-web | :4098 (binds 0.0.0.0 inside container, published 127.0.0.1:4098 on host) | OpenCode web server (host loopback only) |
+| opencode-web | :4098 (binds **0.0.0.0** inside container via `--hostname 0.0.0.0`; Compose publishes to host `127.0.0.1:4098`) | OpenCode web server (host loopback only) |
 
 ### Data Flow
 

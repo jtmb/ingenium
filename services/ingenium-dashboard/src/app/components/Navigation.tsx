@@ -13,7 +13,13 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 
 // ---------------------------------------------------------------------------
-// Tiny inline SVG icons (16×16 viewBox) — no emoji, no external deps
+// Inline SVG icon components (16×16 viewBox)
+//
+// Chosen over emoji or icon libraries for:
+// - Consistent rendering across OS/browser (emoji vary wildly)
+// - Zero bundle-size overhead from icon libraries (lucide, heroicons, etc.)
+// - Full control over stroke width, colours, and animation
+// - All icons are `aria-hidden="true"` since they're decorative alongside text labels
 // ---------------------------------------------------------------------------
 
 function IconHome() {
@@ -221,7 +227,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "OpenCode", href: "/opencode", icon: <IconTerminal /> },
       { label: "Mail", href: "/mail", icon: <IconMail /> },
       { label: "Tasks", href: "/tasks", icon: <IconCheckSquare /> },
-      { label: "Docs", href: "/docs", icon: <IconFile />, badge: "Coming soon" },
+      { label: "Docs", href: "/docs", icon: <IconFile /> },
     ],
   },
   {
@@ -260,7 +266,13 @@ const NAV_GROUPS: NavGroup[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// localStorage persistence for collapsed groups
+// Collapse-state persistence via localStorage
+//
+// We store a `Record<groupId, boolean>` keyed by navigation group ID.
+// On first load, defaults are merged with any saved state — saved keys
+// override defaults, unknown keys are ignored. This ensures new groups
+// added in future releases keep their `defaultOpen` behaviour without
+// requiring a migration.
 // ---------------------------------------------------------------------------
 
 const STORAGE_KEY = "ingenium-nav-collapsed";
@@ -293,7 +305,10 @@ function saveCollapsedState(state: Record<string, boolean>) {
 }
 
 // ---------------------------------------------------------------------------
-// Context — shared between the hamburger trigger (top bar) and sidebar
+// Navigation Context — bridges the hamburger trigger (in the top bar) with
+// the sidebar component via React context rather than prop-drilling.
+// The mobile drawer close-on-route-change behaviour lives here because
+// this context wraps both trigger and sidebar.
 // ---------------------------------------------------------------------------
 
 interface NavContextValue {
@@ -364,6 +379,7 @@ export default function Navigation() {
   }
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(defaultCollapsed);
 
+  // Load persisted collapse state once on mount (defaultCollapsed is a local constant, not a dep)
   useEffect(() => {
     setCollapsed(loadCollapsedState(defaultCollapsed));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -406,6 +422,14 @@ export default function Navigation() {
   const itemLinkBaseClasses =
     "flex items-center gap-2.5 px-3 py-2 text-sm transition-colors";
 
+  /**
+   * Determine if a nav link matches the current route.
+   *
+   * Exact match for `/` (to avoid matching every route), prefix match
+   * for all other links (e.g. `/skills` matches `/skills/foo`).
+   * The `href + "/"` suffix prevents false positives like `/skills`
+   * matching `/skills-archive`.
+   */
   function isActive(href: string): boolean {
     if (href === "/") return pathname === "/";
     return pathname === href || pathname.startsWith(href + "/");

@@ -3,6 +3,10 @@ import { PipelineEvent } from "../schema.js";
 
 /**
  * Log a pipeline event. Returns the created event.
+ *
+ * The `data` object is JSON-serialized for storage in a TEXT column.
+ * Events form a parent-child tree via `parentEventId`, used by getTimeline()
+ * to reconstruct grouped views of pipeline activity.
  */
 export function logEvent(
   projectId: string,
@@ -41,6 +45,8 @@ export function logEvent(
 
 /**
  * Get pipeline events with optional filters.
+ * Dynamically builds the WHERE clause from the provided options — each optional
+ * filter appends a clause to avoid hard-coding every combination.
  */
 export function getEvents(
   projectId: string,
@@ -84,6 +90,11 @@ export function getEvents(
 /**
  * Get a flat timeline with parent events and their children grouped.
  * Returns events ordered by created_at DESC with children nested in `data.children`.
+ *
+ * NOTE: This performs N+1 queries (one for parents, one per parent for children).
+ * Acceptable because parent counts are bounded by the limit (default 50).
+ * If the pipeline produces thousands of events per interval, consider a
+ * single-query approach with a window function instead.
  */
 export function getTimeline(
   projectId: string,
@@ -93,13 +104,11 @@ export function getTimeline(
     since?: string;
   },
 ): PipelineEvent[] {
-  // Get top-level events (no parent)
   const parents = getEvents(projectId, {
     ...options,
     limit: options?.limit ?? 50,
   });
 
-  // Attach children to each parent
   for (const parent of parents) {
     const children = getEvents(projectId, { parentEventId: parent.id });
     if (children.length > 0) {

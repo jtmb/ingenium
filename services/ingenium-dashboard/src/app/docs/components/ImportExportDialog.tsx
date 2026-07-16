@@ -13,6 +13,12 @@ type ImportExportDialogProps = {
 
 type Tab = "import" | "export";
 
+/**
+ * ImportExportDialog — modal with Import/Export tabs.
+ * Import: drag-drop or file picker for .md (with frontmatter) or .json (bulk export).
+ * Export: Download JSON or (coming soon) Markdown archive of a space.
+ * Uses createPortal to render outside the editor DOM tree for proper z-index stacking.
+ */
 export default function ImportExportDialog({ isOpen, onClose, spaceId }: ImportExportDialogProps) {
   const [activeTab, setActiveTab] = useState<Tab>("import");
 
@@ -95,7 +101,11 @@ export default function ImportExportDialog({ isOpen, onClose, spaceId }: ImportE
   );
 }
 
-/** Import sub-tab */
+/**
+ * Import sub-tab — 4 states: empty (drop zone), preview (file parsed), success, error.
+ * JSON: expects `[{title, slug, content, ...}]` or `{pages: [...]}` structure.
+ * Markdown: single file with optional YAML frontmatter (title extracted from frontmatter or filename).
+ */
 function ImportTab({ spaceId, onClose }: { spaceId: number; onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [previews, setPreviews] = useState<ImportPreview[]>([]);
@@ -120,7 +130,7 @@ function ImportTab({ spaceId, onClose }: { spaceId: number; onClose: () => void 
             title: p.title || p.slug || "Untitled",
             slug: p.slug || "",
             content: p.content || "",
-            space_name: p.space_name || "",
+            spaceName: p.space_name || p.spaceName || "",
           })),
         );
       } else {
@@ -139,7 +149,7 @@ function ImportTab({ spaceId, onClose }: { spaceId: number; onClose: () => void 
           }
         }
         setPreviews([
-          { title, slug: title.toLowerCase().replace(/\s+/g, "-"), content, space_name: "" },
+          { title, slug: title.toLowerCase().replace(/\s+/g, "-"), content, spaceName: "" },
         ]);
       }
     } catch (e: any) {
@@ -165,12 +175,19 @@ function ImportTab({ spaceId, onClose }: { spaceId: number; onClose: () => void 
     setUploading(true);
     setStatus(null);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await api.docs.importExport.import(spaceId, fd);
+      const text = await file.text();
+      const format = file.name.endsWith(".json") ? "json" : "markdown";
+      let data: unknown;
+      if (format === "json") {
+        data = JSON.parse(text);
+      } else {
+        // Single markdown file — wrap as array
+        data = [{ title: file.name.replace(/\.md$/i, ""), slug: file.name.replace(/\.md$/i, "").toLowerCase().replace(/\s+/g, "-"), content: text }];
+      }
+      const res = await api.docs.importExport.importJson(spaceId, format, data);
       setStatus({
         type: "success",
-        message: `Imported ${res?.data?.imported ?? previews.length} page(s) successfully.`,
+        message: `Imported ${res?.data?.length ?? res?.total ?? previews.length} page(s) successfully.`,
       });
       setFile(null);
       setPreviews([]);
@@ -307,13 +324,13 @@ function ExportTab({ spaceId }: { spaceId: number }) {
     setExporting(true);
     setError("");
     try {
-      const res = await api.docs.importExport.exportJson(spaceId);
+      const res = await api.docs.importExport.exportSpace(spaceId);
       if (res?.data) {
-        const blob = new Blob([res.data.json], { type: "application/json" });
+        const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = res.data.filename || `space-${spaceId}-export.json`;
+        a.download = `space-${spaceId}-export.json`;
         a.click();
         URL.revokeObjectURL(url);
       }

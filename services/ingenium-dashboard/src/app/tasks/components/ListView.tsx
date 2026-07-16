@@ -5,9 +5,7 @@ import { api, Task } from "../../../lib/api";
 import { badgeTones } from "../../../lib/badgeTones";
 import TaskDetail from "./TaskDetail";
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 type SortField = "id" | "title" | "column_id" | "assigned_to" | "priority" | "due_date" | "issue_type" | "created_at";
 type SortDir = "asc" | "desc";
@@ -30,10 +28,13 @@ const COLUMN_LABELS: Record<string, string> = {
   done: "Done",
 };
 
-/* ------------------------------------------------------------------ */
-/*  Inline Editable Cell                                               */
-/* ------------------------------------------------------------------ */
+// ── Inline Editable Cell ────────────────────────────────────────────────────
 
+/**
+ * Click-to-edit inline cell that commits on Enter/blur and discards on Escape.
+ * Saves only when the value actually changes (avoids unnecessary API calls for
+ * no-op edits).
+ */
 function EditableCell({
   value,
   onSave,
@@ -83,10 +84,12 @@ function EditableCell({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Sortable header                                                    */
-/* ------------------------------------------------------------------ */
+// ── Sortable Header ─────────────────────────────────────────────────────────
 
+/**
+ * Clickable table header that toggles sort direction on repeated clicks
+ * or switches to a new sort field. Shows ▲/▼ indicators for the active column.
+ */
 function SortHeader({
   field,
   currentSort,
@@ -114,9 +117,7 @@ function SortHeader({
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  List View                                                         */
-/* ------------------------------------------------------------------ */
+// ── List View ───────────────────────────────────────────────────────────────
 
 type ListViewProps = {
   project: string;
@@ -124,6 +125,13 @@ type ListViewProps = {
   onTasksChange: (tasks: Task[]) => void;
 };
 
+/**
+ * Table-based task list with sortable columns and inline editing.
+ * Title, assignee, and priority are editable directly in the table cells via
+ * click-to-edit. Optimistic updates with rollback on API failure.
+ *
+ * Default sort is by created_at descending (newest first).
+ */
 export default function ListView({ project, tasks, onTasksChange }: ListViewProps) {
   const [sortField, setSortField] = useState<SortField>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -156,6 +164,10 @@ export default function ListView({ project, tasks, onTasksChange }: ListViewProp
     });
   }, [tasks, sortField, sortDir]);
 
+  /**
+   * Optimistic inline update: immediately updates local state, then persists.
+   * If the API call fails, reverts to the previous task list.
+   */
   const handleInlineUpdate = useCallback(
     async (taskId: string, field: keyof Task, value: string) => {
       const updated = tasks.map((t) =>

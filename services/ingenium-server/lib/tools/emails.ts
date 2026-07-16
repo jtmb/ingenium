@@ -1,7 +1,8 @@
 /**
  * MCP tool handlers for email operations.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Provides 27 tools: 7 basic + 6 self-learning + 14 admin/operations tools.
- * Logs observations to the self-learning pipeline as a side effect.
+ * Logs observations to the self-learning pipeline as a side effect for behavior tracking.
  */
 import { createWriteStream, promises as fs } from "node:fs";
 import path from "node:path";
@@ -148,10 +149,9 @@ export async function emailTriage(project: string, account: string, limit?: numb
 
 /** Suggest an email response based on learned user patterns */
 export async function emailSuggestResponse(project: string, account: string, uid: number, folder?: string) {
-  const res = await api.get(`/emails/suggest/${uid}`, {
-    project, account,
-    folder: folder ?? "INBOX",
-  });
+  const params: Record<string, string> = { project, account };
+  if (folder) params.folder = folder;
+  const res = await api.get(`/emails/suggest/${uid}`, params);
   if (res.data?.matchedSkill) {
     await api.post("/observations", {
       observation_type: "insight",
@@ -165,12 +165,12 @@ export async function emailSuggestResponse(project: string, account: string, uid
 
 /** Auto-draft a response to an email based on learned patterns or LLM smart-replies */
 export async function emailDraftResponse(project: string, account: string, uid: number, folder?: string) {
-  const suggest = await api.get(`/emails/suggest/${uid}`, {
-    project, account,
-    folder: folder ?? "INBOX",
-  });
+  const params: Record<string, string> = { project, account };
+  if (folder) params.folder = folder;
+  const suggest = await api.get(`/emails/suggest/${uid}`, params);
   // New API shape: { suggestions: [...], source: "...", configured: boolean }
   // Old API shape: { data: { body, subject, matchedSkill, ... } } — for backward compat
+  // TODO: Remove backward-compat shim once all instances are migrated to new API shape.
   const suggestions: Array<{ tone?: string; subject?: string; body?: string }> =
     suggest.data?.suggestions ?? (suggest.data?.body ? [suggest.data] : []);
   const first = suggestions[0];

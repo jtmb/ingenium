@@ -8,8 +8,15 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v
 const PROJECT = "gh-llm-bootstrap";
 
 /**
- * Email detail page — full-page reader for a single email by UID.
- * If `id` is "compose", redirects to the compose page.
+ * EmailDetailPage — Full-page reader for a single email by UID.
+ *
+ * If `id` is "compose", redirects to /mail (compose is now an overlay).
+ * This page exists as a legacy deep-link target / standalone mode entry
+ * point. The primary email experience is the 3-pane layout at /mail.
+ *
+ * NOTE: Uses a hardcoded PROJECT const rather than useMailProject() from
+ * the parent page because this route predates the global-project pattern.
+ * The EmailReader component handles its own account resolution.
  */
 export default function EmailDetailPage({
   params,

@@ -6,9 +6,11 @@ import type { DocVersion } from "@/lib/docs-types";
 
 type HistoryPanelProps = {
   pageId: number;
+  /** Called with versionId after a successful restore API call */
   onRestore: (versionId: number) => void;
 };
 
+/** Relative timestamp formatting for version list display. */
 function timeAgo(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
@@ -23,6 +25,11 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
+/**
+ * HistoryPanel — version-by-version history with expand-to-preview and
+ * confirm-first restore flow. The `workspace` pattern: current version is tagged,
+ * older versions can be expanded to view the full content before restoring.
+ */
 export default function HistoryPanel({ pageId, onRestore }: HistoryPanelProps) {
   const [versions, setVersions] = useState<DocVersion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,7 +56,7 @@ export default function HistoryPanel({ pageId, onRestore }: HistoryPanelProps) {
   const handleRestore = async (versionId: number) => {
     setRestoring(true);
     try {
-      await api.docs.versions.restore(versionId);
+      await api.docs.versions.restore(pageId, versionId);
       onRestore(versionId);
       setConfirmRestoreId(null);
     } catch {
@@ -119,7 +126,7 @@ export default function HistoryPanel({ pageId, onRestore }: HistoryPanelProps) {
                           v{v.revision}
                         </span>
                         <span className="text-xs text-[var(--color-text-muted)]">
-                          {timeAgo(v.created_at)}
+                          {timeAgo(v.createdAt)}
                         </span>
                         {v.revision === versions.length && (
                           <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300">

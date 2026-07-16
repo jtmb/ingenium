@@ -19,4 +19,18 @@ export declare function serverRemove(project: string, name: string): Promise<{
         text: string;
     }[];
 }>;
+/** Update a server's running state. */
+export declare function serverUpdate(project: string, name: string, running: boolean): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+/** Sync all servers — upserts an array of server definitions for a project. */
+export declare function serverSyncAll(project: string, servers: any[]): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=servers.d.ts.map

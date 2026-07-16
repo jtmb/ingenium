@@ -3,9 +3,13 @@ import { existsSync } from "node:fs";
 import Database from "better-sqlite3";
 import { logger } from "ingenium-core";
 
+/**
+ * Handles /api/v1/opencode — reads recent user messages directly from the OpenCode SQLite DB.
+ * This is the ONLY route file that directly accesses a SQLite database outside the API authority
+ * pattern, because the OpenCode DB is a separate process's database mounted via docker-compose volume.
+ */
 export const opencodeRouter = Router();
 
-// GET /api/v1/opencode/messages — read recent user messages from the OpenCode DB
 opencodeRouter.get("/messages", (req, res) => {
   const since = parseInt(req.query.since as string || "0", 10);
   const limit = Math.min(parseInt(req.query.limit as string || "500", 10), 2000);

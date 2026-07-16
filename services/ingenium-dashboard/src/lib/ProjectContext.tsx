@@ -7,7 +7,17 @@ const STORAGE_KEY = "ingenium_active_project";
 const GLOBAL_CACHE_KEY = "ingenium_global_project";
 const API_URL = "http://localhost:4097/api/v1";
 
-/** Module-level cache so concurrent callers share the same in-flight resolution. */
+/**
+ * Module-level cache for the global project name.
+ *
+ * Two-tier caching:
+ * 1. `resolvedGlobalProject` — in-memory cache, survives React re-renders
+ * 2. `fetchPromise` — deduplicates concurrent calls so multiple components
+ *    hydrating at the same time share a single in-flight fetch
+ *
+ * Without this, every `useProject()` call in a tree of components would fire
+ * its own API request on first render.
+ */
 let resolvedGlobalProject: string | null = null;
 let fetchPromise: Promise<string> | null = null;
 
@@ -38,10 +48,11 @@ async function resolveGlobalProject(): Promise<string> {
       }
       return name;
     } catch {
-      // 3. Fallback
+      // 3. Fallback — API unreachable, use the hardcoded default
       resolvedGlobalProject = "global-default";
       return "global-default";
     } finally {
+      // Clear the dedup promise so a future call can retry
       fetchPromise = null;
     }
   })();
@@ -64,6 +75,14 @@ export function useProject() {
 
   // Lazy-initialized state for the dynamic global project resolution.
   // Only used when there is NO explicit project from URL or localStorage.
+  /**
+   * Lazy-initialised state for the dynamic global project resolution.
+   *
+   * Initialised from the module-level cache first (avoids a flash of "global-default"
+   * when the cache is already warm), then falls through to localStorage and finally
+   * the static default. This ensures the first render shows the correct project name
+   * without waiting for an API call.
+   */
   const [resolvedGlobal, setResolvedGlobal] = useState<string>(() => {
     if (resolvedGlobalProject) return resolvedGlobalProject;
     if (typeof window !== "undefined") {
@@ -74,8 +93,8 @@ export function useProject() {
   });
 
   useEffect(() => {
-    // Only bother fetching the global project if the user hasn't
-    // explicitly selected one via URL param or prior localStorage choice.
+    // Only fetch the global project if there's NO explicit override —
+    // the URL param or a saved localStorage choice takes precedence.
     const hasExplicitProject =
       fromUrl ||
       (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY));

@@ -15,6 +15,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v
 /**
  * 🔴 Mail is always global — resolve the global project for all API calls.
  * The dashboard's active project selector does NOT affect mail.
+ * This hook fetches the `is_global` project from the API on mount and
+ * falls back to "global-default" if the API is unreachable.
  */
 function useMailProject(): string {
   const [project, setProject] = useState("global-default");
@@ -243,7 +245,8 @@ export default function MailPage() {
   }, [selectedAccount, selectedFolder, page, searchQuery, refreshKey, project]);
 
   const handleSelectEmail = useCallback(async (uid: string) => {
-    // DP#32: guard — re-clicking the already-open email must not reset state
+    // Guard: re-clicking the already-open email must not reset state
+    // Prevents a flash when the user clicks the same email again.
     if (selectedEmail?.uid === uid) return;
 
     // Cancel any existing poll

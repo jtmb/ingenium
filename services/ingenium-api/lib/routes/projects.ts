@@ -1,7 +1,11 @@
 import { Router } from "express";
 import { projects } from "ingenium-core";
 
+/** Handles /api/v1/projects — project CRUD, archive/restore, and global project designation. */
 export const projectsRouter = Router();
+
+// NOTE: Literal-path sub-routes (/archive, /purge) are registered before /:name
+// to avoid Express route capture.
 
 projectsRouter.get("/", (_req, res) => {
   const list = projects.listProjects();
@@ -46,7 +50,7 @@ projectsRouter.delete("/:name", (req, res) => {
   res.status(200).json({ data: { archived: true } });
 });
 
-// DELETE /api/v1/projects/:name/purge — permanently delete a project
+// Permanently deletes all project data — distinct from archive which is reversible
 projectsRouter.delete("/:name/purge", (req, res) => {
   const result = projects.deleteProject(req.params.name!);
   if (!result) {
@@ -56,6 +60,7 @@ projectsRouter.delete("/:name/purge", (req, res) => {
   res.status(204).send();
 });
 
+// Reverses an archive — only works for projects in archived state
 projectsRouter.post("/:name/restore", (req, res) => {
   const restored = projects.unarchiveProject(req.params.name!);
   if (!restored) {
@@ -65,6 +70,7 @@ projectsRouter.post("/:name/restore", (req, res) => {
   res.json({ data: { restored: true } });
 });
 
+// Purges projects older than retentionDays — runs as scheduled cleanup, default 7 days
 projectsRouter.post("/purge", (req, res) => {
   const retentionDays = (req.body.retention_days as number) ?? 7;
   const purged = projects.purgeExpiredProjects(retentionDays);

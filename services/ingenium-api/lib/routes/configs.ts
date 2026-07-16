@@ -2,9 +2,16 @@ import { Router } from "express";
 import { configs } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 
+/**
+ * Config read/write routes for project-level (opencode.json) and global (opencode.jsonc) OpenCode configs.
+ * All routes require a project context for the project-level config; the global config uses
+ * the global-default project internally.
+ *
+ * The `type` query param discriminates between "project" and "global" scopes.
+ * The sync endpoint reads config from disk into DB (disk → DB direction).
+ */
 export const configRouter = Router();
 
-// GET /api/v1/config?type=project|global
 configRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -17,7 +24,6 @@ configRouter.get("/", (req, res) => {
   res.json({ data: config || null });
 });
 
-// PUT /api/v1/config?type=project|global
 configRouter.put("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -31,7 +37,7 @@ configRouter.put("/", (req, res) => {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "content is required" } });
     return;
   }
-  // Validate it's valid JSON/JSONC by attempting parse
+  // Validate JSON before persisting — the DB stores raw text but downstream consumers (OpenCode) expect valid JSON/JSONC
   try { JSON.parse(content); } catch {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "content must be valid JSON" } });
     return;
@@ -40,7 +46,7 @@ configRouter.put("/", (req, res) => {
   res.json({ data: config });
 });
 
-// POST /api/v1/config/sync?type=project|global — sync from disk
+// Disk → DB sync: reads config file from disk and upserts into the settings table
 configRouter.post("/sync", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;

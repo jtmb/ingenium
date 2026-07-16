@@ -1,17 +1,16 @@
 "use client";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
 export type EditorMode = "view" | "edit" | "source" | "split";
 
 interface EditorToolbarProps {
   mode: EditorMode;
   onModeChange: (mode: EditorMode) => void;
+  /** Called with a markdown syntax template string when a formatting button is clicked */
   onInsertMarkdown: (syntax: string) => void;
   showModeToggles?: boolean;
 }
 
-// ── Toolbar button ─────────────────────────────────────────────────────────────
+/** Reusable toolbar button — applies hover/active styling and aria-pressed for toggle states. */
 
 function ToolButton({
   onClick,
@@ -61,7 +60,7 @@ function ModeButton({
   );
 }
 
-// ── SVG Icons ─────────────────────────────────────────────────────────────────
+/** SVG icon components for each formatting action — local inline SVGs avoid external deps. */
 
 const Icons = {
   Heading1: () => (
@@ -136,7 +135,7 @@ const Icons = {
   ),
 };
 
-// ── Formatting button data ────────────────────────────────────────────────────
+/** Formatting buttons — each has a syntax template string that is passed to onInsertMarkdown. */
 
 interface FormatButton {
   label: string;
@@ -169,8 +168,11 @@ const MODE_OPTIONS: { mode: EditorMode; label: string }[] = [
   { mode: "split", label: "Split" },
 ];
 
-// ── Component ──────────────────────────────────────────────────────────────────
-
+/**
+ * EditorToolbar — formatting buttons (left) + mode toggle buttons (right).
+ * Formatting buttons are only visible in edit/source/split modes.
+ * Mode toggles can be hidden via showModeToggles for embedded use cases.
+ */
 const EditorToolbar: React.FC<EditorToolbarProps> = ({
   mode,
   onModeChange,

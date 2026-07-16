@@ -1,6 +1,7 @@
 /**
  * MCP tool handler for the API health check.
- * No project param needed — this is a global endpoint.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
+ * No project param needed — this is a global endpoint that reports API availability and uptime.
  */
 import { api } from "../client.js";
 

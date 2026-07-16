@@ -1,9 +1,20 @@
+/**
+ * Project CRUD — manages the two-project identity model (see AGENTS.md).
+ *
+ * Every project gets a UUID-based ID and a named directory under INGENIUM_HOME/projects/.
+ * Global projects (is_global=1) serve as shared resource roots; normal projects are
+ * tied to external worktree sessions. Skills auto-cascade from global → new projects.
+ *
+ * 🔴 All mutations use execTransaction() with checkpointAfterWrite() outside the txn.
+ * WARNING: deleteProject() does NOT wrap in execTransaction — unlike the others.
+ */
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { logger } from "../logger.js";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import * as skills from "./skills.js";
+/** List all projects, newest first. */
 export function listProjects() {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all();
@@ -36,6 +47,11 @@ export function createProject(name, isGlobal = false) {
         return db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
     });
 }
+/**
+ * Soft-delete a project by setting archived_at.
+ * Archived projects are excluded from the active list but can be restored.
+ * Returns false if the project doesn't exist or is already archived.
+ */
 export function archiveProject(name) {
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -48,6 +64,7 @@ export function archiveProject(name) {
         return true;
     });
 }
+/** Restore a previously archived project by clearing its archived_at timestamp. */
 export function unarchiveProject(name) {
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -59,10 +76,16 @@ export function unarchiveProject(name) {
         return true;
     });
 }
+/** List archived projects, newest-archived first. */
 export function listArchivedProjects() {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM projects WHERE archived_at IS NOT NULL ORDER BY archived_at DESC").all();
 }
+/**
+ * Permanently delete projects whose archived_at is older than retentionDays.
+ * This is the only hard-delete path — used by the scheduled purge job.
+ * Returns the number of projects deleted.
+ */
 export function purgeExpiredProjects(retentionDays) {
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -72,6 +95,11 @@ export function purgeExpiredProjects(retentionDays) {
         return result.changes;
     });
 }
+/**
+ * Hard-delete a project by name. Does NOT wrap in execTransaction — unlike other
+ * write operations here — because this function only does a single DELETE and a
+ * checkpoint, so there's no atomicity benefit from a transaction.
+ */
 export function deleteProject(name) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT id FROM projects WHERE name = ?").get(name);
@@ -81,10 +109,12 @@ export function deleteProject(name) {
     checkpointAfterWrite();
     return true;
 }
+/** Look up a project by name (case-sensitive). Returns undefined if not found. */
 export function getProject(name) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM projects WHERE name = ?").get(name);
 }
+/** Rename a project. Returns the updated project, or undefined if not found. */
 export function updateProject(currentName, newName) {
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -97,6 +127,11 @@ export function updateProject(currentName, newName) {
         return db.prepare("SELECT * FROM projects WHERE id = ?").get(existing.id);
     });
 }
+/**
+ * Toggle a project's global flag. When isGlobal=true, the project's skills/plugins
+ * become the shared baseline for all other projects. Only one project should be
+ * global at a time (not enforced here — UI layer manages this).
+ */
 export function setProjectGlobal(name, isGlobal) {
     return execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -109,10 +144,19 @@ export function setProjectGlobal(name, isGlobal) {
         return true;
     });
 }
+/** Get the single global project (is_global=1, not archived). There should be at most one. */
 export function getGlobalProject() {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL LIMIT 1").get();
 }
+/**
+ * Get a comprehensive project snapshot for the dashboard: project metadata,
+ * skill count + recent skills, observation stats + recent observations,
+ * recent pipeline events, and the latest synthesis timestamp.
+ *
+ * Runs 9 independent SELECT queries — acceptable for the dashboard use case
+ * but not suitable for high-frequency API endpoints.
+ */
 export function getProjectDetail(name) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const project = db.prepare("SELECT * FROM projects WHERE name = ?").get(name);

@@ -3,8 +3,12 @@ import { plugins, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { resolve } from "node:path";
 import { readFileSync } from "node:fs";
+/**
+ * Handles /api/v1/plugins — plugin lifecycle management.
+ * 🔴 Every lifecycle operation MUST sync .opencode/plugins/<file>.ts on disk
+ * AND opencode.json's plugin array (AGENTS.md HARD RULE #16).
+ */
 export const pluginsRouter = Router();
-// GET / — list plugins
 pluginsRouter.get("/", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)
@@ -12,7 +16,6 @@ pluginsRouter.get("/", (req, res) => {
     const list = plugins.listPlugins(projectId);
     res.json({ data: list });
 });
-// POST / — create a new plugin
 pluginsRouter.post("/", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)
@@ -50,7 +53,6 @@ pluginsRouter.get("/:name/source", (req, res) => {
         res.json({ data: { source: plugin.source_content || "" } });
     }
 });
-// GET /:name — get a single plugin
 pluginsRouter.get("/:name", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)
@@ -62,7 +64,6 @@ pluginsRouter.get("/:name", (req, res) => {
     }
     res.json({ data: plugin });
 });
-// PUT /:name — update a plugin
 pluginsRouter.put("/:name", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)
@@ -80,7 +81,6 @@ pluginsRouter.put("/:name", (req, res) => {
         res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
     }
 });
-// DELETE /:name — delete a plugin
 pluginsRouter.delete("/:name", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)

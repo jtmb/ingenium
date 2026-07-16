@@ -71,8 +71,15 @@ Every change MUST be logged with Before and After hashes. Also log via MCP tools
 | [`references/audit.md`](references/audit.md) | Full system audit: 9 checks across all integration points, auto-fix table, quick audit command |
 | [`references/validation-checklist.md`](references/validation-checklist.md) | Frontmatter, file structure, naming, content, registration, agent sync, permission, testing |
 
+## Migrated Sources (Phase 3 Taxonomy)
+
+| Source | Content Preserved At |
+|--------|---------------------|
+| `local-persistence` | [`references/sources/local-persistence/`](references/sources/local-persistence/source-index.md) |
+
 ## Cross-References
 
-- **`development-conventions`** — Python/Next.js/API/README conventions for skills targeting those domains
-- **`devops-conventions`** — Docker/K8s/CLI conventions for skills targeting those domains
-- **`local-models`** — Command safety rules for running skill validation tests
+- **`@development-conventions`** — Python/Next.js/API/README conventions for skills targeting those domains
+- **`@devops-conventions`** — Docker/K8s/CLI conventions for skills targeting those domains
+- **`@local-models`** — Command safety rules for running skill validation tests
+- **`@documentation`** — Documentation workspace and audit conventions

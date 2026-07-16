@@ -1,7 +1,12 @@
 /**
- * Observer Core — New self-learning pipeline core.
- * Works alongside OpenCode: on session start, imports locally-saved observations
- * into the DB. On session idle, triggers synthesis if configured.
+ * Observer Core — Self-learning pipeline core.
+ *
+ * On session start: imports locally-saved observations (API-down fallback) into the DB.
+ * On session idle: triggers synthesis if the check-interval timer has elapsed.
+ *
+ * NOTE: DEFAULT_PROJECT falls back to "global-default" here (unlike resource-sync.ts which
+ * never falls back) because this runs in the extension context where the user always has
+ * a default global project. Resource-sync runs in server context where project isolation is critical.
  */
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
@@ -21,7 +26,8 @@ async function apiFetch(path: string, options?: RequestInit): Promise<any> {
 }
 
 /**
- * Log a pipeline event to the Ingenium API for dashboard observability.
+ * Log a pipeline lifecycle event to the Ingenium API for dashboard timeline observability.
+ * Non-fatal on failure — observability must never block pipeline operations.
  */
 export async function logPipelineEvent(
   eventType: string,
@@ -51,8 +57,10 @@ export async function logPipelineEvent(
 
 /**
  * Import observations from the local file fallback.
- * If the API was down and observations were saved to a local file,
- * this imports them on the next session start.
+ *
+ * When the API is unreachable, observations are saved to observations.md (pipe-delimited).
+ * On the next session start, this imports any that don't have the [IMPORTED] marker.
+ * The file format: YYYY-MM-DD | type | content | importance | source
  */
 export async function importObservationsFromFile(worktree: string): Promise<{ imported: number; skipped: number }> {
   const pathModule = require("path");
@@ -67,6 +75,7 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
   const lineIndices: number[] = [];
 
   lines.forEach((line: string, i: number) => {
+    // Match lines starting with a date but lacking the [IMPORTED] marker
     if (/^\d{4}-\d{2}-\d{2}/.test(line) && !line.includes("[IMPORTED]")) {
       unprocessed.push(line);
       lineIndices.push(i);
@@ -80,7 +89,7 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
 
   for (const entry of unprocessed) {
     try {
-      // Parse pipe-delimited: date | type | content | importance | source
+      // Parse pipe-delimited format: date | type | content | importance | source
       const parts = entry.split(" | ");
       const obsType = parts[1]?.trim() || "insight";
       const obsContent = parts[2]?.trim() || entry;
@@ -101,7 +110,7 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
     }
   }
 
-  // Mark imported entries
+  // Mark successfully imported entries so they aren't re-imported on next restart
   if (imported > 0) {
     const updatedLines = lines.map((line: string, i: number) => {
       if (lineIndices.includes(i) && !line.includes("[IMPORTED]")) {
@@ -111,7 +120,7 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
     });
     fs.writeFileSync(obsPath, updatedLines.join("\n"), "utf-8");
 
-    // Log pipeline event for dashboard observability
+    // Log import event for dashboard observability
     await logPipelineEvent(
       "observation_imported",
       "plugin",
@@ -125,11 +134,11 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
 }
 
 /**
- * Trigger the synthesis pipeline for this project.
+ * Trigger the synthesis pipeline via the API.
+ * The API processes pending observations into personality traits and skill updates.
  */
 export async function triggerSynthesis(worktree: string, sessionId?: string): Promise<{ triggered: boolean; message: string }> {
   try {
-    // Log pipeline event before triggering synthesis
     await logPipelineEvent(
       "synthesis_triggered",
       "plugin",

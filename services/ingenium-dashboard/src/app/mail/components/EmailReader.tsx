@@ -10,12 +10,20 @@ function buildReplySubject(subject?: string) {
 }
 
 /**
- * EmailReader — full email display with headers, body HTML, attachments, and action buttons.
- * Supports inline reply (Gmail-style embedded composer) and AI summarise.
+ * EmailReader — full email display with headers, HTML body (iframed), attachments,
+ * and action buttons. Supports inline reply (Gmail-style embedded composer) and
+ * AI-powered summarization.
  *
- * When replying: side-by-side layout at xl breakpoint (body left, composer right).
- * Below xl: stacked layout (body on top, composer below).
- * Reply panel width is independently resizable via a handle on the left edge.
+ * Layout when replying:
+ *   - xl+: side-by-side (body left, composer right, resizable divider between them)
+ *   - below xl: stacked (body on top, composer below)
+ *
+ * SECURITY: Email HTML is rendered in a sandboxed iframe:
+ *   - `allow-same-origin` — needed for JS-based height measurement via postMessage (if implemented)
+ *   - `allow-popups` — links in emails can open new tabs
+ *   - `allow-popups-to-escape-sandbox` — popups open in the parent context, not nested
+ *   - NO `allow-scripts` or `allow-forms` — prevents XSS in email body
+ *   - `target="_blank"` is injected via <base> tag so links never navigate the iframe itself
  */
 export default function EmailReader({
   email,
@@ -54,23 +62,21 @@ export default function EmailReader({
   replyWidth?: number;
   onReplyWidthChange?: (width: number) => void;
 }) {
-  // Inline reply state (FIX 2)
   const [isReplying, setIsReplying] = useState(false);
   const [replyPrefill, setReplyPrefill] = useState<{ to?: string; subject?: string; body?: string }>({});
 
-  // Summarise state (FIX 4)
   const [summariseLoading, setSummariseLoading] = useState(false);
   const [summariseError, setSummariseError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryConfigured, setSummaryConfigured] = useState<boolean | null>(null);
 
-  // Reply resize state (local tracking during drag)
+  /** Resize state for the reply panel's draggable handle. */
   const [isReplyResizing, setIsReplyResizing] = useState(false);
   const replyStartRef = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: 0 });
   const replyContainerRef = useRef<HTMLDivElement>(null);
+  /** Constrain reply panel: body needs at least 400px, reply min 320px. */
   const [maxReplyWidth, setMaxReplyWidth] = useState(window.innerWidth - 400);
 
-  // Keep maxReplyWidth current — recompute when replying or on resize
   useEffect(() => {
     const cw = replyContainerRef.current?.getBoundingClientRect().width;
     if (cw) setMaxReplyWidth(Math.max(320, cw - 400));
@@ -267,23 +273,31 @@ export default function EmailReader({
 
   const renderEmailBody = (
     <>
-      {email.body?.html ? (
+        {email.body?.html ? (
         (() => {
           const html = email.body.html;
           let srcDoc: string;
+          /**
+           * SECURITY: Three iframe srcdoc construction paths:
+           * 1. Full HTML doc with <head> — inject <base target="_blank"> for link safety.
+           * 2. Partial doc with <body> but no <head> — prepend skeleton with sanitized styles.
+           * 3. Content fragment — wrap in full document with safe default styles.
+           *
+           * All paths include `img{max-width:100%}` to prevent oversized images breaking layout,
+           * and `color-scheme:light` to prevent dark-mode email HTML from inverting colors.
+           */
           if (/<html[\s>]/i.test(html) || /<body[\s>]/i.test(html)) {
-            // Already an HTML document — inject base tag for link safety
             srcDoc = html.replace(/<head[^>]*>/i, '$&<base target="_blank">');
-            // If no <head>, prepend full skeleton
             if (!/<head/i.test(html)) {
               srcDoc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:8px;font:14px system-ui;color:#111;background:#fff;color-scheme:light}img{max-width:100%;height:auto}</style></head>' + html.replace(/^<html[^>]*>/i, '').replace(/<\/html>\s*$/i, '');
             }
           } else {
-            // Content fragment — wrap in full document
             srcDoc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>body{margin:8px;font:14px system-ui;color:#111;background:#fff;color-scheme:light}img{max-width:100%;height:auto}</style></head><body>' + html + '</body></html>';
           }
 
-          // Size guard — if > 2MB, show text fallback
+          /** PERF: Size guard — email bodies > 2MB skip HTML rendering to avoid
+           *  freezing the browser on massive inline base64 images. Falls back to
+           *  plain text if available. */
           if (html.length > 2_000_000) {
             return (
               <p className="text-sm text-[var(--color-text-muted)] italic">

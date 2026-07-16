@@ -1,11 +1,17 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { randomUUID } from "node:crypto";
+/** List all registered MCP servers for a project. */
 export function listServers(projectId) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM servers WHERE project_id = ?").all(projectId);
 }
+/**
+ * Register a new MCP server definition.
+ * Idempotent: if a server with the same name already exists, returns it unchanged.
+ * This is intentional — on container restart, the initialization code may re-register
+ * servers that were already persisted, and we don't want to overwrite config.
+ */
 export function registerServer(projectId, name, command, args, env, source) {
-    // Idempotent: return existing server on container restart
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM servers WHERE project_id = ? AND name = ?").get(projectId, name);
     if (existing)
@@ -20,6 +26,11 @@ export function registerServer(projectId, name, command, args, env, source) {
     checkpointAfterWrite();
     return result;
 }
+/**
+ * Update a server's runtime status (running/stopped).
+ * Currently only supports the `running` field — the `command`/`args`/`env` fields
+ * are updated via upsertServer(), not this function.
+ */
 export function updateServer(projectId, name, fields) {
     execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -29,6 +40,12 @@ export function updateServer(projectId, name, fields) {
     });
     checkpointAfterWrite();
 }
+/**
+ * Create or update an MCP server definition.
+ * Unlike registerServer (idempotent-only), this explicitly updates an existing server's
+ * command/args/env if a match is found — used by the MCP server management UI and
+ * config sync to reconcile disk → DB changes.
+ */
 export function upsertServer(projectId, name, command, args, env, source) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM servers WHERE project_id = ? AND name = ?").get(projectId, name);
@@ -49,6 +66,7 @@ export function upsertServer(projectId, name, command, args, env, source) {
     checkpointAfterWrite();
     return inserted;
 }
+/** Delete a server definition by project and name. */
 export function removeServer(projectId, name) {
     execTransaction(() => {
         const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");

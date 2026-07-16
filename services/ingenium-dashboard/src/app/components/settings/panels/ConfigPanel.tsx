@@ -3,12 +3,20 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import SettingRow from "../SettingRow";
 
+/**
+ * Config settings panel — a single row that navigates to the full Config Editor
+ * page (`/config`). This is a thin redirect because the editor is too complex
+ * to embed within the settings overlay.
+ *
+ * Uses a `mounted` guard to avoid hydration mismatch: the button text/layout
+ * is identical in both renders, but the skeleton prevents a flash of incorrect
+ * content before the client-side router is available.
+ */
 export default function ConfigPanel() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
 
-  // Avoid hydration mismatch with router
   useEffect(() => setMounted(true), []);
 
   const goToConfig = () => {

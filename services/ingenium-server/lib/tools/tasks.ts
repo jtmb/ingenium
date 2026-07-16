@@ -1,6 +1,7 @@
 /**
  * MCP tool handlers for Kaban-style task management.
- * Supports task CRUD, column movement, completion, and next-task retrieval.
+ * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
+ * Supports task CRUD, column movement, completion, subtasks, comments, links, notifications, and board config.
  */
 import { api } from "../client.js";
 

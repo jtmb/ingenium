@@ -1,7 +1,27 @@
+/**
+ * Observation persistence — the raw input to the self-learning pipeline.
+ *
+ * Observations are single statements about user behavior (corrections, preferences,
+ * patterns, etc.) stored with importance and source metadata. The synthesis pipeline
+ * reads pending observations and consolidates them into personality traits and skills.
+ *
+ * 🔴 All mutations use execTransaction() with checkpointAfterWrite() outside the txn.
+ */
+
 import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
 import { Observation } from "../schema.js";
 import { logEvent } from "./pipeline-events.js";
 
+/**
+ * Store a single observation and fire a pipeline event for observability.
+ *
+ * Default importance of 5 (mid-scale 1-10) means most observations are treated
+ * neutrally — the synthesis pipeline can up-rank based on patterns. Default
+ * source 'agent' distinguishes agent-reported observations from auto-extracted ones.
+ *
+ * Pipeline event logging is intentionally outside the transaction (and wrapped in
+ * try/catch) so a pipeline-log failure never prevents the observation from persisting.
+ */
 export function storeObservation(
   projectId: string,
   observationType: Observation["observation_type"],
@@ -52,6 +72,10 @@ export function storeObservation(
   return result;
 }
 
+/**
+ * List observations for a project, optionally filtered by status and type.
+ * Ordered newest-first. Default limit of 50 prevents unbounded result sets.
+ */
 export function getObservations(
   projectId: string,
   status?: Observation["status"],
@@ -78,6 +102,12 @@ export function getObservations(
   ).all(...params) as Observation[];
 }
 
+/**
+ * Full-text search across observations using FTS5.
+ * Query is sanitized via sanitizeFts5Query() to avoid FTS5 syntax errors
+ * from raw user input (special chars like `*`, `"`, `-` in unexpected places).
+ * Returns empty array if the query is invalid after sanitization.
+ */
 export function searchObservations(projectId: string, query: string, limit = 50): Observation[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
   const sanitized = sanitizeFts5Query(query);
@@ -91,11 +121,17 @@ export function searchObservations(projectId: string, query: string, limit = 50)
   ).all(projectId, sanitized, limit) as Observation[];
 }
 
+/** Retrieve a single observation by its primary key ID. */
 export function getObservation(id: number): Observation | undefined {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
   return db.prepare("SELECT * FROM observations WHERE id = ?").get(id) as Observation | undefined;
 }
 
+/**
+ * Update selected fields of an observation. Only the provided fields are changed.
+ * Dynamically builds the SET clause to avoid writing unchanged columns.
+ * Returns null if the observation doesn't exist (changes === 0).
+ */
 export function updateObservation(
   id: number,
   data: Partial<Pick<Observation, "status" | "importance" | "content" | "context" | "observation_type">>,
@@ -127,6 +163,10 @@ export function updateObservation(
   return transactionResult;
 }
 
+/**
+ * Count observations still in 'pending' status — used by the synthesis pipeline
+ * to decide whether processing is needed and by the dashboard to show backlogs.
+ */
 export function countUnprocessed(projectId: string): number {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
   const row = db.prepare(
@@ -135,6 +175,12 @@ export function countUnprocessed(projectId: string): number {
   return row.count;
 }
 
+/**
+ * Fetch the next batch of unprocessed observations for synthesis.
+ * Ordered by importance DESC (most important first) then created_at ASC (oldest first).
+ * This ensures high-importance observations are processed first while maintaining
+ * FIFO order within the same importance level.
+ */
 export function getUnprocessedBatch(projectId: string, limit = 50): Observation[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
   return db.prepare(
@@ -145,6 +191,10 @@ export function getUnprocessedBatch(projectId: string, limit = 50): Observation[
   ).all(projectId, limit) as Observation[];
 }
 
+/**
+ * Hard-delete a single observation by ID, scoped to project.
+ * Returns true if a row was actually deleted.
+ */
 export function deleteObservation(projectId: string, id: number): boolean {
   const ok = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
@@ -157,6 +207,11 @@ export function deleteObservation(projectId: string, id: number): boolean {
   return ok;
 }
 
+/**
+ * Bulk-delete all observations from a given source (e.g., 'auto-observer').
+ * Used to reset observations when re-running extraction after fixing the pipeline.
+ * Returns the number of deleted rows.
+ */
 export function deleteObservationsBySource(projectId: string, source: string): number {
   const result = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");

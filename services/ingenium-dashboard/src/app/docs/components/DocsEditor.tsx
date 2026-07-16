@@ -10,52 +10,24 @@ import { oneDark } from "@codemirror/theme-one-dark";
 import EditorToolbar, { type EditorMode } from "./EditorToolbar";
 import AIActions from "./AIActions";
 import DictationButton from "./DictationButton";
-
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-interface DocPage {
-  id: number;
-  space_id: number;
-  parent_page_id: number | null;
-  title: string;
-  slug: string;
-  content: string;
-  revision: number;
-  status: "draft" | "published" | "archived";
-  sort_order: number;
-  is_favorite: number;
-  created_at: string;
-  updated_at: string;
-}
+import type { DocPage, DocDraft } from "@/lib/docs-types";
 
 interface DocsEditorProps {
   page: DocPage;
   mode: EditorMode;
   onSave: (content: string) => Promise<void>;
+  /** Pre-loaded draft content from a previous autosave session */
   draftContent?: string;
   onModeChange?: (mode: EditorMode) => void;
 }
 
-interface DocDraft {
-  id: number;
-  page_id: number;
-  content: string;
-  saved_at: string;
-}
-
-// ── Constants ──────────────────────────────────────────────────────────────────
-
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
-const AUTOSAVE_INTERVAL = 5000; // 5 seconds
-const PREVIEW_DEBOUNCE = 300;  // 300ms for split preview
+/** PERF: 5s interval balances responsiveness vs write pressure on SQLite WAL. */
+const AUTOSAVE_INTERVAL = 5000;
+/** PREVIEW_DEBOUNCE: shorter than autosave — only drives the live preview panel, not persistence. */
+const PREVIEW_DEBOUNCE = 300;
 
-// ── Markdown renderer ──────────────────────────────────────────────────────────
-
-// Configure marked for GFM
-marked.setOptions({
-  gfm: true,
-  breaks: false,
-});
+marked.setOptions({ gfm: true, breaks: false });
 
 /**
  * Render Markdown to safe HTML with custom handling:
@@ -104,8 +76,6 @@ function renderMarkdown(content: string): string {
   });
 }
 
-// ── API helpers ────────────────────────────────────────────────────────────────
-
 async function fetchDraft(pageId: number): Promise<DocDraft | null> {
   try {
     const res = await fetch(`${API_BASE}/docs/pages/${pageId}/draft`);
@@ -136,8 +106,6 @@ async function deleteDraft(pageId: number): Promise<void> {
     // silently fail
   }
 }
-
-// ── Insert markdown helper ─────────────────────────────────────────────────────
 
 /**
  * Build the string to insert for a markdown syntax template.
@@ -199,10 +167,19 @@ function buildMarkdownInsertion(
   }
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
-
+/**
+ * DocsEditor — multi-mode document editor supporting View/Edit/Source/Split modes.
+ *
+ * Architecture:
+ *   - View: Renders Markdown → sanitized HTML (DOMPurify).
+ *   - Edit: Plain <textarea> with manual markdown insertion buttons.
+ *   - Source: CodeMirror 6 with markdown language extension + oneDark theme.
+ *   - Split: CodeMirror (left) + live-rendered preview (right).
+ *
+ * Autosave writes drafts to the API every 5s. On mount, checks for an existing
+ * draft and offers to restore it. Draft is deleted after a successful explicit save.
+ */
 const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftContent, onModeChange }) => {
-  // ── State ──────────────────────────────────────────────────────────────────
   const [content, setContent] = useState<string>(page.content || "");
   const [editorMode, setEditorMode] = useState<EditorMode>(mode);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -211,7 +188,11 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   const [showDraftPrompt, setShowDraftPrompt] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // ── Refs ───────────────────────────────────────────────────────────────────
+  /**
+   * contentRef tracks latest content for the autosave interval callback,
+   * avoiding stale closures without adding `content` to the effect dependency array.
+   * CodeMirror refs are managed separately to control lifecycle (mount/destroy) explicitly.
+   */
   const codeMirrorRef = useRef<HTMLDivElement>(null);
   const codeMirrorViewRef = useRef<EditorView | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -221,20 +202,20 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const splitPreviewContentRef = useRef(content);
 
-  // Keep contentRef in sync
-  useEffect(() => {
-    contentRef.current = content;
-  }, [content]);
+  useEffect(() => { contentRef.current = content; }, [content]);
 
   // Sync external mode prop
   useEffect(() => {
     setEditorMode(mode);
   }, [mode]);
 
-  // ── Draft check on mount ───────────────────────────────────────────────────
+  /**
+   * Draft check on mount — queries the API for an autosaved draft.
+   * Uses a cancellation flag to avoid state updates after unmount.
+   * HACK: Draft content must differ from page.content, or we assume the page was saved.
+   */
   useEffect(() => {
     let cancelled = false;
-
     async function checkDraft() {
       const draft = await fetchDraft(page.id);
       if (cancelled) return;
@@ -243,16 +224,18 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
         setShowDraftPrompt(true);
       }
     }
-
     checkDraft();
     return () => { cancelled = true; };
   }, [page.id, page.content]);
 
-  // ── Autosave ───────────────────────────────────────────────────────────────
+  /**
+   * Autosave — writes a draft every AUTOSAVE_INTERVAL ms.
+   * Skipped in "view" mode because the user isn't editing.
+   * PERF: Uses contentRef to avoid restarting the interval on every keystroke change to `content`.
+   * The interval only restarts when editorMode, page.id, or page.content reference changes.
+   */
   useEffect(() => {
-    // Only autosave in edit/source/split modes
     if (editorMode === "view") return;
-
     autosaveTimerRef.current = setInterval(() => {
       const current = contentRef.current;
       if (current !== page.content) {
@@ -264,40 +247,42 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
         });
       }
     }, AUTOSAVE_INTERVAL);
-
     return () => {
       if (autosaveTimerRef.current) clearInterval(autosaveTimerRef.current);
     };
   }, [editorMode, page.id, page.content]);
 
-  // ── Split preview debounced update ─────────────────────────────────────────
+  /** Split preview — debounced so rapid typing doesn't re-render the preview on every keystroke. */
   const [splitPreview, setSplitPreview] = useState(content);
-
   useEffect(() => {
     if (editorMode !== "split") return;
     previewTimerRef.current = setTimeout(() => {
       setSplitPreview(content);
       splitPreviewContentRef.current = content;
     }, PREVIEW_DEBOUNCE);
-    return () => {
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    };
+    return () => { if (previewTimerRef.current) clearTimeout(previewTimerRef.current); };
   }, [content, editorMode]);
 
-  // ── CodeMirror setup ──────────────────────────────────────────────────────
+  /**
+   * CodeMirror lifecycle — managed by editorMode transitions:
+   *   - Entering source or split mode: create EditorView with markdown + lineNumbers + oneDark.
+   *   - Already mounted in target mode: update doc content if it changed externally.
+   *   - Leaving source or split mode: destroy the EditorView instance.
+   *
+   * NOTE: eslint-disable react-hooks/exhaustive-deps intentional — adding `content` as a dep
+   * would re-create the EditorView on every keystroke. Content sync is handled separately
+   * via the effect below this one.
+   */
   useEffect(() => {
     if (editorMode !== "source" && editorMode !== "split") {
-      // Destroy CodeMirror when leaving source/split modes
       if (codeMirrorViewRef.current) {
         codeMirrorViewRef.current.destroy();
         codeMirrorViewRef.current = null;
       }
       return;
     }
-
     if (!codeMirrorRef.current) return;
     if (codeMirrorViewRef.current) {
-      // Already mounted — update content
       const currentContent = codeMirrorViewRef.current.state.doc.toString();
       if (currentContent !== content) {
         codeMirrorViewRef.current.dispatch({
@@ -306,14 +291,12 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
       }
       return;
     }
-
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         const newContent = update.state.doc.toString();
         setContent(newContent);
       }
     });
-
     const view = new EditorView({
       doc: content,
       extensions: [
@@ -327,15 +310,17 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
       ],
       parent: codeMirrorRef.current,
     });
-
     codeMirrorViewRef.current = view;
-
-    return () => {
-      // Only destroy on unmount, not on mode change (handled above)
-    };
+    return () => { /* destroy handled in mode-switch path above */ };
   }, [editorMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync content into CodeMirror when switching to source/split mode
+  /**
+   * Push content into CodeMirror when mode switches TO source/split.
+   * Without this, switching from "edit" to "source" would show stale content
+   * because CodeMirror was created with the initial doc value.
+   * NOTE: Dep exclusion on `content` is intentional — we only need to sync on mode transition,
+   * not on every keystroke (which is already handled by the updateListener inside CodeMirror).
+   */
   useEffect(() => {
     if ((editorMode === "source" || editorMode === "split") && codeMirrorViewRef.current) {
       const currentContent = codeMirrorViewRef.current.state.doc.toString();
@@ -395,20 +380,22 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     [],
   );
 
-  // ── Save handler ───────────────────────────────────────────────────────────
+  /**
+   * Explicit save — calls onSave (parent handler, e.g. PUT /api/docs/pages/:id),
+   * then deletes the autosave draft. On 409 conflict, shows a user-facing message
+   * instead of silently overwriting another session's changes.
+   */
   const handleSave = useCallback(async () => {
     setIsSaving(true);
     setSaveError(null);
     try {
       await onSave(content);
       setSaveStatus("saved");
-      // Delete draft after successful save
       await deleteDraft(page.id);
       setHasDraft(false);
       setTimeout(() => setSaveStatus("idle"), 2000);
     } catch (err: any) {
       const message = err.message || "Save failed";
-      // Check for conflict (409)
       if (message.includes("409") || message.includes("conflict") || message.includes("modified since")) {
         setSaveError("Page was modified by another session. Reload to see latest.");
       } else {
@@ -468,8 +455,6 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     },
     [],
   );
-
-  // ── Render ─────────────────────────────────────────────────────────────────
 
   // Save status indicator
   const saveIndicator = useMemo(() => {
@@ -608,8 +593,5 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     </div>
   );
 };
-
-// ── Cleanup on unmount ─────────────────────────────────────────────────────────
-// (handled by the mode-change useEffect which destroys CodeMirror)
 
 export default DocsEditor;

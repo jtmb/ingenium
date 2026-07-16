@@ -28,9 +28,17 @@ declare module "@tiptap/core" {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Custom TipTap extensions (Mark.create for fontFamily, fontSize, textColor, indent)
-// ---------------------------------------------------------------------------
+/**
+ * Custom TipTap Mark extensions for email-safe formatting:
+ * - FontFamily, FontSize: rendered as inline `style` attributes on <span>.
+ * - TextColor: uses <span style="color: ..."> instead of legacy <font color>.
+ * - Indent: tracked as data-indent attribute + padding-left, increments by 20px.
+ *
+ * NOTE: These use Mark.create (inline styling) rather to Node.create because
+ * the formatting should be applied character-level, not block-level.
+ * The TypeScript `commands` return `any` because TipTap's ChainedCommands is
+ * not typed for custom commands — this is expected upstream behavior.
+ */
 
 const FontFamily = Mark.create({
   name: "fontFamily",
@@ -311,6 +319,16 @@ export interface RichTextEditorHandle {
   getText: () => string;
 }
 
+/**
+ * RichTextEditor — TipTap-based WYSIWYG editor for email composition.
+ * Exposes getHTML/getText via forwardRef for imperative access (used by EmailComposer).
+ *
+ * isInternalChange ref prevents cursor-jump when an external change (SmartSuggest
+ * draft, AI review apply) sets `value` while the editor is the source of truth.
+ * Without this guard, the `useEffect` below would reset cursor position on every keystroke.
+ *
+ * Color picker uses a hidden <input type="color"> triggered by a visible swatch button.
+ */
 const RichTextEditor = forwardRef<RichTextEditorHandle, {
   value: string;
   onChange: (html: string) => void;
@@ -348,7 +366,12 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, {
     },
   });
 
-  // Sync external value changes (suggestions, review apply) without cursor jump
+  /**
+   * Sync external value changes (SmartSuggest draft selection, AI review apply)
+   * into TipTap without resetting cursor. Uses isInternalChange ref to distinguish
+   * user-typed changes (already reflected in editor content) from programmatic ones.
+   * PERF: No debounce needed — setContent is cheap for reasonable email body sizes.
+   */
   useEffect(() => {
     if (editor && !isInternalChange.current) {
       const current = editor.getHTML();
@@ -365,6 +388,8 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, {
     getText: () => editor?.getText() ?? "",
   }), [editor]);
 
+  /** TipTap is async (dynamic import of prosemirror). The editor is null during mount
+   *  — show a placeholder that matches the editor's visual height to avoid layout shift. */
   if (!editor) {
     return (
       <div
