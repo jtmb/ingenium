@@ -286,7 +286,8 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
       // Check body cached
       const body = emailCache.getCachedEmailBody(job.account_id, job.folder, job.uid);
       if (!body?.text && !body?.html) {
-        // Body not yet cached — leave job in queue for later retry
+        emailSuggestionQueue.markJobFailed(job.id, "Body not yet cached");
+        logger.warn("sync-engine", `Suggestion job ${job.id}: body not cached, retrying with backoff`);
         continue;
       }
 

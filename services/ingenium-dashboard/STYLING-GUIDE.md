@@ -357,18 +357,88 @@ relying on the global default. Never use hardcoded `border-gray-200` — it won'
 
 All cards below universally include `hover:shadow-md transition-shadow` (Rule #7). The only variation is padding and border radius.
 
-### Homepage Feature Cards
+### Homepage Dashboard Cards (Operational)
 
-Large promotional/feature cards used on the landing page.
+Data-driven operational cards used on the homepage (`page.tsx`). These display live metrics from the `/api/v1/dashboard/summary` endpoint in a 2×2 grid.
+
+#### Grid Layout
+
+```html
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <!-- Four DashboardCard components -->
+</div>
+```
+
+Desktop: 2-column grid. Mobile: single-column stack with full-width cards.
+
+#### Card Structure
 
 | Property | Value | Tailwind |
 |----------|-------|----------|
-| Background | White | `bg-white` |
-| Border | 1px light gray | `border` |
-| Border Radius | 8px | `rounded-lg` |
+| Background | Surface token | `bg-[var(--color-surface)]` |
+| Border | 1px border token | `border border-[var(--color-border)]` |
+| Border Radius | 12px | `rounded-xl` |
 | Padding | 24px | `p-6` |
 | Hover Effect | Light shadow (REQUIRED) | `hover:shadow-md` |
 | Transition | 150ms (REQUIRED) | `transition-shadow` |
+| Header | Title (left) + optional badge (right) | `flex items-center justify-between mb-4` |
+| CTA Link | Bottom separator + text link | `mt-4 pt-3 border-t border-[var(--color-border-muted)]` with `text-sm text-[var(--color-text-link)] hover:underline font-medium` |
+
+#### Component: `DashboardCard` (`components/DashboardCard.tsx`)
+
+Reusable module card with five visual states:
+
+| State | Visual Indicator | When |
+|-------|-----------------|------|
+| **Loading** | `animate-pulse` skeleton placeholder with 3 bars | `loading={true}` prop |
+| **Normal** | Standard card with hover shadow | Data loaded, module available |
+| **Degraded (Unavailable)** | Orange left border (`border-l-4 border-l-orange-400`) + "Unavailable" badge (orange pill, top-right) | Module returned `null` from API; `unavailable` prop |
+| **Empty** | Contextual message with CTA link | Module present but has no data (e.g., 0 tasks, 0 accounts) |
+| **Error (full page)** | Red error panel with message + "Retry" button | API request failed entirely |
+
+#### Props Interface
+
+```typescript
+interface DashboardCardProps {
+  title: string;              // Card heading
+  icon?: React.ReactNode;     // Optional inline icon (text labels preferred)
+  cta?: { label: string; href: string };  // Bottom CTA link
+  loading?: boolean;          // Show skeleton
+  unavailable?: boolean;      // Show orange degraded state
+  degraded?: boolean;         // Alias for unavailable
+  children: React.ReactNode;  // Card body content
+}
+```
+
+#### Usage Example
+
+```tsx
+<DashboardCard
+  title="Self-Learning"
+  unavailable={isUnavailable("learning")}
+  cta={{ label: "Run Synthesis →", href: "/pipeline" }}
+>
+  <div className="flex items-baseline gap-2">
+    <span className="text-xl font-bold text-[var(--color-text-primary)]">3</span>
+    <span>pending observations</span>
+    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
+      Needs synthesis
+    </span>
+  </div>
+</DashboardCard>
+```
+
+#### Design Rules
+
+1. **No emoji** — Use text labels only. No emoji in card titles, badges, or CTAs.
+2. **CSS tokens only** — All backgrounds, text, and borders use `var(--color-*)` tokens. The only exceptions are badge/pill colors (which use `badgeTones` from `lib/badgeTones.ts`) and the page-level error panel.
+3. **Asymmetric grid** — The Self-Learning card (top-left) is the most prominent. All cards share the same base styling; visual hierarchy comes from content density, badge treatments, and metric prominence.
+4. **Auto-refresh** — Optional 60-second polling with a pause/resume button in the page header (`text-xs px-3 py-1.5 rounded border`). Paused state shows "Auto-refresh paused" with hover background; active state shows "Auto-refresh on".
+5. **Single fetch** — The homepage calls `api.home.summary(project)` once (not 6 serial fetches). All four cards derive their data from the single response.
+
+#### Loading Skeleton: `DashboardSkeleton` (`components/DashboardSkeleton.tsx`)
+
+Renders four placeholder cards in the same 2×2 grid. Each card uses `animate-pulse` with three `bg-[var(--color-surface-muted)] rounded` bars of varying widths (1/3, 2/3, 1/2). Skeleton cards have `data-testid="dashboard-skeleton-card"` for Playwright targeting.
 
 ### List Item Card
 
@@ -635,6 +705,66 @@ Resize handles use `w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 t
 > 🔴 **Rule**: When using the inline variant, never wrap `EmailComposer` in an `Overlay`. The inline variant is self-contained and renders inside its parent pane using `border-t` for visual separation. Wrapping it in an Overlay defeats the purpose — it would add a backdrop and modal positioning that conflict with the context-anchored intent.
 
 > 🔴 **SmartSuggest auto-fetch**: When the composer mounts with `emailUid`/`accountId`, SmartSuggest auto-fetches suggestions (unless mode=`manual`). The fetch URL uses `encodeURIComponent(folder)` — the folder value is passed exactly as received from `email.folder` without defaulting to `"INBOX"`. This ensures per-folder cache keys work correctly for Sent, Starred, Archive, etc.
+
+### Module-Level Component Extraction Pattern (CardsVariant)
+
+The `SmartSuggest.tsx` component extracts a `CardsVariant` component at **module scope** (outside the main component) so its React state (collapse/expand) persists across parent re-renders of the same email (e.g., during fetch completion, retry timers, and draft changes).
+
+```tsx
+// 🔴 key={emailUid} ensures the module-level CardsVariant remounts when switching emails
+return <CardsVariant key={emailUid} ... />
+```
+
+This is the canonical pattern for any child component that must maintain internal state (like collapse/expand) across parent re-renders without unmounting. The `key={emailUid}` ensures the component unmounts when switching to a different logical unit (e.g., a different email), but survives within-email re-renders.
+
+### Email List Row — Two-Line Layout Pattern
+
+The email list renders each row as a **three-line layout** by default:
+1. **First line** — Sender name (left, `truncate flex-1`) + Timestamp (right, `shrink-0`)
+2. **Second line** — Subject (`block truncate`)
+3. **Third line** — Body snippet (`truncate mt-0.5`, 120 char max)
+
+At narrow pane widths (below ~300px), the body snippet line is visually clipped and effectively becomes a **two-line layout** (sender+timestamp and subject only). The EmailList pane has a min-width of 240px.
+
+| Element | Tailwind |
+|---------|----------|
+| Row container | `px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer` |
+| Selected row | `bg-[var(--color-surface-selected)]` |
+| Sender (unread) | `font-semibold text-[var(--color-text-primary)] truncate` |
+| Sender (read) | `text-[var(--color-text-secondary)] truncate` |
+| Timestamp | `shrink-0 text-xs text-[var(--color-text-muted)]` |
+| Subject (unread) | `font-medium text-[var(--color-text-primary)] truncate` |
+| Subject (read) | `text-[var(--color-text-secondary)] truncate` |
+| Body snippet | `text-sm text-[var(--color-text-muted)] truncate mt-0.5` |
+
+### `startX`/`startWidth` Ref-Based Resize Pattern
+
+Resizable panels (EmailList pane, reply composer) use a `useRef<{ startX: number; startWidth: number }>` pattern for pointer-driven resize:
+
+```typescript
+const listStartRef = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: 0 });
+
+const onPointerDown = useCallback((e: React.PointerEvent) => {
+  e.preventDefault();
+  handleRef.current?.setPointerCapture(e.pointerId);
+  listStartRef.current = { startX: e.clientX, startWidth: listWidth };
+  setIsResizing(true);
+}, [listWidth]);
+
+const onPointerMove = useCallback((e: React.PointerEvent) => {
+  if (!isResizing) return;
+  const deltaX = e.clientX - listStartRef.current.startX;
+  const newWidth = Math.max(240, Math.min(720, listStartRef.current.startWidth + deltaX));
+  setListWidth(newWidth);
+}, [isResizing]);
+```
+
+**Key rules:**
+- Always capture pointer via `setPointerCapture()` on pointer down for reliable drag tracking
+- Always clamp width between min and max bounds (`Math.max(min, Math.min(max, ...))`)
+- Persist width to `localStorage` on pointer up (not on every move)
+- Use `w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0` on the drag handle
+- `role="separator"` with `aria-orientation="vertical"` and `aria-valuenow` for accessibility
 
 ### SmartSuggest Variant Summary
 

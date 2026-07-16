@@ -1,7 +1,7 @@
 # HOW-TO: Status
 
 ## What It Does
-Service status page showing real-time supervisord process states. Displays uptime, restart counts, and current status for all 3 container processes: API, Dashboard, and opencode-web.
+Service status page showing real-time supervisord process states. Displays uptime, restart counts, and current status for all 4 container processes: API, Dashboard, opencode-web, and ttyd-opencode.
 
 ## How to Use
 1. Navigate to `/status` from the dashboard nav bar

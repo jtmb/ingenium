@@ -45,3 +45,15 @@ export async function projectSetGlobal(project: string, name: string, isGlobal: 
   const res = await api.patch(`/projects/${encodeURIComponent(name)}/global`, { is_global: isGlobal }, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** Rename a project. */
+export async function projectRename(_project: string, name: string, newName: string) {
+  const res = await api.patch(`/projects/${encodeURIComponent(name)}`, { name: newName });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Get detailed info about a project by name (no project param needed). */
+export async function projectDetail(name: string) {
+  const res = await api.get(`/projects/${encodeURIComponent(name)}/detail`);
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

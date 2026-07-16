@@ -1,0 +1,9 @@
+{
+  "tags": [
+    "security",
+    "audit",
+    "hardcoded-credentials",
+    "multi-domain"
+  ],
+  "alwaysApply": true
+}

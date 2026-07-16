@@ -11,4 +11,4 @@ Client-side OpenCode package for connecting to the Ingenium MCP Server.
 - **skill-sync.ts** — Bidirectional skill sync from API to local `.opencode/skills/`
 - **auto-observer.ts** — Thin trigger (~62 lines) that POSTs to `/api/v1/extraction/run` on session idle
 
-**MCP server:** `dist/scripts/mcp-server.js` — stdio server with 73 tools.
+**MCP server:** `dist/scripts/mcp-server.js` — stdio server with 150 tools.

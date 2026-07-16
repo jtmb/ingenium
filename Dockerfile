@@ -28,13 +28,22 @@ FROM node:22-slim AS runtime
 
 ARG OPENCODE_VERSION=1.17.18
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor curl ca-certificates tzdata python3 make g++ git && \
+    supervisor curl ca-certificates tzdata python3 make g++ git sudo && \
     rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
     tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin/ opencode && \
     chmod +x /usr/local/bin/opencode && \
     rm /tmp/opencode.tar.gz
-RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appuser
+RUN curl -fsSL -o /tmp/ttyd.x86_64 "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64" && \
+    echo "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55  /tmp/ttyd.x86_64" | sha256sum -c - && \
+    mv /tmp/ttyd.x86_64 /usr/local/bin/ttyd && \
+    chmod +x /usr/local/bin/ttyd && \
+    ttyd --version && \
+    rm /tmp/ttyd.x86_64 2>/dev/null || true
+RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appuser && \
+    adduser appuser sudo && \
+    echo "appuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/appuser && \
+    chmod 0440 /etc/sudoers.d/appuser
 
 WORKDIR /app
 
@@ -74,6 +83,6 @@ RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".open
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 
-EXPOSE 3000 4097 4098
+EXPOSE 3000 4097 4098 4099
 
 ENTRYPOINT ["/app/entrypoint.sh"]

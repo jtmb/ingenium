@@ -9,7 +9,7 @@ OpenCode runs here. These are client-side processes:
 |---------|------|-------------|
 | MCP: ingenium | stdio child process | Thin HTTP wrapper — exposes `ingenium_*` tools. ZERO database access. All data flows through API calls. **Part of @ingenium/extension package** (`dist/mcp-server.js`). |
 | Plugin: observer.ts | OpenCode plugin | Hooks `session.created` and `session.idle`. Imports observations from file fallback, triggers synthesis pipeline. Writes `observations.md` to `.opencode/skills/`. |
-| Plugin: skill-sync.ts | OpenCode plugin | Hooks `session.created` and `session.idle`. Fetches skills from API, writes missing ones to `.opencode/skills/<name>/` (SKILL.md + metadata.json + references/). |
+| Plugin: resource-sync.ts | OpenCode plugin | **Unified sync engine** — supersedes skill-sync.ts and onboarding-sync.ts. Hooks `session.created` and `session.idle`. Uses a SHA-256 hash-manifest model (`.opencode/.ingenium-sync-state.json`) for conflict-aware bidirectional sync of skills, agents, plugins, commands, and config. Hash-manifest resolution: API changed + disk at baseline → pull API→disk; disk changed + API at baseline → push disk→API; both changed → conflict (logged, preserved). Project resolved via `INGENIUM_PROJECT` env var first, then worktree basename — never falls back to `"global-default"`. |
 | Plugin: auto-observer.ts | OpenCode plugin | **Thin trigger only.** Hooks `session.idle` and POSTs `/api/v1/extraction/run`. Zero detection logic — all extraction runs server-side. If the plugin fails to load, the API scheduler covers extraction anyway. Registers `auto_observe_now` MCP tool for manual trigger. |
 | .opencode/ directory | Local filesystem | Skills, plugins, commands — written by client-side plugins. Read by OpenCode. |
 
@@ -76,7 +76,7 @@ Container runs via `docker compose up --build`. These are server-side processes 
   "plugin": [
     "packages/ingenium-extension/observer.ts",
     "packages/ingenium-extension/auto-observer.ts",
-    "packages/ingenium-extension/skill-sync.ts"
+    "packages/ingenium-extension/resource-sync.ts"
   ]
 }
 ```
@@ -93,7 +93,7 @@ Container runs via `docker compose up --build`. These are server-side processes 
   "plugin": [
     "/app/packages/ingenium-extension/observer.ts",
     "/app/packages/ingenium-extension/auto-observer.ts",
-    "/app/packages/ingenium-extension/skill-sync.ts"
+    "/app/packages/ingenium-extension/resource-sync.ts"
   ]
 }
 ```

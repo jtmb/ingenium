@@ -67,3 +67,15 @@ export async function jobRunCancel(project: string, runId: string) {
   const res = await api.post(`/jobs/runs/${runId}/cancel`, {}, { project });
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** Get a single job by ID. */
+export async function jobGet(project: string, jobId: string) {
+  const res = await api.get(`/jobs/${jobId}`, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Get LLM-generated job suggestions based on a natural-language description. */
+export async function jobSuggest(project: string, description: string) {
+  const res = await api.post("/jobs/suggest", { description }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

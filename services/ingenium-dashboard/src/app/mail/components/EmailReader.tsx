@@ -68,6 +68,13 @@ export default function EmailReader({
   const [isReplyResizing, setIsReplyResizing] = useState(false);
   const replyStartRef = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: 0 });
   const replyContainerRef = useRef<HTMLDivElement>(null);
+  const [maxReplyWidth, setMaxReplyWidth] = useState(window.innerWidth - 400);
+
+  // Keep maxReplyWidth current — recompute when replying or on resize
+  useEffect(() => {
+    const cw = replyContainerRef.current?.getBoundingClientRect().width;
+    if (cw) setMaxReplyWidth(Math.max(320, cw - 400));
+  }, [isReplying]);
 
   // FIX 1 — Reset reply/summary state when switching to a different email
   // DP#32: dependency is `email?.uid` (primitive, stable per email).
@@ -98,8 +105,9 @@ export default function EmailReader({
 
     // Constrain: body needs at least 400px
     const containerWidth = replyContainerRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-    const maxReplyWidth = Math.max(320, containerWidth - 400);
-    newWidth = Math.max(320, Math.min(maxReplyWidth, newWidth));
+    const newMax = Math.max(320, containerWidth - 400);
+    setMaxReplyWidth(newMax);
+    newWidth = Math.max(320, Math.min(newMax, newWidth));
 
     onReplyWidthChange?.(newWidth);
   }, [isReplyResizing, onReplyWidthChange]);
@@ -418,10 +426,7 @@ export default function EmailReader({
             aria-label="Resize reply panel"
             aria-valuenow={replyWidth}
             aria-valuemin={320}
-            aria-valuemax={(() => {
-              const cw = replyContainerRef.current?.getBoundingClientRect().width ?? window.innerWidth;
-              return Math.max(320, cw - 400);
-            })()}
+            aria-valuemax={maxReplyWidth}
             tabIndex={0}
             onPointerDown={onReplyPointerDown}
             onPointerMove={onReplyPointerMove}

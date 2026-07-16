@@ -94,6 +94,7 @@ export default function MailPage() {
   const [listWidth, setListWidth] = useState(350);
   const [isResizing, setIsResizing] = useState(false);
   const handleRef = useRef<HTMLDivElement>(null);
+  const listStartRef = useRef<{ startX: number; startWidth: number }>({ startX: 0, startWidth: 0 });
 
   // Resizable reply composer panel state (persisted in localStorage)
   const [replyWidth, setReplyWidth] = useState(420);
@@ -114,13 +115,14 @@ export default function MailPage() {
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     handleRef.current?.setPointerCapture(e.pointerId);
+    listStartRef.current = { startX: e.clientX, startWidth: listWidth };
     setIsResizing(true);
-  }, []);
+  }, [listWidth]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!isResizing) return;
-    const containerLeft = e.currentTarget.getBoundingClientRect().left;
-    const newWidth = Math.max(240, Math.min(720, e.clientX - containerLeft));
+    const deltaX = e.clientX - listStartRef.current.startX;
+    const newWidth = Math.max(240, Math.min(720, listStartRef.current.startWidth + deltaX));
     setListWidth(newWidth);
   }, [isResizing]);
 

@@ -5,6 +5,7 @@ services:
       - "3000:3000"   # Dashboard
       - "4097:4097"   # API
       - "127.0.0.1:4098:4098"   # OpenCode Web (host loopback only)
+      - "127.0.0.1:4099:4099"   # ttyd OpenCode CLI
     environment:
       - OPENCODE_SERVER_PASSWORD=test
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data

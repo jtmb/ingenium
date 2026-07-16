@@ -40,16 +40,19 @@ const PORT_MAP: Record<string, number> = {
   "ingenium-api": 4097,
   "ingenium-dashboard": 3000,
   "opencode-web": 4098,
+  "ttyd-opencode": 4099,
 };
 
 const DESCRIPTION_MAP: Record<string, string> = {
   "ingenium-api": "REST API Gateway (sole DB authority)",
   "ingenium-dashboard": "Next.js Dashboard UI",
   "opencode-web": "OpenCode Web Server",
+  "ttyd-opencode": "OpenCode CLI Terminal (ttyd)",
 };
 
 const DISPLAY_NAME_MAP: Record<string, string> = {
   "opencode-web": "OpenCode Web",
+  "ttyd-opencode": "OpenCode CLI",
 };
 
 const STATE_MAP: Record<string, ServiceInfo["state"]> = {

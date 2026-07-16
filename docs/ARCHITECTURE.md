@@ -39,8 +39,8 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **73 tools**. It talks to the API over HTTP. Zero DB access.
-- `ingenium-dashboard` is a Next.js 16 App Router frontend with **16 pages**. It talks to the API over HTTP.
+- `ingenium-server` runs as an MCP stdio transport with **150 tools** across **23 categories**. It talks to the API over HTTP. Zero DB access.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **17 pages** (16 routes + Settings overlay). It talks to the API over HTTP.
 
 ## Provider Adapter Layer
 
@@ -139,6 +139,12 @@ Dashboard /config page  ──HTTP──▶  API (PUT /api/v1/config)
 | POST | `/api/v1/config/sync` | Sync project config from disk to DB |
 | POST | `/api/v1/config/global/sync` | Sync global config from disk to DB |
 
+## Dashboard Summary API
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/dashboard/summary` | Aggregated home dashboard endpoint — returns learning stats, task counts, job counts, and mail status in a single response. Each module is independently resolved; failed modules appear in `unavailable[]`. Returns 200 with partial data unless ALL modules fail (500). |
+
 ## Jobs API
 
 | Method | Endpoint | Purpose |
@@ -219,26 +225,26 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access. | No |
-| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 16 pages. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 150 tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 17 pages (16 routes + Settings overlay). Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
 ## Status Page Architecture
 
 The `/status` page renders two distinct card types from separate data sources:
 
-- **Service cards** — supervisord-managed processes (ingenium-api, ingenium-dashboard, opencode-web). Data sourced from `GET /api/v1/services/:name` which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
+- **Service cards** — supervisord-managed processes (ingenium-api, ingenium-dashboard, opencode-web, ttyd-opencode). Data sourced from `GET /api/v1/services/:name` which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
 - **Application cards** — in-process scheduled tasks (synthesis-engine, email-client) running inside the `ingenium-api` Express process. Data sourced from `GET /api/v1/services/applications/:name` which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Cards show application-specific fields (interval, last run, pipeline stats, email account folders).
 
 The detail overlay (`ServiceOverlay.tsx`) switches its data fetching and diagnostics grid based on the `type` prop (`"service"` vs. `"application"`). The `handleServiceClick()` function on the page determines the card type by checking which array the name appears in. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts) for the API implementation and [`services/ingenium-dashboard/src/app/status/page.tsx`](./services/ingenium-dashboard/src/app/status/page.tsx) for the frontend split.
 
 ## Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
+The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages plus the Settings overlay (17 total):
 
 | Page | Purpose |
 |------|---------|
-| `/` | Home — feature cards overview |
+| `/` | Home — operational home dashboard with live metrics (learning stats, task counts, job counts, mail status) via `/api/v1/dashboard/summary` in a 2×2 card grid |
 | `/opencode` | Embedded OpenCode web UI iframe |
 | `/projects` | Project management (create, rename, archive, restore) |
 | `/archive` | Archived projects with restore/purge |
@@ -259,24 +265,33 @@ The Ingenium Dashboard (http://localhost:3000) provides 16 route-based pages:
 
 ### MCP Tool Count
 
-The MCP server (`services/ingenium-server/scripts/mcp-server.ts`) exposes **73 tools**. Tool categories:
+The MCP server exposes **150 tools** across **23 categories**. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`:
 
 | Category | Count | Tools |
 |----------|-------|-------|
-| Settings | 2 | `ingenium_setting_get`, `ingenium_setting_set` |
-| Skills | 9 | list, load, search, create, update, delete, enable, disable, sync |
-| Observations | 4 | observe, search, list, stats |
-| Personality | 2 | personality, personality_traits |
-| Synthesis | 3 | run, status, cross_project |
-| Tasks | 5 | create, list, move, complete, next |
+| Settings | 3 | get, set, test_llm |
+| Skills | 11 | list, load, search, create, update, delete, enable, disable, sync, consolidate, sync_all |
+| Observe | 1 | observe |
+| Observations | 8 | search, list, stats, get, update, enrich, delete, delete_by_source |
+| Personality | 7 | personality, personality_traits, set_trait, trait_dismiss, trait_disable, trait_delete, traits_delete_all |
+| Synthesis | 4 | run, status, cross_project, synthesize_observations |
+| Extraction | 2 | extraction_run, auto_observe_now |
+| Pipeline | 3 | events, timeline, event_log |
+| Status | 4 | service_status, service_application_detail, service_process_detail, service_process_logs |
+| Health | 1 | health_check |
+| OpenCode | 1 | opencode_messages |
+| Tasks | 24 | create, list, move, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update |
 | Plans (Context) | 3 | save, search, list |
-| Projects | 7 | list, init, delete, restore, list_archived, purge, set_global |
-| Plugins | 7 | list, get, enable, disable, create, delete, update |
+| Projects | 9 | list, init, delete, restore, list_archived, purge, set_global, rename, detail |
+| Plugins | 8 | list, get, enable, disable, create, delete, update, source |
 | Commands | 5 | list, get, create, update, delete |
 | Config | 3 | get, set, sync |
-| Servers | 3 | list, add, remove |
+| Servers | 5 | list, add, remove, update, sync_all |
 | Agents | 8 | list, get, create, update, delete, enable, disable, sync |
-| Email | 13 | list, search, read, send, draft, folders, accounts, triage, suggest, draft_response, patterns, watch_start, watch_status |
+| Email | 27 | list, search, read, send, draft, folders, accounts, triage, suggest, draft_response, patterns, watch_start, watch_status, account_create, account_delete, account_test, oauth_url, oauth_exchange, summarize, review_draft, move, set_flags, delete, sync, sync_status, watch_stop, attachment_get |
+| Logs | 2 | list, sources |
+| Jobs | 10 | list, create, update, delete, run, runs, run_logs, run_cancel, get, suggest |
+| Dashboard | 1 | dashboard_summary |
 
 ---
 
@@ -287,7 +302,15 @@ The Express API uses `express.json({ limit: "2mb" })` for request body parsing. 
 ## Dashboard Features
 
 ### OpenCode Web UI Embedded in Dashboard
-The dashboard includes an embedded OpenCode service at `/opencode` — a single shared OpenCode instance on `:4098` that binds `0.0.0.0` inside container, published to host loopback only (`127.0.0.1:4098`). Serves both the dashboard iframe and direct terminal connections without auth. The session persists across tab navigation with a hidden iframe toggle. Workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode toggle**:
+
+- **Web mode** — Embeds the OpenCode Web UI (`http://localhost:4098/`) in a full-viewport iframe. The session persists across tab navigation with a hidden iframe technique.
+- **CLI mode** — Embeds a ttyd terminal (`http://localhost:4099/`) in a full-viewport iframe. The xterm.js terminal connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing the same session state as the Web UI.
+- **Mode switch** — A right-edge glass tab (`OpenCodeSwitch` component) toggles between modes. The inactive iframe is hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
+- **Keyboard shortcut**: `Ctrl+Shift+\`` toggles between modes from anywhere on the page.
+- **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
+- The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
+- The `appuser` has passwordless `sudo` access inside the container for package installation.
 
 ### Project Management
 The Projects page at `/projects` features Active/Archived tab views. Users can:
@@ -325,10 +348,11 @@ services:
       - ingenium-data:/app/.ingenium
 ```
 
-Inside the container, **supervisord** manages three processes:
+Inside the container, **supervisord** manages four processes:
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
-2. **Dashboard** (Next.js on :3000) — 16 route-based pages with highlight.js syntax highlighting in Preview/Source modes
+2. **Dashboard** (Next.js on :3000) — 17 route-based pages with highlight.js syntax highlighting in Preview/Source modes
 3. **opencode-web** (on :4098) — OpenCode web server (binds 0.0.0.0 inside container, published to host loopback only)
+4. **ttyd-opencode** (on :4099) — OpenCode CLI terminal via ttyd (`ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace`). Serves an xterm.js terminal that the dashboard `/opencode` page embeds as a second iframe. The `appuser` has passwordless sudo access for package installation inside the container.
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
@@ -345,9 +369,10 @@ docker compose up --build
 |-----------|---------|-------------|
 | `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
 | `4097` | API | Express REST gateway (sole DB authority) |
-| `4098` | opencode-web | Terminal attach + iframe |
+| `127.0.0.1:4098` | opencode-web | OpenCode Web UI (host loopback only, published from `0.0.0.0` inside container) |
+| `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
 
-> Note: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098.
+> Note: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099.
 
 ### Volume Configurations
 

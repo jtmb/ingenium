@@ -5,7 +5,6 @@ import "./globals.css";
 import "highlight.js/styles/github.css";
 import "./hljs-dark.css";
 import MainContainer from "./components/MainContainer";
-import OpenCodeFrame from "./components/OpenCodeFrame";
 import { SettingsLauncher, SettingsOverlay } from "./components/settings";
 import ThemeProvider from "./components/ThemeProvider";
 import ProjectDropdown from "./components/ProjectDropdown";
@@ -59,7 +58,6 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <MainContainer>
           <Suspense>{children}</Suspense>
         </MainContainer>
-        <OpenCodeFrame />
         <Suspense fallback={null}><SettingsOverlay /></Suspense>
         </ThemeProvider>
       </body>

@@ -102,34 +102,35 @@ export default function EmailList({
               <div
                 key={email.uid}
                 onClick={() => onSelect(email.uid)}
-                className={`px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer flex items-start gap-2 ${
+                className={`px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] cursor-pointer ${
                   isSelected ? "bg-[var(--color-surface-selected)]" : ""
                 }`}
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className={`w-40 truncate text-sm ${
-                        isUnread ? "font-semibold text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"
-                      }`}
-                    >
-                      {email.from?.[0]?.name || email.from?.[0]?.address || "Unknown"}
-                    </span>
-                    <span
-                      className={`flex-1 truncate text-sm ${
-                        isUnread ? "font-medium text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"
-                      }`}
-                    >
-                      {email.subject || "(No subject)"}
-                    </span>
-                    <span className="w-20 text-xs text-[var(--color-text-muted)] text-right shrink-0">
-                      {formatDate(email.date)}
-                    </span>
-                  </div>
-                  <p className="text-sm text-[var(--color-text-muted)] truncate mt-0.5">
-                    {email.body?.text?.substring(0, 120) || ""}
-                  </p>
+                {/* Row 1: Sender (truncate) + Timestamp */}
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <span
+                    className={`min-w-0 flex-1 truncate text-sm ${
+                      isUnread ? "font-semibold text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"
+                    }`}
+                  >
+                    {email.from?.[0]?.name || email.from?.[0]?.address || "Unknown"}
+                  </span>
+                  <span className="shrink-0 text-xs text-[var(--color-text-muted)] text-right">
+                    {formatDate(email.date)}
+                  </span>
                 </div>
+                {/* Row 2: Subject (truncate) */}
+                <span
+                  className={`block truncate w-full text-sm mt-0.5 ${
+                    isUnread ? "font-medium text-[var(--color-text-primary)]" : "text-[var(--color-text-secondary)]"
+                  }`}
+                >
+                  {email.subject || "(No subject)"}
+                </span>
+                {/* Row 3: Body snippet */}
+                <p className="text-sm text-[var(--color-text-muted)] truncate mt-0.5">
+                  {email.body?.text?.substring(0, 120) || ""}
+                </p>
               </div>
             );
           })}

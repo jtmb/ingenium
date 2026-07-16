@@ -1,7 +1,7 @@
 # DeepSeek V4 (Pro/Flash) — Orchestrator Reasoning Protocol
 
 > **Model**: DeepSeek V4 Pro / Flash  
-> **Agents using it**: ingenium-orchestrator, ingenium-qa, ingenium-docs  
+> **Agents using it**: ingenium-orchestrator, ingenium-software-engineer-premium, ingenium-security-auditor  
 > **Purpose**: Prevents avoidable reasoning mistakes — false dependency blame, incomplete verification, misclassified scope, untested integrations, and untrustworthy data counts
 
 ---
@@ -165,6 +165,10 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 **Rule:** Whenever a function returns an error sentinel (a result object with an `error` field, or a null/undefined failure), it MUST log the error (at minimum `logger.warn`) BEFORE returning. This applies to background jobs, async callbacks, and fire-and-forget tasks where callers might swallow errors.
 
 **Detection prompt:** "If this function returns an error sentinel, does it log the error BEFORE returning? Will a silent failure be visible in the logs?"
+
+**Background-job variant — `continue` without advancing retry state:** A job-processing loop dequeues a job, checks preconditions, and `continue`s without mutating retry state (no attempt increment, no `next_attempt_at` advance). The job spins silently — no log, no backoff — consuming DB reads on every scheduled tick indefinitely. **Rule:** Every `continue`/`return` path that exits because preconditions aren't met MUST either bump attempts + advance `next_attempt_at`, mark as failed with diagnostic log, or set a staleness deadline. Never leave a job at `attempts=0` with `next_attempt_at=now`.
+
+**Detection prompt:** "Does every continue/return path advance the job's retry state? Can a precondition that never resolves leave the job spinning forever with zero diagnostic output?"
 
 ---
 
@@ -422,6 +426,22 @@ making the identical API call with the same incorrect handling?"
 
 ---
 
+### 38. Stable Reference Frames — Module-Level Component Identity & Pointer-Down-Anchored Coordinates
+
+**Failure signature (component identity):** Defining a React component as a nested function inside another component body. Every parent render creates a new function identity, causing React to unmount/remount child state. Internal useState/useEffect reset on every parent re-render.
+
+**Failure signature (coordinate anchoring):** Computing drag coordinates from a moving reference point (handle element position) instead of a fixed anchor (pointer-down position). Formula `e.clientX - handleLeft` where `handleLeft` changes with component state produces jumps to minimum/maximum on first move.
+
+**Rule (component identity):** Define shared sub-components at module level. Use explicit props and `key` props for intentional resets (e.g., `key={emailUid}`). Never nest function component definitions inside other component bodies.
+
+**Rule (coordinate anchoring):** Capture `{startX, startWidth}` in a ref at pointer-down. Compute delta from start: `deltaX = e.clientX - startX`, then `newWidth = startWidth + deltaX`. Never use the moving element's own bounding rect as the reference point.
+
+**Detection prompts:**
+- "Is any component defined as a function inside another component? Will its state survive parent re-renders?"
+- "For this drag handler, is the reference point fixed at pointer-down or does it move with component state?"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -440,6 +460,7 @@ making the identical API call with the same incorrect handling?"
 | **Adjacent validation** — Testing a fast endpoint instead of the user's actual slow action | "Am I testing the actual user action with a measured timing?" |
 | **Stale-pipeline trust** — Counting old rows and calling the pipeline working | "Is the latest row timestamp fresher than the deploy time?" |
 | **Silent-error returns** — Returning error sentinels without logging them | "Does this function log the error BEFORE returning its sentinel?" |
+| **Job-loop spin** — continue without advancing retry state, job spins silently forever | "Does every continue/return path advance the job's retry state? Can a precondition that never resolves leave the job spinning forever?" |
 | **Blank-void loading** — Showing nothing while async work is in flight | "Does the cold/loading state show a visible progress indicator?" |
 | **Ephemeral guards** — In-memory state reset causing expensive operations after restart | "Does this guard survive a process restart?" |
 | **Sibling-omission** — Fixing one occurrence but missing another identical pattern in the same or different file | "Did I grep for sibling occurrences across ALL files that interact with this API?" |
@@ -462,13 +483,15 @@ making the identical API call with the same incorrect handling?"
 | **Lucky-value testing** — Testing with a value that happens to work instead of the value the UI's own placeholder suggests | "Did I test with the value the placeholder actually suggests, or a different value that happens to be valid?" |
 | **Render-branch invisible** — State setter and consumer in different render branches, feature silently fails from some entry points | "Is the overlay component in the same render branch as every button that opens it?" |
 | **Paper-only schema** — Trusting a schema definition as enforced without confirming any code path actually calls .parse()/.safeParse() on it | "Is this schema actually invoked in the live request path, or does validation only exist on paper?" |
+| **Nested-component reset** — Component defined inside another → state resets on every parent render | "Is any component defined as a function inside another component? Will its state survive parent re-renders?" |
+| **Moving-reference drag** — Computing drag delta from handle position instead of pointer-down anchor | "For this drag handler, is the reference point fixed at pointer-down or does it move with component state?" |
 | **Container-network blindness** — Testing inside Docker, user accesses from host | "Am I testing inside the container while the user accesses from the host? Is my inside-container curl hiding a host-side connection refusal?" |
 
 ---
 
 ## Cross-References
 
-- **This file is loaded by**: ingenium-orchestrator, ingenium-qa, ingenium-docs preflight checks
+- **This file is loaded by**: ingenium-orchestrator, ingenium-software-engineer-premium, ingenium-security-auditor preflight checks
 - **Parent skill**: `local-models` (SKILL.md in this directory)
 - **Related references**: `qwen-3.5-9b.md` (subagent safety protocol — picked up by orchestrator spawns), `cross-model-strategy.md` (when to use which model)
 - **Other skills with overlapping rules**: `debugging-patterns` (dependency isolation), `development-conventions` (Definition of Done), `useful-tests` (integration testing patterns)

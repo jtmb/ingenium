@@ -109,3 +109,61 @@ export async function taskNotifications(project: string, recipient: string, unre
   const res = await api.get("/tasks/notifications", params);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** Get a single task by ID. */
+export async function taskGet(project: string, taskId: string) {
+  const res = await api.get(`/tasks/${taskId}`, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** List comments for a task. */
+export async function taskCommentsList(project: string, taskId: string) {
+  const res = await api.get(`/tasks/${taskId}/comments`, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Edit an existing comment on a task. */
+export async function taskCommentEdit(project: string, taskId: string, commentId: string, body: string, actor?: string) {
+  const payload: Record<string, unknown> = { body };
+  if (actor) payload.actor = actor;
+  const res = await api.patch(`/tasks/${taskId}/comments/${commentId}`, payload, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Add a reaction to a task comment. */
+export async function taskCommentReact(project: string, taskId: string, commentId: string, reaction: string, actor: string) {
+  const res = await api.post(`/tasks/${taskId}/comments/${commentId}/react`, { reaction, actor }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** List task links (blocks, relates_to, duplicates). */
+export async function taskLinksList(project: string, taskId: string) {
+  const res = await api.get(`/tasks/${taskId}/links`, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Delete a task link by ID. */
+export async function taskLinkDelete(project: string, taskId: string, linkId: string, actor?: string) {
+  const params: Record<string, string> = { project };
+  if (actor) params.actor = actor;
+  await api.del(`/tasks/${taskId}/links/${linkId}`, params);
+  return { content: [{ type: "text" as const, text: JSON.stringify({ deleted: linkId }) }] };
+}
+
+/** Get the full task tree (parent + subtasks + linked tasks). */
+export async function taskTree(project: string, taskId: string) {
+  const res = await api.get(`/tasks/${taskId}/tree`, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Mark a notification as read. */
+export async function taskNotificationRead(project: string, notificationId: string) {
+  const res = await api.post(`/tasks/notifications/${notificationId}/read`, {}, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}
+
+/** Bulk update multiple tasks with the same fields. */
+export async function taskBulkUpdate(project: string, taskIds: string[], fields: Record<string, unknown>) {
+  const res = await api.post("/tasks/bulk", { task_ids: taskIds, ...fields }, { project });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

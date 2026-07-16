@@ -9,7 +9,7 @@ The monorepo has 6 packages:
 - `packages/ingenium-email` — IMAP/SMTP email client with OAuth2 for Gmail and Outlook (imapflow, nodemailer, mailparser, google-auth-library, @azure/msal-node)
 - `packages/ingenium-extension` — client-side OpenCode package: MCP server, observer plugin, skill-sync plugin, auto-observer. Installable via `npx -y @ingenium/extension`.
 - `services/ingenium-api` — Express REST API gateway on port 4097. Sole database authority.
-- `services/ingenium-server` — MCP stdio server with 73 tools. Calls API via HTTP. Zero DB access.
+- `services/ingenium-server` — MCP stdio server with 150 tools. Calls API via HTTP. Zero DB access.
 - `services/ingenium-dashboard` — Next.js 16 App Router frontend with 16 feature pages. Calls API via HTTP. Zero DB access.
 
 ## Documentation Index
@@ -29,7 +29,7 @@ The monorepo has 6 packages:
 | `docs/HOW-TO/plugins.md` | Plugin lifecycle management |
 | `docs/HOW-TO/servers.md` | MCP server configuration and proxy engine |
 | `docs/HOW-TO/email.md` | Email client setup with Gmail/Outlook OAuth2 + IMAP/SMTP |
-| `docs/HOW-TO/mcp-tools.md` | MCP tool reference across 15 categories |
+| `docs/HOW-TO/mcp-tools.md` | MCP tool reference across 23 categories |
 | `docs/HOW-TO/personality.md` | Personality trait management and confidence model |
 | `docs/HOW-TO/synthesis.md` | Synthesis LLM configuration and pipeline (Phase 1 + Phase 2) |
 | `docs/HOW-TO/settings.md` | Application settings and global configuration |

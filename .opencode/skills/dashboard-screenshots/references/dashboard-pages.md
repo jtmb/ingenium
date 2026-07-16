@@ -8,7 +8,7 @@ The dashboard uses a route-based architecture with 16 pages accessible at:
 
 | # | Route Path | Full URL | Screenshot Filename | Description |
 |---|------------|----------|---------------------|-------------|
-| 1 | `/` | `http://localhost:3000/` | `home.png` | Home page — feature cards overview |
+| 1 | `/` | `http://localhost:3000/` | `home.png` | Home page — operational home dashboard with live metrics |
 | 2 | `/opencode` | `http://localhost:3000/opencode` | `opencode.png` | Embedded OpenCode web UI iframe |
 | 3 | `/projects` | `http://localhost:3000/projects` | `projects.png` | Project management (create, rename, archive, restore) |
 | 4 | `/skills` | `http://localhost:3000/skills` | `skills.png` | Skills grid with detail overlay, syntax highlighting |
@@ -17,7 +17,7 @@ The dashboard uses a route-based architecture with 16 pages accessible at:
 | 7 | `/plugins` | `http://localhost:3000/plugins` | `plugins.png` | Plugin lifecycle (enable, disable, configure) |
 | 8 | `/mail` | `http://localhost:3000/mail` | `mail.png` | 3-pane email client (FolderSidebar, EmailList, EmailReader), AccountSetup when no accounts configured |
 | 9 | `/agents` | `http://localhost:3000/agents` | `agents.png` | Agent profiles (model, mode, enable/disable) |
-| 10 | `/mcp-servers` | `http://localhost:3000/mcp-servers` | `mcp-servers.png` | MCP servers + Tool Manager (Servers/Tools tabs, 73 tools in 15 categories, per-tool enable/disable toggle, search, category filter) |
+| 10 | `/mcp-servers` | `http://localhost:3000/mcp-servers` | `mcp-servers.png` | MCP servers + Tool Manager (Servers/Tools tabs, 150 tools in 23 categories, per-tool enable/disable toggle, search, category filter) |
 | 11 | `/config` | `http://localhost:3000/config` | `config.png` | OpenCode config editor (Project/Global tabs, sync from disk, save) |
 | 12 | `/observations` | `http://localhost:3000/observations` | `observations.png` | Self-learning observations with FTS5 search + type/status filters |
 | 13 | `/personality` | `http://localhost:3000/personality` | `personality.png` | Personality traits with confidence bars, enable/disable |
