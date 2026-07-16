@@ -442,6 +442,16 @@ making the identical API call with the same incorrect handling?"
 
 ---
 
+### 39. Never Mutate Domain Data to Satisfy a Static-Analysis / CI Rule
+
+**Failure signature:** A CI check (grep, linter, enforce script) flags a string in display text or UI code — e.g., `sqlite-migration-patterns` in a React component triggers a DB-leak check. Instead of fixing the check to stop matching harmless display text, the display data is changed (e.g., capitalizing to `SQLite-migration-patterns`). The CI goes green, but now the UI labels don't match the actual canonical names on disk or in the database. The check was satisfied by corrupting truthful data rather than by fixing the detector's scope.
+
+**Rule:** When a static-analysis or CI rule flags content that is NOT an instance of the prohibited behavior, fix the DETECTOR (narrow its scope, add exclusions, make it semantic) — not the data. Canonical names, case, identifiers, and paths are domain truth. Changing them to bypass a regex is data corruption by another name.
+
+**Detection prompt:** "Did I fix the FORBIDDEN BEHAVIOR (the actual import/pattern the rule exists to catch), or did I just change the data until the test stopped matching? Is the data I changed still truthful/consistent with its canonical source?"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -486,6 +496,7 @@ making the identical API call with the same incorrect handling?"
 | **Nested-component reset** — Component defined inside another → state resets on every parent render | "Is any component defined as a function inside another component? Will its state survive parent re-renders?" |
 | **Moving-reference drag** — Computing drag delta from handle position instead of pointer-down anchor | "For this drag handler, is the reference point fixed at pointer-down or does it move with component state?" |
 | **Container-network blindness** — Testing inside Docker, user accesses from host | "Am I testing inside the container while the user accesses from the host? Is my inside-container curl hiding a host-side connection refusal?" |
+| **Domain-mutation bypass** — Changing data to bypass a CI regex instead of fixing the detector's scope | "Did I fix the forbidden behavior, or just change data until the test stopped matching? Is the data still truthful?" |
 
 ---
 
