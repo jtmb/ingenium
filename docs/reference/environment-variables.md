@@ -15,7 +15,7 @@
 
 | Variable | Default | Consumed By | Description |
 |----------|---------|-------------|-------------|
-| `CORS_ORIGIN` | `*` | ingenium-api | Allowed CORS origin for browser requests |
+| `CORS_ORIGIN` | `*` | ingenium-api | Allowed CORS origin for browser requests. In production, set to the explicit dashboard URL (e.g., `http://localhost:3000`) instead of using the wildcard default. |
 | `GOOGLE_OAUTH_CLIENT_ID` | _(required for OAuth)_ | ingenium-email | Google OAuth2 app client ID |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | _(required for OAuth)_ | ingenium-email | Google OAuth2 app client secret |
 | `INGENIUM_API_PORT` | `4097` | ingenium-api | Express server listen port |

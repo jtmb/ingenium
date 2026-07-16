@@ -36,6 +36,7 @@ export default function OpenCodeFrame({
         aria-hidden={mode !== "web"}
         tabIndex={mode === "web" ? 0 : -1}
         title="OpenCode Web"
+        sandbox="allow-scripts allow-same-origin"
         allow="clipboard-write"
         onLoad={onWebLoaded}
       />
@@ -53,6 +54,7 @@ export default function OpenCodeFrame({
           aria-hidden={mode !== "cli"}
           tabIndex={mode === "cli" ? 0 : -1}
           title="OpenCode Terminal"
+          sandbox="allow-scripts allow-same-origin"
           allow="clipboard-write"
           onLoad={onCliLoaded}
         />

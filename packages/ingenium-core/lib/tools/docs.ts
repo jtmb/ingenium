@@ -183,7 +183,7 @@ export function createSpace(name: string, slug: string, description?: string, ic
 }
 
 export function updateSpace(id: number, fields: { name?: string; slug?: string; description?: string; icon?: string; sort_order?: number }): DocSpace | undefined {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     const existing = db.prepare("SELECT * FROM docs_spaces WHERE id = ?").get(id) as DocSpace | undefined;
     if (!existing) return undefined;
@@ -201,18 +201,19 @@ export function updateSpace(id: number, fields: { name?: string; slug?: string; 
       now,
       id,
     );
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM docs_spaces WHERE id = ?").get(id) as DocSpace;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function deleteSpace(id: number): boolean {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const result = db.prepare("DELETE FROM docs_spaces WHERE id = ?").run(id);
-    checkpointAfterWrite();
-    return result.changes > 0;
+    return db.prepare("DELETE FROM docs_spaces WHERE id = ?").run(id).changes > 0;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Pages ────────────────────────────────────────────────────────────────────
@@ -308,7 +309,7 @@ export function updatePage(
   id: number,
   fields: { title?: string; slug?: string; content?: string; expectedRevision?: number },
 ): UpdatePageResult {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     const existing = db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(id) as DocPage | undefined;
     if (!existing) return {};
@@ -338,35 +339,37 @@ export function updatePage(
     // Rebuild backlinks
     rebuildBacklinks(db, id, newContent);
 
-    checkpointAfterWrite();
     return { page: db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(id) as DocPage };
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function archivePage(id: number): boolean {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const result = db.prepare(
+    return db.prepare(
       "UPDATE docs_pages SET status = 'archived', updated_at = ? WHERE id = ? AND status != 'archived'"
-    ).run(new Date().toISOString(), id);
-    checkpointAfterWrite();
-    return result.changes > 0;
+    ).run(new Date().toISOString(), id).changes > 0;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function restorePage(id: number): DocPage | undefined {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     db.prepare(
       "UPDATE docs_pages SET status = 'published', updated_at = ? WHERE id = ? AND status = 'archived'"
     ).run(new Date().toISOString(), id);
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(id) as DocPage | undefined;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function movePage(id: number, newParentId?: number | null, newSortOrder?: number): DocPage | undefined {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     const existing = db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(id) as DocPage | undefined;
     if (!existing) return undefined;
@@ -378,9 +381,10 @@ export function movePage(id: number, newParentId?: number | null, newSortOrder?:
     db.prepare(
       "UPDATE docs_pages SET parent_page_id = ?, sort_order = ?, updated_at = ? WHERE id = ?"
     ).run(parent, sort, now, id);
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(id) as DocPage;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Drafts ───────────────────────────────────────────────────────────────────
@@ -405,12 +409,12 @@ export function saveDraft(pageId: number, content: string): DocDraft {
 }
 
 export function deleteDraft(pageId: number): boolean {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const result = db.prepare("DELETE FROM docs_page_drafts WHERE page_id = ?").run(pageId);
-    checkpointAfterWrite();
-    return result.changes > 0;
+    return db.prepare("DELETE FROM docs_page_drafts WHERE page_id = ?").run(pageId).changes > 0;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Versions ─────────────────────────────────────────────────────────────────
@@ -428,7 +432,7 @@ export function getVersion(versionId: number): DocVersion | undefined {
 }
 
 export function restoreVersion(pageId: number, versionId: number): DocPage | undefined {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     const version = db.prepare(
       "SELECT * FROM docs_page_versions WHERE id = ? AND page_id = ?"
@@ -454,9 +458,10 @@ export function restoreVersion(pageId: number, versionId: number): DocPage | und
     // Rebuild backlinks
     rebuildBacklinks(db, pageId, version.content);
 
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(pageId) as DocPage;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Search ───────────────────────────────────────────────────────────────────
@@ -506,7 +511,7 @@ export function getPageTags(pageId: number): DocTag[] {
 }
 
 export function addTag(pageId: number, tagName: string): DocTag | undefined {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     const slug = ensureTagSlug(tagName);
 
@@ -523,20 +528,21 @@ export function addTag(pageId: number, tagName: string): DocTag | undefined {
       "INSERT OR IGNORE INTO docs_page_tags (page_id, tag_id) VALUES (?, ?)"
     ).run(pageId, tag.id);
 
-    checkpointAfterWrite();
     return tag;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function removeTag(pageId: number, tagId: number): boolean {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const result = db.prepare(
+    return db.prepare(
       "DELETE FROM docs_page_tags WHERE page_id = ? AND tag_id = ?"
-    ).run(pageId, tagId);
-    checkpointAfterWrite();
-    return result.changes > 0;
+    ).run(pageId, tagId).changes > 0;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Backlinks ────────────────────────────────────────────────────────────────
@@ -582,23 +588,24 @@ export function createComment(
 }
 
 export function resolveComment(commentId: number): DocComment | undefined {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     db.prepare(
       "UPDATE docs_comments SET resolved = 1, updated_at = ? WHERE id = ?"
     ).run(new Date().toISOString(), commentId);
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM docs_comments WHERE id = ?").get(commentId) as DocComment | undefined;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function deleteComment(commentId: number): boolean {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const result = db.prepare("DELETE FROM docs_comments WHERE id = ?").run(commentId);
-    checkpointAfterWrite();
-    return result.changes > 0;
+    return db.prepare("DELETE FROM docs_comments WHERE id = ?").run(commentId).changes > 0;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Attachments ──────────────────────────────────────────────────────────────
@@ -634,14 +641,15 @@ export function saveAttachment(
 }
 
 export function deleteAttachment(attId: number): DocAttachment | undefined {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     const att = db.prepare("SELECT * FROM docs_attachments WHERE id = ?").get(attId) as DocAttachment | undefined;
     if (!att) return undefined;
     db.prepare("DELETE FROM docs_attachments WHERE id = ?").run(attId);
-    checkpointAfterWrite();
     return att;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Templates ────────────────────────────────────────────────────────────────
@@ -670,12 +678,12 @@ export function createTemplate(name: string, content: string, description?: stri
 }
 
 export function deleteTemplate(id: number): boolean {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const result = db.prepare("DELETE FROM docs_templates WHERE id = ?").run(id);
-    checkpointAfterWrite();
-    return result.changes > 0;
+    return db.prepare("DELETE FROM docs_templates WHERE id = ?").run(id).changes > 0;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Project Links ────────────────────────────────────────────────────────────
@@ -703,20 +711,20 @@ export function linkProject(pageId: number, projectId: string): DocProjectLink {
 }
 
 export function unlinkProject(pageId: number, projectId: string): boolean {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
-    const result = db.prepare(
+    return db.prepare(
       "DELETE FROM docs_page_projects WHERE page_id = ? AND project_id = ?"
-    ).run(pageId, projectId);
-    checkpointAfterWrite();
-    return result.changes > 0;
+    ).run(pageId, projectId).changes > 0;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 // ── Favorites ────────────────────────────────────────────────────────────────
 
 export function toggleFavorite(pageId: number): DocPage | undefined {
-  return execTransaction(() => {
+  const result = execTransaction(() => {
     const db = getDb(dbPath());
     const existing = db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(pageId) as DocPage | undefined;
     if (!existing) return undefined;
@@ -725,9 +733,10 @@ export function toggleFavorite(pageId: number): DocPage | undefined {
     db.prepare(
       "UPDATE docs_pages SET is_favorite = ?, updated_at = ? WHERE id = ?"
     ).run(newFav, new Date().toISOString(), pageId);
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(pageId) as DocPage;
   });
+  checkpointAfterWrite();
+  return result;
 }
 
 export function listFavorites(): DocPage[] {
