@@ -8,6 +8,7 @@ permission:
   glob: allow
   grep: allow
   edit: deny
+  write: deny
   bash: deny
   playwright_*: deny
   ingenium_docs_search: allow

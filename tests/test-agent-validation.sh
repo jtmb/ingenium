@@ -74,12 +74,19 @@ find_agent_files() {
     local all_files
     all_files=$(find "$AGENTS_DIR" -name "*.md" -type f | sort)
     for f in $all_files; do
+        local bn
+        bn=$(basename "$f")
+        # Skip documentation/non-agent files — browser-agent-errors.md, etc.
+        if [[ "$bn" == browser-agent-errors* || "$bn" == *-errors.md ]]; then
+            $VERBOSE && yellow "  ⚠ SKIP: Excluding non-agent file: $bn" >&2
+            continue
+        fi
         local first_line
         first_line=$(head -1 "$f")
         if [[ "$first_line" == "---" ]]; then
             echo "$f"
         else
-            yellow "  ⚠ WARNING: Skipping non-agent file (no --- frontmatter): $(basename "$f")" >&2
+            yellow "  ⚠ WARNING: Skipping non-agent file (no --- frontmatter): $bn" >&2
         fi
     done
 }

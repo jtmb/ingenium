@@ -19,6 +19,9 @@ permission:
     "@devops-conventions": allow
     "@engineering-workflow": allow
     "@mcp-tooling": allow
+    "@security-audit": allow
+    "@local-models": allow
+    "@database-conventions": allow
     "*": deny
 ---
 
