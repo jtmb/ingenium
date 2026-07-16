@@ -3,6 +3,7 @@
   "workspaces": [
     "packages/ingenium-core",
     "packages/ingenium-email",
+    "packages/ingenium-extension",
     "services/ingenium-api",
     "services/ingenium-server",
     "services/ingenium-dashboard"
@@ -11,7 +12,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "tsc -b"
+    "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.17.18",
