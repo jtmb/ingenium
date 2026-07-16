@@ -1,9 +1,4 @@
 {
-  "tags": [
-    "agent",
-    "execution",
-    "quality",
-    "testing"
-  ],
-  "alwaysApply": true
+  "tags": [],
+  "alwaysApply": false
 }
