@@ -43,15 +43,15 @@ Before calling any MCP tool, verify that the MCP server is configured in `openco
 
 ### 🔴 Ingenium MCP Tool Naming — Use Correct Prefix
 
-All Ingenium MCP tools use a **double `ingenium_ingenium_` prefix**:
+All Ingenium MCP tools use a **single `ingenium_` prefix** (OpenCode prepends the server key automatically):
 
 | ✅ Correct | ❌ Wrong |
 |-----------|---------|
-| `ingenium_ingenium_observation_stats` | `ingenuum_ingenium_observation_stats` (typo) |
-| `ingenium_ingenium_skill_load` | `ingenium_skill_load` (missing prefix) |
-| `ingenium_ingenium_observe` | `ingenium_observe` (missing prefix) |
+| `ingenium_observation_stats` | `ingenium_ingenium_observation_stats` (double prefix) |
+| `ingenium_skill_load` | `ingenium_skill_load` (typo: missing `i`) |
+| `ingenium_observe` | `ingenium_ingenium_observe` (double prefix) |
 
-The pattern is: `ingenium_ingenium_<noun>_<verb>`. Double-check the prefix before calling — a typo wastes tool calls.
+The pattern is: `ingenium_<noun>_<verb>`. Double-check the prefix before calling — the `ingenium_` prefix appears once, not twice.
 
 ### 🔴 Save Context to Thread After Every Code Change
 

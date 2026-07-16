@@ -8,8 +8,9 @@ import { ALL_TOOLS, getCategoryMap } from "../../lib/tools/mcp-tool-states.js";
 // ── Helpers ───────────────────────────────────────────
 
 /**
- * Extracts tool names registered in mcp-server.ts by parsing the source.
- * Looks for patterns like: server.registerTool("ingenium_skill_list", ...)
+ * Extracts transport-registered tool names from mcp-server.ts by parsing the source.
+ * Tool names are now UNPREFIXED in transport registration (e.g., "skill_list").
+ * The catalog maps these to canonical names with the "ingenium_" prefix.
  * Also handles extension-registered tools (synthesize_observations, auto_observe_now).
  */
 function extractServerToolNames(): string[] {
@@ -38,6 +39,7 @@ const EXTENSION_TOOLS = [
 
 describe("MCP Tool Catalog Parity", () => {
   // 1. Every registered tool in mcp-server.ts exists in the catalog
+  // Transport names are unprefixed (e.g., "skill_create"), catalog uses "ingenium_" prefix.
   it("every tool registered in mcp-server.ts exists in the catalog", () => {
     const serverToolNames = extractServerToolNames();
     const catalogMap = getCatalogMap();
@@ -45,16 +47,17 @@ describe("MCP Tool Catalog Parity", () => {
     expect(serverToolNames.length, "should find at least 140 tools in mcp-server.ts").toBeGreaterThanOrEqual(140);
 
     const missingFromCatalog: string[] = [];
-    for (const name of serverToolNames) {
-      if (!catalogMap.has(name)) {
-        missingFromCatalog.push(name);
+    for (const transportName of serverToolNames) {
+      const catalogName = `ingenium_${transportName}`;
+      if (!catalogMap.has(catalogName)) {
+        missingFromCatalog.push(transportName);
       }
     }
 
     if (missingFromCatalog.length > 0) {
       console.error(`Tools in mcp-server.ts but NOT in catalog: ${missingFromCatalog.join(", ")}`);
     }
-    expect(missingFromCatalog, "all mcp-server.ts tools must be in the catalog").toEqual([]);
+    expect(missingFromCatalog, "all mcp-server.ts tools must be in the catalog (via ingenium_ prefix)").toEqual([]);
   });
 
   // 2. Extension tools are in the catalog
@@ -168,15 +171,50 @@ describe("MCP Tool Catalog Parity", () => {
     expect(MCP_TOOL_CATALOG.length, "catalog should contain 211 server + 2 extension tools = 213 total").toBe(213);
   });
 
-  // 9. Every tool name starts with "ingenium_" (except extension tools)
-  it("all server tools have the ingenium_ prefix", () => {
+  // 9. All catalog entries have the "ingenium_" prefix (except extension tools)
+  it("all catalog entries have the ingenium_ prefix", () => {
     const nonPrefix: string[] = [];
     for (const entry of MCP_TOOL_CATALOG) {
       if (!EXTENSION_TOOLS.includes(entry.name) && !entry.name.startsWith("ingenium_")) {
         nonPrefix.push(entry.name);
       }
     }
-    expect(nonPrefix, "server tools must have ingenium_ prefix").toEqual([]);
+    expect(nonPrefix, "catalog entries must have ingenium_ prefix").toEqual([]);
+  });
+
+  // 9b. Transport registrations are unprefixed and map 1:1 to catalog entries
+  it("transport registrations are unprefixed and map 1:1 to catalog entries", () => {
+    const serverToolNames = extractServerToolNames();
+    const catalogMap = getCatalogMap();
+
+    // Verify all transport names are unprefixed
+    const prefixedTransport: string[] = [];
+    for (const name of serverToolNames) {
+      if (name.startsWith("ingenium_")) {
+        prefixedTransport.push(name);
+      }
+    }
+    expect(prefixedTransport, "transport registrations must be unprefixed").toEqual([]);
+
+    // Verify every transport name maps to a catalog entry via "ingenium_" prefix
+    const unmapped: string[] = [];
+    for (const transportName of serverToolNames) {
+      const catalogName = `ingenium_${transportName}`;
+      if (!catalogMap.has(catalogName)) {
+        unmapped.push(transportName);
+      }
+    }
+    expect(unmapped, "every transport registration must map to a catalog entry via ingenium_ prefix").toEqual([]);
+
+    // Verify no orphaned catalog entries (excluding extension tools)
+    const transportSet = new Set(serverToolNames.map(n => `ingenium_${n}`));
+    const orphaned: string[] = [];
+    for (const entry of MCP_TOOL_CATALOG) {
+      if (!EXTENSION_TOOLS.includes(entry.name) && !transportSet.has(entry.name)) {
+        orphaned.push(entry.name);
+      }
+    }
+    expect(orphaned, "no catalog entry should lack a transport registration").toEqual([]);
   });
 
   // 10. Category, description, and projectScope are populated for all entries

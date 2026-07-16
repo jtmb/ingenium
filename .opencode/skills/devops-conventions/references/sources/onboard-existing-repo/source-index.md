@@ -18,7 +18,7 @@ ingenium_setting_set(project="{project-name}", key="project_root", value="/path/
 Use `@ingenium-explore` to understand the project structure, build system, and key conventions.
 
 ### 4. Create initial skills
-Run `ingenium_ingenium_synthesis_run(project="{project-name}")` after logging a few observations.
+Run `ingenium_synthesis_run(project="{project-name}")` after logging a few observations.
 
 ### 5. Bootstrap agents
 Create `.opencode/agents/` files for orchestrator, engineers, QA, etc. in the project.
