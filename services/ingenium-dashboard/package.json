@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.1",
@@ -18,6 +19,7 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@tailwindcss/typography": "^0.5.20",
     "@tiptap/core": "^3.0.0",
     "@tiptap/extension-text-align": "^3.0.0",
     "@tiptap/extension-text-style": "^3.0.0",
@@ -35,6 +37,8 @@
   "devDependencies": {
     "@types/node": "^22.20.0",
     "@types/react": "^19.2.17",
-    "typescript": "^5.9.3"
+    "jsdom": "^29.1.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
   }
 }

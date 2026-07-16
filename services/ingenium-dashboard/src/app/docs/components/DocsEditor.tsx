@@ -34,7 +34,7 @@ marked.setOptions({ gfm: true, breaks: false });
  * - [[page-slug]] → internal link placeholder
  * - > **Note:** ... → callout block with colored left border
  */
-function renderMarkdown(content: string): string {
+export function renderMarkdown(content: string): string {
   if (!content) return "";
 
   // Pre-process: convert [[page-slug]] to internal links
@@ -72,7 +72,8 @@ function renderMarkdown(content: string): string {
 
   const html = marked.parse(processed, { async: false }) as string;
   return DOMPurify.sanitize(html, {
-    ADD_ATTR: ["target", "data-internal"],
+    ALLOWED_TAGS: ["h1","h2","h3","h4","h5","h6","p","br","hr","pre","code","blockquote","ul","ol","li","a","strong","em","del","table","thead","tbody","tr","th","td","img","div","span"],
+    ALLOWED_ATTR: ["href","target","data-internal","class","style","src","alt"],
   });
 }
 
@@ -552,6 +553,8 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
         {editorMode === "view" && (
           <div
             className="prose prose-sm max-w-none dark:prose-invert p-6 overflow-y-auto h-full"
+            role="document"
+            aria-label="Page content"
             dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
           />
         )}
@@ -584,6 +587,8 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
             <div className="w-1/2 overflow-y-auto p-4 prose prose-sm max-w-none dark:prose-invert">
               <div
                 ref={previewRef}
+                role="document"
+                aria-label="Page content"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(splitPreview) }}
               />
             </div>
