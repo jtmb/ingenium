@@ -48,3 +48,30 @@ description: "Implementation workflow patterns including verification gates, age
 - Iterative testing required until functionality confirmed (no simulated testing)
 - Visual validation from orchestrator required during implementation phases
 - Tool selection: @ingenium-explore for exploration, @ingenium-software-engineer-premium only for deep reasoning
+
+## 🔴 HARD RULEs
+- Documentation and testing must be mapped at every phase of agent orchestration (importance: 9)
+- Visual validation required for orchestrator acceptance before declaring work complete (importance: 7)
+- Handoff message template must include specific agent count instructions and verification responsibility (importance: 8)
+- Parallel agent execution restricted to maximum of 6 concurrent agents at once (updated from 4)
+
+## Reference Files
+
+| File | Content |
+|------|--------|
+| [`references/phase-documentation-mapping.md`](references/phase-documentation-mapping.md) | Documentation and testing mapped at every phase before implementation begins |
+| [`references/orchestrator-visual-validation.md`](references/orchestrator-visual-validation.md) | Visual validation requirements for orchestrator acceptance |
+| [`references/handoff-message-template.md`](references/handoff-message-template.md) | Plan handoff messages with agent count and verification instructions
+
+## 🔴 HARD RULEs
+- Gates must not advance until real tests pass AND screenshots verified via @vision-bridge
+- Self-verification mandatory at end of every task before delivery
+- Final summary required explaining what was performed and verified
+
+## Reference Files
+
+| File | Content |
+|------|--------|
+| [`references/verification-gates.md`](references/verification-gates.md) | Gate advancement rules requiring test + visual validation |
+| [`references/self-verification.md`](references/self-verification.md) | End-of-task self-verification requirements |
+| [`references/task-summary.md`](references/task-summary.md) | Final summary format and content expectations |
