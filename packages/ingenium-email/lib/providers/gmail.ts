@@ -40,6 +40,7 @@ const SYSTEM_LABEL_MAP: Record<string, string> = {
   STARRED: "Starred",
   IMPORTANT: "Important",
   ALL: "Archive",  // Gmail "All Mail" → user-facing "Archive"
+  DRAFT: "Drafts",
 };
 
 /** Label IDs to skip entirely. */

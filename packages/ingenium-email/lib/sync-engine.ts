@@ -541,9 +541,10 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       if (worker.taskQueue.length === 0) {
         // Skip folders with tripped circuit breaker
         const trippedFolders = new Set<string>();
+        const emailPrefix = `${worker.email}:`;
         for (const [key, count] of authErrorCount) {
-          if (count >= MAX_AUTH_ERRORS) {
-            const folderKey = key.split(":").slice(1).join(":");
+          if (key.startsWith(emailPrefix) && count >= MAX_AUTH_ERRORS) {
+            const folderKey = key.slice(emailPrefix.length);
             if (folderKey) trippedFolders.add(folderKey);
           }
         }
@@ -741,7 +742,9 @@ async function executeSyncFolder(
     setFolderState(worker, folder, { state: "error", lastError: msg });
     
     // Circuit breaker: track consecutive auth errors
-    if (msg.includes("Unsupported state or unable to authenticate data")) {
+    const isAuthError = msg.includes("401") || msg.includes("Unauthorized") || 
+      msg.includes("No stored OAuth tokens") || msg.includes("re-authenticate");
+    if (isAuthError) {
       const key = `${worker.email}:${folder}`;
       const count = (authErrorCount.get(key) || 0) + 1;
       authErrorCount.set(key, count);
