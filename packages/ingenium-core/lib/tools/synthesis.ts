@@ -4,10 +4,12 @@ import * as skills from "./skills.js";
 import * as projects from "./projects.js";
 import * as synthesisLlm from "./synthesis-llm.js";
 import type { SynthesisLLMResult } from "./synthesis-llm.js";
+import * as skillGovernance from "./skill-governance.js";
 import { getSetting, setSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
 import { logger } from "../logger.js";
 
+/** Safely parse a JSON string, returning `{}` on failure instead of throwing. */
 function safeParseJson(str: string): Record<string, any> {
   try { return JSON.parse(str); } catch { return {}; }
 }
@@ -25,19 +27,26 @@ export interface SynthesisResult {
 /**
  * Run the synthesis pipeline: process pending observations into personality traits.
  *
- * Classification heuristics:
- *   - "correction" observations → upsert feedback_style trait
- *   - "preference" observations → upsert code_preference trait
- *   - "terminology" observations → upsert terminology trait
- *   - "feedback" observations → update confidence on matching existing traits
- *   - "behavior", "workflow" → upsert with low initial confidence (0.10)
- *   - "error", "goal" → upsert priority_signal with very low confidence (0.05)
- *   - "pattern", "insight" → implementation notes, no trait creation
+ * The pipeline has two phases:
+ *   1. **Trait consolidation** (LLM-driven) — the LLM decides CREATE/CONFIRM/IGNORE
+ *      for each observation against existing traits.
+ *   2. **Skill synthesis** (LLM-driven, optional) — if an LLM is configured,
+ *      the same batch of observations is analyzed to create/update skills.
  *
- * Confidence gating: new traits start below display threshold (0.3).
- * Only repeated observations of the same trait boost confidence into display range.
+ * Observations that the LLM acted on (CREATE or CONFIRM) are marked "processed".
+ * Observations the LLM explicitly ignored are ALSO marked "processed" so they
+ * don't waste tokens in every cycle.
  *
- * Future phases will replace these heuristics with LLM-based analysis.
+ * Trait decay: traits untouched for 7+ days lose 0.05 confidence per cycle.
+ *
+ * WARNING: The old heuristic classification described below has been replaced
+ *          by LLM-based `consolidateTraits()`. The heuristics are retained here
+ *          as documentation only and should be removed when Phase 1 migration
+ *          to LLM-only is complete.
+ *
+ * Legacy heuristics (replaced):
+ *   - "correction" → feedback_style, "preference" → code_preference, etc.
+ *   - New traits started at 0.05-0.15 confidence (below display threshold 0.3)
  */
 export async function runSynthesis(projectId: string, sessionId?: string): Promise<SynthesisResult> {
   const result: SynthesisResult = {
@@ -276,6 +285,8 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
           llmInsights = llmResult.insights || [];
         } catch (primaryErr: any) {
           // Try backup provider if primary fails
+          // NOTE: This backup fallback is duplicated in consolidateSkills().
+          //       Future work should extract to a shared helper.
           const backupModel = gid ? getSetting(gid, "synthesis_backup_model") : undefined;
           const backupEndpoint = gid ? getSetting(gid, "synthesis_backup_endpoint") : undefined;
           const backupApiKey = gid ? getSetting(gid, "synthesis_backup_api_key") : undefined;
@@ -305,46 +316,53 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
           }
         }
 
-        // Execute skill create operations
+        // Execute skill create proposals (governance-gated)
         for (const skillToCreate of llmResult.skills_to_create) {
           try {
             const fileTree = skillToCreate.reference_files && skillToCreate.reference_files.length > 0
               ? JSON.stringify(Object.fromEntries(skillToCreate.reference_files.map(rf => [rf.path, rf.content])))
               : undefined;
-            skills.createSkill(
+            const proposedState = JSON.stringify({
+              content: skillToCreate.content,
+              description: skillToCreate.description,
+              category: "learning",
+              tags: skillToCreate.tags || "auto-generated",
+              always_apply: 0,
+              file_tree: fileTree || null,
+            });
+            const evidenceJson = JSON.stringify([
+              { trigger: "LLM synthesis", observation_ids: batch.map(o => o.id), model: synthModel },
+            ]);
+            const proposal = skillGovernance.createProposal(
               projectId,
+              "create",
               skillToCreate.name,
-              skillToCreate.description,
-              skillToCreate.content,
-              "learning", // category
-              skillToCreate.tags || "auto-generated",
-              1, // always_apply
-              fileTree,
+              proposedState,
+              {
+                evidenceJson,
+                qualityScore: 0.5,
+                noveltyScore: 0.3,
+                alwaysApply: 0,
+              },
             );
+            skillGovernance.submitProposal(projectId, proposal.id);
             result.skills_created++;
 
-            // Best-effort disk write (createSkill already writes to disk,
-            // but this provides defense-in-depth if the internal path changes)
-            try {
-              const skillObj = skills.getSkill(projectId, skillToCreate.name);
-              if (skillObj) skills.writeSkillToDisk(skillObj);
-            } catch (_) { /* non-fatal — disk write is best-effort */ }
-
             logEvent(
-              projectId, "skill_created", "synthesis",
-              `Skill created: ${skillToCreate.name}`,
+              projectId, "proposal_created", "synthesis",
+              `Proposal created (create): ${skillToCreate.name}`,
               skillToCreate.description.substring(0, 200),
-              { skill_name: skillToCreate.name, via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
+              { proposal_id: proposal.id, skill_name: skillToCreate.name, proposal_type: "create", via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
               synthesisEventId,
               sessionId,
             );
           } catch (err: any) {
-            logger.error("synthesis", `Skill create "${skillToCreate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-            result.errors.push(`Skill create "${skillToCreate.name}": ${err.message}`);
+            logger.error("synthesis", `Skill create proposal "${skillToCreate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+            result.errors.push(`Skill create proposal "${skillToCreate.name}": ${err.message}`);
           }
         }
 
-        // Execute skill update operations
+        // Execute skill update proposals (governance-gated)
         for (const skillToUpdate of llmResult.skills_to_update) {
           try {
             const existing = skills.getSkill(projectId, skillToUpdate.name);
@@ -361,17 +379,35 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
                 }
                 mergedFileTree = JSON.stringify(existingTree);
               }
-              skills.updateSkill(projectId, skillToUpdate.name, updatedContent, undefined, undefined, undefined, mergedFileTree);
-              // Best-effort disk write
-              try {
-                const skillObj = skills.getSkill(projectId, skillToUpdate.name);
-                if (skillObj) skills.writeSkillToDisk(skillObj);
-              } catch (_) { /* non-fatal */ }
+              const proposedState = JSON.stringify({
+                content: updatedContent,
+                description: existing.description,
+                category: (existing as any).category || null,
+                tags: existing.tags || null,
+                always_apply: (existing as any).always_apply ?? 0,
+                file_tree: mergedFileTree || (existing as any).file_tree || null,
+              });
+              const evidenceJson = JSON.stringify([
+                { trigger: "LLM synthesis update", observation_ids: batch.map(o => o.id), model: synthModel, patch_type: skillToUpdate.patch_type },
+              ]);
+              const proposal = skillGovernance.createProposal(
+                projectId,
+                "update",
+                skillToUpdate.name,
+                proposedState,
+                {
+                  evidenceJson,
+                  qualityScore: 0.5,
+                  noveltyScore: 0.3,
+                  alwaysApply: (existing as any).always_apply ?? 0,
+                },
+              );
+              skillGovernance.submitProposal(projectId, proposal.id);
               logEvent(
-                projectId, "skill_updated", "synthesis",
-                `Skill updated: ${skillToUpdate.name}`,
+                projectId, "proposal_created", "synthesis",
+                `Proposal created (update): ${skillToUpdate.name}`,
                 `Patch type: ${skillToUpdate.patch_type}`,
-                { skill_name: skillToUpdate.name, patch_type: skillToUpdate.patch_type, via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
+                { proposal_id: proposal.id, skill_name: skillToUpdate.name, proposal_type: "update", patch_type: skillToUpdate.patch_type, via_llm: true, model: synthModel, observation_ids: batch.map(o => o.id), project_name: projectName },
                 synthesisEventId,
                 sessionId,
               );
@@ -379,8 +415,8 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
               result.errors.push(`Skill update "${skillToUpdate.name}": not found`);
             }
           } catch (err: any) {
-            logger.error("synthesis", `Skill update "${skillToUpdate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
-            result.errors.push(`Skill update "${skillToUpdate.name}": ${err.message}`);
+            logger.error("synthesis", `Skill update proposal "${skillToUpdate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
+            result.errors.push(`Skill update proposal "${skillToUpdate.name}": ${err.message}`);
           }
         }
 
@@ -420,9 +456,10 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
           }
         }
 
-        // Update summary to include skill info
-        if (result.skills_created > 0 || llmResult.skills_to_update.length > 0) {
-          result.summary += ` LLM synthesized ${result.skills_created} skill(s), ${llmResult.skills_to_update.filter(s => s.name).length} update(s).`;
+        // Update summary to include proposal info
+        const totalProposals = result.skills_created + llmResult.skills_to_update.filter(s => s.name).length;
+        if (totalProposals > 0) {
+          result.summary += ` LLM created ${totalProposals} governance proposal(s).`;
         }
       }
     } catch (err: any) {
@@ -483,6 +520,10 @@ export function getSynthesisStatus(projectId: string): {
 /**
  * Cross-project synthesis: identifies patterns present in 2+ projects
  * and promotes them to the global-default project as shared skills and traits.
+ *
+ * Skills appearing in ≥2 non-global projects are copied to the global project.
+ * Traits with confidence ≥0.7 appearing in ≥2 projects are also promoted.
+ * Already-existing global skills are updated to note their cross-project origin.
  */
 export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
   const result: SynthesisResult = {
@@ -553,26 +594,40 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
       if (!existing) {
         const sourceSkill = skills.getSkill(sampleSkill.project_id || projectIds[0]!, skillName);
         const fileTree = (sourceSkill as any)?.file_tree || undefined;
-        skills.createSkill(
+        const proposedState = JSON.stringify({
+          content: sampleSkill.content,
+          description: `[Cross-project] ${sampleSkill.description}`,
+          category: "global",
+          tags: sampleSkill.tags || "cross-project,auto-generated",
+          always_apply: 0,
+          file_tree: fileTree || null,
+        });
+        const evidenceJson = JSON.stringify([
+          { trigger: "cross-project synthesis", project_count: projectIds.length, source_projects: projectIds },
+        ]);
+        const proposal = skillGovernance.createProposal(
           globalProject.id,
+          "create",
           sampleSkill.name,
-          `[Cross-project] ${sampleSkill.description}`,
-          sampleSkill.content,
-          "global",
-          sampleSkill.tags || "cross-project,auto-generated",
-          1,
-          fileTree,
+          proposedState,
+          {
+            evidenceJson,
+            qualityScore: 0.5,
+            noveltyScore: 0.3,
+            alwaysApply: 0,
+          },
         );
+        skillGovernance.submitProposal(globalProject.id, proposal.id);
         result.skills_created++;
 
         try {
           logEvent(
             globalProject.id,
-            "skill_created",
+            "proposal_created",
             "synthesis",
-            `Cross-project skill created: ${skillName}`,
+            `Cross-project proposal created (create): ${skillName}`,
             `Promoted from ${projectIds.length} projects`,
-            { skill_name: skillName, project_count: projectIds.length, cross_project: true },
+            { proposal_id: proposal.id, skill_name: skillName, proposal_type: "create", project_count: projectIds.length, cross_project: true },
           );
         } catch (_) { /* non-fatal */ }
       } else {
@@ -580,7 +635,40 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
         const updatedDesc = existing.description.includes("[Cross-project]")
           ? existing.description
           : `[Cross-project] ${existing.description}`;
-        skills.updateSkill(globalProject.id, skillName, existing.content, updatedDesc);
+        const proposedState = JSON.stringify({
+          content: existing.content,
+          description: updatedDesc,
+          category: (existing as any).category || null,
+          tags: existing.tags || null,
+          always_apply: (existing as any).always_apply ?? 0,
+          file_tree: (existing as any).file_tree || null,
+        });
+        const evidenceJson = JSON.stringify([
+          { trigger: "cross-project synthesis update", project_count: projectIds.length, source_projects: projectIds },
+        ]);
+        const proposal = skillGovernance.createProposal(
+          globalProject.id,
+          "update",
+          skillName,
+          proposedState,
+          {
+            evidenceJson,
+            qualityScore: 0.5,
+            noveltyScore: 0.2,
+            alwaysApply: (existing as any).always_apply ?? 0,
+          },
+        );
+        skillGovernance.submitProposal(globalProject.id, proposal.id);
+        try {
+          logEvent(
+            globalProject.id,
+            "proposal_created",
+            "synthesis",
+            `Cross-project proposal created (update): ${skillName}`,
+            `Updated description from ${projectIds.length} projects`,
+            { proposal_id: proposal.id, skill_name: skillName, proposal_type: "update", project_count: projectIds.length, cross_project: true },
+          );
+        } catch (_) { /* non-fatal */ }
       }
     } catch (err: any) {
       logger.error("synthesis", `Cross-project skill promotion "${skillName}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
@@ -589,7 +677,9 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
   }
 
   // ── Cross-project traits ──
-  // Aggregate traits from all non-global projects
+  // Aggregate traits from all non-global projects.
+  // Only traits with confidence ≥ 0.7 are eligible for promotion (threshold
+  // filters out weak signals that haven't been reinforced across cycles).
   const traitMap = new Map<string, { count: number; trait: any }>();
   for (const proj of nonGlobalProjects) {
     try {
@@ -628,7 +718,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
     }
   }
 
-  result.summary = `Cross-project synthesis complete: ${result.skills_created} skill(s) promoted, ${result.traits_created} trait(s) aggregated from ${nonGlobalProjects.length} project(s).`;
+  result.summary = `Cross-project synthesis complete: ${result.skills_created} proposal(s) created, ${result.traits_created} trait(s) aggregated from ${nonGlobalProjects.length} project(s).`;
   if (result.errors.length > 0) {
     result.summary += ` ${result.errors.length} error(s) encountered.`;
   }
@@ -648,7 +738,7 @@ export async function runCrossProjectSynthesis(): Promise<SynthesisResult> {
 }
 
 /**
- * Consolidation result from the skill audit job.
+ * Result of a skill consolidation run.
  */
 export interface ConsolidationResult {
   merged: number;
@@ -660,6 +750,13 @@ export interface ConsolidationResult {
  * Audit all enabled skills for a project and use the LLM to propose merges/deletes,
  * condensing to ≤20 skills. This is a standalone pass that runs after synthesis,
  * not driven by new observations — it evaluates the entire skill catalog.
+ *
+ * Pre-consolidation state is saved as a setting (`consolidation_backup`) capped
+ * at 50 KB, enabling a manual restore if the LLM's proposals are too aggressive.
+ *
+ * WARNING: Merges use `stripLeadingFrontmatter()` to avoid embedding YAML in
+ *          the middle of the merged document. If either skill lacks frontmatter,
+ *          the merge still proceeds (the function returns the body unchanged).
  */
 export async function consolidateSkills(projectId: string): Promise<ConsolidationResult> {
   // Skip if LLM not configured
@@ -728,7 +825,7 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
     setSetting(projectId, "consolidation_backup", backupData.substring(0, 50000)); // cap at 50KB
   } catch (_) { /* non-fatal */ }
 
-  // Process merges: combine source skill into target, delete source
+  // Process merges: produce governance merge proposals (governance-gated)
   for (const merge of result.merges || []) {
     try {
       const target = skills.getSkill(projectId, merge.target);
@@ -745,7 +842,7 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
       const targetTree = safeParseJson((target as any).file_tree || "{}");
       const sourceTree = safeParseJson((source as any).file_tree || "{}");
       for (const [key, val] of Object.entries(sourceTree)) {
-        if (key.startsWith("merged-")) continue; // already merged, skip to prevent nested prefixes
+        if (key.startsWith("merged-")) continue;
         targetTree[`merged-${merge.source}/${key}`] = val;
       }
 
@@ -757,34 +854,68 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
         ]),
       ].join(",");
 
-      skills.updateSkill(
+      const proposedState = JSON.stringify({
+        content: mergedContent,
+        description: target.description || "",
+        category: (target as any).category || null,
+        tags: mergedTags || null,
+        always_apply: (target as any).always_apply ?? 0,
+        file_tree: JSON.stringify(targetTree),
+      });
+      const proposal = skillGovernance.createProposal(
         projectId,
+        "merge",
         merge.target,
-        mergedContent,
-        target.description || "",
-        mergedTags,
-        (target as any).always_apply,
-        JSON.stringify(targetTree),
+        proposedState,
+        {
+          sourceProjectId: projectId,
+          sourceName: merge.source,
+          qualityScore: 0.7,
+          noveltyScore: 0.1,
+          alwaysApply: (target as any).always_apply ?? 0,
+        },
       );
-      skills.writeSkillToDisk(skills.getSkill(projectId, merge.target)!);
-      skills.deleteSkill(projectId, merge.source);
+      skillGovernance.submitProposal(projectId, proposal.id);
       merged++;
     } catch (e: any) {
-      logger.warn("synthesis", `Merge failed: ${merge.source} → ${merge.target}: ${e.message}`);
+      logger.warn("synthesis", `Merge proposal failed: ${merge.source} → ${merge.target}: ${e.message}`);
     }
   }
 
-  // Process deletes
+  // Process deletes: produce governance archive proposals (governance-gated)
   for (const name of result.delete || []) {
     try {
-      skills.deleteSkill(projectId, name);
+      const skillToArchive = skills.getSkill(projectId, name);
+      if (!skillToArchive) continue;
+      const proposedState = JSON.stringify({
+        // Archive proposals don't require content/description — the skill is being soft-deleted.
+        // We include minimal metadata for traceability.
+        content: skillToArchive.content,
+        description: skillToArchive.description || "",
+        category: (skillToArchive as any).category || null,
+        tags: skillToArchive.tags || null,
+        always_apply: (skillToArchive as any).always_apply ?? 0,
+        file_tree: (skillToArchive as any).file_tree || null,
+      });
+      const proposal = skillGovernance.createProposal(
+        projectId,
+        "archive",
+        name,
+        proposedState,
+        {
+          qualityScore: 0.7,
+          noveltyScore: 0.0,
+          alwaysApply: (skillToArchive as any).always_apply ?? 0,
+        },
+      );
+      skillGovernance.submitProposal(projectId, proposal.id);
       deleted++;
     } catch (e: any) {
-      logger.warn("synthesis", `Delete failed for ${name}: ${e.message}`);
+      logger.warn("synthesis", `Archive proposal failed for ${name}: ${e.message}`);
     }
   }
 
-  const summary = `Consolidated ${allSkills.length} → ${allSkills.length - merged - deleted} skills (${merged} merged, ${deleted} deleted)`;
+  const summary = `Consolidation created ${merged} merge proposal(s) and ${deleted} archive proposal(s) for ${allSkills.length} skills`;
 
   // Log consolidation result
   logger.info("synthesis", `Skill consolidation: ${summary}`);
