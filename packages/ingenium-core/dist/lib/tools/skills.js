@@ -277,6 +277,13 @@ export function syncSkillFromDisk(projectId, name) {
             logger.debug("skills", "Skill file not found on disk", { name, filePath });
             return undefined;
         }
+        // Canonicalize the skill directory to prevent symlink escapes during reading
+        const skillDir = resolve(filePath, "..");
+        let baseDir = skillDir;
+        try {
+            baseDir = realpathSync(skillDir);
+        }
+        catch { /* fall back to resolved path */ }
         // Read and parse frontmatter
         const content = readFileSync(filePath, "utf-8");
         const nameMatch = content.match(/^name:\s*(.+)$/m);
@@ -300,6 +307,8 @@ export function syncSkillFromDisk(projectId, name) {
             catch { }
         }
         // Read all auxiliary files (everything except SKILL.md and metadata.json)
+        // 🔴 SECURITY: Verify every file read is within the canonical skill directory
+        // to prevent symlink-based escapes reading files outside the expected path.
         let fileTree = "";
         try {
             const tree = {};
@@ -307,14 +316,44 @@ export function syncSkillFromDisk(projectId, name) {
                 const entries = readdirSync(dir, { withFileTypes: true });
                 for (const e of entries) {
                     if (e.isDirectory()) {
-                        walkDir(resolve(dir, e.name), base + e.name + "/");
+                        const childPath = resolve(dir, e.name);
+                        // Containment check before recursing into subdirectories
+                        try {
+                            const childCanonical = realpathSync(childPath);
+                            if (!childCanonical.startsWith(baseDir + sep) && childCanonical !== baseDir) {
+                                logger.warn("skills", "Skipping directory outside skill base", {
+                                    name, path: childPath, canonical: childCanonical,
+                                });
+                                continue;
+                            }
+                            walkDir(childPath, base + e.name + "/");
+                        }
+                        catch {
+                            // realpathSync may fail; skip this entry
+                        }
                     }
                     else if (e.isFile()) {
                         const relPath = base + e.name;
                         if (relPath === "SKILL.md" || relPath === "metadata.json")
                             continue;
-                        tree[relPath] = readFileSync(resolve(dir, e.name), "utf-8");
+                        const childPath = resolve(dir, e.name);
+                        // Containment check before reading file content
+                        try {
+                            const childCanonical = realpathSync(childPath);
+                            if (!childCanonical.startsWith(baseDir + sep) && childCanonical !== baseDir) {
+                                logger.warn("skills", "Skipping file outside skill base", {
+                                    name, path: childPath, canonical: childCanonical,
+                                });
+                                continue;
+                            }
+                        }
+                        catch {
+                            // realpathSync may fail; skip this entry
+                        }
+                        tree[relPath] = readFileSync(childPath, "utf-8");
                     }
+                    // Note: symlinks are not followed — readdirSync with withFileTypes uses lstat,
+                    // so symlinks are neither isDirectory() nor isFile() and are silently skipped.
                 }
             };
             walkDir(resolve(filePath, ".."), "");

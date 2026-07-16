@@ -72,6 +72,8 @@ COPY --chown=appuser:appuser scripts/docker-entrypoint.sh ./entrypoint.sh
 COPY --chown=appuser:appuser .opencode/agents ./.opencode/agents
 COPY --chown=appuser:appuser .opencode/commands ./.opencode/commands
 COPY --chown=appuser:appuser .opencode/skills ./.opencode/skills
+# Copy database migrations (needed for incremental DB upgrades)
+COPY packages/ingenium-core/data/migrations/ /app/packages/ingenium-core/data/migrations/
 RUN chmod +x /app/entrypoint.sh
 
 # Create shared config and data directories with proper ownership

@@ -36,7 +36,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh DB — run all migrations in order
-      for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql"]) {
+      for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -328,6 +328,116 @@ function runMigrations(db: Database.Database): void {
       const sql = readFileSync(resolve(migrationsDir, "028_email_suggestion_queue.sql"), "utf-8");
       db.exec(sql);
       logger.info("db", "Applied migration 028_email_suggestion_queue.sql");
+    }
+
+    // Check if docs_spaces table exists (migration 029)
+    const docsSpacesCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_spaces'"
+    ).get() as { count: number };
+    if (docsSpacesCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "029_docs_spaces.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 029_docs_spaces.sql");
+    }
+
+    // Check if docs_pages table exists (migration 030)
+    const docsPagesCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_pages'"
+    ).get() as { count: number };
+    if (docsPagesCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "030_docs_pages.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 030_docs_pages.sql");
+    }
+
+    // Check if docs_pages_fts FTS table exists (migration 031)
+    const docsPagesFtsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_pages_fts'"
+    ).get() as { count: number };
+    if (docsPagesFtsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "031_docs_pages_fts.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 031_docs_pages_fts.sql");
+    }
+
+    // Check if docs_page_drafts table exists (migration 032)
+    const docsDraftsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_page_drafts'"
+    ).get() as { count: number };
+    if (docsDraftsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "032_docs_drafts.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 032_docs_drafts.sql");
+    }
+
+    // Check if docs_page_versions table exists (migration 033)
+    const docsVersionsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_page_versions'"
+    ).get() as { count: number };
+    if (docsVersionsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "033_docs_versions.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 033_docs_versions.sql");
+    }
+
+    // Check if docs_tags table exists (migration 034)
+    const docsTagsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_tags'"
+    ).get() as { count: number };
+    if (docsTagsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "034_docs_tags.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 034_docs_tags.sql");
+    }
+
+    // Check if docs_page_links table exists (migration 035)
+    const docsLinksCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_page_links'"
+    ).get() as { count: number };
+    if (docsLinksCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "035_docs_links.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 035_docs_links.sql");
+    }
+
+    // Check if docs_comments table exists (migration 036)
+    const docsCommentsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_comments'"
+    ).get() as { count: number };
+    if (docsCommentsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "036_docs_comments.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 036_docs_comments.sql");
+    }
+
+    // Check if docs_page_projects table exists (migration 037)
+    const docsProjCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_page_projects'"
+    ).get() as { count: number };
+    if (docsProjCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "037_docs_project_links.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 037_docs_project_links.sql");
+    }
+
+    // Check if docs_attachments table exists (migration 038)
+    const docsAttachCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_attachments'"
+    ).get() as { count: number };
+    if (docsAttachCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "038_docs_attachments.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 038_docs_attachments.sql");
+    }
+
+    // Check if docs_templates table exists (migration 039)
+    const docsTemplatesCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='docs_templates'"
+    ).get() as { count: number };
+    if (docsTemplatesCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "039_docs_templates.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 039_docs_templates.sql");
     }
   }
 }
