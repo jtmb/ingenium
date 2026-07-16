@@ -114,3 +114,18 @@
     border-color: var(--color-border);
   }
 }
+
+/* Callout blocks for DocsEditor markdown renderer */
+.callout {
+  border-left: 4px solid;
+  padding: 0.5rem 1rem;
+  margin: 0.75rem 0;
+  background: var(--color-surface-hover);
+  border-radius: 0 4px 4px 0;
+}
+.callout-note { border-left-color: #3b82f6; }
+.callout-warning { border-left-color: #f59e0b; }
+.callout-danger { border-left-color: #ef4444; }
+.callout-info { border-left-color: #06b6d4; }
+.callout-tip { border-left-color: #10b981; }
+.callout-success { border-left-color: #22c55e; }

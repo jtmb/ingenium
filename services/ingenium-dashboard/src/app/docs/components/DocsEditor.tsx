@@ -47,7 +47,7 @@ export function renderMarkdown(content: string): string {
   // Pattern: > **Note:** or > **Warning:** etc.
   processed = processed.replace(
     /^>\s*\*\*(Note|Warning|Info|Tip|Danger|Success):\*\*(.*?)(?:\n> (.*?))*(?=\n\n|\n(?!>)|$)/gm,
-    (_match, type: string, ...rest: string[]) => {
+    (_match, type: string, ..._rest: string[]) => {
       // Reconstruct the full block content
       const fullMatch = _match;
       const contentWithoutCallout = fullMatch
@@ -55,16 +55,7 @@ export function renderMarkdown(content: string): string {
         .replace(/^>\s?/gm, "")
         .trim();
       const typeLower = type.toLowerCase();
-      const colors: Record<string, string> = {
-        note: "#3b82f6",
-        warning: "#f59e0b",
-        danger: "#ef4444",
-        info: "#06b6d4",
-        tip: "#10b981",
-        success: "#22c55e",
-      };
-      const borderColor = colors[typeLower] || "#3b82f6";
-      return `<div class="callout callout-${typeLower}" style="border-left: 4px solid ${borderColor}; padding: 0.5rem 1rem; margin: 0.75rem 0; background: var(--color-surface-hover); border-radius: 0 4px 4px 0;">
+      return `<div class="callout callout-${typeLower}">
 <strong>${type}:</strong> ${contentWithoutCallout}
 </div>`;
     },
@@ -73,7 +64,7 @@ export function renderMarkdown(content: string): string {
   const html = marked.parse(processed, { async: false }) as string;
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: ["h1","h2","h3","h4","h5","h6","p","br","hr","pre","code","blockquote","ul","ol","li","a","strong","em","del","table","thead","tbody","tr","th","td","img","div","span"],
-    ALLOWED_ATTR: ["href","target","data-internal","class","style","src","alt"],
+    ALLOWED_ATTR: ["href","target","data-internal","class","src","alt"],
   });
 }
 
