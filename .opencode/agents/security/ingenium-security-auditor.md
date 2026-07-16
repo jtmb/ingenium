@@ -5,7 +5,8 @@ mode: subagent
 model: deepseek/deepseek-v4-flash
 permission:
   read: allow
-  edit: allow
+  edit: deny
+  write: deny
   bash: allow
   glob: allow
   grep: allow
@@ -16,9 +17,8 @@ permission:
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
+    "@engineering-workflow": allow
     "@mcp-tooling": allow
-    "@github-cli": allow
-    "@debugging-patterns": allow
     "*": deny
 ---
 

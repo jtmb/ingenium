@@ -5,9 +5,22 @@ model: deepseek/deepseek-v4-pro
 steps: 100
 permission:
   read: allow
-  edit: allow
-  write: allow
-  bash: allow
+  edit: deny
+  write: deny
+  bash:
+    "git add *": allow
+    "git commit *": allow
+    "git rev-parse *": allow
+    "npm test": allow
+    "npm run test *": allow
+    "npx vitest *": allow
+    "npx tsc *": allow
+    "npx playwright *": allow
+    "curl *": allow
+    "python -m pytest": allow
+    "go test": allow
+    "docker compose *": allow
+    "*": deny
   task:
     "*": "deny"
     "ingenium-explore": "allow"
@@ -17,17 +30,16 @@ permission:
     "ingenium-software-engineer-fast": "allow"
     "ingenium-software-engineer-premium": "allow"
     "ingenium-scout": "allow"
+    "browser-agent": "allow"
     "vision-bridge": "allow"
   playwright_*: allow
   skill:
     "@development-conventions": allow
     "@devops-conventions": allow
-    "@debugging-patterns": allow
+    "@engineering-workflow": allow
     "@local-models": allow
-    "@configuring-opencode": allow
     "@skill-maintenance": allow
     "@mcp-tooling": allow
-    "@github-cli": allow
     "*": deny
 ---
 
@@ -98,13 +110,11 @@ You read plans from the prior conversation context (the Plan agent's output), de
 Load these skills at session start:
 
 - **`@development-conventions`** — Code conventions, API design, README/Next.js/Python patterns, testing, refactoring
-- **`@devops-conventions`** — Docker, Kubernetes, shell scripts, CLI toolkit
-- **`@debugging-patterns`** — Debugging methods, error interpretation, self-correction
+- **`@devops-conventions`** — Docker, Kubernetes, shell scripts, CLI toolkit, git hygiene, GitHub CLI
+- **`@engineering-workflow`** — Agent execution quality, debugging, OpenCode agent configuration, orchestrator primer, logging, supervision
 - **`@local-models`** — Command safety rules (no `&`, timeout wrappers), model profiles
-- **`@configuring-opencode`** — OpenCode agent configuration, permission lockdown, skill reference conventions
 - **`@skill-maintenance`** — Skill creation, detection, indexing, and audit. Used when encoding new patterns
-- **`@mcp-tooling`** — MCP tool integration and browser automation for visual verification
-- **`@github-cli`** — GitHub CLI for PRs, issues, releases
+- **`@mcp-tooling`** — MCP tool integration, browser automation for visual verification, Thread persistence
 
 ## Architecture
 
@@ -185,18 +195,18 @@ When a task fails, run structured analysis:
 #### Step 6 — Encode Pattern or Create Skill
 If the failure reveals a NEW pattern:
 
-| Pattern category | Skill to update | Reference file |
+| Pattern category | Canonical Skill | Reference file |
 |-----------------|----------------|---------------|
 | Command safety / `&` / timeout | `@local-models` | `references/command-safety.md` |
 | Model-specific behavior | `@local-models` | `references/model-profiles.md` |
 | Code / language conventions | `@development-conventions` | `references/<lang>-conventions/` or `SKILL.md` |
 | Infrastructure / Docker / K8s | `@devops-conventions` | `references/docker/` / `kubernetes/` |
-| Debugging / error patterns | `@debugging-patterns` | `references/` |
-| Browser / Playwright patterns | `@mcp-tooling` | `references/playwright/` |
-| GitHub / PR / release | `@github-cli` | `references/` |
-| Agent pipeline / orchestration | `@configuring-opencode` | `SKILL.md` |
-| Documentation / README | `@development-conventions` | `references/create-readme/` |
-| Security findings | `@development-conventions` | `references/` |
+| Debugging / error / agent pipeline patterns | `@engineering-workflow` | `references/` |
+| Browser / Playwright / MCP integration | `@mcp-tooling` | `references/playwright/` |
+| GitHub / PR / release / git hygiene | `@devops-conventions` | `references/` |
+| Agent configuration / orchestrator | `@engineering-workflow` | `references/` |
+| Documentation / README | `@documentation` | `references/` |
+| Security findings | `@security-audit` | `references/` |
 | Cross-cutting / no existing skill fits | `@skill-maintenance` | Create new skill (see below) |
 
 **To update an existing skill:** Use `edit` to modify the reference file. Tag with `(discovered via {project} task)`.
