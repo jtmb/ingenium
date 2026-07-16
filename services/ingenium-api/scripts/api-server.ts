@@ -30,6 +30,7 @@ import { jobsRouter } from "../lib/routes/jobs.js";
 import { servicesRouter } from "../lib/routes/services.js";
 import { dashboardRouter } from "../lib/routes/dashboard.js";
 import { router as docsRouter } from "../lib/routes/docs.js";
+import { router as docsAiRouter } from "../lib/routes/docs-ai.js";
 import { startScheduler } from "../lib/scheduler.js";
 
 // ── Defense-in-depth crash handlers ──────────────────────────────────────────
@@ -93,6 +94,7 @@ app.use("/api/v1/jobs", jobsRouter);
 app.use("/api/v1/services", servicesRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
 app.use("/api/v1/docs", docsRouter);
+app.use("/api/v1/docs", docsAiRouter);
 
 // Error handler
 app.use(errorHandler);
