@@ -7,7 +7,7 @@ description: Agent profiles, pipeline lifecycle, and subagent invocation for the
 
 ## Overview
 
-Ten agents total: 1 primary, 9 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Nine specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, security, and vision analysis.
+12 agents total: 1 primary, 11 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Eleven specialized subagents handle search, context, prompt engineering, implementation (2 tiers), review, documentation, security, browser automation, and vision analysis.
 
 ```mermaid
 flowchart TB
@@ -48,19 +48,19 @@ flowchart TB
 
 ## Agent Table
 
-| Agent | Type | Model | Provider | Access | Purpose |
-|-------|------|-------|----------|--------|---------|
-| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Full R/W (`edit: deny, write: deny`) | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
-| **ingenium-prompt-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
-| **ingenium-explore** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Codebase search — grep, glob, file discovery, pattern analysis |
-| **ingenium-scout** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Thread/RAG persistent memory — past decisions, preferences |
-| **ingenium-software-engineer** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | **Writes all code** — implementation, refactoring, bug fixes. Also: design review, technical analysis |
-| **vision-bridge** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only (`read: allow`) | Vision analysis — reads screenshot files and produces structured technical descriptions for non-vision models |
-| **ingenium-software-engineer-fast** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read/Write (`edit: allow, write: allow`) | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
-| **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | Complex multi-file refactoring, architectural changes, performance-critical code |
-| **ingenium-qa** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only | Code review + test verification. Reviews tests written by @ingenium-software-engineer. Does NOT write production code or author tests |
-| **ingenium-docs** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Edit + Write (`edit: allow, write: allow, bash: deny`) | Documentation + skill updates — observations are auto-extracted by the server-side engine |
-| **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | Security audit + git-history leak scanning |
+| Agent | Type | Model | Provider | Access | Skills Allowed | Purpose |
+|-------|------|-------|----------|--------|---------------|---------|
+| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Full R/W (`edit: deny, write: deny`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
+| **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | — | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
+| **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `local-models` | Codebase search — grep, glob, file discovery, pattern analysis |
+| **ingenium-scout** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `local-models` | Thread/RAG persistent memory — past decisions, preferences |
+| **vision-bridge** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only (`read: allow`) | `local-models` | Vision analysis — reads screenshot files and produces structured technical descriptions for non-vision models |
+| **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
+| **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Complex multi-file refactoring, architectural changes, performance-critical code |
+| **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` | Code review + test verification. Reviews tests, does NOT write production code or author tests |
+| **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Edit + Write (`edit: allow, write: allow, bash: deny`) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` | Documentation + skill updates — observations are auto-extracted by the server-side engine |
+| **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` | Security audit + git-history leak scanning |
+| **browser-agent** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Free | Read/Write | `mcp-tooling`, `engineering-workflow` | Browser automation — Puppeteer/Playwright-based web interaction and testing |
 
 ---
 

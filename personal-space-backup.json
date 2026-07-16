@@ -1,0 +1,161 @@
+{
+  "data": {
+    "space": {
+      "id": 1,
+      "name": "Personal",
+      "slug": "personal",
+      "description": "Your personal documentation space",
+      "icon": "user",
+      "sortOrder": 0,
+      "isGlobal": 1,
+      "createdAt": "2026-07-16T05:07:47.030Z",
+      "updatedAt": "2026-07-16T05:07:47.030Z"
+    },
+    "pages": [
+      {
+        "id": 5,
+        "spaceId": 1,
+        "parentPageId": null,
+        "title": "Getting Started",
+        "slug": "getting-started-mrnubglg",
+        "content": "",
+        "revision": 0,
+        "status": "draft",
+        "sortOrder": 0,
+        "isFavorite": 0,
+        "createdAt": "2026-07-16T18:26:18.443Z",
+        "updatedAt": "2026-07-16T18:26:18.443Z"
+      },
+      {
+        "id": 4,
+        "spaceId": 1,
+        "parentPageId": null,
+        "title": "QA Baseline Disposable Page",
+        "slug": "qa-baseline-disposable-1784180134853",
+        "content": "# QA Baseline Page\n\nThis is a disposable page created for baseline screenshot capture.\n\n## Section One\n\nSome content here.\n\n## Section Two\n\nMore content.",
+        "revision": 1,
+        "status": "archived",
+        "sortOrder": 0,
+        "isFavorite": 0,
+        "createdAt": "2026-07-16T05:35:34.857Z",
+        "updatedAt": "2026-07-16T05:36:30.390Z"
+      },
+      {
+        "id": 1,
+        "spaceId": 1,
+        "parentPageId": null,
+        "title": "Untitled",
+        "slug": "untitled-1784178614570",
+        "content": "",
+        "revision": 1,
+        "status": "archived",
+        "sortOrder": 0,
+        "isFavorite": 0,
+        "createdAt": "2026-07-16T05:10:14.568Z",
+        "updatedAt": "2026-07-16T18:28:07.905Z"
+      },
+      {
+        "id": 2,
+        "spaceId": 1,
+        "parentPageId": null,
+        "title": "Untitled",
+        "slug": "untitled-1784178689035",
+        "content": "",
+        "revision": 1,
+        "status": "archived",
+        "sortOrder": 0,
+        "isFavorite": 0,
+        "createdAt": "2026-07-16T05:11:29.029Z",
+        "updatedAt": "2026-07-16T18:28:09.567Z"
+      },
+      {
+        "id": 3,
+        "spaceId": 1,
+        "parentPageId": null,
+        "title": "Untitled",
+        "slug": "untitled-1784178689601",
+        "content": "",
+        "revision": 1,
+        "status": "archived",
+        "sortOrder": 0,
+        "isFavorite": 0,
+        "createdAt": "2026-07-16T05:11:29.593Z",
+        "updatedAt": "2026-07-16T18:28:11.873Z"
+      }
+    ],
+    "tree": [
+      {
+        "id": 5,
+        "spaceId": 1,
+        "parentPageId": null,
+        "title": "Getting Started",
+        "slug": "getting-started-mrnubglg",
+        "content": "",
+        "revision": 0,
+        "status": "draft",
+        "sortOrder": 0,
+        "isFavorite": 0,
+        "createdAt": "2026-07-16T18:26:18.443Z",
+        "updatedAt": "2026-07-16T18:26:18.443Z",
+        "children": []
+      }
+    ],
+    "tags": [
+      {
+        "pageId": 5,
+        "tags": []
+      },
+      {
+        "pageId": 4,
+        "tags": []
+      },
+      {
+        "pageId": 1,
+        "tags": []
+      },
+      {
+        "pageId": 2,
+        "tags": []
+      },
+      {
+        "pageId": 3,
+        "tags": []
+      }
+    ],
+    "versions": [
+      {
+        "id": 4,
+        "pageId": 4,
+        "revision": 1,
+        "title": "QA Baseline Disposable Page",
+        "content": "# QA Baseline Page\n\nThis is a disposable page created for baseline screenshot capture.\n\n## Section One\n\nSome content here.\n\n## Section Two\n\nMore content.",
+        "createdAt": "2026-07-16T05:35:34.857Z"
+      },
+      {
+        "id": 1,
+        "pageId": 1,
+        "revision": 1,
+        "title": "Untitled",
+        "content": "",
+        "createdAt": "2026-07-16T05:10:14.568Z"
+      },
+      {
+        "id": 2,
+        "pageId": 2,
+        "revision": 1,
+        "title": "Untitled",
+        "content": "",
+        "createdAt": "2026-07-16T05:11:29.029Z"
+      },
+      {
+        "id": 3,
+        "pageId": 3,
+        "revision": 1,
+        "title": "Untitled",
+        "content": "",
+        "createdAt": "2026-07-16T05:11:29.593Z"
+      }
+    ],
+    "comments": []
+  }
+}
