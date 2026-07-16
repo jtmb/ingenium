@@ -1,17 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import SmartSuggest from "./SmartSuggest";
+import RichTextEditor, { RichTextEditorHandle } from "./RichTextEditor";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
 
+/** Escape plain text for safe insertion as HTML content */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/** Convert plain text to safe HTML paragraphs */
+function plainTextToHtml(text: string): string {
+  const escaped = escapeHtml(text);
+  const paragraphs = escaped.split(/\n\n+/);
+  return paragraphs.map((p) => `<p>${p.replace(/\n/g, "<br>") || "<br>"}</p>`).join("");
+}
+
+/** Strip HTML tags, decode entities, trim */
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
 /**
  * EmailComposer — simple compose form with From/To/CC/BCC/Subject/Body.
- * Uses <textarea> for body (TipTap integration deferred to follow-up).
+ * Uses RichTextEditor (TipTap) for HTML body composition.
  *
  * When `inline={true}`, renders a compact Gmail-inspired reply box
- * (tighter spacing, single-line fields, smaller textarea).
+ * (tighter spacing, single-line fields, smaller editor).
  * When `inline` is falsy/undefined, renders the full modal layout unchanged.
+ *
+ * When `sideBySide={true}` (only valid with `inline`), the composer's
+ * background/padding/rounded wrapper is removed — the parent panel in
+ * EmailReader handles the positioning.
  */
 export default function EmailComposer({
   initialData,
@@ -21,6 +53,7 @@ export default function EmailComposer({
   onSave,
   onCancel,
   inline,
+  sideBySide,
   project,
   emailUid,
   accountId,
@@ -34,6 +67,7 @@ export default function EmailComposer({
   onSave: (data: any) => void;
   onCancel: () => void;
   inline?: boolean;
+  sideBySide?: boolean;
   project?: string;
   emailUid?: string;
   accountId?: string;
@@ -46,15 +80,45 @@ export default function EmailComposer({
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState(initialData?.subject || "");
-  const [body, setBody] = useState(initialData?.body || "");
+  const [htmlBody, setHtmlBody] = useState(initialData?.body ? plainTextToHtml(initialData.body) : "");
   const [fromAccount, setFromAccount] = useState(initialAccountId || "");
+
+  // RichTextEditor ref for imperative API access
+  const editorRef = useRef<RichTextEditorHandle>(null);
+
+  // Smart replies mode — fetched from settings (defaults to "auto")
+  const [smartRepliesMode, setSmartRepliesMode] = useState<"auto" | "manual">("auto");
+
+  useEffect(() => {
+    if (!project) return;
+    fetch(
+      `${API_BASE}/settings?project=${encodeURIComponent(project)}&key=mail_smart_replies_mode`,
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const val = d?.data?.value;
+        if (val === "manual") setSmartRepliesMode("manual");
+        else setSmartRepliesMode("auto");
+      })
+      .catch(() => {});
+  }, [project]);
 
   // Review with AI state
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewResult, setReviewResult] = useState<{ improved: string; configured: boolean } | null>(null);
 
-  const formData = { to, cc: showCc ? cc : "", bcc: showBcc ? bcc : "", subject, body, accountId: fromAccount };
+  const plainText = stripHtml(htmlBody);
+
+  const formData = {
+    to,
+    cc: showCc ? cc : "",
+    bcc: showBcc ? bcc : "",
+    subject,
+    accountId: fromAccount,
+    html: htmlBody,
+    text: plainText,
+  };
 
   const handleReview = async () => {
     setReviewLoading(true);
@@ -64,7 +128,7 @@ export default function EmailComposer({
       const res = await fetch(`${API_BASE}/emails/review-draft?project=${project || "global-default"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: body, subject }),
+        body: JSON.stringify({ text: plainText, subject }),
       });
       const data = await res.json().catch(() => ({ data: null }));
       const d = data.data || data;
@@ -83,17 +147,19 @@ export default function EmailComposer({
   };
 
   const applyReview = (improved: string) => {
-    setBody(improved);
+    // Safety: escape before inserting as HTML
+    setHtmlBody(plainTextToHtml(improved));
     setReviewResult(null);
   };
 
   // ———— INLINE VARIANT (compact, Gmail-inspired reply box) ————
-  // [DP#32] Trace: `inline=true` enters this branch → compact layout
-  // FIX 2 — Visual distinction: bg, padding, rounded so the inline reply
-  // box reads as a self-contained card distinct from the page background.
   if (inline) {
+    const wrapperClass = sideBySide
+      ? "flex-1 overflow-y-auto px-3 py-2 space-y-2"
+      : "space-y-2 bg-[var(--color-surface-muted)] p-3 rounded";
+
     return (
-      <div className="space-y-2 bg-[var(--color-surface-muted)] p-3 rounded">
+      <div className={wrapperClass}>
         {/* From — compact single-line */}
         <div className="flex items-center gap-2">
           <span className="text-xs text-[var(--color-text-muted)] w-8 shrink-0">From</span>
@@ -123,7 +189,7 @@ export default function EmailComposer({
           />
         </div>
 
-        {/* CC/BCC toggles — unchanged pattern */}
+        {/* CC/BCC toggles */}
         <div className="flex gap-4 text-sm pl-10">
           <button
             type="button"
@@ -179,30 +245,16 @@ export default function EmailComposer({
           />
         </div>
 
-        {/* Body — compact textarea */}
+        {/* Body — RichTextEditor */}
         <div>
-          <textarea
+          <RichTextEditor
+            ref={editorRef}
+            value={htmlBody}
+            onChange={setHtmlBody}
             placeholder="Write your message..."
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] min-h-[150px] resize-y"
+            minHeight="120px"
           />
         </div>
-
-        {/* Smart Suggestions — inline in composer */}
-        {emailUid && accountId && (
-          <SmartSuggest
-            emailUid={emailUid}
-            accountId={accountId}
-            folder={folder}
-            mode="auto"
-            onDraft={(draft) => {
-              setSubject(draft.subject);
-              setBody(draft.body);
-            }}
-            compact={true}
-          />
-        )}
 
         {/* Review with AI button + panel (shared between variants) */}
         {!reviewLoading && !reviewResult && !reviewError && (
@@ -230,7 +282,7 @@ export default function EmailComposer({
               <div>
                 <p className="text-xs font-semibold text-[var(--color-text-muted)] mb-1">Original</p>
                 <pre className="text-xs text-[var(--color-text-secondary)] whitespace-pre-wrap font-sans bg-[var(--color-surface-muted)] p-2 rounded">
-                  {body}
+                  {plainText}
                 </pre>
               </div>
               <div>
@@ -255,6 +307,22 @@ export default function EmailComposer({
               </button>
             </div>
           </div>
+        )}
+
+        {/* Smart Suggestions — prominent cards variant (below Review with AI in inline mode) */}
+        {emailUid && accountId && (
+          <SmartSuggest
+            emailUid={emailUid}
+            accountId={accountId}
+            folder={folder}
+            mode={smartRepliesMode}
+            variant="cards"
+            onDraft={(draft) => {
+              setSubject(draft.subject);
+              // Safety: escape plain text before inserting as HTML
+              setHtmlBody(plainTextToHtml(draft.body));
+            }}
+          />
         )}
 
         {/* Buttons */}
@@ -282,11 +350,9 @@ export default function EmailComposer({
     );
   }
 
-  // ———— MODAL VARIANT (original, byte-for-byte unchanged) ————
-  // [DP#32] Trace: `inline=false/undefined` enters this branch → current layout,
-  // zero visual/behavioral regression from the pre-change EmailComposer
+  // ———— MODAL VARIANT ————
   return (
-    <div className="space-y-4 max-w-2xl mx-auto">
+    <div className="space-y-4 w-full">
       {/* From */}
       <div>
         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">From</label>
@@ -336,26 +402,26 @@ export default function EmailComposer({
 
       {showCc && (
         <div>
-        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">CC</label>
-        <input
-          type="text"
-          placeholder="CC"
-          value={cc}
-          onChange={(e) => setCc(e.target.value)}
-          className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
+          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">CC</label>
+          <input
+            type="text"
+            placeholder="CC"
+            value={cc}
+            onChange={(e) => setCc(e.target.value)}
+            className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
           />
         </div>
       )}
 
       {showBcc && (
         <div>
-        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">BCC</label>
-        <input
-          type="text"
-          placeholder="BCC"
-          value={bcc}
-          onChange={(e) => setBcc(e.target.value)}
-          className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
+          <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">BCC</label>
+          <input
+            type="text"
+            placeholder="BCC"
+            value={bcc}
+            onChange={(e) => setBcc(e.target.value)}
+            className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
           />
         </div>
       )}
@@ -372,15 +438,18 @@ export default function EmailComposer({
         />
       </div>
 
-      {/* Body */}
-      <div>
-        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">Message</label>
-        <textarea
-          placeholder="Write your message..."
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] min-h-[300px] resize-y"
-        />
+      {/* Body — RichTextEditor */}
+      <div className="min-h-[50vh] flex flex-col">
+        <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1 shrink-0">Message</label>
+        <div className="flex-1">
+          <RichTextEditor
+            ref={editorRef}
+            value={htmlBody}
+            onChange={setHtmlBody}
+            placeholder="Write your message..."
+            minHeight="200px"
+          />
+        </div>
       </div>
 
       {/* Review with AI button + panel (shared between variants) */}
@@ -409,7 +478,7 @@ export default function EmailComposer({
             <div>
               <p className="text-sm font-semibold text-[var(--color-text-muted)] mb-1">Original</p>
               <pre className="text-sm text-[var(--color-text-secondary)] whitespace-pre-wrap font-sans bg-[var(--color-surface-muted)] p-2 rounded max-h-[200px] overflow-y-auto">
-                {body}
+                {plainText}
               </pre>
             </div>
             <div>

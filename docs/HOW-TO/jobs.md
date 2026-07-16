@@ -5,9 +5,20 @@ Job queue and background task monitoring page. Displays a list of scheduled and 
 
 ## How to Use
 1. Navigate to `/jobs` from the dashboard nav bar
-2. The table shows each job's name, status (pending/running/completed/failed), and last run time
-3. Click a job row to see its run history, duration, and any error messages
-4. Failed jobs show error details that can be expanded inline
+2. Jobs are displayed as a **grid of cards**, each showing the job name, agent badge, description, cron schedule (human-readable), enable/disable toggle, timeout, and a status dot indicating the last run outcome
+3. Each card has a **▶ Run Now** button and an **enable/disable toggle** for quick actions without entering the detail view
+4. **Click a job card** to open its full **Detail View**, which shows:
+   - Job info card with name, description, agent badge, cron schedule, trigger event, timeout, enable/disable toggle
+   - Prompt template preview
+   - Action buttons: **▶ Run Now**, **Edit**, and **Delete**
+   - Run history table (ID, status badge, trigger, started time, duration, exit code)
+   - Live log console (auto-polls every 2 seconds while a run is active; "Pin to bottom" toggle for auto-scroll)
+
+### Editing a Job
+- From the **Detail View**, click the **Edit** button to open the same form overlay used for creating a job, pre-populated with the job's current values (name, description, agent, prompt template, cron schedule, trigger event, timeout)
+- Change any field and click **Update Job** to save
+- After saving, both the **Detail View** and the **job list** reflect the update
+- The overlay is available from any view — you can also edit directly from the list view if you open the detail view first
 
 ### Creating a Job with the Magic-Wand Button
 When creating or editing a job, the form uses a **two-column layout** — metadata fields on the left, prompt template on the right (collapses to single column on mobile).

@@ -21,7 +21,7 @@
 **Ingenium** is a complete AI agent development workspace. It combines agent orchestration (10 subagent profiles), a Kanban task board, a full email client with AI auto-drafting, a self-learning pipeline with LLM-powered extraction and synthesis, an MCP server manager with per-tool toggles, OpenCode browser embedding, and project management — all accessible through a single MCP stdio transport. Pluggable into any MCP-compatible client (OpenCode, Cline, Claude Desktop, any provider), fully local and cost-effective. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
 ### OpenCode Web UI Embedded in Dashboard
-The dashboard includes an embedded OpenCode service at `/opencode` — a second OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
+The dashboard includes an embedded OpenCode service at `/opencode` — a shared single OpenCode instance on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
 
 Connect any MCP-compatible client (OpenCode, Cline, Claude Desktop) to `ingenium-server` and instantly gain access to **73 tools** spanning project management, skill management, observations, personality, synthesis pipeline, task boards, full-text knowledge search, plugin lifecycle, commands, config management, agent management, server configuration, email client integration with Gmail/Outlook OAuth2 + IMAP/SMTP support, and settings. Every tool is backed by SQLite with WAL mode and FTS5 full-text search.
 
@@ -42,7 +42,7 @@ npm install
 # Start all services (API on :4097, dashboard on :3000, MCP server on stdio)
 ./run.sh dev
 
-# Or use Docker (API :4097, dashboard :3000, opencode-server :4096 managed by supervisord)
+# Or use Docker (API :4097, dashboard :3000, opencode-web :4098 managed by supervisord)
 docker compose up --build
 ```
 
@@ -80,7 +80,7 @@ Plugins ship inside the `@ingenium/extension` package. Reference them from your 
 
 **Other MCP clients** — Point your client's `command` to `npx -y @ingenium/extension`. The server speaks stdio MCP with **73 tools**. No HTTP port, no network config.
 
-**Docker Deployment** — Single-container deployment via `docker compose up --build` manages four processes: API (`:4097`), Dashboard (`:3000`), opencode-server (`:4096`), and opencode-iframe (`:4098`) via supervisord. Build-time UID matching ensures write access to workspace. Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
+**Docker Deployment** — Single-container deployment via `docker compose up --build` manages three processes: API (`:4097`), Dashboard (`:3000`), and opencode-web (`:4098`) via supervisord. Build-time UID matching ensures write access to workspace. Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 
 **Open the dashboard** — Navigate to `http://localhost:3000` in your browser. The Next.js dashboard provides visual management for all feature areas.
 
@@ -196,7 +196,7 @@ Real-time log dashboard for monitoring API, dashboard, and MCP server activity. 
 <p align="center"><img src="docs/assets/screenshot-logs.png" alt="Logs" width="600" /></p>
 
 ### 🌐 OpenCode
-Embedded OpenCode web UI at `/opencode` — a second OpenCode instance running on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across dashboard tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
+Embedded OpenCode web UI at `/opencode` — a shared single OpenCode instance running on `:4098` without auth (for iframe use) that connects to the Ingenium MCP server via a direct iframe mount. The session persists across dashboard tab navigation with a hidden iframe toggle. Workspace is mounted at `~/repos` → `/workspace` in the container.
 
 <p align="center"><img src="docs/assets/screenshot-opencode.png" alt="OpenCode" width="600" /></p>
 
@@ -225,7 +225,7 @@ ingenium/
 │   └── commands/              # OpenCode custom commands
 ├── docs/                      # Project documentation database
 ├── run.sh                     # Unified dev/test/build/check/seed runner
-├── docker-compose.yml         # Single-container deployment (supervisord: API + dashboard + opencode-server)
+├── docker-compose.yml         # Single-container deployment (supervisord: API + dashboard + opencode-web)
 └── Dockerfile                 # Multi-stage build for containerised deployment
 ```
 
@@ -287,17 +287,15 @@ services:
     ports:
       - "4097:4097"   # API
       - "3000:3000"   # Dashboard
-      - "4096:4096"   # opencode-server (managed by supervisord)
-      - "4098:4098"   # opencode-iframe (no-auth for embedded use)
+      - "127.0.0.1:4098:4098"   # opencode-web (host loopback only)
     volumes:
       - ingenium_data:/app/.ingenium/data
 ```
 
-Inside the container, **supervisord** manages four processes:
+Inside the container, **supervisord** manages three processes:
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill uploads
 2. **Dashboard** (Next.js on :3000) — 16 route-based pages with highlight.js syntax highlighting
-3. **opencode-server** (on :4096) — Auth-enabled OpenCode web server
-4. **opencode-iframe** (on :4098) — No-auth OpenCode iframe for embedded dashboard use
+3. **opencode-web** (on :4098) — OpenCode web server (loopback only)
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
 

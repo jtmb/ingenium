@@ -3,9 +3,8 @@ services:
     build: .
     ports:
       - "3000:3000"   # Dashboard
-      - "4096:4096"   # OpenCode server (auth)
       - "4097:4097"   # API
-      - "4098:4098"   # OpenCode iframe (no auth)
+      - "127.0.0.1:4098:4098"   # OpenCode Web (host loopback only)
     environment:
       - OPENCODE_SERVER_PASSWORD=test
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data

@@ -24,6 +24,7 @@ export default function MailPanel() {
   // Smart replies state
   const [smartRepliesEnabled, setSmartRepliesEnabled] = useState(true);
   const [smartRepliesMode, setSmartRepliesMode] = useState("auto");
+  const [smartRepliesPrefetch, setSmartRepliesPrefetch] = useState(false);
 
   // Password visibility toggles
   const [showPw, setShowPw] = useState<Record<string, boolean>>({});
@@ -55,16 +56,18 @@ export default function MailPanel() {
       .finally(() => setLoadingOauth(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load mail sync interval
+  // Load mail sync interval — smart-reply settings read from global project
+  // (sync engine + API route always resolve to global-default)
   useEffect(() => {
     Promise.all([
       api.settings.get("mail_sync_interval_ms", project),
       api.settings.get("mail_offline_window", project),
       api.settings.get("mail_body_window", project),
-      api.settings.get("mail_smart_replies_enabled", project),
-      api.settings.get("mail_smart_replies_mode", project),
+      api.settings.get("mail_smart_replies_enabled", "global-default"),
+      api.settings.get("mail_smart_replies_mode", "global-default"),
+      api.settings.get("mail_smart_replies_prefetch", "global-default"),
     ])
-      .then(([intervalR, offlineR, bodyR, enabledR, modeR]) => {
+      .then(([intervalR, offlineR, bodyR, enabledR, modeR, prefetchR]) => {
         const ms = parseInt(intervalR.data?.value, 10);
         if (!isNaN(ms) && ms >= 0) setMailIntervalMin(ms / 60000);
         const o = parseInt(offlineR.data?.value, 10);
@@ -75,6 +78,8 @@ export default function MailPanel() {
         if (enabledVal === "false") setSmartRepliesEnabled(false);
         else setSmartRepliesEnabled(true);
         setSmartRepliesMode(modeR.data?.value === "manual" ? "manual" : "auto");
+        const prefetchVal = prefetchR?.data?.value;
+        setSmartRepliesPrefetch(prefetchVal === "true");
       })
       .catch(() => {})
       .finally(() => setLoadingSync(false));
@@ -94,9 +99,10 @@ export default function MailPanel() {
     setSavingOauth(false);
   };
 
-  const saveSetting = async (key: string, value: string, successMsg: string) => {
+  const saveSetting = async (key: string, value: string, successMsg: string, useGlobal = false) => {
     try {
-      await api.settings.set(key, value, project);
+      const targetProject = useGlobal ? "global-default" : project;
+      await api.settings.set(key, value, targetProject);
       setToast(successMsg);
     } catch (err: any) {
       setToast(`Error: ${err.message}`);
@@ -280,11 +286,12 @@ export default function MailPanel() {
               onChange={(e) => {
                 const checked = e.target.checked;
                 setSmartRepliesEnabled(checked);
-                saveSetting(
-                  "mail_smart_replies_enabled",
-                  checked ? "true" : "false",
-                  checked ? "Smart replies enabled ✓" : "Smart replies disabled ✓",
-                );
+              saveSetting(
+                "mail_smart_replies_enabled",
+                checked ? "true" : "false",
+                checked ? "Smart replies enabled ✓" : "Smart replies disabled ✓",
+                true, // global-default (API route reads from global project)
+              );
               }}
               className="w-4 h-4 cursor-pointer"
             />
@@ -296,17 +303,36 @@ export default function MailPanel() {
               onChange={(e) => {
                 const v = e.target.value;
                 setSmartRepliesMode(v);
-                saveSetting(
-                  "mail_smart_replies_mode",
-                  v,
-                  v === "auto" ? "Trigger mode set to automatic ✓" : "Trigger mode set to manual ✓",
-                );
+              saveSetting(
+                "mail_smart_replies_mode",
+                v,
+                v === "auto" ? "Trigger mode set to automatic ✓" : "Trigger mode set to manual ✓",
+                true, // global-default (API route reads from global project)
+              );
               }}
               className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
             >
               <option value="auto">Automatic (on email open)</option>
               <option value="manual">Manual (click to generate)</option>
             </select>
+          </SettingRow>
+
+          <SettingRow label="Precompute replies" description="Pre-generate smart replies in the background so they load instantly when you open an email">
+            <input
+              type="checkbox"
+              checked={smartRepliesPrefetch}
+              onChange={async (e) => {
+                const checked = e.target.checked;
+                setSmartRepliesPrefetch(checked);
+                try {
+                  await api.settings.set("mail_smart_replies_prefetch", checked ? "true" : "false", "global-default");
+                  setToast(`Precompute replies ${checked ? "enabled" : "disabled"} ✓`);
+                } catch (err: any) {
+                  setToast(`Error: ${err.message}`);
+                }
+              }}
+              className="w-4 h-4 cursor-pointer"
+            />
           </SettingRow>
         </>
       )}

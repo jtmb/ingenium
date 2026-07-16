@@ -1,12 +1,12 @@
 # HOW-TO: Status
 
 ## What It Does
-Service status page showing real-time supervisord process states. Displays uptime, restart counts, and current status for all 4 container processes: API, Dashboard, opencode-server, and opencode-iframe.
+Service status page showing real-time supervisord process states. Displays uptime, restart counts, and current status for all 3 container processes: API, Dashboard, and opencode-web.
 
 ## How to Use
 1. Navigate to `/status` from the dashboard nav bar
 2. Each process card shows:
-   - **Process name** — API, Dashboard, opencode-server, opencode-iframe
+   - **Process name** — API, Dashboard, opencode-web
    - **Status badge** — Running (green), Starting (yellow), Stopped (red)
    - **Uptime** — how long the process has been running
    - **Restart count** — number of automatic restarts by supervisord

@@ -9,7 +9,7 @@
 - **Frontend**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Syntax Highlighting**: highlight.js (`github.css` + custom `hljs-dark.css`) — Preview and Source modes in skill detail overlay
 - **State / Persistence**: Thread MCP server for cross-session context
-- **Container**: Docker multi-stage build (node:22-alpine), supervisord (4 processes: API + Dashboard + opencode-server + opencode-iframe)
+- **Container**: Docker multi-stage build (node:22-alpine), supervisord (3 processes: API + Dashboard + opencode-web)
 - **Packages**: `ingenium-core` (shared lib), `ingenium-extension` (client-side OpenCode — MCP server, observer plugin, skill-sync plugin, auto-observer thin trigger), `ingenium-email` (IMAP/SMTP client)
 - **Testing**: Vitest, Playwright
 - **Linting**: ESLint, TypeScript compiler

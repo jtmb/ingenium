@@ -53,13 +53,13 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_EMAIL_ENCRYPTION_KEY` | _(required)_ | `oauth.ts`, `accounts.ts` | 32-byte hex key for AES-256-GCM credential encryption |
 | `OAUTH_REDIRECT_URI` | `http://localhost:3000/mail/oauth/callback` | `oauth.ts` | OAuth2 callback URL for Gmail/Outlook |
 
-## Docker / opencode-server
+## Docker / opencode-web
 
-Inside the container, **supervisord** manages four processes: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098).
+Inside the container, **supervisord** manages three processes: API (:4097), Dashboard (:3000), and opencode-web (binds 0.0.0.0:4098 inside container, published 127.0.0.1:4098 on host).
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
-| `OPENCODE_SERVER_PASSWORD` | _(none, required for Docker)_ | `scripts/start.sh`, Docker entrypoint | Password for opencode-server HTTP/SSE transport |
+| `OPENCODE_SERVER_PASSWORD` | _(none, required for Docker)_ | `scripts/docker-entrypoint.sh` | Entrypoint guard — verifies the environment is configured |
 | `INGENIUM_CORE_DB_PATH` | `./.ingenium/data.db` | Core `db.ts` | Path to the SQLite database (must map volume in Docker) |
 | `THREAD_API_TOKEN` | _(none)_ | OpenCode config | API token for Thread MCP server |
 

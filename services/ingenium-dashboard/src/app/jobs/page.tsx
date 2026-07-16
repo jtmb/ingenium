@@ -200,7 +200,7 @@ function JobFormOverlay({
   initial?: Job;
   agents: Agent[];
   project: string;
-  onSaved: () => void;
+  onSaved: (savedJob?: Job) => void;
 }) {
   const [form, setForm] = useState<JobFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
@@ -257,12 +257,15 @@ function JobFormOverlay({
         trigger_event: form.trigger_event || undefined,
         timeout_minutes: form.timeout_minutes,
       };
+      let savedJob: Job | undefined;
       if (initial) {
-        await api.jobs.update(initial.id, payload, project);
+        const res = await api.jobs.update(initial.id, payload, project);
+        savedJob = res.data;
       } else {
-        await api.jobs.create(payload, project);
+        const res = await api.jobs.create(payload, project);
+        savedJob = res.data;
       }
-      onSaved();
+      onSaved(savedJob);
       onClose();
     } catch (err: any) {
       setError(err?.message ?? "Save failed");
@@ -877,6 +880,13 @@ export default function JobsPage() {
     setShowCreate(true);
   }, []);
 
+  const handleSaved = useCallback(async (savedJob?: Job) => {
+    await fetchJobs();
+    if (editingJob && savedJob) {
+      setSelectedJob(savedJob);
+    }
+  }, [fetchJobs, editingJob]);
+
   // Last-run status dot for a job card
   const getLastRunStatus = useCallback(
     async (jobId: string): Promise<JobRun["status"] | null> => {
@@ -894,78 +904,78 @@ export default function JobsPage() {
     [project]
   );
 
-  // JobDetail view
-  if (selectedJob) {
-    return (
-      <JobDetailView
-        key={selectedJob.id}
-        job={selectedJob}
-        onBack={() => setSelectedJob(null)}
-        onEdit={() => handleEdit(selectedJob)}
-        onRun={() => handleRun(selectedJob)}
-        onToggleEnabled={() => handleToggleEnabled(selectedJob)}
-        onDelete={() => handleDelete(selectedJob)}
-        project={project}
-      />
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Jobs</h1>
-        <button
-          onClick={() => {
-            setEditingJob(undefined);
-            setShowCreate(true);
-          }}
-          className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700"
-        >
-          Create Job
-        </button>
-      </div>
-
-      {error && (
-        <div className="text-[var(--color-error-text)] text-sm bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3">{error}</div>
-      )}
-
-      {/* Job cards grid */}
-      {sortedJobs.length === 0 ? (
-        <div className="text-center text-[var(--color-text-muted)] py-12">
-          <p className="text-lg font-semibold">No jobs yet</p>
-          <p className="text-sm mt-1">Create a job to schedule agent runs.</p>
-        </div>
+    <>
+      {selectedJob ? (
+        <JobDetailView
+          key={selectedJob.id}
+          job={selectedJob}
+          onBack={() => setSelectedJob(null)}
+          onEdit={() => handleEdit(selectedJob)}
+          onRun={() => handleRun(selectedJob)}
+          onToggleEnabled={() => handleToggleEnabled(selectedJob)}
+          onDelete={() => handleDelete(selectedJob)}
+          project={project}
+        />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sortedJobs.map((job) => (
-            <JobCard
-              key={job.id}
-              job={job}
-              onClick={() => setSelectedJob(job)}
-              onRun={() => handleRun(job)}
-              onToggleEnabled={() => handleToggleEnabled(job)}
-              getLastRunStatus={getLastRunStatus}
-            />
-          ))}
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-bold">Jobs</h1>
+            <button
+              onClick={() => {
+                setEditingJob(undefined);
+                setShowCreate(true);
+              }}
+              className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700"
+            >
+              Create Job
+            </button>
+          </div>
+
+          {error && (
+            <div className="text-[var(--color-error-text)] text-sm bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3">{error}</div>
+          )}
+
+          {/* Job cards grid */}
+          {sortedJobs.length === 0 ? (
+            <div className="text-center text-[var(--color-text-muted)] py-12">
+              <p className="text-lg font-semibold">No jobs yet</p>
+              <p className="text-sm mt-1">Create a job to schedule agent runs.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {sortedJobs.map((job) => (
+                <JobCard
+                  key={job.id}
+                  job={job}
+                  onClick={() => setSelectedJob(job)}
+                  onRun={() => handleRun(job)}
+                  onToggleEnabled={() => handleToggleEnabled(job)}
+                  getLastRunStatus={getLastRunStatus}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Create / Edit overlay */}
+      {/* Create / Edit overlay — hoisted outside detail/list conditional */}
       {showCreate && (
         <JobFormOverlay
           isOpen={showCreate}
           onClose={() => {
             setShowCreate(false);
             setEditingJob(undefined);
+            setError("");
           }}
           initial={editingJob}
           agents={agents}
           project={project}
-          onSaved={fetchJobs}
+          onSaved={handleSaved}
         />
       )}
-    </div>
+    </>
   );
 }
 

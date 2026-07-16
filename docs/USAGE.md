@@ -9,7 +9,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-server (:4096), and opencode-iframe (:4098). The MCP server exposes **73 tools** accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 3 processes under supervisord: API (:4097), Dashboard (:3000), and opencode-web (binds 0.0.0.0:4098 inside container, published 127.0.0.1:4098 on host). The MCP server exposes **73 tools** accessible via OpenCode-compatible clients. Build-time UID matching ensures write access to workspace.
 
 ### Connecting an MCP Client
 

@@ -9,6 +9,9 @@ import { test, expect, Page } from "@playwright/test";
  * Forward must open a COMPLETELY BLANK compose modal — nothing pre-filled.
  * This is a regression check: Forward uses handleCompose (no initialData),
  * so it must NOT inherit any Reply/Draft pre-fill logic.
+ *
+ * Additional tests for Smart Replies collapsible cards, copy button, whole-card
+ * click to apply, and element ordering.
  */
 
 const BASE = "http://localhost:3000";
@@ -49,7 +52,7 @@ const MOCK_EMAILS = [
     date: new Date().toISOString(),
     body: {
       text: "This is the body of the email from Alice.",
-      html: undefined,
+      html: "<!doctype html><html><body><p>This is the body of the email from Alice.</p></body></html>",
     },
     flags: [],
     folder: "INBOX",
@@ -72,6 +75,18 @@ const MOCK_EMAILS = [
     attachments: [],
   },
 ];
+
+const MOCK_SUGGEST_RESPONSE = {
+  data: {
+    suggestions: [
+      { tone: "professional", subject: "Re: Project update — Q3 planning", body: "Thank you for the update. I will review the Q3 plan and provide feedback shortly." },
+      { tone: "friendly", subject: "Re: Project update — Q3 planning", body: "Hey Alice, thanks for sending this over! Looks great at first glance." },
+      { tone: "concise", subject: "Re: Project update — Q3 planning", body: "Thanks, will review." },
+    ],
+    source: "generated",
+    configured: true,
+  },
+};
 
 /* ------------------------------------------------------------------ */
 /*  Mock route setup                                                   */
@@ -175,6 +190,59 @@ async function setupMocks(page: Page) {
       });
     },
   );
+
+  // Smart Suggest endpoint
+  await page.route("**/api/v1/emails/suggest/*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(MOCK_SUGGEST_RESPONSE),
+    });
+  });
+
+  // Settings (for mail_smart_replies_mode lookup)
+  await page.route(
+    (url) => url.pathname === "/api/v1/settings",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: { value: "auto" },
+        }),
+      });
+    },
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Helper: navigate to INBOX, open first email, click Reply           */
+/* ------------------------------------------------------------------ */
+
+async function openFirstEmailAndReply(page: Page) {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
+
+  await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
+  await page.waitForTimeout(2000);
+
+  const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+  await expect(inboxBtn).toBeVisible({ timeout: 10000 });
+  await inboxBtn.click();
+  await page.waitForTimeout(1000);
+
+  const emailRows = page.locator("div.cursor-pointer");
+  await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
+  await emailRows.first().click();
+  await page.waitForTimeout(800);
+
+  const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+  await expect(readerPane).toBeVisible({ timeout: 5000 });
+
+  const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
+  await expect(replyBtn).toBeVisible();
+  await replyBtn.click();
+  await page.waitForTimeout(800);
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,41 +251,11 @@ async function setupMocks(page: Page) {
 
 test("Reply opens compose with To/Subject/From pre-filled and Body EMPTY", async ({ page }) => {
   await setupMocks(page);
-  await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
-
-  // Wait for account selector
-  await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
-
-  // Wait for sync status to resolve so inbox renders
-  await page.waitForTimeout(2000);
-
-  // Click INBOX to load email list
-  const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
-  await expect(inboxBtn).toBeVisible({ timeout: 10000 });
-  await inboxBtn.click();
-  await page.waitForTimeout(1000);
-
-  // Wait for email rows
-  const emailRows = page.locator("div.cursor-pointer");
-  await expect(emailRows.first()).toBeVisible({ timeout: 15000 });
-
-  // Click the first email to open it in the reader
-  await emailRows.first().click();
-  await page.waitForTimeout(800);
-
-  // Wait for reader pane to appear
-  const readerPane = page.locator("div.min-w-\\[400px\\]").first();
-  await expect(readerPane).toBeVisible({ timeout: 5000 });
-
-  // Click Reply
-  const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
-  await expect(replyBtn).toBeVisible();
-  await replyBtn.click();
-  await page.waitForTimeout(800);
+  await openFirstEmailAndReply(page);
 
   // The inline reply composer should appear inside the reader (not a modal)
   // Verify the To field is visible — inline composer renders in the reader
-  const toInput = page.getByPlaceholder("To");
+  const toInput = page.getByPlaceholder("recipient@example.com");
   await expect(toInput).toBeVisible({ timeout: 5000 });
 
   // --- VERIFY To: pre-filled with sender's address ---
@@ -250,14 +288,42 @@ test("Reply opens compose with To/Subject/From pre-filled and Body EMPTY", async
   });
 
   // --- VERIFY Body: EMPTY ---
-  const bodyTextarea = page.getByPlaceholder("Write your message...");
-  await expect(bodyTextarea).toBeVisible();
-  const bodyValue = await bodyTextarea.inputValue();
-  expect(bodyValue).toBe("");
+  // The RichTextEditor uses a TipTap contenteditable div, NOT a textarea.
+  // Use the ProseMirror editor for body assertions.
+  const bodyEditor = page.locator('[contenteditable="true"]').first();
+  await expect(bodyEditor).toBeVisible();
+  const bodyText = await bodyEditor.textContent();
+  expect(bodyText?.trim() || "").toBe("");
   test.info().annotations.push({
     type: "reply",
-    description: `Reply Body: empty string "${bodyValue}" — Body is EMPTY as required ✓`,
+    description: `Reply Body: empty string — Body is EMPTY as required ✓`,
   });
+
+  // --- VERIFY DOM order: "Review with AI" appears BEFORE "Smart Replies" heading ---
+  const reviewBtn = page.locator('button:has-text("Review with AI")').first();
+  const smartRepliesHeading = page.locator('button:has-text("Smart Replies")').first();
+  await expect(reviewBtn).toBeVisible({ timeout: 5000 });
+  await expect(smartRepliesHeading).toBeVisible({ timeout: 5000 });
+  const reviewBox = await reviewBtn.boundingBox();
+  const srBox = await smartRepliesHeading.boundingBox();
+  expect(reviewBox!.y).toBeLessThan(srBox!.y);
+  test.info().annotations.push({
+    type: "reply",
+    description: `"Review with AI" (y=${reviewBox!.y.toFixed(0)}) is above "Smart Replies" (y=${srBox!.y.toFixed(0)}) ✓`,
+  });
+
+  // The HTML message must fill the available body pane instead of being
+  // trapped in the iframe's 200px minimum height.
+  const bodyPane = page.getByTestId("email-body-pane");
+  const emailFrame = page.getByTestId("email-html-iframe");
+  const [bodyPaneBox, emailFrameBox] = await Promise.all([
+    bodyPane.boundingBox(),
+    emailFrame.boundingBox(),
+  ]);
+  expect(bodyPaneBox).not.toBeNull();
+  expect(emailFrameBox).not.toBeNull();
+  expect(emailFrameBox!.height).toBeGreaterThan(300);
+  expect(emailFrameBox!.height).toBeGreaterThanOrEqual(bodyPaneBox!.height - 40);
 
   // Close the inline composer via Discard
   const discardBtn = page.getByRole("button", { name: "Discard" }).first();
@@ -331,13 +397,14 @@ test("Forward opens blank compose with nothing pre-filled", async ({ page }) => 
   });
 
   // --- VERIFY Body: NOT pre-filled (empty) ---
-  const bodyTextarea = page.getByPlaceholder("Write your message...");
-  await expect(bodyTextarea).toBeVisible();
-  const bodyValue = await bodyTextarea.inputValue();
-  expect(bodyValue).toBe("");
+  // The RichTextEditor uses TipTap contenteditable div, not textarea.
+  const bodyEditor = page.locator('[contenteditable="true"]').first();
+  await expect(bodyEditor).toBeVisible();
+  const bodyText = await bodyEditor.textContent();
+  expect(bodyText?.trim() || "").toBe("");
   test.info().annotations.push({
     type: "forward",
-    description: `Forward Body: "${bodyValue}" — empty (nothing pre-filled) ✓`,
+    description: `Forward Body: empty — nothing pre-filled ✓`,
   });
 
   // --- VERIFY From: the first account is pre-selected (same as Reply behavior) ---
@@ -350,4 +417,127 @@ test("Forward opens blank compose with nothing pre-filled", async ({ page }) => 
   await page.getByRole("button", { name: "Discard" }).click();
   await page.waitForTimeout(500);
   await expect(composeHeading).not.toBeVisible();
+});
+
+/* ------------------------------------------------------------------ */
+/*  Test: Smart Replies cards are collapsible                          */
+/* ------------------------------------------------------------------ */
+
+test("Smart Replies cards are collapsible with aria-expanded", async ({ page }) => {
+  await setupMocks(page);
+  await openFirstEmailAndReply(page);
+
+  // The smart-replies toggle button should be visible with aria-expanded="true"
+  const toggleBtn = page.locator('button[aria-expanded][aria-controls]');
+  await expect(toggleBtn).toBeVisible({ timeout: 5000 });
+  expect(await toggleBtn.getAttribute("aria-expanded")).toBe("true");
+
+  // The suggestion cards should be visible
+  const suggestionCards = page.locator('div[role="button"][tabindex="0"]');
+  const visibleCards = await suggestionCards.count();
+  expect(visibleCards).toBeGreaterThanOrEqual(1);
+
+  // Click to collapse
+  await toggleBtn.click();
+  await page.waitForTimeout(300);
+  expect(await toggleBtn.getAttribute("aria-expanded")).toBe("false");
+
+  // Cards should be hidden now
+  await expect(suggestionCards.first()).not.toBeVisible();
+
+  // Click to expand again
+  await toggleBtn.click();
+  await page.waitForTimeout(300);
+  expect(await toggleBtn.getAttribute("aria-expanded")).toBe("true");
+  await expect(suggestionCards.first()).toBeVisible();
+});
+
+/* ------------------------------------------------------------------ */
+/*  Test: Clicking a Smart Reply card applies the draft                */
+/* ------------------------------------------------------------------ */
+
+test("Clicking a Smart Reply card applies the draft", async ({ page }) => {
+  await setupMocks(page);
+  await openFirstEmailAndReply(page);
+
+  // Wait for smart reply suggestion cards to load
+  const suggestionCards = page.locator('div[role="button"][tabindex="0"]');
+  await expect(suggestionCards.first()).toBeVisible({ timeout: 8000 });
+
+  // Get the first card's tone label text
+  const firstCardTone = await suggestionCards.first().locator("span").first().textContent();
+  expect(firstCardTone).toBeTruthy();
+
+  // Click the entire card div (not a button inside it)
+  await suggestionCards.first().click();
+  await page.waitForTimeout(500);
+
+  // Verify the draft was applied — the subject should be updated
+  const subjectInput = page.getByPlaceholder("Subject");
+  const subjectValue = await subjectInput.inputValue();
+  expect(subjectValue).toContain("Re:");
+  test.info().annotations.push({
+    type: "smart-suggest",
+    description: `Subject after card click: "${subjectValue}" — draft was applied ✓`,
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Test: Copy button does not apply draft                             */
+/* ------------------------------------------------------------------ */
+
+test("Copy button on Smart Reply card does not apply draft", async ({ page }) => {
+  await setupMocks(page);
+  await openFirstEmailAndReply(page);
+
+  // Wait for smart reply suggestion cards to load
+  const suggestionCards = page.locator('div[role="button"][tabindex="0"]');
+  await expect(suggestionCards.first()).toBeVisible({ timeout: 8000 });
+
+  // Get the current subject before clicking copy
+  const subjectInput = page.getByPlaceholder("Subject");
+  const subjectBefore = await subjectInput.inputValue();
+
+  // Find the copy icon button inside the first card (aria-label="Copy draft to clipboard")
+  const copyBtn = suggestionCards.first().locator('button[aria-label="Copy draft to clipboard"]');
+  await expect(copyBtn).toBeVisible();
+
+  // Click the copy button
+  await copyBtn.click();
+  await page.waitForTimeout(300);
+
+  // Verify the subject did NOT change (draft was not applied)
+  const subjectAfter = await subjectInput.inputValue();
+  expect(subjectAfter).toBe(subjectBefore);
+  test.info().annotations.push({
+    type: "smart-suggest",
+    description: `Subject unchanged after copy click — draft NOT applied ✓`,
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Test: Review with AI appears above Smart Replies in inline reply   */
+/* ------------------------------------------------------------------ */
+
+test("Review with AI appears above Smart Replies in inline reply", async ({ page }) => {
+  await setupMocks(page);
+  await openFirstEmailAndReply(page);
+
+  // Both the "Review with AI" button and "Smart Replies" heading should be visible
+  const reviewBtn = page.locator('button:has-text("Review with AI")').first();
+  const smartRepliesHeading = page.locator('button:has-text("Smart Replies")').first();
+
+  await expect(reviewBtn).toBeVisible({ timeout: 5000 });
+  await expect(smartRepliesHeading).toBeVisible({ timeout: 8000 });
+
+  // Verify DOM order: Review with AI appears ABOVE Smart Replies
+  const reviewBox = await reviewBtn.boundingBox();
+  const srBox = await smartRepliesHeading.boundingBox();
+  expect(reviewBox).not.toBeNull();
+  expect(srBox).not.toBeNull();
+  expect(reviewBox!.y).toBeLessThan(srBox!.y);
+  test.info().annotations.push({
+    type: "smart-suggest",
+    description: `"Review with AI" (y=${reviewBox!.y.toFixed(0)}) is above "Smart Replies" (y=${srBox!.y.toFixed(0)}) ✓`,
+  });
 });

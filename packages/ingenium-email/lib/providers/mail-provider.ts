@@ -23,6 +23,8 @@ export interface CachedEmailWrite {
   flags: string[];
   hasAttachments: boolean;
   envelopeJson: string | null;
+  /** Distinguish genuinely new messages from label-only changes. */
+  changeType?: "added" | "label";
 }
 
 // ── Provider Interface ─────────────────────────────────────────────────────

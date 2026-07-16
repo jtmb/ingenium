@@ -225,11 +225,12 @@ export type Job = {
   id: string;
   project_id: string;
   name: string;
-  description?: string;
+  description?: string | null;
   agent: string;
   prompt_template: string;
-  schedule_cron?: string;
-  trigger_event?: string;
+  schedule_cron?: string | null;
+  trigger_event?: string | null;
+  /** Runtime value is 0/1 (number) from SQLite; truthy/falsy coercion works for checkboxes and ternaries. */
   enabled: boolean;
   timeout_minutes: number;
   created_at: string;

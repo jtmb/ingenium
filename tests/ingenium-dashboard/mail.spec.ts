@@ -222,6 +222,39 @@ async function setupMocks(page: Page) {
       });
     },
   );
+
+  // 7. Smart Suggest endpoint
+  await page.route("**/api/v1/emails/suggest/*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        data: {
+          suggestions: [
+            { tone: "professional", subject: "Re: Test", body: "Thank you for your email." },
+            { tone: "friendly", subject: "Re: Hello", body: "Hey, great to hear from you!" },
+            { tone: "concise", subject: "Re: Quick note", body: "Got it, thanks." },
+          ],
+          source: "generated",
+          configured: true,
+        },
+      }),
+    });
+  });
+
+  // 8. Settings (for mail_smart_replies_mode lookup)
+  await page.route(
+    (url) => url.pathname === "/api/v1/settings",
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          data: { value: "auto" },
+        }),
+      });
+    },
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -516,7 +549,7 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await expect(readerPane.getByRole("button", { name: "Delete" }).first()).toBeVisible();
 
     // Body content
-    const bodyArea = readerPane.locator("div.overflow-y-auto").first();
+    const bodyArea = readerPane.getByTestId("email-body-pane");
     await expect(bodyArea).toBeVisible({ timeout: 3000 });
     const bodyHtml = await bodyArea.innerHTML();
     expect(bodyHtml.length).toBeGreaterThan(50);
@@ -535,35 +568,17 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await inboxBtn.click();
     await waitForEmailList(page);
 
-    // Every 3rd mock email has HTML with images (indices 0, 3, 6, 9, ...)
-    // Click email 1 (index 1 = email 2) first to avoid the HTML one, then
-    // try index 0, 3, 6, etc.
-    let foundHtmlEmail = false;
-    const emailRows = page.locator("div.cursor-pointer");
-    const count = await emailRows.count();
+    // Click the first email (index 0) which is known to have HTML with images
+    await clickEmailRow(page, 0);
+    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    await expect(readerPane).toBeVisible({ timeout: 5000 });
 
-    for (const idx of [0, 3, 6, 9, 12]) {
-      if (idx >= count) break;
+    // HTML emails render in an iframe, not a div.prose
+    const htmlIframe = readerPane.locator('[data-testid="email-html-iframe"]');
+    await expect(htmlIframe).toBeVisible({ timeout: 5000 });
 
-      await clickEmailRow(page, idx);
-
-      const readerPane = page.locator("div.min-w-\\[400px\\]").first();
-      await expect(readerPane).toBeVisible({ timeout: 5000 });
-
-      // Check for HTML prose container which renders HTML body
-      const proseDiv = readerPane.locator("div.prose").first();
-      const hasProse = await proseDiv.isVisible().catch(() => false);
-
-      if (hasProse) {
-        const imgTags = await proseDiv.locator("img").count();
-        if (imgTags > 0) {
-          foundHtmlEmail = true;
-          break;
-        }
-      }
-    }
-
-    expect(foundHtmlEmail).toBeTruthy();
+    // Verify the email is the HTML one (not the text fallback)
+    expect(await htmlIframe.count()).toBeGreaterThan(0);
   });
 
   /* ------------------------------------------------------------------ */
@@ -867,5 +882,236 @@ test.describe("Mail Client — 3-Pane Email Interface", () => {
     await mailSectionDiv.screenshot({
       path: path.join(SCREENSHOTS_DIR, "mail-test-16.png"),
     });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  17. Dual resize handles work independently                        */
+  /* ------------------------------------------------------------------ */
+
+  test("17 - Dual resize handles work independently", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await gotoMail(page);
+    await waitForAccount(page);
+
+    // Load INBOX
+    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    await inboxBtn.click();
+    await waitForEmailList(page);
+
+    // Click an email
+    await clickEmailRow(page, 0);
+
+    // Wait for reader
+    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    await expect(readerPane).toBeVisible({ timeout: 5000 });
+
+    // Click Reply to show the composer panel
+    const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
+    await replyBtn.click();
+    await page.waitForTimeout(800);
+
+    // Verify both resize handles exist
+    // 1. List resize handle (between list and reader)
+    const listHandle = page.getByRole("separator", { name: "Resize email list" });
+    await expect(listHandle).toBeVisible({ timeout: 5000 });
+
+    // 2. Reply resize handle (between body and composer)
+    const replyHandle = page.getByRole("separator", { name: "Resize reply panel" });
+    await expect(replyHandle).toBeVisible({ timeout: 5000 });
+
+    // Get initial list width
+    const listBoxBefore = await listHandle.boundingBox();
+    expect(listBoxBefore).not.toBeNull();
+
+    // Drag the list handle right by simulating pointer events
+    await listHandle.hover();
+    await page.mouse.down();
+    await page.mouse.move(listBoxBefore!.x + 50, listBoxBefore!.y, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+
+    // Get new list handle position
+    const listBoxAfterListDrag = await listHandle.boundingBox();
+    expect(listBoxAfterListDrag).not.toBeNull();
+    // List handle should have moved right
+    expect(listBoxAfterListDrag!.x).toBeGreaterThan(listBoxBefore!.x);
+
+    // Now drag the reply handle left (increase reply width)
+    const replyBoxBefore = await replyHandle.boundingBox();
+    expect(replyBoxBefore).not.toBeNull();
+
+    await replyHandle.hover();
+    await page.mouse.down();
+    await page.mouse.move(replyBoxBefore!.x - 40, replyBoxBefore!.y, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+
+    // Get new reply handle position
+    const replyBoxAfter = await replyHandle.boundingBox();
+    expect(replyBoxAfter).not.toBeNull();
+    // Reply handle should have moved left (reply panel grew)
+    expect(replyBoxAfter!.x).toBeLessThan(replyBoxBefore!.x);
+
+    // List handle should NOT have moved (list width unchanged by reply resize)
+    const listBoxAfterReplyDrag = await listHandle.boundingBox();
+    expect(listBoxAfterReplyDrag).not.toBeNull();
+    expect(Math.abs(listBoxAfterReplyDrag!.x - listBoxAfterListDrag!.x)).toBeLessThan(10);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  18. Reply resize persists across reload                            */
+  /* ------------------------------------------------------------------ */
+
+  test("18 - Reply resize persists across reload", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await gotoMail(page);
+    await waitForAccount(page);
+
+    // Load INBOX
+    const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
+    await inboxBtn.click();
+    await waitForEmailList(page);
+
+    // Click an email and open reply
+    await clickEmailRow(page, 0);
+    const readerPane = page.locator("div.min-w-\\[400px\\]").first();
+    await expect(readerPane).toBeVisible({ timeout: 5000 });
+    const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
+    await replyBtn.click();
+    await page.waitForTimeout(800);
+
+    // Get the reply handle
+    const replyHandle = page.getByRole("separator", { name: "Resize reply panel" });
+    await expect(replyHandle).toBeVisible({ timeout: 5000 });
+
+    // Drag to a specific width
+    const replyBoxBefore = await replyHandle.boundingBox();
+    expect(replyBoxBefore).not.toBeNull();
+
+    await replyHandle.hover();
+    await page.mouse.down();
+    // Drag left to increase reply width significantly
+    await page.mouse.move(replyBoxBefore!.x - 80, replyBoxBefore!.y, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForTimeout(300);
+
+    const replyBoxAfter = await replyHandle.boundingBox();
+    expect(replyBoxAfter).not.toBeNull();
+    const movedBy = replyBoxBefore!.x - replyBoxAfter!.x;
+    expect(movedBy).toBeGreaterThan(20);
+
+    // Reload the page
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForAccount(page);
+
+    // Load INBOX again
+    const inboxBtn2 = page.locator("button").filter({ hasText: "INBOX" }).first();
+    await inboxBtn2.click();
+    await waitForEmailList(page);
+
+    // Open the same email and reply
+    await clickEmailRow(page, 0);
+    await page.waitForTimeout(500);
+    const readerPane2 = page.locator("div.min-w-\\[400px\\]").first();
+    await expect(readerPane2).toBeVisible({ timeout: 5000 });
+    const replyBtn2 = readerPane2.getByRole("button", { name: "Reply" }).first();
+    await replyBtn2.click();
+    await page.waitForTimeout(800);
+
+    // The reply handle should be at the persisted position (similar to where we left it)
+    const replyHandle2 = page.getByRole("separator", { name: "Resize reply panel" });
+    await expect(replyHandle2).toBeVisible({ timeout: 5000 });
+    const replyBoxReload = await replyHandle2.boundingBox();
+    expect(replyBoxReload).not.toBeNull();
+
+    // The handle x position after reload should be close to where we left it
+    // (may differ slightly due to scrollbar / render timing)
+    const deltaAfterReload = Math.abs(replyBoxReload!.x - replyBoxAfter!.x);
+    expect(deltaAfterReload).toBeLessThan(30);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  19. Compose overlay uses full available width                       */
+  /* ------------------------------------------------------------------ */
+
+  test("19 - Compose overlay uses full available width", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await gotoMail(page);
+    await waitForAccount(page);
+
+    // Click Compose
+    const composeBtn = page.locator("button").filter({ hasText: "Compose" }).first();
+    await expect(composeBtn).toBeVisible();
+    await composeBtn.click();
+    await page.waitForTimeout(1000);
+
+    // The overlay panel should exist and fill most of the viewport width
+    const overlayPanel = page.locator("div.fixed.inset-0.z-50").first();
+    await expect(overlayPanel).toBeVisible({ timeout: 5000 });
+
+    // The body of the overlay should NOT have max-w-2xl constraint
+    const maxW2xl = page.locator(".max-w-2xl");
+    const maxW2xlCount = await maxW2xl.count();
+    // The compose form inside the overlay should not use max-w-2xl
+    // (the overlay itself has its own width classes)
+    expect(maxW2xlCount).toBe(0);
+
+    // The overlay panel width should be large (fullScreen mode)
+    const panelBox = await overlayPanel.boundingBox();
+    expect(panelBox).not.toBeNull();
+
+    // In fullScreen mode, the panel should be most of the viewport width
+    // (w-[calc(100%-32px)] ≈ 1888px for 1920 viewport)
+    expect(panelBox!.width).toBeGreaterThan(1800);
+
+    // Close the overlay
+    await page.getByRole("button", { name: "Discard" }).click();
+    await page.waitForTimeout(500);
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  20. Compose overlay actions are visible without scrolling           */
+  /* ------------------------------------------------------------------ */
+
+  test("20 - Compose overlay actions are visible without scrolling", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await gotoMail(page);
+    await waitForAccount(page);
+
+    // Click Compose
+    const composeBtn = page.locator("button").filter({ hasText: "Compose" }).first();
+    await expect(composeBtn).toBeVisible();
+    await composeBtn.click();
+    await page.waitForTimeout(1000);
+
+    // The action buttons (Send, Save Draft, Discard) should be visible in the viewport
+    const sendBtn = page.getByRole("button", { name: "Send" });
+    const saveBtn = page.getByRole("button", { name: "Save Draft" });
+    const discardBtn = page.getByRole("button", { name: "Discard" });
+
+    await expect(sendBtn).toBeVisible({ timeout: 5000 });
+    await expect(saveBtn).toBeVisible({ timeout: 5000 });
+    await expect(discardBtn).toBeVisible({ timeout: 5000 });
+
+    // Verify they're within the viewport (not scrolled out)
+    const viewportHeight = await page.evaluate(() => window.innerHeight);
+    const sendBox = await sendBtn.boundingBox();
+    const saveBox = await saveBtn.boundingBox();
+    const discardBox = await discardBtn.boundingBox();
+
+    expect(sendBox).not.toBeNull();
+    expect(saveBox).not.toBeNull();
+    expect(discardBox).not.toBeNull();
+
+    expect(sendBox!.y).toBeLessThan(viewportHeight);
+    expect(sendBox!.y + sendBox!.height).toBeLessThanOrEqual(viewportHeight);
+    expect(saveBox!.y).toBeLessThan(viewportHeight);
+    expect(saveBox!.y + saveBox!.height).toBeLessThanOrEqual(viewportHeight);
+    expect(discardBox!.y).toBeLessThan(viewportHeight);
+    expect(discardBox!.y + discardBox!.height).toBeLessThanOrEqual(viewportHeight);
+
+    // Close via Discard
+    await discardBtn.click();
+    await page.waitForTimeout(500);
   });
 });

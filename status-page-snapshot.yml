@@ -71,8 +71,8 @@
               - text: Port
               - paragraph [ref=e56]: "3000"
         - generic [ref=e57]:
-          - heading "opencode-iframe" [level=2] [ref=e58]
-          - paragraph [ref=e59]: OpenCode Iframe (embedded)
+          - heading "opencode-web" [level=2] [ref=e58]
+          - paragraph [ref=e59]: OpenCode Web Server
           - generic [ref=e60]: Running
           - generic [ref=e62]:
             - generic [ref=e63]:
@@ -81,15 +81,4 @@
             - generic [ref=e65]:
               - text: Port
               - paragraph [ref=e66]: "4098"
-        - generic [ref=e67]:
-          - heading "opencode-server" [level=2] [ref=e68]
-          - paragraph [ref=e69]: OpenCode Web Server (auth-enabled)
-          - generic [ref=e70]: Running
-          - generic [ref=e72]:
-            - generic [ref=e73]:
-              - text: Uptime
-              - paragraph [ref=e74]: —
-            - generic [ref=e75]:
-              - text: Port
-              - paragraph [ref=e76]: "4096"
   - alert [ref=e77]

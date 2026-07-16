@@ -70,9 +70,15 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 **Failure signature:** Manually calling MCP tools to populate the `/plugins` page — "verified!" — but the actual plugin code was never loaded or run by OpenCode. DeepSeek treats "the API endpoint returns 200" as equivalent to "the feature works." It validates each piece in isolation but never runs the full integration path.
 
+**Failure signature (render-branch variant):** A trigger element (button, link) calls a state setter that opens a modal/overlay — but the modal component lives in a sibling render branch that returns early (`if (selectedItem) return <DetailView />`), so the state changes but the overlay never mounts. The feature "works" from the primary entry point (list-view Create button) but silently fails from every other path (detail-view Edit button).
+
 **Rule:** "The endpoint works" ≠ "the feature works." The full integration path (e.g., plugin → API → dashboard rendering → user interaction) must be tested as a unit. Isolated endpoint checks validate the transport layer, not the feature.
 
+**Rule (render-branch):** For every stateful UI action with multiple navigation paths, trace the trigger → the state setter → the rendered consumer through EVERY component return branch. If the consumer is outside an early-return branch, the trigger inside that branch can never render the consumer.
+
 **Detection prompt:** "Did I test the FULL INTEGRATION PATH from end to end, or did I just verify each piece in isolation (API returns 200, file exists, DB has row) and assume the combination works?"
+
+**Detection prompt:** "For every stateful UI action, did I trace the trigger, state update, and rendered consumer through every early-return branch? Is the overlay component in the same render branch as every button that opens it?"
 
 ---
 
@@ -130,9 +136,15 @@ You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. Y
 
 **Failure signature:** QA passes because the email list endpoint returns quickly, while the actual user action (clicking an email to read it) takes minutes and was never tested. The test validated the wrong thing — an adjacent signal that happens to be fast — while the real broken action went unchecked for multiple runs.
 
+**Failure signature (render-branch variant):** QA tests "open the overlay from the Create button" and it works. But the user opens it from the Edit button in a detail view — which goes through a different render branch that returns early. The overlay never mounts from that path, but QA approved it because the adjacent "Create" path worked.
+
 **Rule:** Every QA test must reproduce the user's **exact sequence of actions** and **measure their timings**. If the requirement is "email opens in <2s," the test must click an email row and assert the body text is visible within 2s — not just check that the list endpoint returns cache hits. Test what the user does, not what the code exposes nearby.
 
+**Rule (navigation-path variant):** When verifying a feature that can be reached from multiple UI paths, reproduce the EXACT navigation sequence the user will take — not a nearby path that happens to exercise some of the same code. "The overlay opens from the Create button" does not prove it opens from the Edit button in the detail view. If both paths go through the same component but different render branches, they are different integration paths.
+
 **Detection prompt:** "Am I testing the actual user action with a measured timing, or did I validate an adjacent endpoint/state that happens to be green?"
+
+**Detection prompt:** "Did I reproduce the user's exact navigation and action sequence, or test a nearby path that happens to exercise some of the same code? Does my test cover EVERY user entry point?"
 
 ---
 
@@ -393,6 +405,23 @@ making the identical API call with the same incorrect handling?"
 
 ---
 
+### 37. Container Network Namespaces — Container 127.0.0.1 Is Not Host Loopback
+
+**Failure signature:** "The OpenCode server is running — I can curl it from inside the container!" But the host browser shows "connection refused." The orchestrator tests with `docker compose exec ... curl 127.0.0.1:4098/`, gets HTTP 200, and declares the feature works — while the actual user-facing path (host browser → published port → container) is completely broken.
+
+**Rule:** A Docker container has its own network namespace. `127.0.0.1` inside the container is NOT the same interface as the host's `127.0.0.1`. Docker's port publishing maps host ports to the container's network interface, not its loopback. To make a container service reachable from the host:
+1. The container process must bind to `0.0.0.0` (all interfaces), not `127.0.0.1`.
+2. Docker Compose should publish with a host-loopback prefix: `"127.0.0.1:4098:4098"` — this exposes the port on the host's loopback only (no LAN exposure) while the container binds to all interfaces internally.
+3. A curl from inside the container is NOT a valid substitute for a host-side acceptance test. The test exercise must match the user's actual access path.
+
+**Rule (acceptance rationalization):** Never redefine a failed acceptance criterion as intentional. If the requirement says "the user can access OpenCode at http://localhost:4098," a failed host-side curl is a FAILURE — not "the terminal attach works inside the container so it's fine." An inside-container test that passes while the host test fails proves your test methodology is wrong, not that the feature works. Always test from the user's actual access path.
+
+**Detection prompt:** "Am I testing from inside the container while the user accesses from the host? Is my inside-container curl hiding a host-side connection refusal? Did I just call a failed acceptance test 'not applicable' because an adjacent test passed?"
+
+**Detection prompt:** "Am I redefining 'the user can access at localhost:4098' to mean 'I can curl it from inside Docker'? Is the actual user-facing test failing while I claim success from a different access path?"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -431,7 +460,9 @@ making the identical API call with the same incorrect handling?"
 | **Mechanical DP application** — Applying detection prompts without checking if their triggering conditions apply | "Did any file in this change set touch a scheduler, interval, timer, or connection pool? If not, am I about to wait 5 minutes for a signal that literally cannot occur?" |
 | **Pre-existing mislabel on newly-exercised code** — Dismissing a bug as pre-existing when your new feature is the first caller to reach it | "Did the OLD code path ever exercise this exact input, or is my NEW feature the first caller ever to reach it?" |
 | **Lucky-value testing** — Testing with a value that happens to work instead of the value the UI's own placeholder suggests | "Did I test with the value the placeholder actually suggests, or a different value that happens to be valid?" |
+| **Render-branch invisible** — State setter and consumer in different render branches, feature silently fails from some entry points | "Is the overlay component in the same render branch as every button that opens it?" |
 | **Paper-only schema** — Trusting a schema definition as enforced without confirming any code path actually calls .parse()/.safeParse() on it | "Is this schema actually invoked in the live request path, or does validation only exist on paper?" |
+| **Container-network blindness** — Testing inside Docker, user accesses from host | "Am I testing inside the container while the user accesses from the host? Is my inside-container curl hiding a host-side connection refusal?" |
 
 ---
 

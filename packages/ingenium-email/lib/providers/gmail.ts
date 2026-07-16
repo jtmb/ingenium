@@ -352,7 +352,10 @@ export const GmailProvider: MailProvider = {
               if (info) { folder = info.folder; break; }
             }
             const cached = await mapMetadataToCachedEmail(msg, folder);
-            if (cached) upserts.push(cached);
+            if (cached) {
+              cached.changeType = "added";
+              upserts.push(cached);
+            }
           } catch (err: unknown) {
             const emsg = err instanceof Error ? err.message : String(err);
             console.warn(`GmailProvider: failed to get message ${added.message.id} during changesSince: ${emsg}`);
@@ -391,7 +394,10 @@ export const GmailProvider: MailProvider = {
               if (info) { folder = info.folder; break; }
             }
             const cached = await mapMetadataToCachedEmail(msg, folder);
-            if (cached) upserts.push(cached);
+            if (cached) {
+              cached.changeType = "label";
+              upserts.push(cached);
+            }
           } catch (err: unknown) {
             const emsg = err instanceof Error ? err.message : String(err);
             console.warn(`GmailProvider: failed to get label-changed message ${mid}: ${emsg}`);
