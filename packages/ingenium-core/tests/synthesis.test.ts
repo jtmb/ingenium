@@ -9,6 +9,8 @@ import { storeObservation } from "../lib/tools/observations.js";
 import { runSynthesis, getSynthesisStatus } from "../lib/tools/synthesis.js";
 import { getTraits, upsertTrait } from "../lib/tools/personality.js";
 import { setSetting } from "../lib/tools/settings.js";
+import { listSkills, createSkill } from "../lib/tools/skills.js";
+import { listProposals } from "../lib/tools/skill-governance.js";
 
 let tempDir: string;
 let projectId: string;
@@ -17,10 +19,22 @@ let mockServer: Server;
 let mockPort: number;
 let mockResponsePayload: any;
 let mockResponseStatus: number;
+let mockResponseQueue: any[] = [];
+let mockResponseQueueIndex = 0;
 
 function setMockResponse(payload: any, status = 200) {
   mockResponsePayload = payload;
   mockResponseStatus = status;
+  mockResponseQueue = [];
+  mockResponseQueueIndex = 0;
+}
+
+/** Queue multiple sequential responses for the mock server. The queue is consumed FIFO. */
+function setMockResponseQueue(responses: { payload: any; status?: number }[]) {
+  mockResponseQueue = responses;
+  mockResponseQueueIndex = 0;
+  // Clear single-value fallback
+  mockResponsePayload = null;
 }
 
 /** Build an OpenAI-style chat completions response wrapping a content string. */
@@ -64,10 +78,22 @@ beforeAll(async () => {
   // Spin up mock HTTP server
   await new Promise<void>((resolve) => {
     mockServer = createServer((_req, res) => {
-      const body = typeof mockResponsePayload === "string"
-        ? mockResponsePayload
-        : JSON.stringify(mockResponsePayload);
-      res.writeHead(mockResponseStatus, { "Content-Type": "application/json" });
+      // Check queue first for sequential responses
+      let payload: any;
+      let status: number;
+      if (mockResponseQueue.length > 0 && mockResponseQueueIndex < mockResponseQueue.length) {
+        const entry = mockResponseQueue[mockResponseQueueIndex]!;
+        payload = entry.payload;
+        status = entry.status ?? 200;
+        mockResponseQueueIndex++;
+      } else {
+        payload = mockResponsePayload;
+        status = mockResponseStatus;
+      }
+      const body = typeof payload === "string"
+        ? payload
+        : JSON.stringify(payload);
+      res.writeHead(status, { "Content-Type": "application/json" });
       res.end(body);
     });
     mockServer.listen(0, () => {
@@ -329,5 +355,249 @@ describe("synthesis pipeline", () => {
     const decayed = traits.find(t => t.id === trait.id);
     expect(decayed).toBeDefined();
     expect(decayed!.confidence).toBeLessThan(0.4); // Should be 0.35 after -0.05 decay
+  });
+});
+
+describe("synthesis governance proposals (zero active write)", () => {
+  it("does NOT directly create skills — only creates governance proposals", async () => {
+    // Capture baseline: no proposals, no skills in this fresh phase
+    const skillsBefore = listSkills(projectId);
+    const skillCountBefore = skillsBefore.length;
+    const proposalsBefore = listProposals(projectId);
+    const proposalCountBefore = proposalsBefore.length;
+
+    // Create observations that the LLM will synthesize into a skill
+    const obs1 = storeObservation(projectId, "behavior", "User always creates tests before refactoring", 7);
+    const obs2 = storeObservation(projectId, "behavior", "User requires test coverage above 80%", 8);
+    const obs3 = storeObservation(projectId, "behavior", "User runs full test suite before merging PRs", 7);
+
+    // Phase 1 (consolidation): create a trait from the observations
+    const consolidationResponse = JSON.stringify({
+      create: [
+        {
+          trait_type: "workflow_pattern",
+          trait_value: "User always writes tests before refactoring and maintains high coverage",
+          confidence_hint: 0.15,
+          observation_ids: [obs1.id, obs2.id, obs3.id],
+        },
+      ],
+      confirm: [],
+      ignore_count: 0,
+    });
+
+    // Phase 2 (LLM synthesis): propose a new skill
+    const synthesisResponse = JSON.stringify({
+      skills_to_create: [
+        {
+          name: "auto-testing-mandate",
+          description: "User enforces test coverage and pre-merge test suite runs",
+          content: "## 🔴 HARD RULE\n\nAlways create tests before refactoring. Maintain >80% coverage. Run full test suite before merging.",
+          tags: "testing,quality,auto-generated",
+        },
+      ],
+      skills_to_update: [],
+      personality_traits: [],
+      insights: ["Strong testing discipline detected"],
+      summary: "Synthesized testing-mandate skill",
+    });
+
+    setMockResponseQueue([
+      { payload: mockContent(consolidationResponse) },
+      { payload: mockContent(synthesisResponse) },
+    ]);
+
+    const result = await runSynthesis(projectId);
+    expect(result.errors.length).toBe(0);
+    expect(result.skills_created).toBeGreaterThanOrEqual(1);
+
+    // VERIFY: No direct skill was created
+    const skillsAfter = listSkills(projectId);
+    expect(skillsAfter.length).toBe(skillCountBefore); // skill count unchanged
+
+    // VERIFY: Proposal was created in skill_proposals table
+    const proposalsAfter = listProposals(projectId);
+    expect(proposalsAfter.length).toBeGreaterThan(proposalCountBefore);
+
+    // VERIFY: The proposal is in pending status (submitted)
+    const pendingProposals = listProposals(projectId, "pending");
+    expect(pendingProposals.length).toBeGreaterThanOrEqual(1);
+
+    // VERIFY: The proposal has expected fields
+    const skillProposal = pendingProposals.find(p => p.target_name === "auto-testing-mandate");
+    expect(skillProposal).toBeDefined();
+    expect(skillProposal!.proposal_type).toBe("create");
+    expect(skillProposal!.status).toBe("pending");
+  });
+
+  it("does NOT directly update skills — only creates update proposals", async () => {
+    // Create an existing skill that will be "updated" by the LLM
+    const existingSkill = createSkill(
+      projectId,
+      "existing-skill",
+      "An existing skill",
+      "# Existing Skill\n\nSome content.",
+    );
+    const skillsBefore = listSkills(projectId);
+    const skillCountBefore = skillsBefore.length;
+    const proposalsBefore = listProposals(projectId);
+
+    // Create observations that relate to the existing skill
+    const obs1 = storeObservation(projectId, "behavior", "User wants existing-skill to include error handling patterns", 7);
+    const obs2 = storeObservation(projectId, "behavior", "User always adds JSDoc to error handlers", 6);
+
+    // Phase 1: simple consolidation (one trait)
+    const consolidationResponse = JSON.stringify({
+      create: [
+        {
+          trait_type: "workflow_pattern",
+          trait_value: "User documents error handling patterns consistently",
+          confidence_hint: 0.12,
+          observation_ids: [obs1.id, obs2.id],
+        },
+      ],
+      confirm: [],
+      ignore_count: 0,
+    });
+
+    // Phase 2: LLM returns an UPDATE, not a CREATE
+    const synthesisResponse = JSON.stringify({
+      skills_to_create: [],
+      skills_to_update: [
+        {
+          name: "existing-skill",
+          patch: "## Error Handling\n\nAlways include try/catch with JSDoc comments.",
+          patch_type: "add-rule",
+        },
+      ],
+      personality_traits: [],
+      insights: ["Error handling pattern observed"],
+      summary: "Updated existing-skill",
+    });
+
+    setMockResponseQueue([
+      { payload: mockContent(consolidationResponse) },
+      { payload: mockContent(synthesisResponse) },
+    ]);
+
+    const result = await runSynthesis(projectId);
+    expect(result.errors.length).toBe(0);
+
+    // VERIFY: No direct skill update occurred
+    const skillsAfter = listSkills(projectId);
+    expect(skillsAfter.length).toBe(skillCountBefore);
+
+    // Content of the original skill should be UNCHANGED (no direct mutation)
+    const skillAfter = skillsAfter.find(s => s.name === "existing-skill");
+    expect(skillAfter).toBeDefined();
+    expect(skillAfter!.content).toBe("# Existing Skill\n\nSome content."); // unchanged!
+
+    // VERIFY: An update proposal was created
+    const proposalsAfter = listProposals(projectId);
+    expect(proposalsAfter.length).toBeGreaterThan(proposalsBefore.length);
+
+    const updateProposals = proposalsAfter.filter(p => p.target_name === "existing-skill" && p.proposal_type === "update");
+    expect(updateProposals.length).toBeGreaterThanOrEqual(1);
+    expect(updateProposals[0]!.status).toBe("pending");
+  });
+
+  it("skill table row count and content are byte-equivalent before vs after synthesis", async () => {
+    const skillsBefore = listSkills(projectId);
+    const skillCountBefore = skillsBefore.length;
+    // Snapshot existing skills by name → content for byte-equivalent check
+    const skillSnapshot = new Map<string, string>();
+    for (const sk of skillsBefore) {
+      skillSnapshot.set(sk.name, sk.content);
+    }
+
+    // Create observations
+    const obs = storeObservation(projectId, "preference", "User wants eslint strict mode enabled", 7);
+
+    // Phase 1: create a trait
+    const consolidationResponse = JSON.stringify({
+      create: [
+        {
+          trait_type: "code_preference",
+          trait_value: "User prefers strict linting rules",
+          confidence_hint: 0.12,
+          observation_ids: [obs.id],
+        },
+      ],
+      confirm: [],
+      ignore_count: 0,
+    });
+
+    // Phase 2: propose a new skill
+    const synthesisResponse = JSON.stringify({
+      skills_to_create: [
+        {
+          name: "eslint-strict-mode",
+          description: "User prefers strict ESLint mode with no warnings allowed",
+          content: "## 🔴 HARD RULE\n\nEnable strict ESLint mode. No warnings allowed.",
+          tags: "linting,auto-generated",
+        },
+      ],
+      skills_to_update: [],
+      personality_traits: [],
+      insights: [],
+      summary: "Created eslint-strict-mode",
+    });
+
+    setMockResponseQueue([
+      { payload: mockContent(consolidationResponse) },
+      { payload: mockContent(synthesisResponse) },
+    ]);
+
+    await runSynthesis(projectId);
+
+    // VERIFY: skill count unchanged
+    const skillsAfter = listSkills(projectId);
+    expect(skillsAfter.length).toBe(skillCountBefore);
+
+    // VERIFY: every existing skill still has the same content
+    for (const sk of skillsAfter) {
+      const beforeContent = skillSnapshot.get(sk.name);
+      if (beforeContent !== undefined) {
+        // Only check skills that existed before — new skills would not be in the snapshot
+        // (and we expect no new skills to have been created)
+        expect(sk.content).toBe(beforeContent);
+      }
+    }
+  });
+
+  it("noise observations do not produce proposals", async () => {
+    const proposalsBefore = listProposals(projectId);
+
+    // Create noisy observations that the LLM should ignore
+    const obs1 = storeObservation(projectId, "error", "random noise 12345", 2);
+    const obs2 = storeObservation(projectId, "pattern", "unrelated one-off", 1);
+
+    // Phase 1: LLM ignores these as noise
+    const consolidationResponse = JSON.stringify({
+      create: [],
+      confirm: [],
+      ignore_count: 2,
+    });
+
+    // Phase 2: No skills to create or update
+    const synthesisResponse = JSON.stringify({
+      skills_to_create: [],
+      skills_to_update: [],
+      personality_traits: [],
+      insights: [],
+      summary: "No actionable patterns",
+    });
+
+    setMockResponseQueue([
+      { payload: mockContent(consolidationResponse) },
+      { payload: mockContent(synthesisResponse) },
+    ]);
+
+    await runSynthesis(projectId);
+
+    // VERIFY: No new proposals created
+    const proposalsAfter = listProposals(projectId);
+    // Filter to proposals created by this test run (those after baseline)
+    const newProposals = proposalsAfter.filter(p => !proposalsBefore.find(bp => bp.id === p.id));
+    expect(newProposals.length).toBe(0);
   });
 });

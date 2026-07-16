@@ -1,5 +1,18 @@
 import { z } from "zod";
 
+/**
+ * Zod schemas for the Ingenium domain model.
+ *
+ * NOTE: Zod schemas are NOT the primary runtime enforcement gate (see AGENTS.md rule #13).
+ * SQL CHECK constraints in the migration files serve as the actual data integrity layer.
+ * These schemas provide TypeScript type inference and API-layer validation.
+ *
+ * `z.coerce.boolean()` / `z.coerce.number()` are used throughout because SQLite
+ * represents booleans as INTEGER 0/1 — without `coerce`, a raw DB row would fail
+ * TypeScript-level validation.
+ */
+
+/** A workspace project. Supports soft-delete via `archived_at` and cross-project identity via `is_global`. */
 export const ProjectSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1).max(64),
@@ -11,6 +24,7 @@ export const ProjectSchema = z.object({
 });
 export type Project = z.infer<typeof ProjectSchema>;
 
+/** A learned or authored skill with full-text content, metadata, and file_tree for disk sync. */
 export const SkillSchema = z.object({
   id: z.string().uuid(),
   project_id: z.string(),
@@ -20,13 +34,84 @@ export const SkillSchema = z.object({
   category: z.string().optional(),
   tags: z.string().optional(),
   always_apply: z.coerce.number().default(0),
-  file_tree: z.string().optional(),
+  file_tree: z.string().optional().nullable(),
   enabled: z.coerce.boolean().default(true),
+  revision: z.coerce.number().default(0),
+  archived_at: z.string().datetime().optional().nullable(),
   created_at: z.string().datetime(),
   updated_at: z.string().datetime(),
 });
 export type Skill = z.infer<typeof SkillSchema>;
 
+/** An immutable snapshot of a skill's complete state at a specific revision. Created automatically by DB triggers. */
+export const SkillVersionSchema = z.object({
+  id: z.number(),
+  skill_id: z.string(),
+  revision: z.number(),
+  name: z.string().min(1).max(64),
+  description: z.string(),
+  content: z.string(),
+  category: z.string().optional().nullable(),
+  tags: z.string().optional().nullable(),
+  always_apply: z.coerce.number().default(0),
+  file_tree: z.string().optional().nullable(),
+  enabled: z.coerce.boolean().default(true),
+  archived_at: z.string().datetime().optional().nullable(),
+  created_by: z.string().default("system"),
+  created_at: z.string().datetime(),
+});
+export type SkillVersion = z.infer<typeof SkillVersionSchema>;
+
+/** A lineage record mapping a source skill (by project + name) to a canonical target skill. */
+export const SkillLineageSchema = z.object({
+  id: z.number(),
+  project_id: z.string(),
+  source_project_id: z.string(),
+  source_name: z.string(),
+  target_skill_id: z.string(),
+  source_hash: z.string().default(""),
+  merged_file_paths: z.string().default("[]"),
+  tombstone_path: z.string().optional().nullable(),
+  reason: z.string().default(""),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+export type SkillLineage = z.infer<typeof SkillLineageSchema>;
+
+/** A governance proposal for a skill mutation: create, update, merge, or archive. */
+export const SkillProposalSchema = z.object({
+  id: z.string().uuid(),
+  project_id: z.string(),
+  status: z.enum(["draft", "pending", "approved", "rejected", "applied", "rolled_back", "stale"]).default("draft"),
+  proposal_type: z.enum(["create", "update", "merge", "archive"]),
+  target_skill_id: z.string().optional().nullable(),
+  target_name: z.string(),
+  source_project_id: z.string().optional().nullable(),
+  source_name: z.string().optional().nullable(),
+  expected_revision: z.number().optional().nullable(),
+  expected_source_revision: z.number().optional().nullable(),
+  target_revision_before: z.number().optional().nullable(),
+  source_revision_before: z.number().optional().nullable(),
+  target_created: z.coerce.number().default(0),
+  proposed_state: z.string(),
+  evidence_json: z.string().default("[]"),
+  observation_ids: z.string().default("[]"),
+  quality_score: z.number().min(0).max(1).default(0),
+  novelty_score: z.number().min(0).max(1).default(0),
+  contradiction_flag: z.coerce.number().default(0),
+  candidate_group_key: z.string().optional().nullable(),
+  reviewer: z.string().optional().nullable(),
+  review_reason: z.string().optional().nullable(),
+  always_apply: z.coerce.number().default(0),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+  reviewed_at: z.string().datetime().optional().nullable(),
+  applied_at: z.string().datetime().optional().nullable(),
+  rolled_back_at: z.string().datetime().optional().nullable(),
+});
+export type SkillProposal = z.infer<typeof SkillProposalSchema>;
+
+/** A learning entry — a tagged, prioritised record of a decision, pattern, bug, or other context. */
 export const LearningSchema = z.object({
   id: z.number(),
   project_id: z.string(),
@@ -41,6 +126,7 @@ export const LearningSchema = z.object({
 });
 export type Learning = z.infer<typeof LearningSchema>;
 
+/** A kanban task with sub-tasking, scheduling, and time-tracking support. */
 export const TaskSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -67,6 +153,7 @@ export const TaskSchema = z.object({
 });
 export type Task = z.infer<typeof TaskSchema>;
 
+/** A threaded comment on a task, with parent_comment_id for nested replies. */
 export const TaskCommentSchema = z.object({
   id: z.string(),
   task_id: z.string(),
@@ -79,6 +166,7 @@ export const TaskCommentSchema = z.object({
 });
 export type TaskComment = z.infer<typeof TaskCommentSchema>;
 
+/** An audit event recording state transitions on a task (e.g., column move, assignment change). */
 export const TaskActivitySchema = z.object({
   id: z.string(),
   task_id: z.string(),
@@ -89,6 +177,7 @@ export const TaskActivitySchema = z.object({
 });
 export type TaskActivity = z.infer<typeof TaskActivitySchema>;
 
+/** A dependency link between two tasks: blocks, blocked_by, or relates_to. */
 export const TaskLinkSchema = z.object({
   id: z.string(),
   task_id: z.string(),
@@ -97,6 +186,7 @@ export const TaskLinkSchema = z.object({
 });
 export type TaskLink = z.infer<typeof TaskLinkSchema>;
 
+/** A notification targeting a specific user about a task event (mention, assignment, watch status change). */
 export const TaskNotificationSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -108,6 +198,7 @@ export const TaskNotificationSchema = z.object({
 });
 export type TaskNotification = z.infer<typeof TaskNotificationSchema>;
 
+/** Kanban board layout: column definitions and custom field config stored as JSON strings. */
 export const BoardConfigSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -118,6 +209,7 @@ export const BoardConfigSchema = z.object({
 });
 export type BoardConfig = z.infer<typeof BoardConfigSchema>;
 
+/** A recurring or event-triggered job definition with agent assignment and scheduling config. */
 export const JobSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -134,6 +226,7 @@ export const JobSchema = z.object({
 });
 export type Job = z.infer<typeof JobSchema>;
 
+/** A single execution of a job, tracking its lifecycle from queued through completion or failure. */
 export const JobRunSchema = z.object({
   id: z.string(),
   job_id: z.string(),
@@ -146,6 +239,7 @@ export const JobRunSchema = z.object({
 });
 export type JobRun = z.infer<typeof JobRunSchema>;
 
+/** An individual line of stdout/stderr output from a job run, ordered by sequence number. */
 export const JobRunLogSchema = z.object({
   id: z.number(),
   run_id: z.string(),
@@ -156,6 +250,7 @@ export const JobRunLogSchema = z.object({
 });
 export type JobRunLog = z.infer<typeof JobRunLogSchema>;
 
+/** A contextual memory entry with priority ranking — used by agents to recall past session context. */
 export const ContextSchema = z.object({
   id: z.number(),
   project_id: z.string(),
@@ -167,6 +262,7 @@ export const ContextSchema = z.object({
 });
 export type ContextEntry = z.infer<typeof ContextSchema>;
 
+/** A registered child MCP server with its command, arguments, environment, and origin source tracking. */
 export const ServerSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -181,6 +277,7 @@ export const ServerSchema = z.object({
 });
 export type Server = z.infer<typeof ServerSchema>;
 
+/** An observation about user behavior — the raw input to the self-learning pipeline. */
 export const ObservationSchema = z.object({
   id: z.number(),
   project_id: z.string(),
@@ -199,6 +296,7 @@ export const ObservationSchema = z.object({
 });
 export type Observation = z.infer<typeof ObservationSchema>;
 
+/** A consolidated personality trait derived from observations by the synthesis pipeline. Confidence reflects corroboration strength. */
 export const PersonalityTraitSchema = z.object({
   id: z.number(),
   project_id: z.string(),
@@ -220,6 +318,7 @@ export const PersonalityTraitSchema = z.object({
 });
 export type PersonalityTrait = z.infer<typeof PersonalityTraitSchema>;
 
+/** An OpenCode plugin with file path and optional source content cache for disk-write operations. */
 export const PluginSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -232,6 +331,7 @@ export const PluginSchema = z.object({
 });
 export type Plugin = z.infer<typeof PluginSchema>;
 
+/** Per-tool enable/disable state for child MCP servers — allows toggling individual tools at runtime. */
 export const MCPToolStateSchema = z.object({
   id: z.number().optional(),
   project_id: z.string(),
@@ -242,6 +342,7 @@ export const MCPToolStateSchema = z.object({
 });
 export type MCPToolState = z.infer<typeof MCPToolStateSchema>;
 
+/** A slash-command definition with an associated file path and optional content. */
 export const CommandSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -253,6 +354,7 @@ export const CommandSchema = z.object({
 });
 export type Command = z.infer<typeof CommandSchema>;
 
+/** An agent profile with category, model, permission, and skill assignments. */
 export const AgentSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -271,6 +373,7 @@ export const AgentSchema = z.object({
 });
 export type Agent = z.infer<typeof AgentSchema>;
 
+/** Project-level or global `opencode.json` configuration stored in the DB for API-driven editing. */
 export const ConfigSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -281,6 +384,7 @@ export const ConfigSchema = z.object({
 });
 export type Config = z.infer<typeof ConfigSchema>;
 
+/** An event in the self-learning pipeline timeline — tracks extraction, synthesis, and trait/skill lifecycle. */
 export const PipelineEventSchema = z.object({
   id: z.number(),
   project_id: z.string(),
@@ -290,6 +394,8 @@ export const PipelineEventSchema = z.object({
     "synthesis_triggered", "synthesis_started", "synthesis_completed", "synthesis_failed",
     "extraction_completed", "extraction_failed",
     "trait_created", "trait_updated", "skill_created", "skill_updated",
+    "proposal_created", "proposal_submitted", "proposal_approved", "proposal_rejected",
+    "proposal_applied", "proposal_rolled_back",
     "plugin_initialized", "plugin_error",
   ]),
   event_source: z.enum(["agent", "plugin", "synthesis", "system"]),
