@@ -1,6 +1,6 @@
 ---
 name: security-audit
-description: ""
+description: "Systematic security review — automated leak scanning, credential rotation, dependency audit, and .gitignore hardening. Use for any security-sensitive code review, new API endpoints, environment variable introduction, or vulnerability scanning."
 ---
 
 # Security Audit
@@ -87,6 +87,12 @@ Access-Control-Allow-Origin: *
 .env*
 credentials.json
 ```
+
+## Migrated Sources (Phase 3 Taxonomy)
+
+| Source | Content Preserved At |
+|--------|---------------------|
+| `security-audit-workflow` | [`references/sources/security-audit-workflow/`](references/sources/security-audit-workflow/source-index.md) |
 
 ## Integration
 
