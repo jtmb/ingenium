@@ -1,3 +1,8 @@
+---
+title: Deployment Guide
+description: Docker deployment guide — services, ports, volumes, health checks for the Ingenium system.
+---
+
 # Deployment Guide
 
 > **Note:** This document is the canonical operations reference for deployment. The AGENTS.md file contains a summary only.
@@ -45,15 +50,15 @@ The sole DB authority. All CRUD operations flow through this service.
 
 ### 2. Dashboard (Next.js on :3000)
 
-16 route-based pages with highlight.js syntax highlighting in Preview/Source modes. Talks to the API layer only — zero direct DB access.
+17 primary route-based pages plus the Settings overlay. Talks to the API layer only — zero direct DB access.
 
 ### 3. opencode-web (on :4098)
 
-OpenCode web server. Binds `0.0.0.0` inside container, published to host loopback only.
+OpenCode web server. Binds **0.0.0.0** inside container via `--hostname 0.0.0.0` (supervisord.conf:45). The Docker Compose `ports` block publishes to HOST `127.0.0.1:4098` only — not exposed to LAN.
 
 ### 4. ttyd-opencode (on :4099)
 
-OpenCode CLI terminal via ttyd. Provides the xterm.js terminal for the dashboard's CLI mode. Managed by supervisord as `[program:ttyd-opencode]`.
+OpenCode CLI terminal via ttyd. Provides the xterm.js terminal for the dashboard's CLI mode. Binds **0.0.0.0** inside container (no `--interface` flag; ttyd defaults to `0.0.0.0`). The Docker Compose `ports` block publishes to HOST `127.0.0.1:4099` only.
 
 ```bash
 ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace
@@ -69,8 +74,8 @@ ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace
 |-----------|---------|-------------|
 | `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
 | `4097` | API | Express REST gateway (sole DB authority) |
-| `127.0.0.1:4098` | OpenCode Web | OpenCode web server — container binds `0.0.0.0`, published to `127.0.0.1:4098:4098` (host loopback only) |
-| `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
+| `127.0.0.1:4098` | OpenCode Web | OpenCode web server — container binds **0.0.0.0** via `--hostname 0.0.0.0`; Compose publishes to `127.0.0.1:4098` (host loopback only) |
+| `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal — container binds **0.0.0.0** (ttyd default); Compose publishes to `127.0.0.1:4099` (host loopback only) |
 
 > 🔴 Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099.
 

@@ -1,3 +1,8 @@
+---
+title: Backup and Restore
+description: Database backup and restore procedures, migration recovery for the Ingenium SQLite database.
+---
+
 # Backup and Restore Procedures
 
 This document covers backup and restore procedures for the Ingenium SQLite database and associated data.

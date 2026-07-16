@@ -9,14 +9,14 @@ tags: [documentation, readme, adr, api-docs, getting-started]
 
 ## 🔴 HARD RULEs
 
-### GETTING-STARTED.md Required
-Every project MUST have `docs/GETTING-STARTED.md` covering setup from scratch: prerequisites, clone and install, build steps, editor/IDE configuration, starting the app, verification checks, troubleshooting.
+### operations/getting-started.md Required
+Every project MUST have `docs/operations/getting-started.md` covering setup from scratch: prerequisites, clone and install, build steps, editor/IDE configuration, starting the app, verification checks, troubleshooting.
 
-### VARIABLES.md Required
-Every project MUST have `docs/VARIABLES.md` documenting ALL environment variables. Each entry lists: variable name, default value, which files use it, brief description.
+### develop/variables.md Required
+Every project MUST have `docs/develop/variables.md` documenting ALL environment variables. Each entry lists: variable name, default value, which files use it, brief description.
 
-### Per-Feature HOW-TO Required
-Every project with multiple features MUST have `docs/HOW-TO/` with one `.md` file per feature. Each covers: what it does, how to use, API endpoints, code location, related docs.
+### Per-Feature Guides Required
+Every project with multiple features MUST have `docs/usage/`, `docs/configure/`, and `docs/operations/` with one `.md` file per feature. Each covers: what it does, how to use, API endpoints, code location, related docs.
 
 ### README.md
 
@@ -38,7 +38,7 @@ Environment variables, config files, feature flags.
 How to set up dev environment, run tests, contribute.
 
 ## Architecture
-High-level overview — link to docs/ARCHITECTURE.md.
+High-level overview — link to docs/concepts/architecture.md.
 ```
 
 - Write for someone who just found your repo — they have 30 seconds
@@ -75,8 +75,8 @@ When a specific change was made, update only the affected docs:
 
 | Change | Docs to update |
 |--------|---------------|
-| Added/removed/modified a skill | `docs/ARCHITECTURE.md` (skill count, directory map) |
-| Added/removed/modified an agent | `docs/agents.md` (agent table, profiles) |
-| Changed config | `docs/ARCHITECTURE.md`, `docs/TECH-STACK.md` |
-| Added new dependencies | `docs/TECH-STACK.md` |
-| Modified self-learning system files | `AGENTS.md` (self-learning section), `.opencode/skills/self-learning/SKILL.md`, `docs/self-learning-pipeline.md` (update reference) |
+| Added/removed/modified a skill | `docs/concepts/architecture.md` (skill count, directory map), `docs/concepts/skill-system.md` |
+| Added/removed/modified an agent | `docs/configure/agents.md` (agent table, profiles) |
+| Changed config | `docs/concepts/architecture.md`, `docs/concepts/tech-stack.md` |
+| Added new dependencies | `docs/concepts/tech-stack.md` |
+| Modified self-learning system files | `AGENTS.md` (self-learning section), `.opencode/skills/self-learning/SKILL.md`, `docs/concepts/self-learning.md` (update reference) |

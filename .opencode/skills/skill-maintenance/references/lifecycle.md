@@ -26,7 +26,7 @@ After creating the SKILL.md file, register it in ALL of these places:
 |----------|--------|
 | `.opencode/SKILL-INDEX.md` | Add to numbered list AND category section |
 | `AGENTS.md` | If mandatory or in Pre-Flight Check table |
-| `docs/CONVENTIONS.md` | Add learning→skill detection references |
+| `docs/concepts/conventions.md` | Add learning→skill detection references |
 
 Update the skill count in SKILL-INDEX.md. AGENTS.md may also reference the count in text.
 

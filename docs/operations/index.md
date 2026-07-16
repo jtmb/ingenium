@@ -1,3 +1,8 @@
+---
+title: Operations
+description: Deployment, maintenance, and recovery procedures for the Ingenium system.
+---
+
 # Operations
 
 Deployment, maintenance, and recovery procedures for the Ingenium system.
@@ -8,8 +13,12 @@ Deployment, maintenance, and recovery procedures for the Ingenium system.
 
 | Document | Description |
 |----------|-------------|
-| [Deployment](./deployment.md) | Docker deployment guide: services, ports, volumes, health checks |
-| [Backup & Restore](./backup-restore.md) | Database backup and restore procedures, migration recovery |
+| [Getting Started](getting-started.md) | Step-by-step setup guide for OpenCode |
+| [Deployment](deployment.md) | Docker deployment guide: services, ports, volumes, health checks |
+| [Backup & Restore](backup-restore.md) | Database backup and restore procedures, migration recovery |
+| [Jobs](jobs.md) | Job queue and background task monitoring |
+| [Logs](logs.md) | Structured logging and event viewer |
+| [Status](status.md) | Service status page — process and application monitoring |
 
 ---
 
@@ -33,5 +42,4 @@ docker compose exec ingenium bash -c "sqlite3 /app/.ingenium/data.db '.backup /a
 
 ## Related Documents
 
-- [Database Migrations](../reference/database-migrations.md) — Migration file list, WAL safety, manual repair
-- [Deployment Details](./deployment.md) — Full deployment reference
+- [Database Migrations](../develop/database.md) — Migration file list, WAL safety, manual repair

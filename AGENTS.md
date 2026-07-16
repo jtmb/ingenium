@@ -25,16 +25,23 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 
 | Topic | Canonical Document |
 |-------|-------------------|
-| Getting Started | [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) |
-| Architecture | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Tech Stack | [docs/TECH-STACK.md](docs/TECH-STACK.md) |
-| Conventions | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
-| Environment Variables | [docs/VARIABLES.md](docs/VARIABLES.md) |
-| Database Migrations | [docs/reference/database-migrations.md](docs/reference/database-migrations.md) |
-| Self-Learning Pipeline | [docs/self-learning-pipeline.md](docs/self-learning-pipeline.md) |
-| Security | [docs/security/](docs/security/) |
-| How-To Guides | [docs/HOW-TO/](docs/HOW-TO/) |
-| Usage Guide | [docs/USAGE.md](docs/USAGE.md) |
+| Getting Started | [docs/operations/getting-started.md](docs/operations/getting-started.md) |
+| Architecture | [docs/concepts/architecture.md](docs/concepts/architecture.md) |
+| Tech Stack | [docs/concepts/tech-stack.md](docs/concepts/tech-stack.md) |
+| Conventions | [docs/concepts/conventions.md](docs/concepts/conventions.md) |
+| Environment Variables | [docs/develop/variables.md](docs/develop/variables.md) |
+| Database Migrations | [docs/develop/database.md](docs/develop/database.md) |
+| Self-Learning Pipeline | [docs/concepts/self-learning.md](docs/concepts/self-learning.md) |
+| Skill System | [docs/concepts/skill-system.md](docs/concepts/skill-system.md) |
+| Security | [docs/security/index.md](docs/security/index.md) |
+| Usage Guides | [docs/usage/index.md](docs/usage/index.md) |
+| Configuration Guides | [docs/configure/index.md](docs/configure/index.md) |
+| Operations Guides | [docs/operations/index.md](docs/operations/index.md) |
+| Development Reference | [docs/develop/index.md](docs/develop/index.md) |
+| Reference Docs | [docs/reference/index.md](docs/reference/index.md) |
+| API Reference | [docs/develop/api.md](docs/develop/api.md) |
+| MCP Tools Reference | [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md) |
+| Docs Workspace | [docs/reference/docs-workspace.md](docs/reference/docs-workspace.md) |
 
 ---
 
@@ -52,16 +59,16 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 
 | You're about to... | Check this skill |
 |-------------------|-----------------|
-| Edit a source file | Framework skill (`nextjs`, `python`, `go`, `rust`, `typescript-standalone`) |
+| Edit a source file | `development-conventions` (framework conventions) |
 | Run a terminal command | `local-models` — **no `&`, no infinite-wait** |
-| Create a new file/service | `project-structure` |
-| Write/run tests | `useful-tests` |
-| Edit Docker/K8s | `containers` / `kubernetes` |
-| Edit shell scripts | `shell-scripts` — `set -euo pipefail` |
+| Create a new file/service | `development-conventions` (project structure patterns) |
+| Write/run tests | `development-conventions` (testing patterns) |
+| Edit Docker/K8s | `devops-conventions` (container/kubernetes conventions) |
+| Edit shell scripts | `devops-conventions` (CLI toolkit conventions) |
 
 ### 🔴 MANDATORY Skills (load before ANY action)
 
-`configuring-opencode` `debugging-patterns` `development-conventions` `devops-conventions` `github-cli` `local-models` `mcp-tooling` `skill-maintenance`
+`development-conventions` `devops-conventions` `engineering-workflow` `local-models` `mcp-tooling` `skill-maintenance`
 
 > 💡 Skills are synced between the DB and `.opencode/skills/` via the `/sync-skills` command or scheduled sync.
 
@@ -91,15 +98,15 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 150 tools. HTTP to API. Zero DB access.
-└── ingenium-dashboard/   # Next.js 16 App Router frontend (17 pages). HTTP to API. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 210 tools. HTTP to API. Zero DB access.
+└── ingenium-dashboard/   # Next.js 16 App Router frontend (17 primary routes + Settings overlay). HTTP to API. Zero DB access.
 ```
 
 **API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer.
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 overlay):
+The Ingenium Dashboard (http://localhost:3000) provides 17 primary routes plus the Settings overlay (18 user-facing views):
 
 | Page | Purpose |
 |------|---------|
@@ -107,6 +114,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 
 | `/opencode` | Embedded OpenCode with Web/CLI dual-mode (glass tab toggle, Ctrl+Shift+`) |
 | `/projects` | Project management (create, rename, archive, restore) |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
+| `/docs` | Documentation workspace (spaces, editor, search, templates, history, trash) |
 | `/jobs` | Job queue and background task monitoring |
 | `/logs` | Structured logging and event viewer |
 | `/mail` | 3-pane email client (FolderSidebar, EmailList, EmailReader), AccountSetup when no accounts configured |
@@ -114,7 +122,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 pages (16 routes + 1 
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
-| `/mcp-servers` | MCP servers + Tool Manager (150 tools, 23 categories, search, category filter) |
+| `/mcp-servers` | MCP servers + Tool Manager (212 catalog tools, 24 categories, search, category filter) |
 | `/config` | OpenCode config editor (Project/Global tabs, sync from disk, save) |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
@@ -248,7 +256,7 @@ The self-learning pipeline captures observations about user behavior, consolidat
 **Key sections**:
 - Observation types: `correction`, `preference`, `pattern`, `insight`, `feedback`, `behavior`, `terminology`, `workflow`, `error`, `goal`
 - Confidence model: traits start at 0.10–0.15, gain +0.15 per confirmation, cap at 0.95, display threshold ≥0.30
-- Scheduled maintenance: extraction → synthesis → skill sync every 15 minutes (configurable via `SYNTHESIS_INTERVAL_MS`)
+- Scheduled maintenance: extraction → synthesis every 15 minutes (configurable via `SYNTHESIS_INTERVAL_MS`); extension session events run resource sync separately
 - LLM synthesis backup provider: configured in Settings → Synthesis LLM
 - Cross-project synthesis: evaluates patterns across all projects, `ingenium_synthesis_cross_project` tool
 

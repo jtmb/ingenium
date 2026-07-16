@@ -1,8 +1,18 @@
+---
+title: Security & Performance Review
+description: This page has moved.
+---
+
+> **This page has moved.** The canonical location is now [security/review-docs-workspace.md](security/review-docs-workspace.md). Please update your bookmarks.
+
+---
+
 # Security & Performance Review: Documentation Workspace + Popout/Fullscreen Architecture
 
 > **Date:** 2026-07-15
 > **Review type:** READ-ONLY — threat model, no edits
 > **Scope:** Planned documentation workspace feature + popout/fullscreen architecture, mapped against the current `ingenium-api` + `ingenium-dashboard` codebase
+> **Remediation update:** 2026-07-16 — completed controls are annotated against the current source; remaining recommendations are explicitly marked.
 
 ---
 
@@ -111,7 +121,17 @@ The `renderSimpleMarkdown()` link regex (line 45, `MarkdownViewer.tsx`) generate
 
 ### Current State
 
-The `writeSkillToDisk()` function in `packages/ingenium-core/lib/tools/skills.ts` (lines 92-104) writes `file_tree` JSON entries to disk using `resolve(dir, relPath)`. **There is no path traversal prevention** — a `file_tree` entry with `relPath: "../../../etc/passwd"` would escape the skill directory.
+> 🟢 **REMEDIATED (Phase 2B):** The `resolveSafePath()` function in `packages/ingenium-core/lib/tools/skills.ts` now protects all file_tree writes. See the [Skills guide](HOW-TO/skills.md#file_tree-validation) for the 7-vector defense table. The extension `packages/ingenium-extension/resource-sync.ts` also validates names, rejects symlinks, and never follows symlinks during deletion.
+
+The `writeSkillToDisk()` function in `packages/ingenium-core/lib/tools/skills.ts` writes `file_tree` JSON entries to disk using `resolve(dir, relPath)`. **Path traversal prevention is now enforced** via `resolveSafePath()` which:
+- Rejects absolute paths (`isAbsolute`)
+- Rejects containment violations (resolved path must start with baseDir)
+- Rejects reserved canonical filenames (SKILL.md, metadata.json)
+- Rejects existing directory targets
+- Rejects symlink escapes at any ancestor level (upward walk + realpathSync)
+- Rejects dangling symlink ancestors
+- Rejects empty/`.` paths resolving to base dir
+- Performs post-write re-verification: if realpathSync reveals escape, file is removed immediately
 
 The API server uses `express.json({ limit: "2mb" })` as the only body size limit. There is no file upload endpoint currently, but the `file_tree` mechanism is the nearest analogue — it already deserializes arbitrary JSON paths and writes to disk.
 
@@ -119,20 +139,19 @@ The API server uses `express.json({ limit: "2mb" })` as the only body size limit
 
 | Threat | Impact | Likelihood |
 |--------|--------|------------|
-| Path traversal in file_tree: `{ "../../.ssh/authorized_keys": "ssh-rsa AAAA..." }` | Write arbitrary files anywhere the appuser has write access (within Docker container) | **Medium-High** — exploitable through skill create/update API, file_tree is parsed and written unconditionally |
+| Path traversal in file_tree: `{ "../../.ssh/authorized_keys": "ssh-rsa AAAA..." }` | Write arbitrary files anywhere the appuser has write access (within Docker container) | 🟢 **REMEDIATED (Phase 2B)** — `resolveSafePath()` containment check + 7 defenses block this. file_tree contents are validated before copy-phase write. See the [Skills guide](HOW-TO/skills.md#file_tree-validation). |
 | Content-type spoofing — if file upload is added for workspace attachments | Server interprets malicious file type (e.g., .html served as text/plain but executed by browser) | **Medium** — depends on upload implementation |
 | ZIP bomb — if zip import is added to workspace | Container OOM, disk exhaustion | **High** if zip import added without limits |
-| Symlink escape — if file_tree writing follows symlinks | Write outside intended directory | **Low** — Node's `writeFileSync` doesn't follow symlinks, but `mkdirSync` + `resolve` does |
+| Symlink escape through a file_tree target or ancestor | Write outside intended directory | 🟢 **REMEDIATED (Phase 2B)** — ancestor `lstatSync`/`realpathSync` checks, post-write verification, and symlink-safe removal block this path |
 | Zip slip — if zip extraction is added without path validation | Same as path traversal | **High** if zip import added |
 
 ### Required Mitigations (File Operations)
 
 ```
-1. 🔴 CRITICAL: Add path traversal prevention to writeSkillToDisk() and ANY new file write paths:
-   const safePath = resolve(dir, relPath);
-   if (!safePath.startsWith(resolve(dir))) {
-     throw new Error(`Path traversal blocked: ${relPath}`);
-   }
+1. ✅ COMPLETED: `writeSkillToDisk()` validates every file_tree entry with
+   `resolveSafePath()`, including absolute-path, containment, reserved-path,
+   directory-target, ancestor-symlink, dangling-symlink, and base-directory checks.
+   New file-writing features must reuse an equivalent canonical-path boundary.
 
 2. Add file size limits per-file in file_tree writes:
    - 1MB per individual file in file_tree
@@ -190,53 +209,42 @@ The API server uses `express.json({ limit: "2mb" })` as the only body size limit
 
 ### Current State
 
-**Inconsistency found:** Two search implementations in `ingenium-core` handle FTS5 differently:
+> 🟢 **REMEDIATED (Phase 2B):** All current core FTS5 search paths use the shared `sanitizeFts5Query()` helper from `packages/ingenium-core/lib/db.ts` before executing `MATCH`.
 
-1. **`searchTasks()`** (`packages/ingenium-core/lib/tools/tasks.ts`, line 237) — **correctly sanitizes** by escaping double quotes: `query.replace(/"/g, '""')`
-2. **`searchSkills()`** (`packages/ingenium-core/lib/tools/skills.ts`, lines 54-62) — **does NOT sanitize** — passes user query directly to FTS5 MATCH.
-
-Both use **parameterized** queries (`?` placeholders), which prevents SQL injection. However, **FTS5 syntax errors from malformed user input** cause unhandled exceptions in `searchSkills()` specifically:
+The helper escapes embedded double quotes and wraps the complete input as a quoted literal phrase. Current consumers include skills, tasks, observations, saved context, and documentation pages. Each query also uses parameter placeholders, so user input is neither SQL nor an FTS5 operator expression.
 
 ```typescript
-// skills.ts (UNSAFE — no sanitization):
-db.prepare("... WHERE skills_fts MATCH ?").all(projectId, query);
-// A query of `"unclosed` or `*` throws: "fts5: syntax error near..."
-
-// tasks.ts (SAFE — sanitized):
-const sanitized = query.replace(/"/g, '""');
-db.prepare("... WHERE tasks_fts MATCH ?").all(projectId, sanitized);
+const sanitized = sanitizeFts5Query(query);
+if (!sanitized) return [];
+db.prepare("... WHERE skills_fts MATCH ?").all(projectId, sanitized);
 ```
+
+Remaining defense-in-depth: API routes do not currently impose a common maximum FTS query length, and the sanitizer intentionally does not strip non-printable characters.
 
 ### Threat Scenarios
 
 | Threat | Impact | Likelihood |
 |--------|--------|------------|
-| FTS5 syntax error: `"unclosed quote` | 500 error, raw SQLite error message exposed to client | **Medium** — every search query with `"` or unbalanced quotes crashes |
-| FTS5 performance DoS: `a* OR b* OR c* OR ...` (prefix query on common terms) | Slow query, high CPU | **Low-Medium** — FTS5 prefix queries can be expensive on large indexes |
-| Error message leakage: FTS5 throws `fts5: syntax error near "*"` | Information disclosure — confirms FTS5 backend | **Low** — error handler catches this, but provides requestId for debugging |
+| FTS5 syntax input such as `"unclosed quote` | Previously caused a query syntax error | 🟢 **REMEDIATED** — embedded quotes are escaped inside a quoted literal phrase |
+| FTS5 operator/prefix expression such as `a* OR b*` | Could force broader or more expensive query semantics | 🟢 **REMEDIATED** — the complete value is treated as literal text, not operators |
+| Excessively long or control-character-heavy literal input | Unnecessary tokenizer/CPU work | **Low** — explicit API query-length and printable-character limits remain optional hardening |
 
 ### Required Mitigations
 
 ```
-1. 🔴 IMMEDIATE: Apply the same sanitization from searchTasks() to searchSkills():
-   // skills.ts line 55 — before querying:
-   const sanitized = query.replace(/"/g, '""');
-   // This is a one-line fix matching the existing tasks.ts pattern (line 237).
+1. ✅ COMPLETED: Route every current FTS5 `MATCH` value through the shared
+   `sanitizeFts5Query()` helper and use parameter placeholders.
 
-2. Add a try/catch around all FTS5 queries for defense-in-depth:
-   try {
-     return db.prepare("... MATCH ?").all(projectId, sanitized);
-   } catch (e) {
-     logger.warn("search", "FTS5 query error", { query, error: (e as Error).message });
-     return []; // Graceful degradation
-   }
+2. REMAINING DEFENSE-IN-DEPTH: Enforce a common maximum query length (for
+   example, 200 characters) at API boundaries and reject non-printable input.
 
-3. Limit query length: max 200 characters for FTS5 MATCH
-
-4. For any new workspace full-text search:
-   - Copy the tasks.ts sanitization pattern (query.replace(/"/g, '""'))
-   - Add try/catch defense-in-depth
-   - Consider time-limiting queries (better-sqlite3 doesn't support query timeout, so use worker threads or set busy_timeout)
+3. For any new workspace full-text search:
+   - Reuse `sanitizeFts5Query()`; do not create a local escaping variant
+   - Keep the `MATCH` value parameterized
+   - Let real database failures reach centralized error handling rather than
+     silently converting infrastructure errors into an empty result set
+   - Consider worker isolation if measured query latency becomes a problem;
+     `better-sqlite3` does not provide a per-query timeout
 ```
 
 ---
@@ -283,17 +291,17 @@ The codebase has no collaborative editing or autosave mechanism today. Skills ar
 The API auth (`auth.ts`) is **optional**: if `INGENIUM_API_TOKEN` is not set, ALL requests pass through (lines 8-12). The dashboard SPA lives on the same origin (same Docker container, port 3000) as the API (port 4097) — but different ports = different origins in browser security model.
 
 **Key findings:**
-- `CORS_ORIGIN` defaults to `"*"` (`config/index.ts` line 4)
+- ~~`CORS_ORIGIN` defaults to `"*"`~~ **🟢 REMEDIATED (W2):** `CORS_ORIGIN` now defaults to `http://localhost:3000` as of `supervisord.conf:28` (`CORS_ORIGIN="http://localhost:3000"`). Explicit override via `CORS_ORIGIN` env var is still supported for deployments that need a different origin. See [recommendation #3](#required-mitigations) below.
 - No CSRF tokens in the dashboard or API
 - No `SameSite` cookie configuration (cookies are only used for `theme` preference)
-- Dashboard API client (`api.ts`) uses `fetch()` with `Content-Type: application/json` — these are "non-simple" requests that trigger CORS preflight, but CORS is wide open
+- Dashboard API client (`api.ts`) uses `fetch()` with `Content-Type: application/json` — these are "non-simple" requests that trigger CORS preflight. CORS origin is now locked to `http://localhost:3000` (not wide open).
 - `helmet()` is used with defaults — provides some headers (`X-Frame-Options: SAMEORIGIN`, `X-XSS-Protection`, etc.)
 
 ### Threat Scenarios
 
 | Threat | Impact | Likelihood |
 |--------|--------|------------|
-| CSRF from external site: attacker's page makes `fetch("http://localhost:4097/api/v1/skills?project=...", {method:"POST", body:...})` | Create/delete skills, change configs, trigger synthesis | **High** — CORS is `*`, auth is optional, browser auto-sends cookies (though cookies aren't used for auth currently) |
+| CSRF from external site: attacker's page makes `fetch("http://localhost:4097/api/v1/skills?project=...", {method:"POST", body:...})` | Create/delete skills, change configs, trigger synthesis | **High** — CORS was `*` at review time; **🟢 REMEDIATED (W2):** CORS origin is now `http://localhost:3000`. Auth is still optional. Browser auto-sends cookies (though cookies aren't used for auth currently). |
 | Drive-by MCP tool invocation from malicious page | Trigger `ingenium_synthesis_run`, `ingenium_skill_delete`, `ingenium_config_set` | **High** if user visits attacker page while dashboard is open |
 | Cross-origin postMessage attack (see section 9) | If popout communicates via postMessage without origin check | **Medium** |
 
@@ -320,9 +328,14 @@ The API auth (`auth.ts`) is **optional**: if `INGENIUM_API_TOKEN` is not set, AL
    }
 
 3. Tighten CORS:
-   // config/index.ts
+   // config/index.ts → supervisord.conf:28
    corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000"
    // NEVER default to "*" in production
+   //
+   // 🟢 REMEDIATED (W2): CORS origin now defaults to "http://localhost:3000" via
+   // `supervisord.conf:28` (CORS_ORIGIN="http://localhost:3000"). The
+   // config/index.ts fallback reads `process.env.CORS_ORIGIN` which is set by
+   // supervisord. Explicit override via the same env var works for custom deployments.
 
 4. If cookies are ever used for auth:
    - Set SameSite=Strict (or Lax at minimum)
@@ -509,7 +522,7 @@ The `Overlay.tsx` component uses a `fullScreen` boolean prop for size but never 
 
 ### Current State
 
-The MCP server (`services/ingenium-server/`) exposes 150 tools including destructive ones:
+The MCP server (`services/ingenium-server/`) registers 210 tools, and the complete catalog contains 212 including two extension tools. The catalog includes destructive operations:
 - `ingenium_skill_delete` — delete skills
 - `ingenium_project_delete` — delete projects
 - `ingenium_agent_delete` — delete agents
@@ -927,7 +940,7 @@ Fullscreen (same window):
 
 - `services/ingenium-api/lib/middleware/auth.ts` — Optional bearer token auth
 - `services/ingenium-api/lib/middleware/rate-limit.ts` — In-memory per-IP rate limiter
-- `services/ingenium-api/config/index.ts` — CORS defaults to `*`
+- `services/ingenium-api/config/index.ts` — CORS default (reads `CORS_ORIGIN` env var; see `supervisord.conf:28` for the `http://localhost:3000` default applied at runtime)
 - `services/ingenium-api/scripts/api-server.ts` — Express setup with helmet, 2MB body limit
 - `services/ingenium-dashboard/src/app/components/MarkdownViewer.tsx` — Vulnerable Markdown renderer
 - `services/ingenium-dashboard/src/app/components/OpenCodeFrame.tsx` — Unsandboxed iframes
