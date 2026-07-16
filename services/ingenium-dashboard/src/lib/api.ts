@@ -1,7 +1,19 @@
+/** @default "http://localhost:4097/api/v1" — overridden via NEXT_PUBLIC_API_URL env var at build or runtime. */
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4097/api/v1";
+/**
+ * Default project for API calls when no explicit project is selected.
+ * The API resolves this to the global-default project (is_global=1).
+ */
 const DEFAULT_PROJECT = "global-default";
 
-/** Internal fetch wrapper that handles errors and content types uniformly. */
+/**
+ * Typed fetch wrapper for the Ingenium API.
+ *
+ * - Throws on non-OK responses, extracting the server's error message when available
+ * - Handles 204 No Content (returned by DELETE endpoints) without trying to parse JSON
+ * - Overwrites the `Content-Type` header if `options.headers` is provided, so callers
+ *   can pass FormData (for file uploads) without the default JSON header
+ */
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
@@ -11,7 +23,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
     throw new Error(err.error?.message ?? res.statusText);
   }
-  // Handle 204 No Content
+  // 204 No Content — returned by DELETE endpoints; no body to parse
   if (res.status === 204) return undefined as T;
   return res.json();
 }
@@ -19,8 +31,28 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 /** A project managed by Ingenium. */
 export type Project = { id: string; name: string; path?: string; archived_at?: string; created_at: string; updated_at: string; is_global?: boolean };
 
-/** An AI agent skill with its full content. */
-export type Skill = { id: string; name: string; description: string; content: string; category?: string; enabled: boolean; tags?: string; always_apply?: number; file_tree?: string; created_at: string; updated_at: string };
+/** An AI agent skill with its full content.
+ * Matches the raw API row shape exactly (the API deliberately preserves raw DB rows):
+ * - enabled is the raw numeric 0/1 (SQLite boolean)
+ * - file_tree / category / tags / archived_at are nullable
+ * - project_id and revision are always present in the raw row
+ */
+export type Skill = {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  content: string;
+  category: string | null;
+  tags: string | null;
+  always_apply: number;
+  file_tree: string | null;
+  enabled: 0 | 1;
+  revision: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 /** A learning entry — decisions, patterns, bugs, or preferences. */
 export type Learning = { id: number; entry_type: string; content: string; tags?: string; priority: number; created_at: string };
@@ -230,7 +262,11 @@ export type Job = {
   prompt_template: string;
   schedule_cron?: string | null;
   trigger_event?: string | null;
-  /** Runtime value is 0/1 (number) from SQLite; truthy/falsy coercion works for checkboxes and ternaries. */
+  /**
+   * SQLite stores booleans as 0/1 integers. The API returns them as numbers,
+   * but we type as `boolean` for ergonomic usage. Truthy/falsy coercion works
+   * for checkboxes and ternaries; use `!!enabled` when a strict boolean is needed.
+   */
   enabled: boolean;
   timeout_minutes: number;
   created_at: string;
@@ -359,20 +395,37 @@ export interface DashboardSummary {
   generatedAt: string;
 }
 
-/** ========== Docs Types ========== */
+/** ========== Docs Types (re-exported from canonical docs-types.ts) ========== */
 
-export interface DocSpace { id: number; name: string; slug: string; description: string; icon: string; sort_order: number; }
-export interface DocPage { id: number; space_id: number; parent_page_id: number | null; title: string; slug: string; content: string; revision: number; status: "draft" | "published" | "archived"; sort_order: number; is_favorite: number; created_at: string; updated_at: string; }
-export interface DocPageTree extends DocPage { children: DocPageTree[]; }
-export interface DocComment { id: number; page_id: number; parent_comment_id: number | null; content: string; selection_text: string; selection_offset: number; resolved: number; created_at: string; updated_at: string; }
-export interface DocPageVersion { id: number; page_id: number; revision: number; title: string; content: string; created_at: string; }
-export interface DocAttachment { id: number; page_id: number; filename: string; original_name: string; mime_type: string; size_bytes: number; storage_path: string; created_at: string; }
-export interface DocTemplate { id: number; name: string; description: string; content: string; category: string; }
-export interface DocTag { id: number; name: string; slug: string; }
+export type {
+  DocSpace,
+  DocPage,
+  DocPageTree,
+  DocDraft,
+  DocComment,
+  DocVersion,
+  DocSearchResult,
+  DocTag,
+  DocBacklink,
+  DocTemplate,
+  DocTrashItem,
+  DocAttachment,
+  DocProjectLink,
+  DocStats,
+  DocExportData,
+  ImportPreview,
+} from "./docs-types";
 
 /**
  * Typed API client for the Ingenium backend.
- * All methods accept an optional `project` parameter that defaults to "ingenium".
+ *
+ * Every method accepts an optional `project` parameter defaulting to `"global-default"`.
+ * Methods that accept user-controlled path segments (names, IDs) use `encodeURIComponent`
+ * to prevent path-traversal injection.
+ *
+ * The client exposes 15 resource groups: projects, skills, learnings, tasks, plugins,
+ * agents, servers, observations, personality, synthesis, pipeline, emails, settings,
+ * configs, logs, mcpTools, jobs, docs, and home (dashboard summary).
  */
 export const api = {
   projects: {
@@ -398,6 +451,33 @@ export const api = {
         method: "PATCH", 
         body: JSON.stringify({ content, ...(extra || {}) })
       }),
+    // Governance
+    proposals: {
+      list: (project = DEFAULT_PROJECT, status?: string) => 
+        request<{ data: any[] }>(`/skills/proposals?project=${project}${status ? `&status=${status}` : ''}`),
+      get: (proposalId: string, project = DEFAULT_PROJECT) => 
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}?project=${project}`),
+      create: (body: any, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/skills/proposals?project=${project}`, { method: 'POST', body: JSON.stringify(body) }),
+      submit: (proposalId: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/submit?project=${project}`, { method: 'POST' }),
+      approve: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/approve?project=${project}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
+      reject: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/reject?project=${project}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
+      rollback: (proposalId: string, reviewer: string, reason?: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/skills/proposals/${encodeURIComponent(proposalId)}/rollback?project=${project}`, { method: 'POST', body: JSON.stringify({ reviewer, reason }) }),
+    },
+    versions: {
+      list: (name: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any[] }>(`/skills/${encodeURIComponent(name)}/versions?project=${project}`),
+    },
+    archived: {
+      list: (project = DEFAULT_PROJECT) =>
+        request<{ data: any[] }>(`/skills/archived?project=${project}`),
+      restore: (name: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/skills/${encodeURIComponent(name)}/restore?project=${project}`, { method: 'POST' }),
+    },
   },
   learnings: {
     list: (project = DEFAULT_PROJECT) => request<{ data: Learning[] }>(`/learnings?project=${project}`),
@@ -630,7 +710,13 @@ export const api = {
     set: (key: string, value: string, project = DEFAULT_PROJECT) =>
       request<{ data: { key: string; value: string } }>(`/settings?project=${project}`, { method: "POST", body: JSON.stringify({ key, value }) }),
 
-    /** Fetch the full LLM synthesis config (model, API key, endpoint) in parallel. */
+    /**
+     * Fetch the full LLM synthesis config in parallel.
+     *
+     * Three independent settings requests fire concurrently via Promise.all,
+     * then the results are assembled into a single config object. This avoids
+     * three sequential round-trips to the API.
+     */
     getConfig: (project = DEFAULT_PROJECT) =>
       Promise.all([
         request<{ data: { key: string; value: string } }>(`/settings?project=${project}&key=synthesis_model`),
@@ -727,35 +813,82 @@ export const api = {
     /** Spaces — top-level doc containers. */
     spaces: {
       list: (project = DEFAULT_PROJECT) =>
-        request<{ data: DocSpace[] }>(`/docs/spaces?project=${encodeURIComponent(project)}`),
+        request<{ data: import("./docs-types").DocSpace[]; total: number }>(`/docs/spaces?project=${encodeURIComponent(project)}`),
+      get: (idOrSlug: number | string, project = DEFAULT_PROJECT) => {
+        if (typeof idOrSlug === "number") {
+          return request<{ data: import("./docs-types").DocSpace }>(`/docs/spaces/${idOrSlug}?project=${encodeURIComponent(project)}`);
+        }
+        return request<{ data: import("./docs-types").DocSpace }>(`/docs/spaces?slug=${encodeURIComponent(idOrSlug)}&project=${encodeURIComponent(project)}`);
+      },
+      create: (name: string, slug: string, description?: string, icon?: string, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocSpace }>(`/docs/spaces?project=${encodeURIComponent(project)}`, {
+          method: "POST", body: JSON.stringify({ name, slug, description, icon }),
+        }),
+      update: (id: number, data: { name?: string; slug?: string; description?: string; icon?: string }, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocSpace }>(`/docs/spaces/${id}?project=${encodeURIComponent(project)}`, {
+          method: "PUT", body: JSON.stringify(data),
+        }),
+      delete: (id: number, project = DEFAULT_PROJECT) =>
+        request(`/docs/spaces/${id}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
     },
 
     /** Pages — individual documents within a space. */
     pages: {
+      list: (spaceId: number, parentPageId?: number, project = DEFAULT_PROJECT) => {
+        const params = new URLSearchParams({ project: String(project) });
+        if (parentPageId) params.set("parentPageId", String(parentPageId));
+        return request<{ data: import("./docs-types").DocPage[]; total: number }>(`/docs/spaces/${spaceId}/pages?${params}`);
+      },
       tree: (spaceId: number, project = DEFAULT_PROJECT) =>
-        request<{ data: DocPageTree[] }>(`/docs/spaces/${spaceId}/tree?project=${encodeURIComponent(project)}`),
+        request<{ data: import("./docs-types").DocPageTree[] }>(`/docs/spaces/${spaceId}/tree?project=${encodeURIComponent(project)}`),
       get: (id: number, project = DEFAULT_PROJECT) =>
-        request<{ data: DocPage }>(`/docs/pages/${id}?project=${encodeURIComponent(project)}`),
-      create: (spaceId: number, data: Partial<DocPage>, project = DEFAULT_PROJECT) =>
-        request<{ data: DocPage }>(`/docs/spaces/${spaceId}/pages?project=${encodeURIComponent(project)}`, {
+        request<{ data: import("./docs-types").DocPage }>(`/docs/pages/${id}?project=${encodeURIComponent(project)}`),
+      getBySlug: (spaceId: number, slug: string, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocPage }>(`/docs/pages?spaceId=${spaceId}&slug=${encodeURIComponent(slug)}&project=${encodeURIComponent(project)}`),
+      create: (spaceId: number, data: { title: string; slug: string; content?: string; parentPageId?: number; status?: string }, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocPage }>(`/docs/spaces/${spaceId}/pages?project=${encodeURIComponent(project)}`, {
           method: "POST", body: JSON.stringify(data),
         }),
-      update: (id: number, data: Partial<DocPage>, expectedRevision?: number, project = DEFAULT_PROJECT) => {
+      /** PUT /pages/:id — reads expectedRevision (camelCase) for optimistic concurrency. */
+      update: (id: number, data: { title?: string; slug?: string; content?: string; status?: string }, expectedRevision?: number, project = DEFAULT_PROJECT) => {
         const body: Record<string, unknown> = { ...data };
-        if (expectedRevision !== undefined) body.expected_revision = expectedRevision;
-        return request<{ data: DocPage }>(`/docs/pages/${id}?project=${encodeURIComponent(project)}`, {
-          method: "PATCH", body: JSON.stringify(body),
+        if (expectedRevision !== undefined) body.expectedRevision = expectedRevision;
+        return request<{ data: import("./docs-types").DocPage }>(`/docs/pages/${id}?project=${encodeURIComponent(project)}`, {
+          method: "PUT", body: JSON.stringify(body),
         });
       },
       delete: (id: number, project = DEFAULT_PROJECT) =>
         request(`/docs/pages/${id}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
+      restore: (pageId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocPage }>(`/docs/pages/${pageId}/restore?project=${encodeURIComponent(project)}`, { method: "POST" }),
+      move: (id: number, newParentId?: number, newSortOrder?: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocPage }>(`/docs/pages/${id}/move?project=${encodeURIComponent(project)}`, {
+          method: "POST", body: JSON.stringify({ newParentId, newSortOrder }),
+        }),
+      publish: (id: number, expectedRevision?: number, project = DEFAULT_PROJECT) => {
+        const body: Record<string, unknown> = {};
+        if (expectedRevision !== undefined) body.expectedRevision = expectedRevision;
+        return request<{ data: import("./docs-types").DocPage }>(`/docs/pages/${id}/publish?project=${encodeURIComponent(project)}`, {
+          method: "POST", body: JSON.stringify(body),
+        });
+      },
+      toggleFavorite: (id: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocPage }>(`/docs/pages/${id}/favorite?project=${encodeURIComponent(project)}`, { method: "POST" }),
+      /** Draft sub-resource. */
       draft: {
         get: (pageId: number, project = DEFAULT_PROJECT) =>
-          request<{ data: { content: string } }>(`/docs/pages/${pageId}/draft?project=${encodeURIComponent(project)}`),
-        save: (pageId: number, content: string, project = DEFAULT_PROJECT) =>
-          request(`/docs/pages/${pageId}/draft?project=${encodeURIComponent(project)}`, {
-            method: "PUT", body: JSON.stringify({ content }),
-          }),
+          request<{ data: import("./docs-types").DocDraft }>(`/docs/pages/${pageId}/draft?project=${encodeURIComponent(project)}`),
+        save: (pageId: number, content: string, title?: string, slug?: string, baseRevision?: number, project = DEFAULT_PROJECT) => {
+          const body: Record<string, unknown> = { content };
+          if (title !== undefined) body.title = title;
+          if (slug !== undefined) body.slug = slug;
+          if (baseRevision !== undefined) body.baseRevision = baseRevision;
+          return request<{ data: import("./docs-types").DocDraft }>(`/docs/pages/${pageId}/draft?project=${encodeURIComponent(project)}`, {
+            method: "PUT", body: JSON.stringify(body),
+          });
+        },
+        delete: (pageId: number, project = DEFAULT_PROJECT) =>
+          request(`/docs/pages/${pageId}/draft?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
       },
     },
 
@@ -768,30 +901,27 @@ export const api = {
       create: (
         pageId: number,
         content: string,
-        author: string,
-        parentId?: number,
+        parentCommentId?: number,
         selectionText?: string,
-        offset?: number,
+        selectionOffset?: number,
         project = DEFAULT_PROJECT,
       ) =>
         request<{ data: import("./docs-types").DocComment }>(
           `/docs/pages/${pageId}/comments?project=${encodeURIComponent(project)}`,
           {
             method: "POST",
-            body: JSON.stringify({
-              content,
-              author,
-              parent_id: parentId ?? null,
-              selection_text: selectionText ?? null,
-              offset: offset ?? null,
-            }),
+            body: JSON.stringify({ content, parentCommentId, selectionText, selectionOffset }),
           },
         ),
-      resolve: (commentId: number, project = DEFAULT_PROJECT) =>
+      /** PUT /pages/:pageId/comments/:commentId/resolve — resolve (toggle) a comment. */
+      resolve: (pageId: number, commentId: number, project = DEFAULT_PROJECT) =>
         request<{ data: import("./docs-types").DocComment }>(
-          `/docs/comments/${commentId}/resolve?project=${encodeURIComponent(project)}`,
-          { method: "POST" },
+          `/docs/pages/${pageId}/comments/${commentId}/resolve?project=${encodeURIComponent(project)}`,
+          { method: "PUT" },
         ),
+      /** DELETE /pages/:pageId/comments/:commentId */
+      delete: (pageId: number, commentId: number, project = DEFAULT_PROJECT) =>
+        request(`/docs/pages/${pageId}/comments/${commentId}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
     },
 
     /** Versions — point-in-time page snapshots. */
@@ -800,13 +930,15 @@ export const api = {
         request<{ data: import("./docs-types").DocVersion[]; total: number }>(
           `/docs/pages/${pageId}/versions?project=${encodeURIComponent(project)}`,
         ),
-      get: (versionId: number, project = DEFAULT_PROJECT) =>
+      /** GET /pages/:pageId/versions/:versionId (page-scoped). */
+      get: (pageId: number, versionId: number, project = DEFAULT_PROJECT) =>
         request<{ data: import("./docs-types").DocVersion }>(
-          `/docs/versions/${versionId}?project=${encodeURIComponent(project)}`,
+          `/docs/pages/${pageId}/versions/${versionId}?project=${encodeURIComponent(project)}`,
         ),
-      restore: (versionId: number, project = DEFAULT_PROJECT) =>
-        request<{ data: import("./docs-types").DocVersion }>(
-          `/docs/versions/${versionId}/restore?project=${encodeURIComponent(project)}`,
+      /** POST /pages/:pageId/restore/:versionId */
+      restore: (pageId: number, versionId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocPage }>(
+          `/docs/pages/${pageId}/restore/${versionId}?project=${encodeURIComponent(project)}`,
           { method: "POST" },
         ),
     },
@@ -814,7 +946,7 @@ export const api = {
     /** Search — full-text search across all spaces/pages. */
     search: (query: string, spaceId?: number, project = DEFAULT_PROJECT) => {
       const params = new URLSearchParams({ project, q: query });
-      if (spaceId) params.set("space_id", String(spaceId));
+      if (spaceId) params.set("spaceId", String(spaceId));
       return request<{ data: import("./docs-types").DocSearchResult[]; total: number }>(
         `/docs/search?${params}`,
       );
@@ -823,21 +955,22 @@ export const api = {
     /** Tags — per-page tag management. */
     tags: {
       list: (pageId: number, project = DEFAULT_PROJECT) =>
-        request<{ data: import("./docs-types").DocTag[]; total: number }>(
+        request<{ data: import("./docs-types").DocTag[] }>(
           `/docs/pages/${pageId}/tags?project=${encodeURIComponent(project)}`,
         ),
+      /** POST /pages/:id/tags — body { tagName } */
       add: (pageId: number, tagName: string, project = DEFAULT_PROJECT) =>
         request<{ data: import("./docs-types").DocTag }>(
           `/docs/pages/${pageId}/tags?project=${encodeURIComponent(project)}`,
-          { method: "POST", body: JSON.stringify({ name: tagName }) },
+          { method: "POST", body: JSON.stringify({ tagName }) },
         ),
       remove: (pageId: number, tagId: number, project = DEFAULT_PROJECT) =>
-        request<{ data: { removed: boolean } }>(
+        request(
           `/docs/pages/${pageId}/tags/${tagId}?project=${encodeURIComponent(project)}`,
           { method: "DELETE" },
         ),
       allUnique: (project = DEFAULT_PROJECT) =>
-        request<{ data: string[] }>(
+        request<{ data: import("./docs-types").DocTag[]; total: number }>(
           `/docs/tags?project=${encodeURIComponent(project)}`,
         ),
     },
@@ -860,40 +993,103 @@ export const api = {
         request<{ data: import("./docs-types").DocTemplate }>(
           `/docs/templates/${id}?project=${encodeURIComponent(project)}`,
         ),
+      create: (name: string, content: string, description?: string, category?: string, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocTemplate }>(`/docs/templates?project=${encodeURIComponent(project)}`, {
+          method: "POST", body: JSON.stringify({ name, content, description, category }),
+        }),
+      /** PUT /templates/:id */
+      update: (id: number, data: { name?: string; content?: string; description?: string; category?: string }, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocTemplate }>(`/docs/templates/${id}?project=${encodeURIComponent(project)}`, {
+          method: "PUT", body: JSON.stringify(data),
+        }),
+      delete: (id: number, project = DEFAULT_PROJECT) =>
+        request(`/docs/templates/${id}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
+    },
+
+    /** Attachments — file uploads on pages. */
+    attachments: {
+      list: (pageId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocAttachment[]; total: number }>(
+          `/docs/pages/${pageId}/attachments?project=${encodeURIComponent(project)}`,
+        ),
+      /** Upload multipart file. */
+      upload: (pageId: number, formData: FormData, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocAttachment }>(
+          `/docs/pages/${pageId}/attachments?project=${encodeURIComponent(project)}`,
+          { method: "POST", headers: {}, body: formData },
+        ),
+      /** GET /pages/:pageId/attachments/:attId/download — returns download URL. The caller opens this as a blob download. */
+      downloadUrl: (pageId: number, attId: number, project = DEFAULT_PROJECT): string =>
+        `${API_URL}/docs/pages/${pageId}/attachments/${attId}/download?project=${encodeURIComponent(project)}`,
+      /** DELETE /pages/:pageId/attachments/:attId */
+      delete: (pageId: number, attId: number, project = DEFAULT_PROJECT) =>
+        request(`/docs/pages/${pageId}/attachments/${attId}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
+    },
+
+    /** Project Links — link pages to Ingenium projects. */
+    projectLinks: {
+      /** GET /pages/:id/projects */
+      list: (pageId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocProjectLink[] }>(
+          `/docs/pages/${pageId}/projects?project=${encodeURIComponent(project)}`,
+        ),
+      /** POST /pages/:id/projects — body { projectId: string } */
+      link: (pageId: number, projectId: string, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocProjectLink }>(
+          `/docs/pages/${pageId}/projects?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify({ projectId }) },
+        ),
+      /** DELETE /pages/:pageId/projects/:linkedProjectId */
+      unlink: (pageId: number, linkedProjectId: string, project = DEFAULT_PROJECT) =>
+        request(
+          `/docs/pages/${pageId}/projects/${encodeURIComponent(linkedProjectId)}?project=${encodeURIComponent(project)}`,
+          { method: "DELETE" },
+        ),
+    },
+
+    /** Favorites. */
+    favorites: {
+      list: (project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocPage[]; total: number }>(
+          `/docs/favorites?project=${encodeURIComponent(project)}`,
+        ),
     },
 
     /** Import / Export. */
     importExport: {
-      import: (spaceId: number, formData: FormData, project = DEFAULT_PROJECT) =>
-        request<{ data: { imported: number; errors: string[] } }>(
-          `/docs/spaces/${spaceId}/import?project=${encodeURIComponent(project)}`,
-          {
-            method: "POST",
-            headers: {}, // Let browser set Content-Type for multipart
-            body: formData,
-          },
+      /** POST /docs/import — JSON body { spaceId, format, data } */
+      importJson: (spaceId: number, format: string, data: unknown, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocPage[]; total: number }>(
+          `/docs/import?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify({ spaceId, format, data }) },
         ),
-      exportJson: (spaceId: number, project = DEFAULT_PROJECT) =>
-        request<{ data: { json: string; filename: string } }>(
-          `/docs/spaces/${spaceId}/export?project=${encodeURIComponent(project)}&format=json`,
+      /** GET /docs/spaces/:spaceId/export — canonical export response. */
+      exportSpace: (spaceId: number, project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocExportData }>(
+          `/docs/spaces/${spaceId}/export?project=${encodeURIComponent(project)}`,
         ),
     },
 
     /** Trash — soft-deleted pages. */
     trash: {
+      /** GET /spaces/:spaceId/trash */
       list: (spaceId: number, project = DEFAULT_PROJECT) =>
         request<{ data: import("./docs-types").DocTrashItem[]; total: number }>(
           `/docs/spaces/${spaceId}/trash?project=${encodeURIComponent(project)}`,
         ),
-      restore: (pageId: number, project = DEFAULT_PROJECT) =>
-        request<{ data: { restored: boolean } }>(
-          `/docs/pages/${pageId}/restore?project=${encodeURIComponent(project)}`,
-          { method: "POST" },
-        ),
+      /** DELETE /spaces/:spaceId/trash — purge all archived. */
       empty: (spaceId: number, project = DEFAULT_PROJECT) =>
-        request<{ data: { purged: number } }>(
+        request(
           `/docs/spaces/${spaceId}/trash?project=${encodeURIComponent(project)}`,
           { method: "DELETE" },
+        ),
+    },
+
+    /** Stats. */
+    stats: {
+      get: (project = DEFAULT_PROJECT) =>
+        request<{ data: import("./docs-types").DocStats }>(
+          `/docs/stats?project=${encodeURIComponent(project)}`,
         ),
     },
   },
