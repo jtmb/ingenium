@@ -1,8 +1,8 @@
-import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
 import { Skill } from "../schema.js";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
+import { resolve, sep, isAbsolute } from "node:path";
 import { logger } from "../logger.js";
 import { getSkillsBase } from "./paths.js";
 
@@ -39,6 +39,44 @@ export function stripLeadingFrontmatter(text: string): string {
   return t;
 }
 
+/**
+ * Security: validate a relative file_tree path against a canonical base directory.
+ * Rejects absolute paths, path traversal (../), and symlink escapes.
+ * Returns the resolved safe path, or null if the path is unsafe.
+ */
+function resolveSafePath(baseDir: string, relativePath: string): string | null {
+  // Reject absolute paths (e.g., "/etc/passwd")
+  if (isAbsolute(relativePath)) return null;
+
+  // Resolve relative to the canonical base directory
+  const resolved = resolve(baseDir, relativePath);
+
+  // Containment check: resolved path must be within baseDir
+  // Use `baseDir + sep` to ensure we match the directory boundary, not a sibling prefix
+  if (!resolved.startsWith(baseDir + sep) && resolved !== baseDir) return null;
+
+  // Symlink escape check: realpathSync follows symlinks to the canonical target
+  // This catches cases where a symlink within the skill directory points outside
+  try {
+    const parentDir = resolve(resolved, "..");
+    // Only check if the parent exists (file may not yet exist for writes)
+    if (existsSync(parentDir)) {
+      // For directories, check that the parent is within baseDir
+      const canonicalParent = realpathSync(parentDir);
+      if (!canonicalParent.startsWith(baseDir + sep) && canonicalParent !== baseDir) return null;
+    }
+    // If the file already exists (e.g., on re-write), verify its real path
+    if (existsSync(resolved)) {
+      const canonical = realpathSync(resolved);
+      if (!canonical.startsWith(baseDir + sep) && canonical !== baseDir) return null;
+    }
+  } catch {
+    // realpathSync can throw on nonexistent paths — that's fine, skip this check
+  }
+
+  return resolved;
+}
+
 export function listSkills(projectId: string): Skill[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   return db.prepare("SELECT * FROM skills WHERE project_id = ? AND enabled = 1")
@@ -53,12 +91,14 @@ export function getSkill(projectId: string, name: string): Skill | undefined {
 
 export function searchSkills(projectId: string, query: string): Skill[] {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+  const sanitized = sanitizeFts5Query(query);
+  if (!sanitized) return [];
   return db.prepare(
     `SELECT s.*, rank FROM skills s
      INNER JOIN skills_fts fts ON fts.rowid = s.rowid
      WHERE s.project_id = ? AND skills_fts MATCH ?
      ORDER BY rank`
-  ).all(projectId, query) as Skill[];
+  ).all(projectId, sanitized) as Skill[];
 }
 
 export function writeSkillToDisk(skill: Skill): void {
@@ -66,6 +106,10 @@ export function writeSkillToDisk(skill: Skill): void {
   const skillsBase = getSkillsBase(projectId);
   const dir = resolve(skillsBase, skill.name);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+  // Canonicalize the base directory to prevent symlink-based escapes
+  let baseDir = dir;
+  try { baseDir = realpathSync(dir); } catch { /* dir just created, realpath may fail; fall back to resolved */ }
 
   // Write SKILL.md with YAML frontmatter
   // Un-escape any existing escapes before re-escaping to prevent double-escape
@@ -89,14 +133,34 @@ created: ${(skill as any).created_at || new Date().toISOString()}
   writeFileSync(resolve(dir, "metadata.json"), meta);
 
   // Write file_tree — every file under the skill directory
+  // 🔴 SECURITY: Validate every path against the canonical baseDir to prevent
+  // path traversal (../), absolute paths (/etc/passwd), and symlink escapes.
   if ((skill as any).file_tree) {
     try {
       const tree = JSON.parse((skill as any).file_tree);
       for (const [relPath, content] of Object.entries(tree)) {
-        const filePath = resolve(dir, relPath);
-        const parentDir = resolve(filePath, "..");
+        const safePath = resolveSafePath(baseDir, relPath as string);
+        if (!safePath) {
+          logger.warn("skills", "Rejected unsafe file_tree path", {
+            name: skill.name, path: relPath, baseDir,
+          });
+          continue;
+        }
+        const parentDir = resolve(safePath, "..");
         if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true });
-        writeFileSync(filePath, content as string, "utf-8");
+        writeFileSync(safePath, content as string, "utf-8");
+
+        // Post-write symlink defense: verify the written file's real path is still within baseDir.
+        // If a symlink was created between the containment check and the write, this catches it.
+        try {
+          const realPath = realpathSync(safePath);
+          if (!realPath.startsWith(baseDir + sep) && realPath !== baseDir) {
+            logger.warn("skills", "Post-write symlink escape detected, removing file", {
+              name: skill.name, path: relPath, realPath,
+            });
+            unlinkSync(safePath);
+          }
+        } catch { /* realpath may fail if the file was just removed; safe to ignore */ }
       }
     } catch (e) {
       logger.warn("skills", "Failed to parse file_tree JSON", { name: skill.name });
@@ -224,6 +288,11 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
       return undefined;
     }
 
+    // Canonicalize the skill directory to prevent symlink escapes during reading
+    const skillDir = resolve(filePath, "..");
+    let baseDir = skillDir;
+    try { baseDir = realpathSync(skillDir); } catch { /* fall back to resolved path */ }
+
     // Read and parse frontmatter
     const content = readFileSync(filePath, "utf-8");
     const nameMatch = content.match(/^name:\s*(.+)$/m);
@@ -246,6 +315,8 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
     }
 
     // Read all auxiliary files (everything except SKILL.md and metadata.json)
+    // 🔴 SECURITY: Verify every file read is within the canonical skill directory
+    // to prevent symlink-based escapes reading files outside the expected path.
     let fileTree = "";
     try {
       const tree: Record<string, string> = {};
@@ -253,12 +324,40 @@ export function syncSkillFromDisk(projectId: string, name: string): Skill | unde
         const entries = readdirSync(dir, { withFileTypes: true });
         for (const e of entries) {
           if (e.isDirectory()) {
-            walkDir(resolve(dir, e.name), base + e.name + "/");
+            const childPath = resolve(dir, e.name);
+            // Containment check before recursing into subdirectories
+            try {
+              const childCanonical = realpathSync(childPath);
+              if (!childCanonical.startsWith(baseDir + sep) && childCanonical !== baseDir) {
+                logger.warn("skills", "Skipping directory outside skill base", {
+                  name, path: childPath, canonical: childCanonical,
+                });
+                continue;
+              }
+              walkDir(childPath, base + e.name + "/");
+            } catch {
+              // realpathSync may fail; skip this entry
+            }
           } else if (e.isFile()) {
             const relPath = base + e.name;
             if (relPath === "SKILL.md" || relPath === "metadata.json") continue;
-            tree[relPath] = readFileSync(resolve(dir, e.name), "utf-8");
+            const childPath = resolve(dir, e.name);
+            // Containment check before reading file content
+            try {
+              const childCanonical = realpathSync(childPath);
+              if (!childCanonical.startsWith(baseDir + sep) && childCanonical !== baseDir) {
+                logger.warn("skills", "Skipping file outside skill base", {
+                  name, path: childPath, canonical: childCanonical,
+                });
+                continue;
+              }
+            } catch {
+              // realpathSync may fail; skip this entry
+            }
+            tree[relPath] = readFileSync(childPath, "utf-8");
           }
+          // Note: symlinks are not followed — readdirSync with withFileTypes uses lstat,
+          // so symlinks are neither isDirectory() nor isFile() and are silently skipped.
         }
       };
       walkDir(resolve(filePath, ".."), "");

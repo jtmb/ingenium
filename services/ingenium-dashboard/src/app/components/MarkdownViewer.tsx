@@ -2,6 +2,29 @@
 
 import { useState, useMemo, useEffect, useRef } from "react";
 import hljs from "highlight.js/lib/common";
+import DOMPurify from "dompurify";
+
+/** Allowed HTML elements and attributes for rendered markdown. */
+const PURIFY_CONFIG = {
+  ALLOWED_TAGS: [
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "p", "br", "hr",
+    "strong", "em", "u", "s",
+    "a",
+    "ul", "ol", "li",
+    "code", "pre",
+    "blockquote",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "img",
+    "span",
+  ],
+  ALLOWED_ATTR: [
+    "href", "target", "rel",
+    "src", "alt",
+    "class",
+  ],
+  ALLOW_DATA_ATTR: false,
+} satisfies DOMPurify.Config;
 
 type MarkdownViewerProps = {
   content: string;
@@ -63,7 +86,18 @@ export default function MarkdownViewer({ content, isMarkdown = true, language }:
 
   const renderedHtml = useMemo(() => {
     if (!isMarkdown) return "";
-    return renderSimpleMarkdown(content);
+    const rawHtml = renderSimpleMarkdown(content);
+    // Sanitize HTML to prevent XSS — strips javascript: URLs, event handlers, etc.
+    const clean = DOMPurify.sanitize(rawHtml, PURIFY_CONFIG);
+    // Harden links: rel="noopener noreferrer" on all links, convert
+    // any leftover javascript: URLs to # (belt-and-suspenders after DOMPurify)
+    return clean.replace(
+      /<a\s+[^>]*href="([^"]*)"([^>]*)>/gi,
+      (_m, href, rest) => {
+        const safe = /^javascript:/i.test(href) ? "#" : href;
+        return `<a href="${safe}"${rest} rel="noopener noreferrer">`;
+      },
+    );
   }, [content, isMarkdown]);
 
   // Apply syntax highlighting to code blocks in Preview mode

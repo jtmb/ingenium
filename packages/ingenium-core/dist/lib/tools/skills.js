@@ -1,7 +1,7 @@
-import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
+import { resolve, sep, isAbsolute } from "node:path";
 import { logger } from "../logger.js";
 import { getSkillsBase } from "./paths.js";
 /**
@@ -35,6 +35,44 @@ export function stripLeadingFrontmatter(text) {
     }
     return t;
 }
+/**
+ * Security: validate a relative file_tree path against a canonical base directory.
+ * Rejects absolute paths, path traversal (../), and symlink escapes.
+ * Returns the resolved safe path, or null if the path is unsafe.
+ */
+function resolveSafePath(baseDir, relativePath) {
+    // Reject absolute paths (e.g., "/etc/passwd")
+    if (isAbsolute(relativePath))
+        return null;
+    // Resolve relative to the canonical base directory
+    const resolved = resolve(baseDir, relativePath);
+    // Containment check: resolved path must be within baseDir
+    // Use `baseDir + sep` to ensure we match the directory boundary, not a sibling prefix
+    if (!resolved.startsWith(baseDir + sep) && resolved !== baseDir)
+        return null;
+    // Symlink escape check: realpathSync follows symlinks to the canonical target
+    // This catches cases where a symlink within the skill directory points outside
+    try {
+        const parentDir = resolve(resolved, "..");
+        // Only check if the parent exists (file may not yet exist for writes)
+        if (existsSync(parentDir)) {
+            // For directories, check that the parent is within baseDir
+            const canonicalParent = realpathSync(parentDir);
+            if (!canonicalParent.startsWith(baseDir + sep) && canonicalParent !== baseDir)
+                return null;
+        }
+        // If the file already exists (e.g., on re-write), verify its real path
+        if (existsSync(resolved)) {
+            const canonical = realpathSync(resolved);
+            if (!canonical.startsWith(baseDir + sep) && canonical !== baseDir)
+                return null;
+        }
+    }
+    catch {
+        // realpathSync can throw on nonexistent paths — that's fine, skip this check
+    }
+    return resolved;
+}
 export function listSkills(projectId) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     return db.prepare("SELECT * FROM skills WHERE project_id = ? AND enabled = 1")
@@ -47,10 +85,13 @@ export function getSkill(projectId, name) {
 }
 export function searchSkills(projectId, query) {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const sanitized = sanitizeFts5Query(query);
+    if (!sanitized)
+        return [];
     return db.prepare(`SELECT s.*, rank FROM skills s
      INNER JOIN skills_fts fts ON fts.rowid = s.rowid
      WHERE s.project_id = ? AND skills_fts MATCH ?
-     ORDER BY rank`).all(projectId, query);
+     ORDER BY rank`).all(projectId, sanitized);
 }
 export function writeSkillToDisk(skill) {
     const projectId = skill.project_id;
@@ -58,6 +99,12 @@ export function writeSkillToDisk(skill) {
     const dir = resolve(skillsBase, skill.name);
     if (!existsSync(dir))
         mkdirSync(dir, { recursive: true });
+    // Canonicalize the base directory to prevent symlink-based escapes
+    let baseDir = dir;
+    try {
+        baseDir = realpathSync(dir);
+    }
+    catch { /* dir just created, realpath may fail; fall back to resolved */ }
     // Write SKILL.md with YAML frontmatter
     // Un-escape any existing escapes before re-escaping to prevent double-escape
     const escaped = (skill.description || "")
@@ -78,15 +125,35 @@ created: ${skill.created_at || new Date().toISOString()}
     const meta = JSON.stringify({ tags, alwaysApply: skill.always_apply === 1 }, null, 2);
     writeFileSync(resolve(dir, "metadata.json"), meta);
     // Write file_tree — every file under the skill directory
+    // 🔴 SECURITY: Validate every path against the canonical baseDir to prevent
+    // path traversal (../), absolute paths (/etc/passwd), and symlink escapes.
     if (skill.file_tree) {
         try {
             const tree = JSON.parse(skill.file_tree);
             for (const [relPath, content] of Object.entries(tree)) {
-                const filePath = resolve(dir, relPath);
-                const parentDir = resolve(filePath, "..");
+                const safePath = resolveSafePath(baseDir, relPath);
+                if (!safePath) {
+                    logger.warn("skills", "Rejected unsafe file_tree path", {
+                        name: skill.name, path: relPath, baseDir,
+                    });
+                    continue;
+                }
+                const parentDir = resolve(safePath, "..");
                 if (!existsSync(parentDir))
                     mkdirSync(parentDir, { recursive: true });
-                writeFileSync(filePath, content, "utf-8");
+                writeFileSync(safePath, content, "utf-8");
+                // Post-write symlink defense: verify the written file's real path is still within baseDir.
+                // If a symlink was created between the containment check and the write, this catches it.
+                try {
+                    const realPath = realpathSync(safePath);
+                    if (!realPath.startsWith(baseDir + sep) && realPath !== baseDir) {
+                        logger.warn("skills", "Post-write symlink escape detected, removing file", {
+                            name: skill.name, path: relPath, realPath,
+                        });
+                        unlinkSync(safePath);
+                    }
+                }
+                catch { /* realpath may fail if the file was just removed; safe to ignore */ }
             }
         }
         catch (e) {
@@ -128,10 +195,13 @@ export function createSkill(projectId, name, description, content, category, tag
         // Sync FTS5 index: use lastInsertRowid (integer) for FTS5 rowid
         db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
             .run(result.lastInsertRowid, content, description);
-        // 🔴 writeSkillToDisk DISABLED to stop frontmatter amplification
         return getSkill(projectId, name);
     });
     checkpointAfterWrite();
+    // Write to disk AFTER the DB transaction commits — frontmatter amplification
+    // is prevented by stripLeadingFrontmatter() inside writeSkillToDisk
+    if (skill)
+        writeSkillToDisk(skill);
     return skill;
 }
 export function updateSkill(projectId, name, content, description, tags, alwaysApply, fileTree) {
@@ -269,24 +339,15 @@ export function syncSkillFromDisk(projectId, name) {
            always_apply = excluded.always_apply,
            file_tree = excluded.file_tree,
            updated_at = excluded.updated_at`).run(id, projectId, diskName, description, content, diskTags, diskAlwaysApply, fileTree, now, now);
-            // Sync FTS5
-            const inserted = db.prepare("SELECT rowid FROM skills WHERE id = ?").get(id);
-            db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
-                .run(inserted.rowid, content, description);
+            // FTS5 index is auto-synced by AFTER INSERT trigger on skills (migration 024)
             logger.info("skills", "Skill created from disk sync", { name: diskName });
         }
         else {
             // Update existing skill from disk file
+            // FTS5 index is auto-synced by AFTER UPDATE trigger on skills (migration 024)
             const now = new Date().toISOString();
-            const row = db.prepare("SELECT rowid FROM skills WHERE id = ?").get(existing.id);
-            // Remove old FTS entry
-            db.prepare("DELETE FROM skills_fts WHERE rowid = ?").run(row.rowid);
-            // Update skill
             db.prepare("UPDATE skills SET content = ?, description = ?, tags = ?, always_apply = ?, file_tree = ?, updated_at = ? WHERE id = ?")
                 .run(content, description, diskTags, diskAlwaysApply, fileTree, now, existing.id);
-            // Re-insert FTS
-            db.prepare("INSERT INTO skills_fts(rowid, content, description) VALUES (?, ?, ?)")
-                .run(row.rowid, content, description);
             logger.info("skills", "Skill synced from disk", { name: diskName });
         }
         return db.prepare("SELECT * FROM skills WHERE project_id = ? AND name = ?")

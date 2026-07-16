@@ -1,4 +1,4 @@
-import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
 import { randomUUID } from "node:crypto";
 // ============================================================================
 // Internal helpers
@@ -169,8 +169,9 @@ export function deleteTask(projectId, taskId, actor) {
  */
 export function searchTasks(projectId, query, limit = 50) {
     const db = getDb(dbPath());
-    // Sanitize FTS5 query: wrap terms in quotes to avoid syntax errors
-    const sanitized = query.replace(/"/g, '""');
+    const sanitized = sanitizeFts5Query(query);
+    if (!sanitized)
+        return [];
     return db.prepare(`SELECT t.*, rank FROM tasks t
      INNER JOIN tasks_fts fts ON fts.rowid = t.rowid
      WHERE t.project_id = ? AND tasks_fts MATCH ?
