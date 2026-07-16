@@ -31,9 +31,9 @@ export default function FolderSidebar({
   syncingFolders?: string[];
   folderSyncStatuses?: any[];
 }) {
-  /** Default folders displayed when the real folder list hasn't loaded yet.
-   *  NOTE: These are common IMAP folder names — actual folders may differ per provider
-   *  (e.g., "[Gmail]/Sent" for Gmail). The real list replaces these after the API responds. */
+  /** Display fallbacks shown while the real folder list hasn't loaded from the API.
+   *  Actual folders are provider-specific (e.g., Gmail labels, IMAP directory listing).
+   *  These defaults are replaced as soon as the API responds with the real folder list. */
   const defaultFolders = [
     { name: "INBOX", path: "INBOX", unreadMessages: 0 },
     { name: "Sent", path: "Sent", unreadMessages: 0 },
