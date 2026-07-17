@@ -22,4 +22,4 @@ Agent YAML format: `model: {provider-id}/{model-key}`
 
 ## LMStudio (local)
 
-- **qwen/qwen3.5-9b** -> `model: lmstudio/qwen/qwen3.5-9b`
+- **qwen/qwen3.5-9b** -> `model: qwen/qwen3.5-9b`

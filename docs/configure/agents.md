@@ -7,7 +7,17 @@ description: Agent profiles, pipeline lifecycle, and subagent invocation for the
 
 ## Overview
 
-11 agents total: 1 primary, 10 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Ten specialized subagents handle search, context, prompt engineering, implementation (2 tiers), review, documentation, security, browser automation, and vision analysis.
+12 agents total: 2 primary, 10 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. A dedicated **chat agent** (`ingenium-chat`) handles conversational interactions with read-only access. Ten specialized subagents handle search, context, prompt engineering, implementation (2 tiers), review, documentation, security, browser automation, and vision analysis.
+
+### Chat Agent Model Inheritance
+
+The `ingenium-chat` agent uses **Settings-backed model resolution** rather than a hardcoded model:
+
+- **No `model` field** — The agent inherits its model from the Chat request's `modelID` parameter at send time, not from a static agent config.
+- **`hidden: true`** — Prevents the agent from appearing in OpenCode's non-Chat agent selectors (e.g., the OpenCode Web/CLI agent dropdown). It is only visible in the Chat page's agent selector.
+- **Provider from Settings** — The available providers and models come from the Settings Pipeline tab (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
+
+This design means the Chat page always uses the same LLM that the self-learning pipeline is configured with, avoiding confusion about which model is in use.
 
 ```mermaid
 flowchart TB
@@ -54,7 +64,7 @@ flowchart TB
 | **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | — | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `local-models` | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `local-models` | Thread/RAG persistent memory — past decisions, preferences |
-| **vision-bridge** | Subagent | `lmstudio/qwen/qwen3.5-9b` | LM Studio | Read-only (`read: allow`) | `local-models` | Vision analysis — reads screenshot files and produces structured technical descriptions for non-vision models |
+| **vision-bridge** | Subagent | `qwen/qwen3.5-9b` | LM Studio | Read-only (`read: allow`) | `local-models` | Vision analysis — reads screenshot files and produces structured technical descriptions for non-vision models |
 | **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Complex multi-file refactoring, architectural changes, performance-critical code |
 | **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` | Code review + test verification. Reviews tests, does NOT write production code or author tests |

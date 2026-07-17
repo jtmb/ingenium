@@ -99,22 +99,23 @@ packages/
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
 ├── ingenium-server/      # MCP stdio server with 210 tools. HTTP to API. Zero DB access.
-└── ingenium-dashboard/   # Next.js 16 App Router frontend (17 primary routes + Settings overlay). HTTP to API. Zero DB access.
+└── ingenium-dashboard/   # Next.js 16 App Router frontend (18 primary routes + Settings overlay). HTTP to API. Zero DB access.
 ```
 
 **API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer.
 
 ## Agent Table
 
-**11 agents total: 1 primary + 10 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
+**12 agents total: 2 primary + 10 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
 
 | Agent | Type | Model | Skills Allowed |
 |-------|------|-------|----------------|
 | **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` |
+| **ingenium-chat** | Primary | `deepseek/deepseek-v4-flash` | — |
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | `local-models` |
 | **ingenium-scout** | Subagent | `deepseek/deepseek-v4-flash` | `local-models` |
 | **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-pro` | — |
-| **vision-bridge** | Subagent | `lmstudio/qwen/qwen3.5-9b` | `local-models` |
+| **vision-bridge** | Subagent | `qwen/qwen3.5-9b` | `local-models` |
 | **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
@@ -138,12 +139,13 @@ The full pattern is `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `inge
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 17 primary routes plus the Settings overlay (18 user-facing views):
+The Ingenium Dashboard (http://localhost:3000) provides 18 primary routes plus the Settings overlay (19 user-facing views):
 
 | Page | Purpose |
 |------|---------|
 | `/` | Home — operational dashboard with live metrics via `/api/v1/dashboard/summary` |
-| `/opencode` | Embedded OpenCode with Web/CLI dual-mode (glass tab toggle, Ctrl+Shift+`) |
+| `/chat` | Ingenium Chat — standalone conversational agent interface |
+| `/opencode` | Embedded OpenCode Web/CLI iframes (no native chat) |
 | `/projects` | Project management (create, rename, archive, restore) |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
 | `/docs` | Documentation workspace (spaces, editor, search, templates, history, trash) |
@@ -159,9 +161,9 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 primary routes plus t
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
-| Settings (overlay) | Full-screen overlay via gear icon. 14 tabs, deep-link: `?settings=<tab>`. Auto-selects tab matching current page. |
+| Settings (overlay) | Full-screen overlay via gear icon. 4 functional tabs (General, Mail, Pipeline, Config), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. |
 
-> **Nav bar layout**: Settings gear far-right. **ProjectDropdown** (folder icon) to its left for project switching — disabled on `/mail` and `/opencode`. The dashboard talks to the API layer only — zero direct DB access.
+> **Nav bar layout**: Settings gear far-right. **ProjectDropdown** (folder icon) to its left for project switching — disabled on `/mail` and `/opencode`. Chat link added to the Workspace group alongside OpenCode. The dashboard talks to the API layer only — zero direct DB access.
 
 ### Project Identity Model
 
@@ -270,7 +272,7 @@ docker compose exec ingenium npm run test   # Execute inside container
 bash tests/test-self-improving.sh        # All 4 detection pipeline tests
 bash tests/test-self-improving.sh -v     # Verbose output
 bash tests/enforce-no-db-leaks.sh        # CI gate: verify no DB access leaks
-bash tests/test-agent-validation.sh      # Agent validation checks (11 agents)
+bash tests/test-agent-validation.sh      # Agent validation checks (12 agents)
 bash tests/test-append-only-files.sh     # Verify append-only file constraints
 
 npm run test --workspace=packages/ingenium-core          # Unit tests

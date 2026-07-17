@@ -3,7 +3,7 @@ name: browser-agent
 description: "Browser automation agent — navigates websites, extracts data, fills forms, takes screenshots. Uses dev-browser + wsl-chrome-connect.sh. Self-healing via site recipe updates."
 mode: subagent
 model: opencode/deepseek-v4-flash-free
-# model: opencode/deepseek-v4-flash-free  # only if Zen free tier ;also available: lmstudio/qwen/qwen3.5-9b
+# model: opencode/deepseek-v4-flash-free  # only if Zen free tier ;also available: qwen/qwen3.5-9b
 permission:
   read: allow
   edit:
