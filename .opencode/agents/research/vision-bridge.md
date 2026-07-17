@@ -2,7 +2,8 @@
 name: vision-bridge
 description: "Vision bridge for non-vision models — analyzes a screenshot file and produces a precise technical description of what's visible, for a troubleshooting model without vision to consume."
 mode: subagent
-model: lmstudio/qwen/qwen3.5-9b
+model: qwen/qwen3.5-9b
+steps: 20
 permission:
   read: allow
   edit: deny

@@ -238,7 +238,8 @@ test_frontmatter_validity() {
             continue
         fi
 
-        # Check required fields
+        # Check required fields — ingenium-chat is exempt from model: requirement
+        # because it inherits the model from the requesting context (Settings → OpenCode config).
         local missing_fields=""
 
         if ! echo "$fm" | grep -q "^name:"; then
@@ -248,7 +249,9 @@ test_frontmatter_validity() {
             missing_fields="${missing_fields}description "
         fi
         if ! echo "$fm" | grep -q "^model:"; then
-            missing_fields="${missing_fields}model "
+            if [[ "$name" != "ingenium-chat" ]]; then
+                missing_fields="${missing_fields}model "
+            fi
         fi
 
         if [[ -n "$missing_fields" ]]; then
@@ -636,7 +639,7 @@ test_model_identity_match() {
         fi
 
         # Extract just the core model name (last segment after final /)
-        # e.g., "lmstudio/qwen/qwen3.5-9b" → "qwen3.5-9b"
+        # e.g., "qwen/qwen3.5-9b" → "qwen3.5-9b"
         #       "deepseek/deepseek-v4-pro" → "deepseek-v4-pro"
         #       "opencode/deepseek-v4-flash-free" → "deepseek-v4-flash-free"
         local fm_core
@@ -827,14 +830,15 @@ test_agents_table_task_block_coverage() {
     done
 
     # Standalone agents: documented in AGENTS.md as not spawned by others
-    local standalone_agents="ingenium-prompt-engineer"
+    # ingenium-chat is a primary conversational agent, not a subagent
+    local standalone_agents="ingenium-prompt-engineer ingenium-chat"
 
     # Check each subagent from the table (skip primary/orchestrator)
     while IFS= read -r agent; do
         [[ -z "$agent" ]] && continue
 
-        # Skip the primary orchestrator — its job is to spawn, not be spawned
-        if [[ "$agent" == "ingenium-orchestrator" ]]; then
+        # Skip primary agents — their job is to spawn, not be spawned
+        if [[ "$agent" == "ingenium-orchestrator" || "$agent" == "ingenium-chat" ]]; then
             continue
         fi
 

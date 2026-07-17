@@ -3,7 +3,7 @@ name: ingenium-qa
 description: "Code review and quality assurance. Reviews code for quality, correctness, and security. Verifies tests written by @ingenium-software-engineer."
 mode: subagent
 model: deepseek/deepseek-v4-flash
-# Alt models: opencode/deepseek-v4-flash-free (Zen free tier), lmstudio/qwen/qwen3.5-9b (local)
+# Alt models: opencode/deepseek-v4-flash-free (Zen free tier), qwen/qwen3.5-9b (local)
 permission:
   read: allow
   bash: allow

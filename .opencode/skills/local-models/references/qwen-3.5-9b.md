@@ -1,6 +1,6 @@
 # Qwen 3.5 9B — Subagent Safety Protocol
 
-> **Model**: lmstudio/qwen/qwen3.5-9b  
+> **Model**: qwen/qwen3.5-9b  
 > **Agents using it**: ingenium-docs, ingenium-explore, ingenium-scout  
 > **Purpose**: Prevents looping, hallucination, empty returns, and batch-read collapse
 
