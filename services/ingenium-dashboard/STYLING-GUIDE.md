@@ -39,13 +39,16 @@ The dashboard uses CSS custom properties (defined in `globals.css` via `@theme`)
 | `--color-surface` | `#ffffff` | `#111827` | `bg-white` |
 | `--color-surface-muted` | `#f9fafb` | `#1f2937` | `bg-gray-50`, `bg-gray-100` |
 | `--color-surface-hover` | `#f3f4f6` | `#374151` | `hover:bg-gray-50` / `hover:bg-gray-100` |
-| `--color-surface-selected` | `#eff6ff` | `#1e3a5f` | `bg-blue-50` |
+| `--color-surface-selected` | `#eff6ff` | `#374151` | `bg-blue-50` (light), neutral gray (dark) |
+| `--color-selection-bg` | `#eff6ff` | `#374151` | `bg-blue-100` / active item background |
+| `--color-selection-text` | `#1e3a5f` | `#e5e7eb` | `text-blue-800` / active item text |
 | `--color-border` | `#e5e7eb` | `#374151` | `border-gray-200` |
 | `--color-border-muted` | `#f3f4f6` | `#1f2937` | `border-gray-100` |
 | `--color-text-primary` | `#111827` | `#f3f4f6` | `text-gray-900` / `text-gray-800` / `text-gray-700` |
 | `--color-text-secondary` | `#6b7280` | `#9ca3af` | `text-gray-600` |
 | `--color-text-muted` | `#9ca3af` | `#6b7280` | `text-gray-500` / `text-gray-400` |
 | `--color-text-link` | `#2563eb` | `#60a5fa` | `text-blue-600` |
+| `--color-nav-text-active` | `#2563eb` | `#e5e7eb` | Active navigation link text |
 | `--color-error-bg` | `#fef2f2` | `#7f1d1d33` | `bg-red-50` |
 | `--color-warning-bg` | `#fffbeb` | `#78350f33` | `bg-amber-50` |
 | `--color-success-bg` | `#f0fdf4` | `#14532d33` | `bg-green-50` / `bg-green-100` |

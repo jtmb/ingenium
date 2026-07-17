@@ -84,9 +84,9 @@ const TASK_PROCESS_YIELD_MS = 100;        // yield between individual tasks in a
 
 // ── Auth error circuit breaker ───────────────────────────────────────────────
 
-/** Track consecutive auth errors per folder to implement circuit breaking. */
-const authErrorCount = new Map<string, number>();
-const MAX_AUTH_ERRORS = 3;
+import { authErrorCount, MAX_AUTH_ERRORS, resetAuthCircuit } from "./circuit-breaker.js";
+
+export { resetAuthCircuit };
 
 // ── Engine singleton state ──────────────────────────────────────────────────
 
@@ -408,6 +408,28 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
 
     const tokens = creds.tokens;
     if (!tokens) {
+      // Check whether this is a decryption failure (OAuth expected) vs. no tokens at all
+      const accountHasOAuth = account.authType === "oauth2";
+      if (accountHasOAuth) {
+        logger.warn("sync-engine",
+          `Credentials unavailable for ${worker.email} — parking worker. Re-authentication required.`,
+        );
+        // Park the worker by marking all known folder states as errors
+        for (const folderName of worker.folderStates.keys()) {
+          setFolderState(worker, folderName, {
+            state: "error",
+            lastError: "Account needs re-authentication — credentials cannot be decrypted.",
+          });
+        }
+        // If no folders are known yet, mark INBOX so the dashboard shows the error
+        if (worker.folderStates.size === 0) {
+          setFolderState(worker, "INBOX", {
+            state: "error",
+            lastError: "Account needs re-authentication — credentials cannot be decrypted.",
+          });
+        }
+        return; // Worker exits — no further sync attempts until credentials change
+      }
       logger.warn("sync-engine", `Worker for ${worker.email}: no OAuth tokens, stopping`);
       return;
     }
@@ -742,8 +764,9 @@ async function executeSyncFolder(
     setFolderState(worker, folder, { state: "error", lastError: msg });
     
     // Circuit breaker: track consecutive auth errors
-    const isAuthError = msg.includes("401") || msg.includes("Unauthorized") || 
-      msg.includes("No stored OAuth tokens") || msg.includes("re-authenticate");
+    // Matches 401, auth-related HTTP errors, decryption failures, and invalid credentials
+    const authMsg = String(err instanceof Error ? err.message : String(err));
+    const isAuthError = /401|unauthorized|invalid.*credential|auth.*error|re-authenticate|oauthtoken/i.test(authMsg);
     if (isAuthError) {
       const key = `${worker.email}:${folder}`;
       const count = (authErrorCount.get(key) || 0) + 1;
@@ -948,6 +971,30 @@ async function spawnWorkers(projectId: string): Promise<void> {
 
     logger.info("sync-engine", `Worker launched for ${acct.email}`);
   }
+}
+
+/**
+ * Stop a single account worker by its account ID.
+ * Called by the API route before deleting an account to cleanly park
+ * the worker and prevent stale sync tasks from running against deleted data.
+ *
+ * Sets worker.running = false, aborts the worker's AbortController,
+ * deregisters the worker, and cleans up auth-error counters for the account.
+ */
+export function stopAccountWorker(accountId: string): void {
+  const worker = engineState.workers.get(accountId);
+  if (!worker) return;
+  worker.running = false;
+  worker.abortController?.abort();
+  engineState.workers.delete(accountId);
+  // Clean up auth error counters for this account
+  const emailPrefix = `${worker.email}:`;
+  for (const [key] of authErrorCount) {
+    if (key.startsWith(emailPrefix)) {
+      authErrorCount.delete(key);
+    }
+  }
+  logger.info("sync-engine", `Worker stopped for account ${accountId} (${worker.email})`);
 }
 
 /**

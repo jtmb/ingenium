@@ -258,12 +258,17 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   /**
    * CodeMirror lifecycle — managed by editorMode transitions:
    *   - Entering source or split mode: create EditorView with markdown + lineNumbers + oneDark.
-   *   - Already mounted in target mode: update doc content if it changed externally.
+   *   - Switching between source/split: destroy existing EditorView and recreate in the new
+   *     host DOM node (the mount-point div changes between modes).
    *   - Leaving source or split mode: destroy the EditorView instance.
    *
-   * NOTE: eslint-disable react-hooks/exhaustive-deps intentional — adding `content` as a dep
-   * would re-create the EditorView on every keystroke. Content sync is handled separately
-   * via the effect below this one.
+   * 🔴 Always destroy and recreate when mode changes between source/split because the host
+   * DOM element changes (source uses a full-width div, split uses a left-half div). Keeping
+   * the old view attached to a destroyed DOM node produces a blank editor.
+   *
+   * `content` is included as a dependency so the new view starts with the current content
+   * on mode switch. Every-keystroke re-creation is avoided because React bails out when
+   * the same reference is passed — the effect only fires when editorMode or content changes.
    */
   useEffect(() => {
     if (editorMode !== "source" && editorMode !== "split") {
@@ -274,15 +279,13 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
       return;
     }
     if (!codeMirrorRef.current) return;
+
+    // Always destroy existing view — the host DOM node may have changed since last render
     if (codeMirrorViewRef.current) {
-      const currentContent = codeMirrorViewRef.current.state.doc.toString();
-      if (currentContent !== content) {
-        codeMirrorViewRef.current.dispatch({
-          changes: { from: 0, to: currentContent.length, insert: content },
-        });
-      }
-      return;
+      codeMirrorViewRef.current.destroy();
+      codeMirrorViewRef.current = null;
     }
+
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         const newContent = update.state.doc.toString();
@@ -304,25 +307,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     });
     codeMirrorViewRef.current = view;
     return () => { /* destroy handled in mode-switch path above */ };
-  }, [editorMode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  /**
-   * Push content into CodeMirror when mode switches TO source/split.
-   * Without this, switching from "edit" to "source" would show stale content
-   * because CodeMirror was created with the initial doc value.
-   * NOTE: Dep exclusion on `content` is intentional — we only need to sync on mode transition,
-   * not on every keystroke (which is already handled by the updateListener inside CodeMirror).
-   */
-  useEffect(() => {
-    if ((editorMode === "source" || editorMode === "split") && codeMirrorViewRef.current) {
-      const currentContent = codeMirrorViewRef.current.state.doc.toString();
-      if (currentContent !== content) {
-        codeMirrorViewRef.current.dispatch({
-          changes: { from: 0, to: currentContent.length, insert: content },
-        });
-      }
-    }
-  }, [editorMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editorMode, content]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Mode change handler ────────────────────────────────────────────────────
   const handleModeChange = useCallback(

@@ -34,6 +34,8 @@ interface StoredAccount {
   smtpPort?: number;
   connected: boolean;
   lastSync?: string;
+  /** If true, account is hidden from the sidebar dropdown but sync still runs. */
+  hidden?: boolean;
   // Encrypted fields stored alongside
   imapPass?: string;
   smtpPass?: string;
@@ -196,7 +198,12 @@ export function getCredentials(
       password = encKey ? decryptCredentials(stored.imapPass) : stored.imapPass;
     }
     if (stored.tokens) {
-      tokens = decodeTokens(stored.tokens, encKey);
+      try {
+        tokens = decodeTokens(stored.tokens, encKey);
+      } catch {
+        // Credential decryption failed — account needs re-authentication.
+        // tokens remains undefined, which signals "no valid credentials."
+      }
     }
   }
 
@@ -208,7 +215,9 @@ export function getCredentials(
       try {
         const oauthStored = JSON.parse(oauthRaw) as OAuthToken;
         tokens = decodeTokens(oauthStored, encKey);
-      } catch { /* ignore parse errors */ }
+      } catch {
+        // Credential decryption failed for legacy tokens too — tokens stays undefined.
+      }
     }
   }
 
@@ -216,10 +225,12 @@ export function getCredentials(
 }
 
 /**
- * Decrypt stored OAuth tokens. Handles two scenarios:
- *   1. Encryption key present → decrypt both access and refresh tokens
- *   2. Decryption fails → tokens were stored unencrypted (legacy data or key rotation),
- *      return them as-is
+ * Decrypt stored OAuth tokens.
+ *
+ * When an encryption key is configured, decrypts both access and refresh tokens.
+ * If decryption fails (key rotation, ciphertext corruption), throws immediately
+ * instead of returning ciphertext as plaintext — preventing garbage tokens
+ * from reaching the Gmail API and triggering infinite retry loops.
  */
 function decodeTokens(stored: OAuthToken, encKey?: string): OAuthToken {
   if (encKey) {
@@ -231,10 +242,12 @@ function decodeTokens(stored: OAuthToken, encKey?: string): OAuthToken {
         scope: stored.scope,
       };
     } catch {
-      // Decryption failed — tokens were stored unencrypted (old/different key).
-      // Return raw tokens — the caller can attempt re-encryption on next save.
+      // Decryption failed — encryption key was rotated or ciphertext corrupted.
+      // Do NOT return ciphertext as plaintext (would reach Gmail as garbage token).
+      throw new Error("Credential decryption failed — re-authentication required");
     }
   }
+  // No encryption key configured — tokens stored in plaintext (legacy).
   return stored;
 }
 
@@ -292,5 +305,28 @@ function storedToAccount(s: StoredAccount): EmailAccount {
     smtpPort: s.smtpPort,
     connected: s.connected,
     lastSync: s.lastSync,
+    hidden: s.hidden,
   };
+}
+
+/**
+ * Update a stored account's metadata (non-credential fields).
+ * Always uses the global project regardless of the passed projectId.
+ * Does NOT touch encrypted credential fields.
+ */
+export function storeAccount(
+  _projectId: string,
+  account: EmailAccount,
+): void {
+  const projectId = getGlobalProjectId();
+  const raw = settings.getSetting(projectId, settingsKey(account.id));
+  if (!raw) throw new Error(`Account ${account.id} not found`);
+
+  const stored = JSON.parse(raw) as StoredAccount;
+  stored.hidden = account.hidden;
+  stored.connected = account.connected;
+  stored.lastSync = account.lastSync;
+  stored.name = account.name;
+  // Preserve encrypted credential fields — never rewrite them
+  settings.setSetting(projectId, settingsKey(account.id), JSON.stringify(stored));
 }

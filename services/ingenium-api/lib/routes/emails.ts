@@ -6,6 +6,7 @@ import {
   getAccount,
   addAccount,
   removeAccount,
+  storeAccount,
   getCredentials,
   storeCredentials,
   storeTokens,
@@ -43,6 +44,7 @@ import {
   boostFolder,
   boostBody,
   getEngineStatus,
+  stopAccountWorker,
   // Connection state
   setAccountConnected,
   // Providers
@@ -211,10 +213,15 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
 
 // ── Account Management ───────────────────────────────────────────────────
 
-/** GET /accounts?project= — List all email accounts. */
-emailsRouter.get("/accounts", (_req, res) => {
+/** GET /accounts?project=&include_hidden=true — List all email accounts.
+ *  Default: only returns non-hidden accounts. Pass include_hidden=true to get all. */
+emailsRouter.get("/accounts", (req, res) => {
   const projectId = resolveEmailProject();
-  const accounts = listAccounts(projectId);
+  const includeHidden = req.query.include_hidden === "true";
+  let accounts = listAccounts(projectId);
+  if (!includeHidden) {
+    accounts = accounts.filter(a => !a.hidden);
+  }
   res.json({ data: accounts, total: accounts.length });
 });
 
@@ -263,10 +270,34 @@ emailsRouter.delete("/accounts/:id", (req, res) => {
     return;
   }
 
+  // Stop the account's sync engine worker BEFORE deleting data
+  stopAccountWorker(accountId);
+
   removeAccount(projectId, accountId);
-  // Also clear all cached emails, bodies, and sync state for this account
+  // Also clear all cached emails, bodies, suggestions, summaries, and sync state for this account
   emailCache.clearCache(accountId);
   res.status(204).send();
+});
+
+/** PATCH /accounts/:id?project= — Update account metadata (e.g., hidden flag). */
+emailsRouter.patch("/accounts/:id", (req, res) => {
+  const projectId = resolveEmailProject();
+  const accountId = req.params.id!;
+  const account = getAccount(projectId, accountId);
+  if (!account) {
+    res.status(404).json({
+      error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` },
+    });
+    return;
+  }
+
+  const { hidden } = req.body;
+  if (hidden !== undefined) {
+    account.hidden = !!hidden;
+  }
+
+  storeAccount(projectId, account);
+  res.json({ data: account });
 });
 
 /** POST /accounts/:id/test?project= — Test IMAP connection for an account. */

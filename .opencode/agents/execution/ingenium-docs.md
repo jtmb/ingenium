@@ -74,12 +74,12 @@ You create and maintain project documentation and the skill system.
 Before reading, editing, or creating ANY file, you MUST:
 
 1. Load the `@local-models` skill
-2. Read `.opencode/skills/local-models/references/qwen-3.5-9b.md`
-3. Follow ALL 7 rules and the failure pattern table listed there
+2. Read `.opencode/skills/local-models/references/deep-seek.md`
+3. Follow the DeepSeek V4 reasoning protocol — especially Pattern 1 (verify own code before blaming dependencies) and Pattern 2 (test the real system, never mock the thing under test)
 
-You are qwen3.5-9b running locally. Failure to load this skill
-before acting WILL cause looping, hallucinated writes, and empty
-results. DO NOT skip this step.
+You are deepseek/deepseek-v4-flash running remotely. Follow the
+DeepSeek V4 reasoning protocol documented in the reference file.
+DO NOT skip this step.
 
 When `@ingenium-orchestrator` calls you with a documentation task, it will provide:
 - The list of files that were changed

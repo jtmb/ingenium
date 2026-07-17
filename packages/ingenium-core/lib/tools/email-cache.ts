@@ -448,6 +448,11 @@ export function clearCache(accountId: string): { listings: number; bodies: numbe
   const result = execTransaction(() => {
     const db = getDb(dbPath());
     const bodyResult = db.prepare("DELETE FROM email_bodies WHERE account_id = ?").run(accountId);
+    // Clean suggestion queue BEFORE email_cache to avoid FK violation from concurrent
+    // engine workers. Also clean suggestions and summaries (which FK-reference email_cache).
+    db.prepare("DELETE FROM email_suggestion_queue WHERE account_id = ?").run(accountId);
+    db.prepare("DELETE FROM email_suggestions WHERE account_id = ?").run(accountId);
+    db.prepare("DELETE FROM email_summaries WHERE account_id = ?").run(accountId);
     const listingResult = db.prepare("DELETE FROM email_cache WHERE account_id = ?").run(accountId);
     db.prepare("DELETE FROM email_sync_state WHERE account_id = ?").run(accountId);
     return { listings: listingResult.changes, bodies: bodyResult.changes };

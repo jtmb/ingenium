@@ -57,6 +57,7 @@ interface SyncStatus {
   totalCached: number;
   totalBodies: number;
   folders: SyncFolderStatus[];
+  engine?: any; // Raw EngineStatus from /sync-status response
 }
 
 /**
@@ -86,6 +87,7 @@ export default function MailPage() {
   const [folders, setFolders] = useState<any[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [deleteAccountId, setDeleteAccountId] = useState<string | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [accountsLoading, setAccountsLoading] = useState(true);
   const [emailPending, setEmailPending] = useState(false);
   const [emailDownloadError, setEmailDownloadError] = useState<string | null>(null);
@@ -141,13 +143,17 @@ export default function MailPage() {
     const fetchAccounts = async () => {
       setAccountsLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
+        const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
         if (res.ok) {
           const data = await res.json();
           const accts = data.data || [];
           setAccounts(accts);
           if (accts.length > 0 && !selectedAccount) {
-            setSelectedAccount(accts[0].id);
+            // Auto-select first visible (non-hidden) account
+            const firstVisible = accts.find((a: any) => !a.hidden);
+            if (firstVisible) {
+              setSelectedAccount(firstVisible.id);
+            }
           }
         }
       } catch {
@@ -440,21 +446,80 @@ export default function MailPage() {
     setDeleteAccountId(accountId);
   }, []);
 
+  const handleHideAccount = useCallback(async (accountId: string) => {
+    try {
+      await fetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hidden: true }),
+      });
+      // Refresh account list
+      const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
+      if (res.ok) {
+        const data = await res.json();
+        const accts = data.data || [];
+        setAccounts(accts);
+        // If the hidden account was selected, auto-select the next visible account
+        if (selectedAccount === accountId) {
+          const nextVisible = accts.find((a: any) => !a.hidden);
+          if (nextVisible) {
+            setSelectedAccount(nextVisible.id);
+          } else {
+            setSelectedAccount("");
+          }
+          setSelectedEmail(null);
+          setEmails([]);
+        }
+      }
+    } catch { /* non-fatal */ }
+  }, [selectedAccount, project]);
+
+  const handleShowAccount = useCallback(async (accountId: string) => {
+    try {
+      await fetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hidden: false }),
+      });
+      // Refresh account list
+      const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
+      if (res.ok) {
+        const data = await res.json();
+        setAccounts(data.data || []);
+        // Select the newly-shown account
+        setSelectedAccount(accountId);
+        setSelectedFolder("INBOX");
+        setSelectedEmail(null);
+        setPage(1);
+        setSearchQuery("");
+        setEmailError(null);
+      }
+    } catch { /* non-fatal */ }
+  }, [project]);
+
   const confirmDeleteAccount = useCallback(async () => {
     if (!deleteAccountId) return;
+    setDeletingAccount(true);
     try {
       await fetch(`${API_BASE}/emails/accounts/${deleteAccountId}?project=${project}`, { method: "DELETE" });
-      // Refresh account list
-      const accountsRes = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
+      // Refresh account list with hidden included
+      const accountsRes = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
       if (accountsRes.ok) {
         const data = await accountsRes.json();
         const accts = data.data || [];
         setAccounts(accts);
         if (selectedAccount === deleteAccountId) {
-          setSelectedAccount(accts.length > 0 ? accts[0].id : "");
+          // Auto-select next visible account
+          const nextVisible = accts.find((a: any) => !a.hidden);
+          setSelectedAccount(nextVisible ? nextVisible.id : "");
+          setSelectedEmail(null);
+          setEmails([]);
         }
       }
+      // Also refresh health status — trigger a service status re-fetch
+      fetch(`${API_BASE}/services/status?project=${project}`).catch(() => {});
     } catch { /* non-fatal */ }
+    setDeletingAccount(false);
     setDeleteAccountId(null);
   }, [deleteAccountId, selectedAccount, project]);
 
@@ -506,6 +571,24 @@ export default function MailPage() {
   const selectedFolderStatus = syncStatus?.folders?.find((f: any) => f.folder === selectedFolder);
   const isColdFolder = !loading && emails.length === 0 && selectedFolderStatus?.cachedCount === 0 && selectedFolderStatus?.syncing === true;
 
+  // Detect auth errors from the engine's raw status
+  const engineFolders = syncStatus?.engine?.accounts?.[0]?.folders ?? [];
+  const hasAuthError = engineFolders.some((f: any) =>
+    f.state === "error" && (
+      typeof f.lastError === "string" &&
+      /auth|re-authenticat|credential.*(decrypt|reconn)/i.test(f.lastError)
+    )
+  ) || (
+    syncStatus !== null &&
+    (syncStatus.folders?.length ?? 0) > 0 &&
+    syncStatus.folders!.every((f: any) => f.engineState === "error") &&
+    syncStatus.folders!.every((f: any) => f.cachedCount === 0)
+  );
+
+  const handleReconnect = useCallback(() => {
+    setShowAccountSetup(true);
+  }, []);
+
   // Loading — accounts are still being fetched
   if (accountsLoading) {
     return (
@@ -543,12 +626,14 @@ export default function MailPage() {
           onComplete={async () => {
             setShowAccountSetup(false);
             try {
-              const res = await fetch(`${API_BASE}/emails/accounts?project=${project}`);
+              const res = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
               if (res.ok) {
                 const data = await res.json();
                 setAccounts(data.data || []);
                 if (data.data?.length > 0) {
-                  setSelectedAccount(data.data[0].id);
+                  // Auto-select first visible account
+                  const firstVisible = data.data.find((a: any) => !a.hidden);
+                  if (firstVisible) setSelectedAccount(firstVisible.id);
                 }
               }
             } catch {}
@@ -579,24 +664,55 @@ export default function MailPage() {
           }))}
           syncingFolders={syncStatus.syncingFolders}
           totalCached={syncStatus.totalCached}
+          hasAuthError={hasAuthError}
+          onReconnect={handleReconnect}
         />
       ) : (
         <>
+          {/* Auth error banner — visible above the mail UI when account needs reconnection */}
+          {hasAuthError && (
+            <div className="p-4 border border-amber-300 bg-amber-50 rounded-lg flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <svg className="w-5 h-5 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-amber-800">
+                    Your email account needs re-authentication.
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    The stored credentials could not be decrypted. Please reconnect your account.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={handleReconnect}
+                className="shrink-0 inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Reconnect
+              </button>
+            </div>
+          )}
           <div className="flex h-[calc(100dvh-180px)] border border-[var(--color-border)] rounded bg-[var(--color-surface)] overflow-hidden">
-            {/* Folder sidebar */}
-            <FolderSidebar
-              accounts={accounts}
-              selectedAccount={selectedAccount}
-              selectedFolder={selectedFolder}
-              onSelectFolder={handleSelectFolder}
-              onSelectAccount={handleSelectAccount}
-              onCompose={handleCompose}
-              onAddAccount={() => setShowAccountSetup(true)}
-              onDeleteAccount={handleDeleteAccount}
-              folders={folders}
-              syncingFolders={syncingFolders}
-              folderSyncStatuses={syncStatus?.folders ?? []}
-            />
+          {/* Folder sidebar */}
+          <FolderSidebar
+            accounts={accounts}
+            selectedAccount={selectedAccount}
+            selectedFolder={selectedFolder}
+            onSelectFolder={handleSelectFolder}
+            onSelectAccount={handleSelectAccount}
+            onCompose={handleCompose}
+            onAddAccount={() => setShowAccountSetup(true)}
+            onDeleteAccount={handleDeleteAccount}
+            onHideAccount={handleHideAccount}
+            onShowAccount={handleShowAccount}
+            folders={folders}
+            syncingFolders={syncingFolders}
+            folderSyncStatuses={syncStatus?.folders ?? []}
+          />
 
             {/* Email list + reader — resizable split */}
             <div className="flex items-stretch relative flex-1 min-w-0">
@@ -704,8 +820,12 @@ export default function MailPage() {
                   <button onClick={() => setDeleteAccountId(null)} className="px-4 py-2 border border-[var(--color-border)] rounded text-sm hover:bg-[var(--color-surface-hover)]">
                     Cancel
                   </button>
-                  <button onClick={confirmDeleteAccount} className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700">
-                    Remove
+                  <button
+                    onClick={confirmDeleteAccount}
+                    disabled={deletingAccount}
+                    className={`px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700 ${deletingAccount ? "opacity-60 cursor-not-allowed" : ""}`}
+                  >
+                    {deletingAccount ? "Removing..." : "Remove"}
                   </button>
                 </div>
               </div>
