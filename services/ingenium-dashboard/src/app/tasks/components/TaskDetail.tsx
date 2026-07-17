@@ -710,7 +710,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                     style={{ top: mentionAnchor.top, left: mentionAnchor.left }}>
                     {filteredAgents.map((a, i) => (
                       <button key={a.name} onClick={() => insertMention(a.name)}
-                        className={`w-full text-left px-2 py-1 text-sm hover:bg-blue-50 ${i === mentionIndex ? "bg-blue-100" : ""}`}>
+                        className={`w-full text-left px-2 py-1 text-sm hover:bg-[var(--color-surface-hover)] ${i === mentionIndex ? "bg-[var(--color-selection-bg)]" : ""}`}>
                         {a.name}
                       </button>
                     ))}
@@ -758,7 +758,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                   const target = getTaskById(targetId);
                   return (
                     <div key={l.id} className="flex items-center justify-between text-sm py-0.5 group">
-                      <button className="text-blue-600 hover:underline truncate text-left"
+                      <button className="text-[var(--color-text-link)] hover:underline truncate text-left"
                         onClick={() => target && onTaskClick?.(target)}>
                         {target?.title ?? targetId}
                       </button>
@@ -777,7 +777,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
                   const target = getTaskById(targetId);
                   return (
                     <div key={l.id} className="flex items-center justify-between text-sm py-0.5 group">
-                      <button className="text-blue-600 hover:underline truncate text-left"
+                      <button className="text-[var(--color-text-link)] hover:underline truncate text-left"
                         onClick={() => target && onTaskClick?.(target)}>
                         {target?.title ?? targetId}
                       </button>

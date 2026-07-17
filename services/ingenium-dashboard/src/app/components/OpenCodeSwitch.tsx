@@ -79,7 +79,7 @@ export default function OpenCodeSwitch({ mode, onModeChange }: OpenCodeSwitchPro
           "transition-all duration-300 ease-out",
           // Hover/focus states
           "hover:bg-[var(--color-surface)]/85 hover:shadow-[0_0_12px_rgba(59,130,246,0.15)] hover:-translate-x-6",
-          "focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:outline-none",
+          "focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:outline-none",
           // Hide on mobile (mobile variant shown below)
           "hidden md:flex",
         ].join(" ")}
@@ -118,7 +118,7 @@ export default function OpenCodeSwitch({ mode, onModeChange }: OpenCodeSwitchPro
           "text-[var(--color-text-secondary)]",
           "transition-all duration-300 ease-out",
           "hover:bg-[var(--color-surface)]/85 hover:shadow-[0_0_12px_rgba(59,130,246,0.15)]",
-          "focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:outline-none",
+          "focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:outline-none",
         ].join(" ")}
       >
         {/* Icon representing the OTHER mode */}

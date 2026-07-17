@@ -38,7 +38,7 @@ function ProgressBar({
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
   const colorClass =
     color === "blue"
-      ? "bg-blue-500"
+      ? "bg-[var(--color-accent)]"
       : color === "green"
       ? "bg-emerald-500"
       : "bg-amber-500";

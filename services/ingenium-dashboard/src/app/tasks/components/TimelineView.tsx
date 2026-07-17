@@ -9,7 +9,7 @@ import TaskDetail from "./TaskDetail";
 /** Color per column for the timeline bars. */
 const COLUMN_COLORS: Record<string, string> = {
   todo: "#9ca3af",
-  in_progress: "#3b82f6",
+  in_progress: "var(--color-accent)",
   review: "#f59e0b",
   done: "#22c55e",
 };

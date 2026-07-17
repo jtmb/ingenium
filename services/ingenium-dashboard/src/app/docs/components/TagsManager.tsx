@@ -164,7 +164,7 @@ export default function TagsManager({ pageId }: TagsManagerProps) {
         <input
           ref={inputRef}
           type="text"
-          className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2.5 py-1.5 placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2.5 py-1.5 placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
           placeholder="Add tag..."
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}

@@ -34,14 +34,14 @@ function sourceBadgeColor(src: string): string {
 
 const LEVEL_DOT: Record<string, string> = {
   debug: "bg-gray-400",
-  info: "bg-blue-500 dark:bg-blue-400",
+  info: "bg-[var(--color-accent)]",
   warn: "bg-amber-500 dark:bg-amber-400",
   error: "bg-red-500 dark:bg-red-400",
 };
 
 const LEVEL_BADGE: Record<string, string> = {
   debug: "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)] border-[var(--color-border)]",
-  info: "bg-[var(--color-surface-selected)] text-blue-700 border-[var(--color-info-border)]",
+  info: badgeTones("blue") + " border-[var(--color-info-border)]",
   warn: "bg-[var(--color-warning-bg)] text-amber-700 border-[var(--color-warning-border)]",
   error: "bg-[var(--color-error-bg)] text-[var(--color-error-text)] border-[var(--color-error-border)]",
 };
@@ -353,7 +353,7 @@ export default function LogsPage() {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               placeholder="Search messages..."
-              className="w-full border border-[var(--color-border)] rounded text-xs px-3 py-1.5 focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200"
+              className="w-full border border-[var(--color-border)] rounded text-xs px-3 py-1.5 focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
             />
           </div>
         </div>

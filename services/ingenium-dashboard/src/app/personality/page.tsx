@@ -114,7 +114,7 @@ export default function PersonalityPage() {
                 <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Dismiss trait">&times;</button>
                 <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(t.created_at)}</span>
                 <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
+                      <div className="h-full bg-[var(--color-accent)] rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
                 </div>
               </div>
             </div>
@@ -167,7 +167,7 @@ export default function PersonalityPage() {
                   <div className="flex items-center gap-2">
                     <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Dismiss trait">&times;</button>
                     <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
+                  <div className="h-full bg-[var(--color-accent)] rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
                     </div>
                     <span className="text-xs text-[var(--color-text-muted)] w-8">{Math.round((t.confidence || 0) * 100)}%</span>
                   </div>

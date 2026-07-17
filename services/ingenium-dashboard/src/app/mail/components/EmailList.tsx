@@ -64,7 +64,7 @@ export default function EmailList({
         <input
           type="text"
           placeholder="Search emails..."
-          className="flex-1 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-blue-300 focus:ring-1 focus:ring-blue-200"
+          className="flex-1 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)]"
           onChange={(e) => onSearch(e.target.value)}
         />
         {onRefresh && (

@@ -67,8 +67,8 @@ export default function ImportExportDialog({ isOpen, onClose, spaceId }: ImportE
         <div className="flex border-b border-[var(--color-border)] shrink-0">
           <button
             className={`flex-1 px-4 py-2.5 text-sm font-medium text-center transition-colors ${
-              activeTab === "import"
-                ? "text-blue-600 border-b-2 border-blue-600"
+                activeTab === "import"
+                ? "text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]"
                 : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
             }`}
             onClick={() => setActiveTab("import")}
@@ -77,8 +77,8 @@ export default function ImportExportDialog({ isOpen, onClose, spaceId }: ImportE
           </button>
           <button
             className={`flex-1 px-4 py-2.5 text-sm font-medium text-center transition-colors ${
-              activeTab === "export"
-                ? "text-blue-600 border-b-2 border-blue-600"
+                activeTab === "export"
+                ? "text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]"
                 : "text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
             }`}
             onClick={() => setActiveTab("export")}
@@ -204,8 +204,8 @@ function ImportTab({ spaceId, onClose }: { spaceId: number; onClose: () => void 
       <div
         className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
           dragging
-            ? "border-blue-400 bg-[var(--color-surface-selected)]"
-            : "border-[var(--color-border)] hover:border-blue-300"
+            ? "border-[var(--color-accent)] bg-[var(--color-surface-selected)]"
+            : "border-[var(--color-border)] hover:border-[var(--color-accent)]"
         }`}
         onDragOver={(e) => {
           e.preventDefault();

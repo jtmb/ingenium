@@ -100,7 +100,7 @@ export default function FolderSidebar({
         >
           {selectedAccountData ? (
             <>
-              <span className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-medium shrink-0">
+              <span className="w-6 h-6 rounded-full bg-[var(--color-accent)] text-white flex items-center justify-center text-xs font-medium shrink-0">
                 {(selectedAccountData.email || selectedAccountData.id)[0].toUpperCase()}
               </span>
               <span className="flex-1 truncate text-left">{selectedAccountData.email}</span>
@@ -132,7 +132,7 @@ export default function FolderSidebar({
                     (selectedAccount === acct.id || selectedAccount === acct.email) ? "bg-[var(--color-surface-selected)]" : ""
                   }`}
                 >
-                  <span className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center text-xs font-medium shrink-0">
+                  <span className="w-6 h-6 rounded-full bg-[var(--color-accent)] text-white flex items-center justify-center text-xs font-medium shrink-0">
                     {acct.email[0].toUpperCase()}
                   </span>
                   <span className="flex-1 truncate">{acct.email}</span>
@@ -207,7 +207,7 @@ export default function FolderSidebar({
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); onShowAccount(acct.id); }}
-                        className="px-2 py-2 text-blue-500 hover:text-blue-700 hover:bg-blue-50 rounded cursor-pointer shrink-0"
+                        className="px-2 py-2 text-[var(--color-text-link)] hover:text-[var(--color-text-link-hover)] hover:bg-[var(--color-surface-hover)] rounded cursor-pointer shrink-0"
                         title="Show in sidebar"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -239,7 +239,7 @@ export default function FolderSidebar({
                 <button
                   type="button"
                   onClick={() => { onAddAccount(); setIsOpen(false); }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-blue-600 hover:bg-[var(--color-surface-hover)] cursor-pointer"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-[var(--color-text-link)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
                 >
                   + Add Account
                 </button>

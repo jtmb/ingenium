@@ -188,7 +188,7 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
           </div>
         )}
         <textarea
-          className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] px-3 py-2 resize-none placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] px-3 py-2 resize-none placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
           rows={2}
           placeholder="Add a comment..."
           value={newComment}
@@ -291,7 +291,7 @@ export default function CommentsPanel({ pageId, pageContent }: CommentsPanelProp
                       {replyTo === comment.id && (
                         <div className="mt-2">
                           <textarea
-                            className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2 py-1.5 resize-none placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500"
+                            className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2 py-1.5 resize-none placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
                             rows={2}
                             placeholder="Write a reply..."
                             value={replyText}

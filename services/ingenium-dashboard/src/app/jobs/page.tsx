@@ -95,7 +95,7 @@ function agentBadgeColor(category: string): string {
 function RunStatusDot({ status }: { status: JobRun["status"] }) {
   const map: Record<string, string> = {
     queued: "bg-gray-400 dark:bg-gray-500",
-    running: "bg-blue-500 animate-pulse dark:bg-blue-400",
+    running: "bg-[var(--color-accent)] animate-pulse",
     success: "bg-green-500",
     failed: "bg-red-500",
     timeout: "bg-red-500",
@@ -1020,7 +1020,7 @@ function JobCard({
   }, [job.id, getLastRunStatus]);
 
   const statusDotColor: Record<string, string> = {
-    running: "bg-blue-500 animate-pulse dark:bg-blue-400",
+    running: "bg-[var(--color-accent)] animate-pulse",
     success: "bg-green-500",
     failed: "bg-red-500",
     timeout: "bg-red-500",

@@ -103,10 +103,10 @@ export default function MCPServersPage() {
       <div className="flex items-center gap-1 border-b border-[var(--color-border)]">
         <h1 className="text-2xl font-bold mr-6">MCP</h1>
         <button onClick={() => setTab("servers")} className={`px-4 py-2.5 text-sm font-medium rounded-t transition-colors ${
-          tab === "servers" ? "bg-[var(--color-surface)] text-blue-700 border border-b-[var(--color-border)] border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+          tab === "servers" ? "bg-[var(--color-surface)] text-[var(--color-nav-text-active)] border border-b-[var(--color-border)] border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
         }`}>Servers</button>
         <button onClick={() => setTab("tools")} className={`px-4 py-2.5 text-sm font-medium rounded-t transition-colors ${
-          tab === "tools" ? "bg-[var(--color-surface)] text-blue-700 border border-b-[var(--color-border)] border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
+          tab === "tools" ? "bg-[var(--color-surface)] text-[var(--color-nav-text-active)] border border-b-[var(--color-border)] border-[var(--color-border)] -mb-px" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
         }`}>
           Tools
           <span className="ml-1.5 text-xs bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] px-1.5 py-0.5 rounded">{totalTools}</span>

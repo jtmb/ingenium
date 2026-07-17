@@ -154,7 +154,7 @@ function typeIcon(type: string): string {
 function dotColor(type: string): string {
   if (type.includes("failed") || type.includes("error")) return "bg-red-500";
   if (type.includes("completed")) return "bg-green-500";
-  if (type.includes("started") || type.includes("triggered")) return "bg-blue-500";
+  if (type.includes("started") || type.includes("triggered")) return "bg-[var(--color-accent)]";
   if (type.includes("created") || type.includes("imported") || type.includes("received")) return "bg-purple-500";
   if (type.includes("updated") || type.includes("processed")) return "bg-amber-500";
   return "bg-gray-400";
