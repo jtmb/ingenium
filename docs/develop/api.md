@@ -74,11 +74,50 @@ The Ingenium REST API runs on port 4097 and is the sole database authority. All 
 | POST | `/api/v1/config/sync` | Sync config from disk to DB |
 
 ### Email
+
+All email routes are prefixed with `/api/v1/emails`. All email data is global (project-level scoping is ignored — email is always global).
+
+> 🔴 `GET /accounts` by default returns only non-hidden accounts. Pass `?include_hidden=true` to include hidden accounts.
+
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/api/v1/email/accounts` | List email accounts |
-| GET | `/api/v1/email/inbox/:accountId` | View inbox |
-| GET | `/api/v1/email/messages/:accountId/search?q=...` | Search emails |
+| **OAuth** | | |
+| GET | `/accounts/oauth/url?provider=` | Get OAuth authorization URL |
+| POST | `/accounts/oauth` | Exchange OAuth code for tokens |
+| **Account Management** | | |
+| GET | `/accounts` | List email accounts (`?include_hidden=true` for all) |
+| POST | `/accounts` | Create a new email account |
+| PATCH | `/accounts/:id` | Update account metadata (e.g., `{"hidden": true}`) |
+| DELETE | `/accounts/:id` | Delete an email account (stops sync worker, clears cache) |
+| POST | `/accounts/:id/test` | Test IMAP connection |
+| **Email Reading** | | |
+| GET | `/?account=&folder=&page=&limit=&refresh=` | List cached emails in a folder |
+| GET | `/:uid?account=&folder=` | Get a single email by UID (body fetch with 12s timeout) |
+| **Search & Triage** | | |
+| GET | `/search?account=&folder=&q=` | Search cached emails by keyword/sender/subject/date |
+| GET | `/triage?account=&limit=` | Triage unread emails (cache-only) |
+| **Folders** | | |
+| GET | `/folders?account=` | List IMAP folders (engine-first, cache fallback) |
+| **Smart Replies** | | |
+| GET | `/suggest/:uid?account=&folder=` | Smart-reply suggestions (cache-first, LLM-generated) |
+| GET | `/summarize/:uid?account=&folder=` | LLM-generated email summary (cache-first) |
+| POST | `/review-draft` | LLM-powered draft review and improvement |
+| **Send & Draft** | | |
+| POST | `/draft` | Save a draft email |
+| POST | `/` | Send an email |
+| **Move & Flags** | | |
+| PATCH | `/:uid/move` | Move an email to another folder |
+| PATCH | `/:uid/flags` | Set flags on an email |
+| DELETE | `/:uid` | Delete an email (moves to Trash via IMAP) |
+| **Attachments** | | |
+| GET | `/:id/attachments/:attachmentId` | Download an attachment by part ID |
+| **Sync Engine** | | |
+| POST | `/sync` | Hint the sync engine to prioritize a folder |
+| GET | `/sync-status` | Per-folder sync status from the engine |
+| **IMAP Watcher** | | |
+| POST | `/watch/start` | Start IMAP IDLE watcher for real-time monitoring |
+| POST | `/watch/stop` | Stop IMAP IDLE watcher |
+| GET | `/watch/status` | Get watcher status for an account |
 
 ### Jobs
 | Method | Endpoint | Purpose |

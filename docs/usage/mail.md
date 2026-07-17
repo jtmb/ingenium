@@ -46,6 +46,23 @@ The email composer uses a **TipTap-based rich text editor** with bold, italic, u
 
 A **"Review with AI"** button appears below the message textarea. Clicking it sends your draft to the configured Synthesis LLM for tone, grammar, and clarity suggestions.
 
+## Account Hiding
+
+The FolderSidebar allows you to **hide** accounts from the left sidebar while keeping them active. This is useful when you have multiple accounts but only need a few visible day-to-day.
+
+- **Hidden accounts continue syncing** — hiding an account only removes it from the sidebar UI. Background sync, smart replies, and IMAP IDLE watchers continue normally.
+- **Show/hide an account**: Click the eye icon (👁) next to the account name in the FolderSidebar, or right-click the account name and select "Hide account" / "Show account".
+- **Collapsed "Hidden accounts" section**: When at least one account is hidden, a collapsed **"Hidden accounts"** section appears at the bottom of the FolderSidebar. Click to expand and view/manage hidden accounts.
+
+## Reconnect Button
+
+When an account requires re-authentication (e.g., after an encryption key rotation or expired OAuth token), the account status changes to `error` and a **Reconnect** button appears in two places:
+
+1. **FolderSidebar** — A small warning icon (⚠) appears next to the account name. Click it to see the Reconnect button.
+2. **Account settings** — Under **Settings → Mail**, the affected account shows a "Reconnect" label with a clickable button.
+
+Clicking **Reconnect** initiates the OAuth2 flow again, allowing you to re-authorize the account without removing and re-adding it.
+
 ## Searching Emails
 
 The search bar supports FTS5-style queries:
@@ -84,7 +101,7 @@ A **"Summarize this email"** button appears near the top of every email reading 
 
 ## MCP Tools
 
-The email client registers 13 MCP tools: `ingenium_email_list`, `ingenium_email_search`, `ingenium_email_read`, `ingenium_email_send`, `ingenium_email_draft`, `ingenium_email_folders`, `ingenium_email_accounts`, `ingenium_email_triage`, `ingenium_email_suggest`, `ingenium_email_draft_response`, `ingenium_email_patterns`, `ingenium_email_watch_start`, `ingenium_email_watch_status`.
+The email client registers 27 MCP tools spanning account management, email operations, AI features, and IMAP monitoring: `ingenium_email_list`, `ingenium_email_search`, `ingenium_email_read`, `ingenium_email_send`, `ingenium_email_draft`, `ingenium_email_draft_response`, `ingenium_email_folders`, `ingenium_email_accounts`, `ingenium_email_account_create`, `ingenium_email_account_delete`, `ingenium_email_account_test`, `ingenium_email_attachment_get`, `ingenium_email_delete`, `ingenium_email_move`, `ingenium_email_oauth_exchange`, `ingenium_email_oauth_url`, `ingenium_email_patterns`, `ingenium_email_review_draft`, `ingenium_email_set_flags`, `ingenium_email_suggest`, `ingenium_email_summarize`, `ingenium_email_sync`, `ingenium_email_sync_status`, `ingenium_email_triage`, `ingenium_email_watch_start`, `ingenium_email_watch_status`, `ingenium_email_watch_stop`.
 
 ## Related Docs
 - [Email Setup](../configure/email-setup.md) — Account setup and OAuth2 configuration
