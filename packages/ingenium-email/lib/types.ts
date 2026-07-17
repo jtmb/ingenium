@@ -40,6 +40,8 @@ export interface EmailAccount {
   smtpPort?: number;
   connected: boolean;
   lastSync?: string;
+  /** If true, account is hidden from the sidebar dropdown but sync still runs. */
+  hidden?: boolean;
 }
 
 /** OAuth2 token set with expiry tracking. `refreshToken` is empty for MSAL (handles refresh internally). */

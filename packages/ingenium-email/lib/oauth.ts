@@ -4,7 +4,8 @@ import crypto from "node:crypto";
 import type { OAuthToken } from "./types.js";
 import type { EmailProvider } from "./types.js";
 import { settings, getDb } from "ingenium-core";
-import { getGlobalProjectId } from "./accounts.js";
+import { getGlobalProjectId, getAccount } from "./accounts.js";
+import { resetAuthCircuit } from "./circuit-breaker.js";
 
 // ── OAuth credential resolution ──────────────────────────────────────────
 
@@ -136,6 +137,13 @@ export function storeTokens(
     payload = tokens;
   }
   settings.setSetting(projectId, oauthKey(accountId), JSON.stringify(payload));
+
+  // Clear any tripped auth circuit breaker — new valid tokens mean the
+  // account can resume syncing.
+  const account = getAccount(projectId, accountId);
+  if (account) {
+    resetAuthCircuit(account.email);
+  }
 }
 
 /**
@@ -160,15 +168,21 @@ export async function getValidTokens(
   const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
 
   let tokens: OAuthToken;
-  if (encKey) {
-    tokens = {
-      accessToken: decryptCredentials(stored.accessToken),
-      refreshToken: decryptCredentials(stored.refreshToken),
-      expiryDate: stored.expiryDate,
-      scope: stored.scope,
-    };
-  } else {
-    tokens = stored;
+  try {
+    if (encKey) {
+      tokens = {
+        accessToken: decryptCredentials(stored.accessToken),
+        refreshToken: decryptCredentials(stored.refreshToken),
+        expiryDate: stored.expiryDate,
+        scope: stored.scope,
+      };
+    } else {
+      tokens = stored;
+    }
+  } catch {
+    // Decryption failed — credentials are unreadable. Return null so the
+    // caller knows re-authentication is needed.
+    return null;
   }
 
   // Check if expired (with 60-second buffer to avoid TOCTOU expiry races)

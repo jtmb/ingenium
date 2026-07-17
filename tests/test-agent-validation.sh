@@ -604,11 +604,256 @@ test_skill_count_consistency() {
 
     if [[ "$abs_diff" -eq 0 ]]; then
         pass "Skill count matches: $actual_count directories = $index_count in SKILL-INDEX.md"
-    elif [[ "$abs_diff" -le 2 ]]; then
-        yellow "  ⚠ WARNING: Skill count mismatch ($actual_count actual vs $index_count index — diff: $diff)"
-        pass "Skill count mismatch within tolerance (diff=$abs_diff, tolerance=2)"
     else
         fail "Skill count mismatch" "$actual_count actual vs $index_count in SKILL-INDEX.md (diff=$diff)"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# TEST 8 — Frontmatter-Model vs Body-Model Identity Match
+# Detect body text like "You are qwen3.5-9b running locally"
+# that contradicts the frontmatter model: field.
+# ═══════════════════════════════════════════════════════════
+test_model_identity_match() {
+    section "TEST 8 — Model Identity Match (frontmatter vs body)"
+
+    local errors=0
+    local files
+    files=$(find_agent_files)
+
+    for file in $files; do
+        local name
+        name=$(agent_name_from_path "$file")
+
+        local fm
+        fm=$(extract_frontmatter "$file")
+        local fm_model
+        fm_model=$(get_field_value "$fm" "model" | tr -d '[:space:]')
+
+        # Skip if no frontmatter model (unlikely; caught by TEST 1)
+        if [[ -z "$fm_model" ]]; then
+            continue
+        fi
+
+        # Extract just the core model name (last segment after final /)
+        # e.g., "lmstudio/qwen/qwen3.5-9b" → "qwen3.5-9b"
+        #       "deepseek/deepseek-v4-pro" → "deepseek-v4-pro"
+        #       "opencode/deepseek-v4-flash-free" → "deepseek-v4-flash-free"
+        local fm_core
+        fm_core=$(echo "$fm_model" | sed 's|.*/||' | tr '[:upper:]' '[:lower:]')
+
+        # Search body text for "You are" identity statements
+        local body
+        body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$file")
+
+        # Find "You are ..." pattern (until end of line or sentence)
+        local body_models
+        body_models=$(echo "$body" | grep -oPi 'You are\s+[^\n.]*' | head -5 || true)
+
+        if [[ -z "$body_models" ]]; then
+            info "$name — no 'You are' identity statement found in body"
+            continue
+        fi
+
+        # Check if any body statement mentions a model that differs from frontmatter
+        local mismatch=false
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local normalized_body
+            normalized_body=$(echo "$line" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+
+            # Only check if body mentions specific model names
+            if echo "$normalized_body" | grep -qiE 'qwen|deepseek|claude|gpt|llama|mistral|gemini'; then
+                # Check if body mentions the same model family as frontmatter
+                local fm_family=""
+                if [[ "$fm_core" == deepseek-* ]]; then fm_family="deepseek"; fi
+                if [[ "$fm_core" == qwen* ]]; then fm_family="qwen"; fi
+                if [[ "$fm_core" == claude* ]]; then fm_family="claude"; fi
+
+                # If body mentions a different model family, flag as mismatch
+                if [[ -n "$fm_family" ]]; then
+                    if ! echo "$normalized_body" | grep -qi "$fm_family"; then
+                        fail "$name" "Body model identity '$line' conflicts with frontmatter model '$fm_model' (expected family: $fm_family)"
+                        errors=$((errors + 1))
+                        mismatch=true
+                    else
+                        info "$name — body mentions $fm_family family (matches frontmatter: $fm_model)"
+                    fi
+                else
+                    # Fallback: check for core model name in body
+                    if ! echo "$normalized_body" | grep -qi "$fm_core"; then
+                        fail "$name" "Body model identity '$line' conflicts with frontmatter model '$fm_model'"
+                        errors=$((errors + 1))
+                        mismatch=true
+                    fi
+                fi
+            fi
+        done <<< "$body_models"
+
+        if ! $mismatch; then
+            [[ -n "$body_models" ]] && info "$name — body model identity matches frontmatter" || true
+        fi
+    done
+
+    if [[ "$errors" -eq 0 ]]; then
+        pass "All agent body model identities match frontmatter model field"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# TEST 9 — Body-Referenced Skills Must Be Subset of
+# Frontmatter-Allowed Skills
+# ═══════════════════════════════════════════════════════════
+test_body_skills_in_frontmatter() {
+    section "TEST 9 — Body Skills ⊆ Frontmatter Skills"
+
+    local errors=0
+    local files
+    files=$(find_agent_files)
+
+    # Get list of all known skill names from the skills directory
+    local known_skills
+    known_skills=$(find "$SKILLS_DIR" -maxdepth 2 -name "SKILL.md" -exec dirname {} \; | xargs -I{} basename {} | sort -u)
+
+    for file in $files; do
+        local name
+        name=$(agent_name_from_path "$file")
+
+        local fm
+        fm=$(extract_frontmatter "$file")
+
+        # Get frontmatter-allowed skills (bare names, no @ prefix)
+        local fm_skills
+        fm_skills=$(extract_skill_list "$fm" | sort -u || true)
+
+        # Extract body text after frontmatter
+        local body
+        body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$file")
+
+        # Search body for @word references in "Required Skills" or skill requirement sections
+        local body_at_refs
+        body_at_refs=$(echo "$body" | grep -oP '@([a-z][a-z0-9-]*)' | sed 's/^@//' | sort -u || true)
+
+        if [[ -z "$body_at_refs" ]]; then
+            info "$name — no @ references found in body"
+            continue
+        fi
+
+        # Filter to only skill names (not agent names like ingenium-orchestrator)
+        local body_skills=""
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            # Check if this is a known skill name
+            if echo "$known_skills" | grep -qxF "$ref"; then
+                body_skills="${body_skills}${ref}"$'\n'
+            fi
+        done <<< "$body_at_refs"
+        body_skills=$(echo "$body_skills" | sort -u | grep -v '^$' || true)
+
+        if [[ -z "$body_skills" ]]; then
+            info "$name — no skill @references found in body"
+            continue
+        fi
+
+        # Check each body skill against frontmatter skills
+        local body_violations=0
+        while IFS= read -r bskill; do
+            [[ -z "$bskill" ]] && continue
+            # Check if this skill exists in the frontmatter skill allow list
+            if ! echo "$fm_skills" | grep -qxF "$bskill"; then
+                fail "$name" "Body references skill '@$bskill' not in frontmatter skill permissions"
+                errors=$((errors + 1))
+                body_violations=$((body_violations + 1))
+            fi
+        done <<< "$body_skills"
+
+        if [[ "$body_violations" -eq 0 ]]; then
+            info "$name — all body-referenced skills are in frontmatter permissions"
+        fi
+    done
+
+    if [[ "$errors" -eq 0 ]]; then
+        pass "All agent body skill references are subset of frontmatter-allowed skills"
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════
+# TEST 10 — AGENTS.md Table Entries Must Appear in a Task Block
+# Every subagent listed in the AGENTS.md agent table must either
+# be reachable from another agent's task block or marked as
+# standalone (prompt-engineer, browser-agent).
+# ═══════════════════════════════════════════════════════════
+test_agents_table_task_block_coverage() {
+    section "TEST 10 — AGENTS.md Agent Table Task Block Coverage"
+
+    local errors=0
+    local agents_md="$REPO_ROOT/AGENTS.md"
+
+    if [[ ! -f "$agents_md" ]]; then
+        fail "Cannot find AGENTS.md" "Expected at $agents_md"
+        return
+    fi
+
+    # Parse agent table from AGENTS.md — extract bold names from table rows
+    # Table rows begin with "| **agent-name** |"
+    local table_agents
+    table_agents=$(grep -oP '^\| \*\*\K[^*]+(?=\*\* \|)' "$agents_md" || true)
+
+    # Collect all task block allowed subagents from ALL agent files
+    declare -A TASK_TARGETS
+    local files
+    files=$(find_agent_files)
+
+    for file in $files; do
+        local fm
+        fm=$(extract_frontmatter "$file")
+
+        # Extract task block from permission
+        local perm_block
+        perm_block=$(extract_yaml_block "permission" <<< "$fm")
+
+        # Get allowed subagents from task block
+        local task_allows
+        task_allows=$(echo "$perm_block" | sed -n '/^  task:/,/^  [a-z]/p' \
+            | grep '": "allow"' \
+            | sed 's/.*"\(.*\)": "allow".*/\1/' \
+            | grep -v '^\*$' || true)
+
+        while IFS= read -r allowed_agent; do
+            [[ -z "$allowed_agent" ]] && continue
+            allowed_agent=$(echo "$allowed_agent" | tr -d '[:space:]')
+            TASK_TARGETS["$allowed_agent"]=1
+        done <<< "$task_allows"
+    done
+
+    # Standalone agents: documented in AGENTS.md as not spawned by others
+    local standalone_agents="ingenium-prompt-engineer"
+
+    # Check each subagent from the table (skip primary/orchestrator)
+    while IFS= read -r agent; do
+        [[ -z "$agent" ]] && continue
+
+        # Skip the primary orchestrator — its job is to spawn, not be spawned
+        if [[ "$agent" == "ingenium-orchestrator" ]]; then
+            continue
+        fi
+
+        # Check if standalone
+        if echo "$standalone_agents" | grep -qxF "$agent"; then
+            info "$agent — standalone agent (documented as not spawned by others)"
+            continue
+        fi
+
+        if [[ -n "${TASK_TARGETS[$agent]:-}" ]]; then
+            info "$agent — referenced in at least one agent's task block"
+        else
+            fail "$agent" "Not referenced in any agent's task block and not listed as standalone"
+            errors=$((errors + 1))
+        fi
+    done <<< "$table_agents"
+
+    if [[ "$errors" -eq 0 ]]; then
+        pass "All AGENTS.md table subagents appear in at least one task block or are marked standalone"
     fi
 }
 
@@ -629,6 +874,9 @@ main() {
     test_task_block_safety
     test_no_git_workflows
     test_skill_count_consistency
+    test_model_identity_match
+    test_body_skills_in_frontmatter
+    test_agents_table_task_block_coverage
 
     echo ""
     echo "═══════════════════════════════════════════════════════"

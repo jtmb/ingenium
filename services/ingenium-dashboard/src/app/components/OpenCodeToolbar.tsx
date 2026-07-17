@@ -80,8 +80,8 @@ export default function OpenCodeToolbar({
             className={[
               "px-3 py-1 text-xs font-medium transition-colors",
               mode === "web"
-                ? "bg-blue-600 text-white"
-                : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]",
+                ? "bg-[var(--color-selection-bg)] text-[var(--color-selection-text)]"
+                : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]",
             ].join(" ")}
             aria-pressed={mode === "web"}
             aria-label="Switch to Web mode"
@@ -95,8 +95,8 @@ export default function OpenCodeToolbar({
             className={[
               "px-3 py-1 text-xs font-medium transition-colors border-l border-[var(--color-border)]",
               mode === "cli"
-                ? "bg-blue-600 text-white"
-                : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]",
+                ? "bg-[var(--color-selection-bg)] text-[var(--color-selection-text)]"
+                : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)]",
             ].join(" ")}
             aria-pressed={mode === "cli"}
             aria-label="Switch to CLI mode"

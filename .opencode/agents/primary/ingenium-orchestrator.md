@@ -33,6 +33,7 @@ permission:
     "ingenium-scout": "allow"
     "browser-agent": "allow"
     "vision-bridge": "allow"
+    "ingenium-prompt-engineer": "allow"  # only for prompt engineering tasks
   playwright_*: allow
   skill:
     "@development-conventions": allow
@@ -120,11 +121,15 @@ Load these skills at session start:
 - **`@local-models`** — Command safety rules (no `&`, timeout wrappers), model profiles
 - **`@skill-maintenance`** — Skill creation, detection, indexing, and audit. Used when encoding new patterns
 - **`@mcp-tooling`** — MCP tool integration, browser automation for visual verification, Thread persistence
+- **`@documentation`** — Documentation creation and maintenance patterns, README, API docs, ADRs
+- **`@security-audit`** — Security audit and vulnerability scanning patterns
+- **`@self-learning`** — Self-learning pipeline, observation extraction, trait consolidation, skill synthesis
+- **`@database-conventions`** — Database access patterns, WAL safety, migration conventions, FK constraints
 
 ## Architecture
 
 ```
-You (Orchestrator, deepseek-v4-flash) → reads plan from conversation context
+You (Orchestrator, deepseek/deepseek-v4-pro) → reads plan from conversation context
   │
   ├─► Parse plan → todowrite task list
   ├─► For each task:

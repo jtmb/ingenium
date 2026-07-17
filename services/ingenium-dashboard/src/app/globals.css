@@ -17,6 +17,10 @@
   --color-surface-selected: #eff6ff;
   --color-surface-raised: #ffffff;
 
+  /* Selection states — for active/selected items in lists, trees, toggles */
+  --color-selection-bg: #eff6ff;
+  --color-selection-text: #1e3a5f;
+
   /* Border colors */
   --color-border: #e5e7eb;
   --color-border-muted: #f3f4f6;
@@ -64,8 +68,12 @@
   --color-surface: #111827;
   --color-surface-muted: #1f2937;
   --color-surface-hover: #374151;
-  --color-surface-selected: #1e3a5f;
+  --color-surface-selected: #374151;
   --color-surface-raised: #1f2937;
+
+  /* Selection states — for active/selected items in lists, trees, toggles */
+  --color-selection-bg: #374151;
+  --color-selection-text: #e5e7eb;
 
   /* Border colors */
   --color-border: #2d3748;
@@ -101,7 +109,7 @@
   --color-nav-border: #374151;
   --color-nav-text: #9ca3af;
   --color-nav-text-hover: #f3f4f6;
-  --color-nav-text-active: #60a5fa;
+  --color-nav-text-active: #e5e7eb;
 
   /* Code / pre blocks */
   --color-code-bg: #1f2937;

@@ -20,6 +20,8 @@ interface SyncProgressProps {
   folders: FolderProgress[];
   syncingFolders: number;
   totalCached: number;
+  hasAuthError?: boolean;
+  onReconnect?: () => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -102,6 +104,8 @@ export default function SyncProgress({
   folders,
   syncingFolders,
   totalCached,
+  hasAuthError,
+  onReconnect,
 }: SyncProgressProps) {
   const activeFolders = folders.filter((f) => f.state !== "error");
   const complete = activeFolders.filter((f) => f.cachedCount > 0).length;
@@ -247,6 +251,26 @@ export default function SyncProgress({
           ? `Syncing ${syncingFolders} folder${syncingFolders > 1 ? "s" : ""}. Emails will appear as each folder completes.`
           : "All folders have initial data — loading your mailbox…"}
       </p>
+
+      {/* ── Auth error reconnect banner ─────────────────────────────── */}
+      {errorFolders.length > 0 && (
+        <div className="mt-8 p-4 border border-amber-300 bg-amber-50 rounded-lg text-center">
+          <p className="text-sm text-amber-800 font-medium mb-3">
+            Your email account needs to be reconnected.
+          </p>
+          {onReconnect && (
+            <button
+              onClick={onReconnect}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Reconnect Account
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

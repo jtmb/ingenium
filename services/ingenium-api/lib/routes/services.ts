@@ -236,7 +236,7 @@ async function getEmailClientStatus(): Promise<AppInfo> {
         name: "email-client", 
         state: "degraded", 
         description: "Mail sync engine", 
-        detail: `${allErrorAccounts.length} account(s) with auth errors — re-authentication needed` 
+        detail: "Re-authentication required" 
       };
     }
     return {

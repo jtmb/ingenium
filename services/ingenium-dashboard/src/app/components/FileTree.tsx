@@ -98,7 +98,7 @@ function TreeNodeItem({ node, depth, onSelect, selectedFile }: { node: TreeNode;
           else if (hasContent) onSelect(node.path, node.content || "");
         }}
         className={`flex items-center gap-1 px-2 py-1 cursor-pointer rounded text-sm ${
-          isSelected ? "bg-blue-100 text-blue-800" : "hover:bg-[var(--color-surface-hover)]"
+          isSelected ? "bg-[var(--color-selection-bg)] text-[var(--color-selection-text)]" : "hover:bg-[var(--color-surface-hover)]"
         }`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
       >

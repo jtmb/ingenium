@@ -106,7 +106,7 @@ services/
 
 ## Agent Table
 
-**12 agents total: 1 primary + 11 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
+**11 agents total: 1 primary + 10 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
 
 | Agent | Type | Model | Skills Allowed |
 |-------|------|-------|----------------|
@@ -270,7 +270,7 @@ docker compose exec ingenium npm run test   # Execute inside container
 bash tests/test-self-improving.sh        # All 4 detection pipeline tests
 bash tests/test-self-improving.sh -v     # Verbose output
 bash tests/enforce-no-db-leaks.sh        # CI gate: verify no DB access leaks
-bash tests/test-agent-validation.sh      # Agent validation checks (12 agents)
+bash tests/test-agent-validation.sh      # Agent validation checks (11 agents)
 bash tests/test-append-only-files.sh     # Verify append-only file constraints
 
 npm run test --workspace=packages/ingenium-core          # Unit tests
