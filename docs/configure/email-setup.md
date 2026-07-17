@@ -104,6 +104,31 @@ After successful authentication, you should see:
 - **No plaintext storage**: Never see raw client IDs/secrets — decrypted at runtime only
 - **Project-scoped keys**: Each project should have its own encryption key
 
+## Account Removal
+
+Removing an email account follows a three-step cleanup flow:
+
+1. **Worker stop** — The sync engine stops any active IMAP watcher and IDLE connections for the account.
+2. **Settings removal** — The account entry and its encrypted credential bundle are deleted from the database.
+3. **Cache cleanup** — All cached email data (headers, bodies, summaries, smart-reply caches) for the account is purged.
+
+To remove an account, go to **Settings → Mail** and click **Remove** next to the account name. You will be prompted to confirm.
+
+## Account Hiding
+
+If you want to keep an account configured but remove it from the sidebar, use **hide** instead of remove:
+
+- **Hide/show controls**: In the FolderSidebar, click the eye icon (👁) next to the account name, or right-click and select "Hide account" / "Show account".
+- **Hidden accounts continue syncing** — background sync, smart replies, and IMAP watchers remain active.
+- See [Mail Usage: Account Hiding](../usage/mail.md#account-hiding) for full details.
+
+## Re-Authentication After Key Rotation
+
+If `INGENIUM_EMAIL_ENCRYPTION_KEY` is rotated, all stored OAuth2 tokens become undecryptable. The sync engine parks the affected workers (no infinite retry loop) and the dashboard shows a **Reconnect** button for each affected account.
+
+See [Credential Rotation](../security/credential-rotation.md) for the full rotation procedure.
+
 ## Related Docs
 - [Mail Usage](../usage/mail.md) — Using the email client
 - [Variables](../develop/variables.md) — Email environment variables
+- [Credential Rotation](../security/credential-rotation.md) — Encryption key rotation and re-authentication

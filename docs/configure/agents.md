@@ -7,7 +7,7 @@ description: Agent profiles, pipeline lifecycle, and subagent invocation for the
 
 ## Overview
 
-12 agents total: 1 primary, 11 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Eleven specialized subagents handle search, context, prompt engineering, implementation (2 tiers), review, documentation, security, browser automation, and vision analysis.
+11 agents total: 1 primary, 10 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. Ten specialized subagents handle search, context, prompt engineering, implementation (2 tiers), review, documentation, security, browser automation, and vision analysis.
 
 ```mermaid
 flowchart TB

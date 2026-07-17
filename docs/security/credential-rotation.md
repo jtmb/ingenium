@@ -51,6 +51,8 @@ Before rewriting history, ensure all currently active credentials are replaced w
    ```
 3. **Set a new OPENCODE_SERVER_PASSWORD** (any strong password)
 4. **Re-authenticate email accounts** with the new encryption key (existing encrypted credentials become undecryptable)
+
+   > 🔴 After key rotation, the sync engine parks the affected workers immediately — no infinite retry loop or repeated warnings. Navigate to the Mail page in the Dashboard; a **Reconnect** button appears on the account, and the SyncProgress component prompts for re-authentication. Clicking Reconnect opens the account setup flow to enter the new credentials.
 5. **Re-login to OpenCode** with the new password
 6. **Update `.env` files, Docker Compose, and CI/CD** secrets with the new values
 
