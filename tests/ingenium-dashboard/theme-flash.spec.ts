@@ -91,3 +91,68 @@ test.describe("Theme flash prevention", () => {
     }
   });
 });
+
+test.describe("Dark-mode computed style assertions", () => {
+  test("computed colors match dark-mode CSS variables", async ({ page }) => {
+    // Set localStorage BEFORE page load so ThemeProvider resolves "dark"
+    // instead of overwriting our cookie with "light" (the "system" default).
+    await page.addInitScript(() => {
+      localStorage.setItem("theme", "dark");
+    });
+
+    await page.context().addCookies([{
+      name: "theme", value: "dark", domain: "localhost", path: "/"
+    }]);
+    await page.goto("/skills");
+
+    // Body background = --color-surface-muted
+    const bodyBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    expect(bodyBg).toBe("rgb(15, 15, 15)"); // #0f0f0f
+
+    // Nav bar background = --color-surface
+    const navBg = await page.evaluate(() => {
+      const nav = document.querySelector("nav");
+      return nav ? getComputedStyle(nav).backgroundColor : "";
+    });
+    expect(navBg).toBe("rgb(23, 23, 23)"); // #171717
+
+    // Body text color = --color-text-primary
+    const bodyColor = await page.evaluate(() => getComputedStyle(document.body).color);
+    expect(bodyColor).toBe("rgb(229, 229, 229)"); // #e5e5e5
+
+    // Nav text link (an <a> in the nav) should be readable
+    const navLink = await page.evaluate(() => {
+      const link = document.querySelector("nav a");
+      return link ? getComputedStyle(link).color : "";
+    });
+    // Should not be black/white default — confirms var resolution
+    expect(navLink).not.toBe("rgb(0, 0, 0)");
+    expect(navLink).not.toBe("rgb(255, 255, 255)");
+  });
+
+  test("surface tokens resolve to neutral charcoal, not navy", async ({ page }) => {
+    // Set localStorage BEFORE page load so ThemeProvider resolves "dark"
+    await page.addInitScript(() => {
+      localStorage.setItem("theme", "dark");
+    });
+
+    await page.context().addCookies([{
+      name: "theme", value: "dark", domain: "localhost", path: "/"
+    }]);
+    await page.goto("/skills");
+
+    const navBg = await page.evaluate(() => {
+      const nav = document.querySelector("nav");
+      return nav ? getComputedStyle(nav).backgroundColor : "";
+    });
+    // Extract R,G,B
+    const rgb = navBg.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+    if (!rgb) throw new Error(`Unexpected nav bg: ${navBg}`);
+    const [_, r, g, b] = rgb.map(Number);
+
+    // Navy-blue surfaces have elevated blue vs red
+    // Neutral charcoal: R ≈ G ≈ B
+    const maxDiff = Math.max(Math.abs(r - g), Math.abs(r - b), Math.abs(g - b));
+    expect(maxDiff).toBeLessThanOrEqual(12); // max 12-point spread = neutral
+  });
+});
