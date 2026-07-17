@@ -36,22 +36,31 @@ The dashboard uses CSS custom properties (defined in `globals.css` via `@theme`)
 
 | Token | Light Value | Dark Value | Replaces |
 |-------|-------------|------------|----------|
-| `--color-surface` | `#ffffff` | `#111827` | `bg-white` |
-| `--color-surface-muted` | `#f9fafb` | `#1f2937` | `bg-gray-50`, `bg-gray-100` |
-| `--color-surface-hover` | `#f3f4f6` | `#374151` | `hover:bg-gray-50` / `hover:bg-gray-100` |
-| `--color-surface-selected` | `#eff6ff` | `#374151` | `bg-blue-50` (light), neutral gray (dark) |
-| `--color-selection-bg` | `#eff6ff` | `#374151` | `bg-blue-100` / active item background |
-| `--color-selection-text` | `#1e3a5f` | `#e5e7eb` | `text-blue-800` / active item text |
-| `--color-border` | `#e5e7eb` | `#374151` | `border-gray-200` |
-| `--color-border-muted` | `#f3f4f6` | `#1f2937` | `border-gray-100` |
-| `--color-text-primary` | `#111827` | `#f3f4f6` | `text-gray-900` / `text-gray-800` / `text-gray-700` |
-| `--color-text-secondary` | `#6b7280` | `#9ca3af` | `text-gray-600` |
-| `--color-text-muted` | `#9ca3af` | `#6b7280` | `text-gray-500` / `text-gray-400` |
-| `--color-text-link` | `#2563eb` | `#60a5fa` | `text-blue-600` |
-| `--color-nav-text-active` | `#2563eb` | `#e5e7eb` | Active navigation link text |
-| `--color-error-bg` | `#fef2f2` | `#7f1d1d33` | `bg-red-50` |
-| `--color-warning-bg` | `#fffbeb` | `#78350f33` | `bg-amber-50` |
-| `--color-success-bg` | `#f0fdf4` | `#14532d33` | `bg-green-50` / `bg-green-100` |
+| `--color-surface` | `#ffffff` | `#171717` | `bg-white` (was `#111827`) |
+| `--color-surface-muted` | `#f9fafb` | `#0f0f0f` | `bg-gray-50`, `bg-gray-100` (was `#1f2937`) |
+| `--color-surface-hover` | `#f3f4f6` | `#262626` | `hover:bg-gray-50` / `hover:bg-gray-100` (was `#374151`) |
+| `--color-surface-selected` | `#eff6ff` | `#333333` | `bg-blue-50` (light), neutral gray (dark) (was `#374151`) |
+| `--color-surface-raised` | `#ffffff` | `#1f1f1f` | (was `#1f2937`) |
+| `--color-selection-bg` | `#eff6ff` | `#333333` | `bg-blue-100` / active item background (was `#374151`) |
+| `--color-selection-text` | `#1e3a5f` | `#e5e5e5` | `text-blue-800` / active item text (was `#e5e7eb`) |
+| `--color-border` | `#e5e7eb` | `#2a2a2a` | `border-gray-200` (was `#374151` / `#2d3748`) |
+| `--color-border-muted` | `#f3f4f6` | `#1f1f1f` | `border-gray-100` (was `#1f2937`) |
+| `--color-border-hover` | `#d1d5db` | `#404040` | (was `#4b5563`) |
+| `--color-text-primary` | `#111827` | `#e5e5e5` | `text-gray-900` / `text-gray-800` / `text-gray-700` (was `#f3f4f6`) |
+| `--color-text-secondary` | `#6b7280` | `#a0a0a0` | `text-gray-600` (was `#9ca3af`) |
+| `--color-text-muted` | `#9ca3af` | `#707070` | `text-gray-500` / `text-gray-400` (was `#6b7280`) |
+| `--color-text-link` | `#2563eb` | `#60a5fa` | `text-blue-600` (unchanged) |
+| `--color-nav-bg` | `#ffffff` | `#111111` | (was `#111827`) |
+| `--color-nav-border` | `#e5e7eb` | `#2a2a2a` | (was `#374151`) |
+| `--color-nav-text` | `#6b7280` | `#a0a0a0` | (was `#9ca3af`) |
+| `--color-nav-text-hover` | `#111827` | `#e5e5e5` | (was `#f3f4f6`) |
+| `--color-nav-text-active` | `#2563eb` | `#e5e5e5` | Active navigation link text (was `#e5e7eb`) |
+| `--color-code-bg` | `#f3f4f6` | `#1f1f1f` | (was `#1f2937`) |
+| `--color-code-text` | `#111827` | `#e5e5e5` | (was `#e5e7eb`) |
+| `--color-code-border` | `#e5e7eb` | `#2a2a2a` | (was `#374151`) |
+| `--color-error-bg` | `#fef2f2` | `#7f1d1d33` | `bg-red-50` (unchanged) |
+| `--color-warning-bg` | `#fffbeb` | `#78350f33` | `bg-amber-50` (unchanged) |
+| `--color-success-bg` | `#f0fdf4` | `#14532d33` | `bg-green-50` / `bg-green-100` (unchanged) |
 
 ### Usage: Old → New Class Migration
 

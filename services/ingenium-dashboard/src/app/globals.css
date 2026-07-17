@@ -64,26 +64,26 @@
 }
 
 .dark {
-  /* Surface colors */
-  --color-surface: #111827;
-  --color-surface-muted: #1f2937;
-  --color-surface-hover: #374151;
-  --color-surface-selected: #374151;
-  --color-surface-raised: #1f2937;
+  /* Surface colors — neutral charcoal matching OpenCode */
+  --color-surface: #171717;
+  --color-surface-muted: #0f0f0f;
+  --color-surface-hover: #262626;
+  --color-surface-selected: #333333;
+  --color-surface-raised: #1f1f1f;
 
   /* Selection states — for active/selected items in lists, trees, toggles */
-  --color-selection-bg: #374151;
-  --color-selection-text: #e5e7eb;
+  --color-selection-bg: #333333;
+  --color-selection-text: #e5e5e5;
 
   /* Border colors */
-  --color-border: #2d3748;
-  --color-border-muted: #1f2937;
-  --color-border-hover: #4b5563;
+  --color-border: #2a2a2a;
+  --color-border-muted: #1f1f1f;
+  --color-border-hover: #404040;
 
   /* Text colors */
-  --color-text-primary: #f3f4f6;
-  --color-text-secondary: #9ca3af;
-  --color-text-muted: #6b7280;
+  --color-text-primary: #e5e5e5;
+  --color-text-secondary: #a0a0a0;
+  --color-text-muted: #707070;
   --color-text-link: #60a5fa;
   --color-text-link-hover: #93bbfd;
 
@@ -101,20 +101,20 @@
   --color-info-text: #93c5fd;
   --color-info-border: #1e40af66;
 
-  /* Accent / brand */
+  /* Accent / brand — keep blue */
   --color-accent: #3b82f6;
 
   /* Navigation */
-  --color-nav-bg: #111827;
-  --color-nav-border: #374151;
-  --color-nav-text: #9ca3af;
-  --color-nav-text-hover: #f3f4f6;
-  --color-nav-text-active: #e5e7eb;
+  --color-nav-bg: #111111;
+  --color-nav-border: #2a2a2a;
+  --color-nav-text: #a0a0a0;
+  --color-nav-text-hover: #e5e5e5;
+  --color-nav-text-active: #e5e5e5;
 
   /* Code / pre blocks */
-  --color-code-bg: #1f2937;
-  --color-code-text: #e5e7eb;
-  --color-code-border: #374151;
+  --color-code-bg: #1f1f1f;
+  --color-code-text: #e5e5e5;
+  --color-code-border: #2a2a2a;
 }
 
 @layer base {
