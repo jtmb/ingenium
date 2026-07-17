@@ -51,7 +51,7 @@ function ModeButton({
       onClick={onClick}
       className={`shrink-0 px-2 py-0.5 text-xs rounded transition-colors
         ${active
-          ? "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-medium"
+          ? "bg-[var(--color-selection-bg)] text-[var(--color-accent)] font-medium"
           : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"
         }`}
     >

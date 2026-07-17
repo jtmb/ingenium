@@ -552,7 +552,7 @@ const RichTextEditor = forwardRef<RichTextEditorHandle, {
               type="button"
               onClick={() => colorInputRef.current?.click()}
               title="Custom color"
-              className="shrink-0 w-6 h-6 rounded-full border border-[var(--color-border)] hover:ring-2 hover:ring-blue-400 focus:ring-2 focus:ring-blue-400 focus:outline-none cursor-pointer"
+              className="shrink-0 w-6 h-6 rounded-full border border-[var(--color-border)] hover:ring-2 hover:ring-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)] focus:outline-none cursor-pointer"
               style={{ backgroundColor: getActiveTextColor() || "#000000" }}
               aria-label="Custom color"
             />

@@ -322,7 +322,7 @@ export default function SkillsPage() {
             data-testid={`tab-${t}`}
             className={`px-4 py-2 text-sm font-medium rounded-t transition-colors ${
               tab === t
-                ? "bg-[var(--color-surface)] text-blue-700 border border-[var(--color-border)] border-b-[var(--color-surface)] -mb-px"
+                ?                 "bg-[var(--color-surface)] text-[var(--color-nav-text-active)] border border-[var(--color-border)] border-b-[var(--color-surface)] -mb-px"
                 : "text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
             }`}
           >

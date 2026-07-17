@@ -151,7 +151,7 @@ function CardsVariant({
                     aria-label={`Apply "${draft.tone}" draft`}
                     onClick={() => handleApplyCard(draft)}
                     onKeyDown={(e) => handleCardKeyDown(e, draft)}
-                    className="border border-[var(--color-border)] rounded p-3 hover:shadow-md transition-shadow bg-[var(--color-surface)] cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    className="border border-[var(--color-border)] rounded p-3 hover:shadow-md transition-shadow bg-[var(--color-surface)] cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300">
@@ -427,7 +427,7 @@ export default function SmartSuggest({
                 e.stopPropagation();
                 navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
               }}
-              className="text-xs text-[var(--color-text-link)] hover:text-blue-600 ml-1 shrink-0 p-0.5 cursor-pointer"
+              className="text-xs text-[var(--color-text-link)] hover:text-[var(--color-text-link-hover)] ml-1 shrink-0 p-0.5 cursor-pointer"
               title="Copy to clipboard"
               aria-label="Copy draft to clipboard"
             >

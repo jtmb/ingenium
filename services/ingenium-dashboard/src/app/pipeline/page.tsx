@@ -10,7 +10,7 @@ import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 // ── Color maps ───────────────────────────────────────────────────────────
 const SOURCE_DOT: Record<string, string> = {
   agent: "bg-amber-500",
-  plugin: "bg-blue-500",
+  plugin: "bg-[var(--color-accent)]",
   synthesis: "bg-emerald-500",
   system: "bg-gray-400",
 };

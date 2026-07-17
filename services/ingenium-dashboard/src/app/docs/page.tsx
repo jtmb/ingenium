@@ -279,7 +279,7 @@ function ProjectLinksTab({ pageId }: { pageId: number }) {
           value={linkInput}
           onChange={(e) => setLinkInput(e.target.value)}
           placeholder="Project ID…"
-          className="flex-1 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2 py-1.5 placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex-1 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2 py-1.5 placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
           onKeyDown={(e) => { if (e.key === "Enter") handleLink(); }}
         />
         <button
@@ -398,7 +398,7 @@ function AttachmentsTab({ pageId }: { pageId: number }) {
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
-        className="w-full px-3 py-2 text-xs border border-dashed border-[var(--color-border)] rounded hover:border-blue-400 text-[var(--color-text-muted)] hover:text-[var(--color-text-link)] transition-colors disabled:opacity-50"
+        className="w-full px-3 py-2 text-xs border border-dashed border-[var(--color-border)] rounded hover:border-[var(--color-accent)] text-[var(--color-text-muted)] hover:text-[var(--color-text-link)] transition-colors disabled:opacity-50"
       >
         {uploading ? "Uploading…" : "+ Upload file"}
       </button>

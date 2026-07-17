@@ -113,7 +113,7 @@ export default function TemplatePicker({ isOpen, onClose, onSelect }: TemplatePi
             <>
               {/* Blank page option */}
               <button
-                className="w-full text-left p-4 border-2 border-dashed border-[var(--color-border)] rounded-lg hover:border-blue-400 hover:bg-[var(--color-surface-selected)] transition-colors mb-6"
+                className="w-full text-left p-4 border-2 border-dashed border-[var(--color-border)] rounded-lg hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-selected)] transition-colors mb-6"
                 onClick={() => {
                   onSelect({
                     id: 0,
@@ -150,7 +150,7 @@ export default function TemplatePicker({ isOpen, onClose, onSelect }: TemplatePi
                       {(grouped[cat] ?? []).map((tpl) => (
                         <button
                           key={tpl.id}
-                          className="text-left p-3 border border-[var(--color-border)] rounded-lg hover:shadow-md transition-shadow hover:border-blue-300"
+                          className="text-left p-3 border border-[var(--color-border)] rounded-lg hover:shadow-md transition-shadow hover:border-[var(--color-accent)]"
                           onClick={() => onSelect(tpl)}
                         >
                           <div className="flex items-center gap-2 mb-1">

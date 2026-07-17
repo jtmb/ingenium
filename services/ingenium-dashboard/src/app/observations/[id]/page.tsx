@@ -9,7 +9,7 @@ const TYPE_COLORS: Record<string, string> = {
   correction: "bg-red-100 text-[var(--color-error-text)]",
   preference: "bg-purple-100 text-purple-700",
   pattern: "bg-[var(--color-success-bg)] text-green-700",
-  insight: "bg-blue-100 text-blue-700",
+  insight: "bg-[var(--color-selection-bg)] text-[var(--color-accent)]",
   feedback: "bg-yellow-100 text-yellow-700",
   behavior: "bg-orange-100 text-orange-700",
   terminology: "bg-indigo-100 text-indigo-700",
