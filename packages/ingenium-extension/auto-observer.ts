@@ -13,9 +13,9 @@
  * to reduce latency vs. waiting for the scheduled maintenance cycle.
  */
 import { tool } from "@opencode-ai/plugin"
+import { ensureExtensionProject } from "./project-resolver.js"
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1"
-const PROJECT = process.env.INGENIUM_PROJECT || "global-default"
 
 // Throttle to once per 60s — extraction is expensive and the API's scheduled
 // maintenance cycle (every 15min) will catch anything this misses
@@ -26,9 +26,10 @@ const THROTTLE_MS = 60000
  * POST to the server-side extraction endpoint.
  * Returns success/failure with observation count on success.
  */
-async function triggerExtraction(): Promise<{ triggered: boolean; message: string }> {
+async function triggerExtraction(worktree: string): Promise<{ triggered: boolean; message: string }> {
   try {
-    const res = await fetch(`${API_BASE}/extraction/run?project=${PROJECT}`, {
+    const project = await ensureExtensionProject(worktree, API_BASE)
+    const res = await fetch(`${API_BASE}/extraction/run?project=${encodeURIComponent(project)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     })
@@ -55,7 +56,7 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
         const now = Date.now()
         if (now - lastFire < THROTTLE_MS) return
         lastFire = now
-        await triggerExtraction()
+        await triggerExtraction(ctx.worktree)
       }
     },
 
@@ -64,8 +65,8 @@ export const AutoObserverPlugin = async (ctx: { worktree: string; client: any })
         description:
           "Trigger server-side extraction — the API scans OpenCode message history for behavior patterns and creates observations. Returns a summary of what was found and created.",
         args: {},
-        async execute(_args: any, _context: { worktree: string }) {
-          const result = await triggerExtraction()
+        async execute(_args: any, context: { worktree: string }) {
+          const result = await triggerExtraction(context.worktree)
           return JSON.stringify(result, null, 2)
         },
       }),

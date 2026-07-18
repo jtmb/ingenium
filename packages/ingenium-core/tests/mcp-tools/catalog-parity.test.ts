@@ -167,8 +167,31 @@ describe("MCP Tool Catalog Parity", () => {
 
   // 8. Verify catalog total count
   it("catalog has the expected number of tools", () => {
-    // 243 from mcp-server.ts + 2 extension tools = 245
-    expect(MCP_TOOL_CATALOG.length, "catalog should contain 243 server + 2 extension tools = 245 total").toBe(245);
+    // 244 from mcp-server.ts + 2 extension tools = 246
+    expect(MCP_TOOL_CATALOG.length, "catalog should contain 244 server + 2 extension tools = 246 total").toBe(246);
+  });
+
+  it("exposes the complete project tool shape", () => {
+    const catalogMap = getCatalogMap();
+    const projectTools = [
+      "ingenium_project_delete",
+      "ingenium_project_detail",
+      "ingenium_project_init",
+      "ingenium_project_list",
+      "ingenium_project_list_archived",
+      "ingenium_project_purge",
+      "ingenium_project_rename",
+      "ingenium_project_restore",
+      "ingenium_project_set_global",
+      "ingenium_project_migrate_workspace",
+    ];
+    for (const name of projectTools) {
+      const entry = catalogMap.get(name);
+      expect(entry, `${name} must exist in the catalog`).toBeDefined();
+      expect(entry?.category).toBe("Projects");
+      expect(entry?.projectScope).toBeDefined();
+      expect(entry?.apiEndpoints.length).toBeGreaterThan(0);
+    }
   });
 
   // 9. All catalog entries have the "ingenium_" prefix (except extension tools)

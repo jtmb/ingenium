@@ -27,7 +27,7 @@ description: Canonical reference for all environment variables used across the I
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | ingenium-core | Global config path for skills/plugins/commands |
 | `INGENIUM_HOME` | `~/.ingenium` | core, supervisord | Ingenium data home directory |
 | `INGENIUM_OPENCODE_DB_PATH` | `/var/opencode/opencode.db` | ingenium-api | OpenCode SQLite DB path for extraction engine |
-| `INGENIUM_PROJECT` | `global-default` | @ingenium/extension plugins | Project name for extension plugins to write to |
+| `INGENIUM_PROJECT` | _(none — required override)_ | @ingenium/extension plugins | **Extension session override.** When set, takes priority over worktree-derived project name. Required when worktree is `/workspace` (container mount). Unlike other vars, this has no code-level default — the resolver throws if it cannot determine a valid project name. Set explicitly in Docker entrypoint for the container's own session. |
 | `LOG_LEVEL` | `info` | ingenium-server | Pino log level |
 | `MS_OAUTH_CLIENT_ID` | _(required for OAuth)_ | ingenium-email | Microsoft OAuth2 app client ID |
 | `MS_OAUTH_CLIENT_SECRET` | _(required for OAuth)_ | ingenium-email | Microsoft OAuth2 app client secret |

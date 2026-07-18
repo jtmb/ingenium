@@ -185,7 +185,47 @@ Ingenium uses a **two-project identity model**:
 - **Server/public project** (`global-default`, `is_global=1`) — The container's own OpenCode session. Created automatically at startup — by `scripts/docker-entrypoint.sh` in Docker, or by `ensureGlobalProject()` in the API server for local development.
 - **External sessions** — Named after their repo worktree (e.g., `gh-llm-bootstrap`). The `INGENIUM_PROJECT` env var controls which project the extension plugins write to.
 
+#### External Worktree Project Initialization
+
+When the extension loads (`@ingenium/extension`), `ensureExtensionProject()` in `project-resolver.ts` runs:
+
+1. **Resolves the project name** — `INGENIUM_PROJECT` env var takes priority; falls back to worktree directory basename; throws if worktree is `/workspace` (the container mount — the user must set `INGENIUM_PROJECT` explicitly)
+2. **Provisions the project** — Creates it via API if it does not exist (idempotent 409 on duplicates)
+3. **Returns the project name** — Used for all subsequent API calls for that session
+
+#### Project-Name Safety
+
+All project names pass through `isValidProjectName()` (also defined as `isSafeName()` in the extension for DB-isolation boundary):
+
+| Check | Rejected |
+|-------|----------|
+| Empty or whitespace-only | `""`, `" "` |
+| Exceeds 64 characters | `"a".repeat(65)` |
+| Dot segments | `"."`, `".."` |
+| Path separators | `"a/b"`, `"a\\b"` |
+| Control characters | `"a\u0000b"` |
+| Worktree is `/workspace` | Throws — must set `INGENIUM_PROJECT` |
+
+> 🔴 **Never defaults to `global-default` in code.** The resolver explicitly throws if it cannot determine a valid project name, preventing cross-project data pollution. The Docker entrypoint sets `INGENIUM_PROJECT=global-default` explicitly for the container's session.
+
 **Key rule**: Use `global-default` for shared resources from within the container. For external sessions, `INGENIUM_PROJECT` in the MCP server config determines the target. See [docs/VARIABLES.md](docs/VARIABLES.md).
+
+#### Safe Purge (Child Row Protection)
+
+When a project has FK-constrained child rows (tasks, skills, observations, etc.), `DELETE /api/v1/projects/:name/purge` returns **HTTP 409** with `PROJECT_HAS_CHILDREN` and a `childTables` array instead of silently failing or cascading. The core `deleteProject()` function probes every non-system table with a `project_id` column before deleting — if any has rows referencing the project, the deletion is refused with a typed `{ status: "has_children", childTables }` result. Summary purge (`POST /api/v1/projects/purge`) deletes only fully-orphaned projects that have exceeded the retention period.
+
+#### DB-Only Workspace Migration
+
+A historical artifact (`/workspace` project from the container mount) is migrated via `ingenium_project_migrate_workspace` (MCP tool) or `POST /api/v1/projects/migrate-workspace` (API endpoint):
+
+- **DB-only** — Never reads, renames, or deletes the `/workspace` filesystem path
+- **Validated** — Requires exactly 10 source skills, SHA-256 hash verification, zero remaining child rows, clean foreign key check
+- **Dry-run first** — Send `dryRun: true` for pre-flight validation without mutation
+- **Audit trail** — Results recorded in `project_migration_manifests` table (migration 049)
+- **Transactional** — Wrapped in `execTransaction()`; any guard failure rolls back fully
+- **Collision handling** — Skills with names conflicting in `global-default` are renamed with a `migrated-<sha256[:16]>` suffix and a lineage record is created
+
+> **Migration code vs. runtime execution**: The `migrateWorkspaceProject()` implementation lives in `packages/ingenium-core/lib/tools/projects.ts` and performs actual DB migration when invoked via the API or MCP tool. Unit tests in `packages/ingenium-core/tests/projects.test.ts` exercise the same function but use `resetDbForTest()` and isolated `mkdtempSync()` temp directories — they never read, write, or mutate the production database or any real filesystem path. This separation ensures migration logic is validated without risk to live data.
 
 ---
 
@@ -302,7 +342,7 @@ docker compose exec ingenium npm run test   # Execute inside container
 | Host Port | Service | Description |
 |-----------|---------|-------------|
 | `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
-| `4097` | API | Express REST gateway (sole DB authority) |
+| `127.0.0.1:4097` | API | Express REST gateway (sole DB authority — dashboard uses same-origin proxy) |
 | `127.0.0.1:4098` | OpenCode Web | OpenCode web server (host loopback only) |
 | `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
 | `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → container `:4097` (API). OpenCode redirects OAuth here; API validates and forwards callback |
@@ -314,7 +354,7 @@ docker compose exec ingenium npm run test   # Execute inside container
 - **Volumes**: `ingenium-data` (/app/.ingenium), `opencode-config`, `opencode-data`. Workspace bind-mount: `~/repos` → `/workspace`.
 - **OpenCode Web/CLI**: Dashboard `/opencode` page has dual-mode iframes (Web: :4098, CLI: ttyd :4099). Glass tab toggle with `Ctrl+Shift+\``. Mode persisted in `localStorage`.
 - **Direct terminal attachment**: `opencode attach http://localhost:4098 --dir /workspace`
-- **OpenCode Access**: The Dashboard iframe connects directly to OpenCode Web at `http://localhost:4098/`. The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty so the iframe never opens a native login prompt. Compose publishes port 4098 to host loopback only (`127.0.0.1`). The root `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
+- **OpenCode Access**: The Dashboard iframe connects to OpenCode Web via a URL derived at runtime by `runtime-urls.ts`: loopback HTTP (localhost/127.0.0.1/::1) uses the direct port (`http://localhost:4098/`); LAN HTTP (e.g., `http://192.168.1.50:3000/`) and all HTTPS use a same-origin reverse-proxy path (`/opencode-web/` for Web mode, `/opencode-cli/` for CLI mode) to avoid mixed-content errors. An environment override (`NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL`) is available for custom deployments — only relative same-origin paths are accepted; direct service origins are deliberately unsupported. The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty so the iframe never opens a native login prompt. Compose publishes ports 4098 and 4099 to host loopback only (`127.0.0.1`). The root `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
 - 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks in the API Express process. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts).
 - 🔴 **Docker sudo**: `appuser` has passwordless sudo for package installs.
 - 🔴 **Docker git**: `git` package installed for OpenCode repo creation.
@@ -331,6 +371,8 @@ bash tests/test-agent-validation.sh      # Agent validation checks (13 agents)
 bash tests/test-append-only-files.sh     # Verify append-only file constraints
 
 npm run test --workspace=packages/ingenium-core          # Unit tests
+npm run test --workspace=packages/ingenium-extension     # Extension package tests (vitest)
+npm run typecheck --workspace=packages/ingenium-extension # Extension type checking (tsc --noEmit)
 npx playwright test --config=tests/playwright.config.ts tests/ingenium-dashboard/   # E2E dashboard
 npm test                                                  # All tests
 ```
@@ -385,6 +427,7 @@ For API endpoints and detailed MCP tool reference, see [docs/HOW-TO/settings.md]
 - **Plugin Auto-Config Sync**: Every plugin lifecycle operation MUST sync `.opencode/plugins/<file>.ts` on disk AND `opencode.json`'s `plugin` array.
 - **Plugin Source Auto-Populate**: If `sourceContent` is empty at creation, the API reads the file from disk. See [docs/HOW-TO/plugins.md](docs/HOW-TO/plugins.md).
 - **🔴 Skill Sync Pattern**: Skills sync via the **Resource Sync Engine** (`packages/ingenium-extension/resource-sync.ts`) with SHA-256 hash manifest for conflict-aware bidirectional sync on `session.created` and `session.idle`. See [docs/HOW-TO/skills.md](docs/HOW-TO/skills.md).
+- **🔴 Plugin/Config Restart Requirement**: When the sync engine detects changes to plugins or config (opencode.json), `restartRequired: true` is returned. OpenCode must be restarted for plugin array or config content changes to take effect. Skills, agents, and commands do not require a restart.
 - **Skill file_tree Format**: DB `file_tree` column stores JSON map of paths → content. `writeSkillToDisk()` writes SKILL.md + metadata.json + all files.
 - **Dashboard Styling**: Every service with a frontend must have a `STYLING-GUIDE.md`. All `<select>` elements use `hover:bg-gray-50 cursor-pointer`. See [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 - 🔴 **Auto-observer auto-registration**: Must be registered in DB plugins table + both opencode configs (project + global).
@@ -419,6 +462,7 @@ For quick reference, here are the non-negotiable rules from above:
 | 20 | Declare phase (active count, writers, territories, dependencies, verification) before dispatch | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
 | 21 | Terra is first choice for critical work (auth, migrations, Docker, multi-service, cross-package, high-risk) | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
 | 22 | Restart OpenCode for newly-added agent profiles to become invocable | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
+| 23 | Restart OpenCode when sync engine reports plugin/config changes | [Plugin Conventions](#plugin--skill-conventions) |
 
 ---
 

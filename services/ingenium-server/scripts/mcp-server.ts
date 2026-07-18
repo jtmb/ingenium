@@ -918,6 +918,12 @@ server.registerTool(
   wrapHandler(C("project_detail"), async ({ name }) => projectTools.projectDetail(name)),
 );
 
+server.registerTool(
+  "project_migrate_workspace",
+  { description: "DB-only migration of the historical invalid /workspace project into global-default. Use dryRun first; never accesses filesystem /workspace.", inputSchema: { dryRun: z.boolean().optional() } },
+  wrapHandler(C("project_migrate_workspace"), async ({ dryRun }) => projectTools.projectMigrateWorkspace(dryRun)),
+);
+
 // ── Plugins ─────────────────────────────────────────────
 
 server.registerTool(

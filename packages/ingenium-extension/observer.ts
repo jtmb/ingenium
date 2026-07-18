@@ -16,6 +16,10 @@ function getInterval(): number {
 let turnCount = 0
 let lastCheckTime = 0
 
+function reportObserverError(operation: string): void {
+  process.stderr.write(`${JSON.stringify({ event: "observer_operation_failed", operation, reason: "request_failed" })}\n`);
+}
+
 /**
  * ObserverPlugin — orchestrates the self-learning pipeline from session lifecycle events.
  *
@@ -37,12 +41,22 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
           "session_created",
           "plugin",
           "OpenCode session started",
+          worktree,
           "",
           {},
-        ).catch(() => {});
+        ).catch(() => {
+          // Keep the lifecycle hook non-fatal while recording a safe diagnostic.
+          // Rejected API errors can include response bodies, so never print their text.
+          process.stderr.write(`${JSON.stringify({ event: "pipeline_event_rejected", reason: "request_failed", eventType: "session_created", eventSource: "plugin" })}\n`);
+        });
 
         // Import observations saved to local fallback when API was unreachable
-        const fileResult = await importObservationsFromFile(worktree)
+        let fileResult = { imported: 0, skipped: 0 }
+        try {
+          fileResult = await importObservationsFromFile(worktree)
+        } catch {
+          reportObserverError("import_observations")
+        }
         if (fileResult.imported > 0) {
           await ctx.client.app.log({
             body: {
@@ -55,6 +69,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
 
         // Process any observations that accumulated while the session was closed
         const synthResult = await triggerSynthesis(worktree, sessionId)
+        if (!synthResult.triggered) reportObserverError("trigger_synthesis")
         if (synthResult.triggered) {
           await ctx.client.app.log({
             body: {
@@ -82,6 +97,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
         lastCheckTime = now
 
         const synthResult = await triggerSynthesis(worktree, sessionId)
+        if (!synthResult.triggered) reportObserverError("trigger_synthesis")
         if (synthResult.triggered) {
           await ctx.client.app.log({
             body: {

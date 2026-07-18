@@ -60,3 +60,9 @@ export async function projectDetail(name: string) {
   const res = await api.get(`/projects/${encodeURIComponent(name)}/detail`);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+/** Run the DB-only historical /workspace migration. */
+export async function projectMigrateWorkspace(dryRun = false) {
+  const res = await api.post("/projects/migrate-workspace", { dry_run: dryRun });
+  return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
+}

@@ -990,7 +990,7 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: PLANS_ENDPOINTS,
   },
 
-  // ── Projects (9) ─────────────────────────────────────
+  // ── Projects (10) ────────────────────────────────────
   {
     name: "ingenium_project_list",
     category: "Projects",
@@ -1059,6 +1059,14 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     name: "ingenium_project_detail",
     category: "Projects",
     description: "Get detailed info about a project by name.",
+    projectScope: "global",
+    defaultEnabled: true,
+    apiEndpoints: PROJECTS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_project_migrate_workspace",
+    category: "Projects",
+    description: "DB-only migration of the historical invalid /workspace project into global-default.",
     projectScope: "global",
     defaultEnabled: true,
     apiEndpoints: PROJECTS_ENDPOINTS,

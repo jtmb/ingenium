@@ -55,7 +55,6 @@
   "plugin": [
     "packages/ingenium-extension/auto-observer.ts",
     "packages/ingenium-extension/observer.ts",
-    "packages/ingenium-extension/onboarding-sync.ts",
-    "packages/ingenium-extension/skill-sync.ts"
+    "packages/ingenium-extension/resource-sync.ts"
   ]
 }

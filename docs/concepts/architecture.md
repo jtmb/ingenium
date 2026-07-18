@@ -25,6 +25,45 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 - **Plugin target**: The `INGENIUM_PROJECT` environment variable in the MCP server's `opencode.json` entry controls which project extension plugins write to
 - **Connection method**: These sessions install `@ingenium/extension` via `npx` and register the observer, skill-sync, and auto-observer plugins
 
+### External Worktree Project Initialization
+
+When an external OpenCode session (CLI, VS Code) loads the `@ingenium/extension` plugins, the extension's **resource-sync** module (`packages/ingenium-extension/resource-sync.ts`) calls `ensureExtensionProject()` which:
+
+1. **Resolves the project name** via `resolveExtensionProject()` with this priority:
+   - `process.env.INGENIUM_PROJECT` (explicit override — Docker containers use this for `global-default`)
+   - Worktree directory basename (e.g., `gh-llm-bootstrap` for `/home/user/repos/gh-llm-bootstrap`)
+   - **Throws** if the worktree basename is `"workspace"` (the container mount path) — the user must set `INGENIUM_PROJECT` explicitly
+2. **Provisions the project** via `POST /api/v1/projects` — if the project already exists, the `409 Conflict` response is accepted as idempotent success
+3. **Returns the project name** for use in all subsequent API calls
+
+> 🔴 **Never defaults to `global-default`.** The resolver explicitly throws if it cannot determine a valid project name, preventing cross-project data pollution when multiple worktrees share the same server.
+
+### Global-Default Semantics
+
+The `global-default` project carries `is_global=1` and serves as the sole server/public namespace:
+
+- **Docker deployment**: Created at startup by `scripts/docker-entrypoint.sh` via `POST /api/v1/projects`
+- **Local development**: Created by `ensureGlobalProject()` in the API server before the scheduler or email engine start — idempotent no-op if already present
+- **Shared resources**: Skills, plugins, configs, and settings written to `global-default` are accessible from every project via `resolveProjectBase()` path resolution
+- **Global config path**: `/home/appuser/.config/opencode/opencode.jsonc` (set by the Docker entrypoint)
+- **Auto-loading**: When a new project is created, global skills from `global-default` are automatically copied into it via `copySkills()`
+- **Graceful degradation**: If `global-default` cannot be created, the API logs a warning and skips mail sync with `"Skipping mail sync — no global project configured"`
+
+### Project-Name Safety Validation
+
+All project names pass through `isValidProjectName()` which enforces:
+
+| Check | Rejected Examples |
+|-------|-------------------|
+| Empty or whitespace-only | `""`, `" "` |
+| Exceeds 64 characters | `"a".repeat(65)` |
+| Leading/trailing whitespace | `" name"`, `"name "` |
+| Dot segments | `"."`, `".."` |
+| Path separators | `"a/b"`, `"a\\b"` |
+| Control characters | `"a\u0000b"` |
+
+This check is applied in the API route handler (`services/ingenium-api/lib/routes/projects.ts`) and the extension project resolver (`packages/ingenium-extension/project-resolver.ts`). Project creation returns `422 Unprocessable Entity` with a `VALIDATION_ERROR` code when the name is invalid.
+
 ### Resolution & Switching
 - The **dashboard** resolves the default project dynamically by fetching the `is_global=1` project from the API (`GET /api/v1/projects` with `is_global` filter)
 - Users can switch projects via:
@@ -35,6 +74,77 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 
 ### Key Rule
 > **Never assume a worktree-derived project name is the shared namespace.** The `global-default` project (with `is_global=1`) is the sole server/public namespace for shared resources. External sessions (like this repo's worktree-derived project) have their own isolated workspace — shared resources (skills, plugins, configs, settings) must be written to `global-default` explicitly, never to the worktree-derived project.
+
+### DB-Only Workspace Project Migration
+
+A historical artifact created an invalid `/workspace` project in the database (from the container mount point). The migration is **DB-only** — it never reads, renames, or deletes the `/workspace` filesystem path.
+
+#### Migration Flow
+
+1. **Dry run** (`POST /api/v1/projects/migrate-workspace` with `dry_run: true`):
+   - Counts source skills (expects exactly 10)
+   - Computes SHA-256 content hashes for each skill
+   - Counts child rows in every table with a `project_id` column (skills, tasks, observations, etc.)
+   - Detects name collisions with existing `global-default` skills
+   - Returns a `WorkspaceMigrationResult` without mutating any data
+
+2. **Execute** (`POST /api/v1/projects/migrate-workspace` with `dry_run: false` or omitted):
+   - Creates a `project_migration_manifests` record (status `prepared`) containing source skill hashes and child row counts
+   - Renames any colliding skills in the source project with a `migrated-<sha256[:16]>` suffix
+   - Reassigns all child rows from `/workspace` → `global-default`
+   - Verifies SHA-256 content hash integrity for every migrated skill
+   - Checks no child rows remain in the source project
+   - Runs `PRAGMA foreign_key_check` — rejects if any violations
+   - Deletes the `/workspace` project row
+   - Updates the manifest status to `completed`
+
+#### Validation Guards
+
+| Guard | Action on Failure |
+|-------|-------------------|
+| Source skills ≠ exactly 10 | Throws `MIGRATION_REFUSED` |
+| Skill content hash mismatch after move | Throws `MIGRATION_REFUSED` — refuse project deletion |
+| Child rows remain in `/workspace` | Throws `MIGRATION_REFUSED` |
+| Foreign key violations | Throws `MIGRATION_REFUSED` |
+
+#### Rollback Expectations
+
+The entire migration is **transactional** (wrapped in `execTransaction()`). If any validation guard fails, the transaction aborts, all changes are rolled back, and the source `/workspace` project remains untouched. Once committed, rollback is a manual operation: create a new project, move child rows back, and restore the `/workspace` project row from the `project_migration_manifests` audit record.
+
+#### Audit Table: `project_migration_manifests`
+
+Created by migration `049_workspace_project_migration.sql`. Stores:
+
+| Column | Content |
+|--------|---------|
+| `id` | UUID primary key |
+| `source_project_id` | The `/workspace` project UUID |
+| `destination_project_id` | The `global-default` project UUID |
+| `source_skill_count` | Number of skills in source (expects 10) |
+| `source_hashes` | JSON array of `{name, sha256}` for every source skill |
+| `child_counts` | JSON map of table name → row count for all child tables |
+| `status` | One of `prepared`, `completed`, `failed` |
+
+The manifest is created **before** data movement and updated **after** successful completion, providing a durable audit trail.
+
+#### API Endpoint & MCP Tool
+
+| Interface | Endpoint | Purpose |
+|-----------|----------|---------|
+| REST API | `POST /api/v1/projects/migrate-workspace` | Trigger migration with optional `dry_run` |
+| MCP Tool | `ingenium_project_migrate_workspace` | Same, accessible from OpenCode |
+
+Both return a `WorkspaceMigrationResult` containing `{ migrated, dryRun, manifestId, sourceSkillCount, sourceHashes, movedChildRows, collisions }`. Name `collisions` are reported with their `sha256`, not skill content.
+
+#### MCP Tool Registration
+
+| Field | Value |
+|-------|-------|
+| Tool name | `ingenium_project_migrate_workspace` |
+| Category | Projects |
+| Project scope | `global` |
+| Default enabled | Yes |
+| Input schema | `{ dryRun?: boolean }` |
 
 ---
 
@@ -84,6 +194,40 @@ The `skills` table has a `file_tree` column (TEXT, stores JSON map of relative p
 - **`syncSkillFromDisk()`** — Reads SKILL.md, parses frontmatter, reads metadata.json, and walks the directory tree to rebuild `file_tree`. If skill doesn't exist in DB, creates it; otherwise updates.
 
 This means a skill can contain any number of auxiliary files (reference docs, examples, configs) that are fully preserved in the DB's `file_tree` and round-tripped to disk.
+
+### Resource Sync Engine
+
+The resource sync engine (`packages/ingenium-extension/resource-sync.ts`) provides **unified bidirectional synchronization** of skills, agents, plugins, commands, and config between the Ingenium API and the local filesystem. It supersedes the former `skill-sync.ts` and `onboarding-sync.ts`.
+
+#### Architecture
+
+- **Change detection**: SHA-256 content hashes enable three-way comparison (API vs disk vs manifest baseline)
+- **Sync manifest**: Stored at `.opencode/.ingenium-sync-state.json` — maps resource names to their last-known SHA-256 hash
+- **Conflict resolution**: Three-way merge using manifest baseline as the common ancestor:
+  - API changed, disk unchanged → pull API → disk
+  - Disk changed, API unchanged → push disk → API
+  - Both changed, manifest matches API → disk wins
+  - Both changed, manifest matches disk → API wins  
+  - Both changed, manifest matches neither → conflict (logged, skipped)
+
+#### Sync Hooks
+
+The `ResourceSyncPlugin` hooks into OpenCode session events:
+
+| Event | Action | Throttle |
+|-------|--------|----------|
+| `session.created` | Full sync of all resources | None |
+| `session.idle` | Incremental sync (hash mismatch only) | 60s max 1 |
+
+#### Registration
+
+The plugin is self-registering — the `@ingenium/extension` package exports `ResourceSyncPlugin` which is loaded by OpenCode's plugin system. Registration requires the plugin to be in the `opencode.json` `plugin` array and the corresponding `.ts` file at `.opencode/plugins/`.
+
+#### Restart Requirement
+
+When the sync engine detects changes to **plugins** or **config** (opencode.json), the response includes `restartRequired: true`. A human-readable message is logged: `"⚡ OpenCode restart required (plugin/config changes)"`. This is because OpenCode loads plugins and config at startup — runtime changes to the plugin array or config content do not take effect until the next session restart.
+
+The dashboard sync log captures this condition and prompts the user to restart OpenCode. Skills, agents, and commands do not require a restart — they are read from disk at session startup from the `.opencode/` directory.
 
 ### Skill Seeds
 
@@ -487,7 +631,7 @@ The system exposes **245 catalog tools** across **28 categories**. Canonical cat
 | OpenCode | 1 | opencode_messages |
 | Tasks | 24 | create, list, move, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update |
 | Plans (Context) | 3 | save, search, list |
-| Projects | 9 | list, init, delete, restore, list_archived, purge, set_global, rename, detail |
+| Projects | 10 | list, init, delete, restore, list_archived, purge, set_global, rename, detail, migrate_workspace |
 | Plugins | 8 | list, get, enable, disable, create, delete, update, source |
 | Commands | 5 | list, get, create, update, delete |
 | Config | 3 | get, set, sync |
@@ -510,8 +654,8 @@ The Express API uses `express.json({ limit: "2mb" })` for request body parsing. 
 ### OpenCode Web/CLI Embedded in Dashboard
 The dashboard includes an embedded OpenCode experience at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
-- **Web mode** — Embeds the OpenCode Web UI (`http://localhost:4098/`) in a full-viewport iframe. The session persists across tab navigation with a hidden iframe technique.
-- **CLI mode** — Embeds a ttyd terminal (`http://localhost:4099/`) in a full-viewport iframe. The xterm.js terminal connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing the same session state as the Web UI.
+- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts`: HTTP → `http://<host>:4098/`, HTTPS → `/opencode-web/` (same-origin proxy). Overridable via `NEXT_PUBLIC_OPENCODE_WEB_URL`. The session persists across tab navigation with a hidden iframe technique.
+- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. Same dynamic URL pattern: HTTP → `http://<host>:4099/`, HTTPS → `/opencode-cli/` (overridable via `NEXT_PUBLIC_OPENCODE_CLI_URL`). Connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing session state.
 - **Mode switch** — A right-edge glass tab toggles between Web and CLI modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.

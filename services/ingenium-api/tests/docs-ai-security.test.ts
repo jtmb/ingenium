@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("ingenium-core", () => ({
-  projects: { getProject: (name: string) => name === "docs-ai-test" ? { id: "docs-project" } : undefined },
+  projects: {
+    getProject: (name: string) => name === "docs-ai-test" ? { id: "docs-project" } : undefined,
+    isValidProjectName: (name: unknown): name is string => typeof name === "string" && name.length > 0 && name.length <= 64 && name === name.trim() && name !== "." && name !== ".." && !/[\\/\u0000-\u001f\u007f]/.test(name),
+  },
   logger: { warn: mocks.warn, error: mocks.error },
 }));
 
