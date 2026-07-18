@@ -25,7 +25,7 @@ remain in historical commits and cannot be removed without coordinated history r
 | Secret | Type | Current Worktree Status | Risk |
 |--------|------|-------------------------|------|
 | **Thread API token** (`THREAD_API_TOKEN`) | MCP server auth token | Placeholder `<YOUR_THREAD_API_TOKEN>` in `opencode.json` | Anyone with repo access can read old commits |
-| **Legacy email encryption key** | AES-256-GCM encryption key | `INGENIUM_EMAIL_ENCRYPTION_KEY` — now **required** with 64-hex validation; no hardcoded default | Rotated key in current config; old key in git history |
+| **Legacy email encryption key** | AES-256-GCM encryption key | `INGENIUM_EMAIL_ENCRYPTION_KEY` — now **required** with 64-character hex or base64url validation; no hardcoded default | Rotated key in current config; old key in git history |
 | **Legacy OpenCode password** | Web server auth password | `OPENCODE_SERVER_PASSWORD` — now **required** with entrypoint guard; no hardcoded default | Rotated password in current config; old password in git history |
 
 ### Why This Is a Release Blocker
@@ -44,11 +44,15 @@ remain in historical commits and cannot be removed without coordinated history r
 Before rewriting history, ensure all currently active credentials are replaced with new values:
 
 1. **Generate a new Thread API token** via the Thread server admin panel
-2. **Generate a new INGENIUM_EMAIL_ENCRYPTION_KEY** (64 hex chars):
+2. **Generate a new INGENIUM_EMAIL_ENCRYPTION_KEY** (64 hex chars or 64-char base64url secret):
    ```bash
-   # Linux/macOS
+   # 64 hex characters (used directly as 32-byte AES-256 key)
    openssl rand -hex 32
+
+   # Alternatively, a 64-character base64url secret (deterministically reduced to AES-256 key)
+   openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n' | head -c 64
    ```
+   The hex format is used directly as the AES-256 key. The base64url format is **deterministically reduced** to 32 bytes via SHA-256 — either is accepted.
 3. **Set a new OPENCODE_SERVER_PASSWORD** (any strong password)
 4. **Re-authenticate email accounts** with the new encryption key (existing encrypted credentials become undecryptable)
 

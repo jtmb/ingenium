@@ -82,6 +82,14 @@ describe("encryptCredentials / decryptCredentials", () => {
     expect(decrypted).toBe(original);
   });
 
+  it("should support a 64-character base64url secret", async () => {
+    process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = "A".repeat(63) + "-";
+    const { encryptCredentials, decryptCredentials } = await import("../lib/oauth.js");
+    const encrypted = encryptCredentials("base64url-secret");
+    expect(decryptCredentials(encrypted)).toBe("base64url-secret");
+    process.env.INGENIUM_EMAIL_ENCRYPTION_KEY = TEST_KEY;
+  });
+
   it("should throw on missing key", async () => {
     delete process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
     const { encryptCredentials } = await import("../lib/oauth.js");

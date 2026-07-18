@@ -20,13 +20,14 @@ if [ -z "${OPENCODE_SERVER_PASSWORD:-}" ]; then
 fi
 
 # SECURITY: Validate email encryption key format before supervisor starts.
-# Must be exactly 64 hex characters — no fallback, no generated secret.
+# Accept a 32-byte hex key or a 64-character base64url secret. The latter is
+# deterministically reduced to an AES-256 key by the email package.
 if [ -z "${INGENIUM_EMAIL_ENCRYPTION_KEY:-}" ]; then
-  echo "ERROR: INGENIUM_EMAIL_ENCRYPTION_KEY is required (64 hex characters)"
+  echo "ERROR: INGENIUM_EMAIL_ENCRYPTION_KEY is required (64 hex characters or 64-character base64url secret)"
   exit 1
 fi
-if ! echo "${INGENIUM_EMAIL_ENCRYPTION_KEY}" | grep -qE '^[0-9a-fA-F]{64}$'; then
-  echo "ERROR: INGENIUM_EMAIL_ENCRYPTION_KEY must be exactly 64 hex characters"
+if ! printf '%s\n' "${INGENIUM_EMAIL_ENCRYPTION_KEY}" | grep -qE '^[A-Za-z0-9_-]{64}$'; then
+  echo "ERROR: INGENIUM_EMAIL_ENCRYPTION_KEY must be 64 hex or base64url characters"
   exit 1
 fi
 
