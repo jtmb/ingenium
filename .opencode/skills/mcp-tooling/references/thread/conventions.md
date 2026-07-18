@@ -1,11 +1,13 @@
 ---
-title: "Thread MCP Conventions — Priority, Tags, Rules"
+title: "Thread MCP Conventions — Priority, Tags, Rules [RETIRED]"
 impact: MEDIUM
-impactDescription: "Standardizes priority levels, tag naming, and behavioral rules for Thread usage"
-tags: [thread, mcp, conventions, priority, tags]
+impactDescription: "[RETIRED — Replaced by Docs RAG] Standardizes priority levels, tag naming, and behavioral rules for Thread usage"
+tags: [thread, mcp, conventions, priority, tags, retired]
 ---
 
 ## Thread MCP Conventions
+
+> 🔴 **RETIRED**: Thread has been replaced by the Ingenium Docs RAG system. This content is retained for reference only until full removal is verified. Use `ingenium_docs_*` tools for persistent memory.
 
 ### Priority Guidelines
 

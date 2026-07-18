@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { logger, settings, pipelineEvents, synthesis } from "ingenium-core";
+import { logger, settings, pipelineEvents, synthesis, docs, tasks, projects } from "ingenium-core";
 
 /** Handles /api/v1/services — supervisord process status, logs, and application health checks (email-client, synthesis-engine). */
 export const servicesRouter = Router();
@@ -63,6 +63,19 @@ const STATE_MAP: Record<string, ServiceInfo["state"]> = {
   EXITED: "stopped",
   STOPPED: "stopped",
 };
+
+/**
+ * Resolve the UUID for the global-default project.
+ * Falls back to the literal string "global-default" if the project doesn't exist.
+ */
+function resolveGlobalProjectId(): string {
+  try {
+    const p = projects.getProject("global-default");
+    return p?.id ?? "global-default";
+  } catch {
+    return "global-default";
+  }
+}
 
 /**
  * Extract a member value from a supervisord XML-RPC struct snippet.
@@ -297,6 +310,59 @@ async function getSynthesisStatus(): Promise<AppInfo> {
   }
 }
 
+/**
+ * Docs-workspace health: checks doc stats from ingenium-core.
+ * Returns idle when no documents exist yet.
+ */
+async function getDocsStatus(): Promise<AppInfo> {
+  try {
+    const stats = docs.getDocStats();
+    const total = stats.spaces + stats.pages + stats.drafts;
+    if (total === 0) {
+      return { name: "docs-workspace", state: "idle", description: "Documentation workspace", detail: "No documents yet — create a space to begin" };
+    }
+    return {
+      name: "docs-workspace",
+      state: "healthy",
+      description: `Documentation workspace — ${stats.spaces} space(s), ${stats.pages} page(s)`,
+      detail: `${stats.spaces} spaces, ${stats.pages} pages, ${stats.drafts} drafts`,
+    };
+  } catch (err: any) {
+    return { name: "docs-workspace", state: "error", description: "Documentation workspace", detail: (err as Error).message };
+  }
+}
+
+/**
+ * Tasks-board health: checks task counts by column.
+ * Returns idle when no tasks exist yet.
+ */
+async function getTasksStatus(): Promise<AppInfo> {
+  try {
+    const globalId = resolveGlobalProjectId();
+    const allTasks = tasks.listTasks(globalId);
+    const byColumn: Record<string, number> = {};
+    for (const t of allTasks) {
+      byColumn[t.column_id] = (byColumn[t.column_id] || 0) + 1;
+    }
+    const total = allTasks.length;
+    if (total === 0) {
+      return { name: "tasks-board", state: "idle", description: "Task board", detail: "No tasks — create one to begin" };
+    }
+    const todo = byColumn["todo"] || 0;
+    const inProgress = byColumn["in_progress"] || 0;
+    const review = byColumn["review"] || 0;
+    const done = byColumn["done"] || 0;
+    return {
+      name: "tasks-board",
+      state: "healthy",
+      description: `Task board — ${total} task(s)`,
+      detail: `${todo} todo, ${inProgress} in progress, ${review} in review, ${done} done`,
+    };
+  } catch (err: any) {
+    return { name: "tasks-board", state: "error", description: "Task board", detail: (err as Error).message };
+  }
+}
+
 /** GET /api/v1/services/status — live supervisord process states + application health */
 servicesRouter.get("/status", async (_req, res): Promise<void> => {
   // Always fetch application health checks (independent from supervisord)
@@ -305,6 +371,8 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
     applications = await Promise.all([
       getEmailClientStatus(),
       getSynthesisStatus(),
+      getDocsStatus(),
+      getTasksStatus(),
     ]);
   } catch {
     // Individual errors are caught inside each function; this is defense-in-depth
@@ -446,6 +514,21 @@ servicesRouter.get("/applications/:name", async (req, res): Promise<void> => {
         return;
       }
 
+      case "docs-workspace": {
+        const app = await getDocsStatus();
+        const stats = docs.getDocStats();
+        res.json({ data: { ...app, stats } });
+        return;
+      }
+      case "tasks-board": {
+        const app = await getTasksStatus();
+        const globalId = resolveGlobalProjectId();
+        const allTasks = tasks.listTasks(globalId);
+        const byColumn: Record<string, number> = {};
+        for (const t of allTasks) { byColumn[t.column_id] = (byColumn[t.column_id] || 0) + 1; }
+        res.json({ data: { ...app, stats: { total: allTasks.length, byColumn } } });
+        return;
+      }
       default:
         res.status(404).json({ error: `Unknown application: "${name}"` });
         return;
@@ -467,7 +550,7 @@ servicesRouter.get("/:name", async (req, res): Promise<void> => {
 
   try {
     const xml = await supervisorRpc(
-      `<?xml version="1.0"?>\n<methodCall><methodName>supervisor.getProcessInfo</methodName><params><param><value><string>${processName}</string></value></param></params></methodCall>`
+      `<?xml version="1.0"?>\n<methodCall><methodName>supervisor.getProcessInfo</methodName></params><param><value><string>${processName}</string></value></param></params></methodCall>`
     );
 
     const info = parseProcessInfo(xml);

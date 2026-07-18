@@ -243,7 +243,7 @@ export default function EmailReader({
       )}
       {summaryConfigured === false && (
         <p className="text-xs text-[var(--color-text-muted)]">
-          Configure a <a href="/?settings=general" className="text-[var(--color-text-link)] hover:underline">Synthesis LLM</a> in Settings to enable AI summaries.
+          Configure a <a href="/?settings=providers" className="text-[var(--color-text-link)] hover:underline">primary LLM provider</a> in Settings to enable AI summaries.
         </p>
       )}
       {summary && (

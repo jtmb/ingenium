@@ -85,7 +85,7 @@ Running `find` or `grep` in `node_modules`, `.git`, `dist`, `build`, `.next`, `t
 
 | You want to... | Don't assume — check first |
 |----------------|----------------------------|
-| Use Thread MCP tools | Check `.vscode/mcp.json` for `servers.thread` + `THREAD_SERVER_URL` env var |
+| Use Thread MCP tools <!-- Thread retired → Docs RAG --> | Check `.vscode/mcp.json` for `servers.thread` + `THREAD_SERVER_URL` env var |
 | Call LM Studio `/v1/models` | Verify server is reachable at configured base URL |
 | Use OpenAI-compatible tool calls | Verify the model exists on the server |
 | Read env vars from config files | Look in global MCP config location |
@@ -94,7 +94,7 @@ Running `find` or `grep` in `node_modules`, `.git`, `dist`, `build`, `.next`, `t
 
 ### 🔴 ALWAYS Verify Authentication Before Destructive Operations
 
-When deleting or modifying Thread sessions, NEVER assume HTTP 401 means success.
+When deleting or modifying Thread sessions, NEVER assume HTTP 401 means success. <!-- Thread retired → Docs RAG -->
 - **HTTP 204** → Successfully deleted ✓
 - **HTTP 404** on DELETE → Already deleted or doesn't exist
 - **HTTP 401** → Authentication failed — NOT a deletion indicator!

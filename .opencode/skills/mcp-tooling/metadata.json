@@ -1,5 +1,5 @@
 {
   "name": "mcp-tooling",
-  "description": "MCP tool integration and automation — Playwright browser automation (navigate, screenshot, inspect, interact, console), Thread MCP persistent memory (context save/retrieve, session lifecycle, doc upload), and future MCP tool integrations. Use when the user asks for browser automation, persistent memory operations, or any MCP-based tool workflow.",
-  "tags": ["mcp", "playwright", "thread", "browser", "automation", "memory", "context", "dev-browser"]
+  "description": "MCP tool integration and automation — Playwright browser automation (navigate, screenshot, inspect, interact, console), Docs RAG persistent memory (replacing Thread MCP), and future MCP tool integrations. Use when the user asks for browser automation, persistent memory operations, or any MCP-based tool workflow.",
+  "tags": ["mcp", "playwright", "docs-rag", "browser", "automation", "memory", "context", "dev-browser"]
 }

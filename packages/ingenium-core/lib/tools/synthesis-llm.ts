@@ -2,6 +2,7 @@ import { Observation, PersonalityTrait, Skill } from "../schema.js";
 import { getSetting } from "./settings.js";
 import { getGlobalProject } from "./projects.js";
 import { logger } from "../logger.js";
+import { safeLlmFetch } from "./endpoint-policy.js";
 
 /**
  * Structured response from the LLM synthesis engine.
@@ -236,6 +237,7 @@ export async function callSynthesisLLM(
   model: string,
   apiKey?: string,
   signal?: AbortSignal,
+  allowPrivateNetwork = false,
 ): Promise<SynthesisLLMResult> {
   if (observations.length === 0) {
     return { skills_to_create: [], skills_to_update: [], insights: [], summary: "No observations to process." };
@@ -250,7 +252,7 @@ export async function callSynthesisLLM(
   const baseEndpoint = endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -264,15 +266,15 @@ export async function callSynthesisLLM(
         // LM Studio rejects "json_object" — omit response_format, rely on prompt.
       }),
       signal,
-    });
+    }, { allowPrivateNetwork, timeoutMs: 60_000 });
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown error");
-      logger.warn("synthesis-llm", "LLM synthesis API returned error", { status: response.status, error: errText });
+      logger.warn("synthesis-llm", "LLM synthesis API returned error", { status: response.status, error: errText.substring(0, 200) });
       // HACK: The fallback prompt is nearly identical to the primary except
       // the system message is reworded. Both paths should use a shared format.
       // Try parsing as non-JSON response format
-      const fallbackResponse = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+      const fallbackResponse = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -285,7 +287,7 @@ export async function callSynthesisLLM(
           max_tokens: 8192,
         }),
         signal,
-      });
+      }, { allowPrivateNetwork, timeoutMs: 60_000 });
       if (!fallbackResponse.ok) {
         return { skills_to_create: [], skills_to_update: [], insights: [], summary: `API error: ${fallbackResponse.status}` };
       }
@@ -339,6 +341,7 @@ export interface LLMConfig {
   model: string;
   apiKey?: string;
   endpoint?: string;
+  allowPrivateNetwork?: boolean;
 }
 
 /**
@@ -359,6 +362,7 @@ export function resolveLLMConfig(projectId?: string): LLMConfig | null {
         model,
         apiKey: getSetting(gid, "synthesis_api_key") || undefined,
         endpoint: getSetting(gid, "synthesis_endpoint") || undefined,
+        allowPrivateNetwork: getSetting(gid, "synthesis_allow_private_network") === "true",
       };
     }
   }
@@ -371,6 +375,7 @@ export function resolveLLMConfig(projectId?: string): LLMConfig | null {
         model,
         apiKey: getSetting(projectId, "synthesis_api_key") || undefined,
         endpoint: getSetting(projectId, "synthesis_endpoint") || undefined,
+        allowPrivateNetwork: getSetting(projectId, "synthesis_allow_private_network") === "true",
       };
     }
   }
@@ -381,7 +386,8 @@ export function resolveLLMConfig(projectId?: string): LLMConfig | null {
     return {
       model: envModel,
       apiKey: process.env.SYNTHESIS_API_KEY || undefined,
-      endpoint: process.env.SYNTHESIS_ENDPOINT || undefined,
+        endpoint: process.env.SYNTHESIS_ENDPOINT || undefined,
+        allowPrivateNetwork: process.env.SYNTHESIS_ALLOW_PRIVATE_NETWORK === "true",
     };
   }
 
@@ -492,7 +498,7 @@ For each new observation, decide ONE of:
   const baseEndpoint = endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -505,7 +511,7 @@ For each new observation, decide ONE of:
         max_tokens: 8192,
         // LM Studio rejects "json_object" — omit response_format, rely on prompt.
       }),
-    });
+    }, { allowPrivateNetwork: config.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
     if (!response.ok) {
       logger.warn("synthesis-llm", "consolidateTraits API returned error", { status: response.status });
@@ -677,6 +683,7 @@ export async function enrichObservations(
   model: string,
   apiKey?: string,
   signal?: AbortSignal,
+  allowPrivateNetwork = false,
 ): Promise<EnrichedObservation[]> {
   if (observations.length === 0) return [];
   if (!endpoint || !model) {
@@ -694,7 +701,7 @@ export async function enrichObservations(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+      const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -708,7 +715,7 @@ export async function enrichObservations(
           // LM Studio rejects "json_object" — omit response_format, rely on prompt.
         }),
         signal,
-      });
+      }, { allowPrivateNetwork, timeoutMs: 60_000 });
 
       if (!response.ok) {
         if (attempt < maxRetries) continue;
@@ -760,10 +767,10 @@ export async function enrichObservations(
  * @param projectId — Optional project ID for per-project fallback.
  *   If omitted, only checks global config + env vars.
  */
-export function getFullLLMSynthesisConfig(projectId?: string): { model: string; apiKey?: string; endpoint?: string } | null {
+export function getFullLLMSynthesisConfig(projectId?: string): { model: string; apiKey?: string; endpoint?: string; allowPrivateNetwork?: boolean } | null {
   const config = resolveLLMConfig(projectId);
   if (!config || !config.model || !config.endpoint) return null;
-  return { model: config.model, apiKey: config.apiKey, endpoint: config.endpoint };
+  return { model: config.model, apiKey: config.apiKey, endpoint: config.endpoint, allowPrivateNetwork: config.allowPrivateNetwork };
 }
 
 // ── Skill Consolidation ──────────────────────────────────────
@@ -832,7 +839,7 @@ export async function callConsolidationLLM(
   if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
 
   try {
-    const response = await fetch(`${endpoint}/v1/chat/completions`, {
+    const response = await safeLlmFetch(`${endpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -844,7 +851,7 @@ export async function callConsolidationLLM(
         max_tokens: 8192,
         temperature: 0.3,
       }),
-    });
+    }, { allowPrivateNetwork: resolvedConfig?.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
     if (!response.ok) {
       const errText = await response.text().catch(() => "unknown error");

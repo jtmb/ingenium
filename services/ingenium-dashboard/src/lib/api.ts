@@ -14,10 +14,14 @@ const DEFAULT_PROJECT = "global-default";
  * - Overwrites the `Content-Type` header if `options.headers` is provided, so callers
  *   can pass FormData (for file uploads) without the default JSON header
  */
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "x-ingenium-ui": "dashboard",
+      ...(options?.headers as Record<string, string> | undefined),
+    },
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -295,6 +299,67 @@ export type JobRunLog = {
   created_at: string;
 };
 
+/** ========== Vault Types ========== */
+
+export type VaultStatus = "sealed" | "unsealed";
+
+export type VaultItemType = "login" | "api_key" | "note" | "oauth";
+
+export interface VaultFolder {
+  id: string;
+  name: string;
+  item_count: number;
+  created_at: string;
+}
+
+export interface VaultItem {
+  id: string;
+  name: string;
+  type: VaultItemType;
+  folder_id: string | null;
+  folder_name?: string;
+  username?: string;
+  urls?: string;
+  tags?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface VaultItemDetail extends VaultItem {
+  value?: string; // only populated on reveal
+  notes?: string;
+  password_strength?: number;
+}
+
+export interface AuditEntry {
+  id: string;
+  item_id: string;
+  item_name: string;
+  action: string;
+  actor?: string;
+  created_at: string;
+}
+
+/** A backup file with metadata. */
+export type BackupType = "manual" | "hourly" | "daily";
+
+export interface Backup {
+  id: string;
+  filename: string;
+  type: BackupType;
+  /** Raw size in bytes */
+  size: number;
+  created_at: string;
+  status: "completed" | "in_progress" | "failed";
+}
+
+/** The backup schedule configuration. */
+export interface BackupSchedule {
+  hourly: { enabled: boolean; retention: number };
+  daily: { enabled: boolean; retention: number };
+  manual_retention: number;
+}
+
 /** A learned personality trait derived from observations via synthesis. */
 export type PersonalityTrait = {
   id: number;
@@ -311,6 +376,83 @@ export type PersonalityTrait = {
 };
 
 /** Dashboard summary types — matching GET /api/v1/dashboard/summary response. */
+
+/** Sanitized Chat config response — no API keys exposed. */
+export interface ChatConfigProviderInfo {
+  providerId: string;
+  modelId: string;
+  label: string;
+  isCustom: boolean;
+}
+
+/** A single model within a provider. */
+export interface ChatProviderModel {
+  id: string;
+  label: string;
+}
+
+/** Expanded provider info used in the providers[] array. */
+export interface ChatProviderInfo {
+  providerId: string;
+  label: string;
+  models: ChatProviderModel[];
+  defaultModel: string;
+  source: "managed" | "builtin";
+}
+
+export interface ChatConfigResponse {
+  configured: boolean;
+  primary: ChatConfigProviderInfo | null;
+  backup: ChatConfigProviderInfo | null;
+  agents: Array<{ name: string; label: string }>;
+  restartRequired: boolean;
+  providers: ChatProviderInfo[];
+  defaultSelection: { providerId: string; modelId: string } | null;
+}
+
+/** POST /settings/llm-config request body — primary + backup LLM config. */
+export interface LlmConfigBody {
+  primary: {
+    provider: string;
+    model: string;
+    apiKey?: string;
+    endpoint?: string;
+  };
+  backup?: {
+    provider: string;
+    model: string;
+    apiKey?: string;
+    endpoint?: string;
+  };
+}
+
+/** Sanitized LLM configuration returned to Settings — never contains API keys. */
+export interface LlmConfigEntry {
+  provider: string;
+  model: string;
+  endpoint: string;
+  apiKeySet: boolean;
+}
+
+export interface LlmConfigResponse {
+  primary: LlmConfigEntry;
+  backup: LlmConfigEntry | null;
+}
+
+export type ProviderRole = "available" | "primary" | "backup";
+
+export interface ManagedProviderConfig {
+  id: string;
+  name: string;
+  npm: string;
+  baseURL: string;
+  models: string[];
+  defaultModel: string;
+  roles: ProviderRole[];
+  enabled: boolean;
+  apiKeySet: boolean;
+  apiKey?: string;
+}
 
 interface LearningSummary {
   pendingObservations: number;
@@ -710,27 +852,38 @@ export const api = {
     set: (key: string, value: string, project = DEFAULT_PROJECT) =>
       request<{ data: { key: string; value: string } }>(`/settings?project=${project}`, { method: "POST", body: JSON.stringify({ key, value }) }),
 
-    /**
-     * Fetch the full LLM synthesis config in parallel.
-     *
-     * Three independent settings requests fire concurrently via Promise.all,
-     * then the results are assembled into a single config object. This avoids
-     * three sequential round-trips to the API.
-     */
-    getConfig: (project = DEFAULT_PROJECT) =>
-      Promise.all([
-        request<{ data: { key: string; value: string } }>(`/settings?project=${project}&key=synthesis_model`),
-        request<{ data: { key: string; value: string } }>(`/settings?project=${project}&key=synthesis_api_key`),
-        request<{ data: { key: string; value: string } }>(`/settings?project=${project}&key=synthesis_endpoint`),
-      ]).then(([model, key, endpoint]) => ({
-        model: model.data?.value || "",
-        apiKey: key.data?.value || "",
-        endpoint: endpoint.data?.value || "",
-      })),
     testLlm: (endpoint: string, model: string, apiKey: string, project = DEFAULT_PROJECT) =>
       request<{ data: { ok: boolean; status?: number; message?: string } }>(`/settings/test-llm?project=${project}`, {
         method: "POST", body: JSON.stringify({ endpoint, model, apiKey }),
       }).then((r) => r.data),
+
+    /**
+     * Atomic LLM config save — POSTs both primary and backup config in one
+     * request. Triggers projectToOpenCodeConfig() on the server to create
+     * synthetic OpenCode providers.
+     */
+    saveLlmConfig: (config: LlmConfigBody, project = DEFAULT_PROJECT) =>
+      request<{ data: { saved: boolean; restartRequired: boolean } }>(
+        `/settings/llm-config?project=${project}`,
+        { method: "POST", body: JSON.stringify(config) },
+      ),
+
+    /** Sanitized Settings config — exposes only provider metadata and key presence. */
+    getLlmConfig: (project = DEFAULT_PROJECT) =>
+      request<{ data: LlmConfigResponse }>(`/settings/llm-config?project=${project}`),
+
+    getProviderConfigs: (project = DEFAULT_PROJECT) =>
+      request<{ data: { providers: ManagedProviderConfig[] } }>(`/settings/provider-configs?project=${project}`),
+
+    saveProviderConfigs: (providers: ManagedProviderConfig[], project = DEFAULT_PROJECT) =>
+      request<{ data: { saved: boolean; restartRequired: boolean; warnings: string[] } }>(
+        `/settings/provider-configs?project=${project}`,
+        { method: "PUT", body: JSON.stringify({ providers }) },
+      ),
+
+    /** Sanitized Chat config — returns the configured providers/agents for the Chat page without exposing API keys. */
+    chatConfig: (project = DEFAULT_PROJECT) =>
+      request<{ data: ChatConfigResponse }>(`/opencode/chat-config?project=${project}`),
   },
   configs: {
     get: (type: string = "project", project = DEFAULT_PROJECT) =>
@@ -1093,10 +1246,245 @@ export const api = {
         ),
     },
   },
+  /** RAG — Retrieval-Augmented Generation for docs. */
+  rag: {
+    /** POST /rag/ask — ask a natural language question about documentation. Returns answer with citations. */
+    ask: (question: string, spaceId?: number, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project });
+      return request<{ data: { answer: string; citations: Array<{ id: string; title: string; score: number }> } }>(
+        `/rag/ask?${params}`,
+        { method: "POST", body: JSON.stringify({ question, spaceId }) },
+      );
+    },
+
+    /** GET /rag/search — keyword/embedding search across docs. */
+    search: (query: string, spaceId?: number, project = DEFAULT_PROJECT) => {
+      const params = new URLSearchParams({ project, q: query });
+      if (spaceId) params.set("spaceId", String(spaceId));
+      return request<{ data: Array<{ id: number; title: string; slug: string; snippet: string; score: number }> }>(
+        `/rag/search?${params}`,
+      );
+    },
+
+    /** POST /rag/ingest — trigger ingestion of all docs into the vector index. */
+    ingest: (project = DEFAULT_PROJECT) =>
+      request<{ data: { ingested: number; failed: number } }>(
+        `/rag/ingest?project=${encodeURIComponent(project)}`,
+        { method: "POST" },
+      ),
+
+    /** Sources — manage ingested document records. */
+    sources: {
+      /** GET /rag/sources */
+      list: (project = DEFAULT_PROJECT) =>
+        request<{ data: Array<{ id: number; title: string; slug: string; pageId: number; chunkCount: number; indexedAt: string }>; total: number }>(
+          `/rag/sources?project=${encodeURIComponent(project)}`,
+        ),
+
+      /** GET /rag/sources/:id */
+      get: (id: number, project = DEFAULT_PROJECT) =>
+        request<{ data: { id: number; title: string; slug: string; pageId: number; chunkCount: number; indexedAt: string } }>(
+          `/rag/sources/${id}?project=${encodeURIComponent(project)}`,
+        ),
+
+      /** DELETE /rag/sources/:id */
+      delete: (id: number, project = DEFAULT_PROJECT) =>
+        request(`/rag/sources/${id}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
+
+      /** POST /rag/sources/:id/ingest — re-ingest a single source. */
+      ingest: (id: number, project = DEFAULT_PROJECT) =>
+        request<{ data: { ingested: boolean } }>(
+          `/rag/sources/${id}/ingest?project=${encodeURIComponent(project)}`,
+          { method: "POST" },
+        ),
+    },
+
+    /** GET /rag/stats — vector index statistics. */
+    stats: (project = DEFAULT_PROJECT) =>
+      request<{ data: { totalSources: number; totalChunks: number; lastIndexedAt: string | null } }>(
+        `/rag/stats?project=${encodeURIComponent(project)}`,
+      ),
+  },
   home: {
     summary: (project = DEFAULT_PROJECT) =>
       request<{ data: DashboardSummary; unavailable: string[] }>(
         `/dashboard/summary?project=${encodeURIComponent(project)}`,
       ),
+  },
+  backups: {
+    /** GET /backups — list all backups */
+    list: (project = DEFAULT_PROJECT) =>
+      request<{ data: Backup[]; total: number }>(`/backups?project=${encodeURIComponent(project)}`),
+    /** GET /backups/:id — single backup detail */
+    get: (id: string, project = DEFAULT_PROJECT) =>
+      request<{ data: Backup }>(`/backups/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`),
+    /** POST /backups — trigger a new manual backup */
+    create: (project = DEFAULT_PROJECT) =>
+      request<{ data: Backup }>(`/backups?project=${encodeURIComponent(project)}`, { method: "POST" }),
+    /** DELETE /backups/:id — delete a backup */
+    delete: (id: string, project = DEFAULT_PROJECT) =>
+      request(`/backups/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
+    /** GET /backups/:id/download — download URL for a backup file (returns a redirect-able URL string) */
+    download: (id: string, project = DEFAULT_PROJECT): string =>
+      `${API_URL}/backups/${encodeURIComponent(id)}/download?project=${encodeURIComponent(project)}`,
+    restore: {
+      /** GET /backups/:id/restore/preview — preview what would be restored */
+      preview: (id: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/backups/restore/preview?project=${encodeURIComponent(project)}`, {
+          method: "POST",
+          body: JSON.stringify({ backupId: id }),
+        }),
+      /** POST /backups/:id/restore — start a restore from backup */
+      start: (id: string, project = DEFAULT_PROJECT) =>
+        request<{ data: any }>(`/backups/restore?project=${encodeURIComponent(project)}`, {
+          method: "POST",
+          body: JSON.stringify({ backupId: id, confirm: true }),
+        }),
+    },
+    schedule: {
+      /** GET /backups/schedule — get the current backup schedule configuration */
+      get: (project = DEFAULT_PROJECT) =>
+        request<{ data: BackupSchedule }>(`/backups/schedule?project=${encodeURIComponent(project)}`),
+      /** PUT /backups/schedule — update the backup schedule */
+      set: (data: { hourly?: { enabled?: boolean; retention?: number }; daily?: { enabled?: boolean; retention?: number }; manual_retention?: number }, project = DEFAULT_PROJECT) =>
+        request<{ data: BackupSchedule }>(`/backups/schedule?project=${encodeURIComponent(project)}`, { method: "PUT", body: JSON.stringify(data) }),
+    },
+  },
+  vault: {
+    /** GET /vault/status — returns { sealed: boolean } */
+    status: (project = DEFAULT_PROJECT) =>
+      request<{ data: { sealed: boolean; initialized: boolean; stats?: { itemCount: number; folderCount: number }; created_at?: string } }>(
+        `/vault/status?project=${encodeURIComponent(project)}`,
+      ),
+
+    /** POST /vault/initialize — first-run: create the vault with a new passphrase */
+    initialize: (passphrase: string, confirmation: string, project = DEFAULT_PROJECT) =>
+      request<{ data: { ok: boolean; unsealed: boolean } }>(
+        `/vault/initialize?project=${encodeURIComponent(project)}`,
+        { method: "POST", body: JSON.stringify({ password: passphrase, confirmation }) },
+      ),
+
+    /** POST /vault/unseal — passphrase to unlock */
+    unseal: (passphrase: string, project = DEFAULT_PROJECT) =>
+      request<{ data: { unsealed: boolean } }>(
+        `/vault/unseal?project=${encodeURIComponent(project)}`,
+        { method: "POST", body: JSON.stringify({ password: passphrase }) },
+      ),
+
+    /** POST /vault/seal — lock the vault */
+    seal: (project = DEFAULT_PROJECT) =>
+      request<{ data: { sealed: boolean } }>(
+        `/vault/seal?project=${encodeURIComponent(project)}`,
+        { method: "POST" },
+      ),
+
+    items: {
+      /** GET /vault/items — list items, optionally filtered by folder_id */
+      list: (folderId?: string, project = DEFAULT_PROJECT) => {
+        const params = new URLSearchParams({ project });
+        if (folderId) params.set("folder_id", folderId);
+        return request<{ data: VaultItem[]; total: number }>(
+          `/vault/items?${params}`,
+        );
+      },
+
+      /** POST /vault/items — create a new vault item */
+      create: (data: {
+        name: string;
+        type: VaultItemType;
+        value: string;
+        folder_id?: string;
+        username?: string;
+        urls?: string;
+        tags?: string;
+        notes?: string;
+      }, project = DEFAULT_PROJECT) =>
+        request<{ data: VaultItemDetail }>(
+          `/vault/items?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify(data) },
+        ),
+
+      /** GET /vault/items/:id — full item detail (without decrypted value) */
+      get: (id: string, project = DEFAULT_PROJECT) =>
+        request<{ data: VaultItemDetail }>(
+          `/vault/items/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`,
+        ),
+
+      /** PATCH /vault/items/:id — update item metadata */
+      update: (id: string, data: {
+        name?: string;
+        type?: VaultItemType;
+        folder_id?: string;
+        username?: string;
+        urls?: string;
+        tags?: string;
+        notes?: string;
+      }, project = DEFAULT_PROJECT) =>
+        request<{ data: VaultItemDetail }>(
+          `/vault/items/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`,
+          { method: "PATCH", body: JSON.stringify(data) },
+        ),
+
+      /** DELETE /vault/items/:id */
+      delete: (id: string, project = DEFAULT_PROJECT) =>
+        request(`/vault/items/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`, {
+          method: "DELETE",
+        }),
+
+      /** POST /vault/items/:id/reveal — decrypt and return value (auto-hides server-side after TTL) */
+      reveal: (id: string, project = DEFAULT_PROJECT) =>
+        request<{ data: { value: string; password_strength?: number } }>(
+          `/vault/items/${encodeURIComponent(id)}/reveal?project=${encodeURIComponent(project)}`,
+          { method: "POST" },
+        ),
+
+      /** POST /vault/items/:id/rotate — generate new password and update */
+      rotate: (id: string, project = DEFAULT_PROJECT) =>
+        request<{ data: { value: string; password_strength?: number } }>(
+          `/vault/items/${encodeURIComponent(id)}/rotate?project=${encodeURIComponent(project)}`,
+          { method: "POST" },
+        ),
+    },
+
+    folders: {
+      /** GET /vault/folders */
+      list: (project = DEFAULT_PROJECT) =>
+        request<{ data: VaultFolder[] }>(
+          `/vault/folders?project=${encodeURIComponent(project)}`,
+        ),
+
+      /** POST /vault/folders */
+      create: (name: string, project = DEFAULT_PROJECT) =>
+        request<{ data: VaultFolder }>(
+          `/vault/folders?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify({ name }) },
+        ),
+
+      /** DELETE /vault/folders/:id */
+      delete: (id: string, project = DEFAULT_PROJECT) =>
+        request(`/vault/folders/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`, {
+          method: "DELETE",
+        }),
+    },
+
+    password: {
+      /** POST /vault/password/generate */
+      generate: (project = DEFAULT_PROJECT) =>
+        request<{ data: { password: string; strength: number } }>(
+          `/vault/password/generate?project=${encodeURIComponent(project)}`,
+          { method: "POST" },
+        ),
+    },
+
+    audit: {
+      /** GET /vault/audit — list audit log entries */
+      list: (itemId?: string, project = DEFAULT_PROJECT) => {
+        const params = new URLSearchParams({ project });
+        if (itemId) params.set("item_id", itemId);
+        return request<{ data: AuditEntry[]; total: number }>(
+          `/vault/audit?${params}`,
+        );
+      },
+    },
   },
 };

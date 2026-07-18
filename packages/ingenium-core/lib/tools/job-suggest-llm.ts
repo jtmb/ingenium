@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
 import type { LLMConfig } from "./synthesis-llm.js";
+import { safeLlmFetch } from "./endpoint-policy.js";
 
 /** The result shape returned by generateJobConfig. All fields nullable on any error. */
 export interface JobSuggestResult {
@@ -120,7 +121,7 @@ export async function generateJobConfig(
   const baseEndpoint = (config.endpoint || "").replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -132,7 +133,7 @@ export async function generateJobConfig(
         temperature: 0.3, // Low temperature for deterministic JSON output — we want structure, not creativity
         max_tokens: 8192, // Generous limit gives reasoning models room to finish thinking before content
       }),
-    });
+    }, { allowPrivateNetwork: config.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
     if (!response.ok) {
       logger.warn("job-suggest-llm", `Job suggestion LLM returned HTTP ${response.status}`);

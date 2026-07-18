@@ -158,6 +158,7 @@ describe("callLLMForExtraction", () => {
     const result = await callLLMForExtraction(candidates, {
       model: "test-model",
       endpoint: endpoint(),
+      allowPrivateNetwork: true,
     });
 
     expect(result.rules).toEqual([]);
@@ -176,6 +177,7 @@ describe("callLLMForExtraction", () => {
     const result = await callLLMForExtraction(candidates, {
       model: "test-model",
       endpoint: endpoint(),
+      allowPrivateNetwork: true,
     });
 
     expect(result.failed).toBe(false);
@@ -207,6 +209,7 @@ describe("callLLMForExtraction", () => {
     const result = await callLLMForExtraction(candidates, {
       model: "test-model",
       endpoint: endpoint(),
+      allowPrivateNetwork: true,
     });
 
     expect(result.failed).toBe(false);
@@ -218,6 +221,7 @@ describe("callLLMForExtraction", () => {
     const result = await callLLMForExtraction(candidates, {
       model: "test-model",
       endpoint: "http://127.0.0.1:19999",
+      allowPrivateNetwork: true,
     });
 
     expect(result.rules).toEqual([]);
@@ -234,6 +238,7 @@ describe("callLLMForExtraction", () => {
     const result = await callLLMForExtraction(candidates, {
       model: "test-model",
       endpoint: endpoint(),
+      allowPrivateNetwork: true,
     });
 
     expect(result.failed).toBe(false);

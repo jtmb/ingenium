@@ -1,11 +1,13 @@
 ---
-title: "Thread MCP Documentation Upload — Site Crawling, Content Fetch, Bulk Import"
+title: "Thread MCP Documentation Upload — Site Crawling, Content Fetch, Bulk Import [RETIRED]"
 impact: MEDIUM
-impactDescription: "Standardizes how documentation websites are ingested into Thread"
-tags: [thread, mcp, documentation, upload, crawling, import]
+impactDescription: "[RETIRED — Replaced by Docs RAG] Standardizes how documentation websites are ingested into Thread"
+tags: [thread, mcp, documentation, upload, crawling, import, retired]
 ---
 
 ## Uploading Documentation Websites to Thread
+
+> 🔴 **RETIRED**: Thread has been replaced by the Ingenium Docs RAG system. This content is retained for reference only until full removal is verified. Use `ingenium_docs_*` tools to manage documentation instead.
 
 ### When to Trigger
 

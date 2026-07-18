@@ -6,7 +6,7 @@ description: Service status page — supervisord process states, application hea
 # HOW-TO: Status
 
 ## What It Does
-Service status page showing real-time supervisord process states. Displays uptime, restart counts, and current status for all 4 container processes: API, Dashboard, opencode-web, and ttyd-opencode.
+Service status page showing real-time process and application health. Displays supervisord-managed process states (API, Dashboard, opencode-web, ttyd-opencode) alongside in-process application services (email-client, synthesis-engine).
 
 ## How to Use
 1. Navigate to `/status` from the dashboard nav bar

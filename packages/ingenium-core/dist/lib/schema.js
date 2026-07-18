@@ -357,3 +357,89 @@ export const PipelineEventSchema = z.object({
     importance: z.number().min(1).max(10).default(5),
     created_at: z.string().datetime(),
 });
+/** Non-sensitive metadata for an encrypted vault item. */
+export const VaultItemSchema = z.object({
+    id: z.string().uuid(),
+    project_id: z.string(),
+    folder_id: z.string().nullable(),
+    name: z.string().min(1),
+    type: z.enum(["login", "api_key", "note", "oauth"]),
+    tags: z.string().default("[]"),
+    urls: z.string().default("[]"),
+    username: z.string().nullable(),
+    version: z.coerce.number().int().default(1),
+    access_policy: z.string().default('{"mode":"restricted"}'),
+    expires_at: z.string().nullable(),
+    lease_duration_seconds: z.coerce.number().int().nullable(),
+    last_accessed_at: z.string().nullable(),
+    access_count: z.coerce.number().int().default(0),
+    created_at: z.string(),
+    updated_at: z.string(),
+});
+/** A folder used to organize vault items within a project. */
+export const VaultFolderSchema = z.object({
+    id: z.string().uuid(),
+    project_id: z.string(),
+    name: z.string().min(1),
+    parent_folder_id: z.string().nullable(),
+});
+/** An immutable audit record for vault activity. */
+export const VaultAuditSchema = z.object({
+    id: z.coerce.number().int(),
+    project_id: z.string(),
+    event_type: z.string(),
+    item_id: z.string().nullable(),
+    actor: z.string(),
+    details: z.string().nullable(),
+    ip_address: z.string().nullable(),
+    user_agent: z.string().nullable(),
+    created_at: z.string(),
+});
+/** The current status of the in-memory vault session and project inventory. */
+export const VaultStatusSchema = z.object({
+    sealed: z.coerce.boolean(),
+    items_count: z.coerce.number().int().nonnegative(),
+    folders_count: z.coerce.number().int().nonnegative(),
+    last_unsealed: z.string().nullable(),
+});
+/** Metadata for a project-scoped Ingenium and OpenCode database snapshot. */
+export const BackupRecordSchema = z.object({
+    id: z.string().uuid(),
+    project_id: z.string(),
+    filename: z.string(),
+    size_bytes: z.coerce.number().int().nonnegative(),
+    sha256: z.string(),
+    backup_type: z.enum(["manual", "scheduled_hourly", "scheduled_daily", "pre_restore"]),
+    components: z.string().default("{}"),
+    status: z.enum(["pending", "in_progress", "completed", "failed"]).default("completed"),
+    error_message: z.string().nullable(),
+    created_at: z.string(),
+});
+/** Lifecycle state for a restore request associated with a backup snapshot. */
+export const BackupRestoreJobSchema = z.object({
+    id: z.string().uuid(),
+    project_id: z.string(),
+    backup_id: z.string().nullable(),
+    status: z.enum(["validating", "confirmed", "applying", "completed", "failed", "rolled_back"]).default("validating"),
+    components: z.string().default("{}"),
+    error_message: z.string().nullable(),
+    started_at: z.string().nullable(),
+    completed_at: z.string().nullable(),
+    created_at: z.string(),
+});
+/** An ingestion source for RAG-backed documentation search. */
+export const RagSourceSchema = z.object({
+    id: z.string().uuid(), project_id: z.string(), title: z.string().min(1),
+    source_type: z.enum(["file", "thread_import", "text", "url"]),
+    source_path: z.string().nullable(), source_hash: z.string().nullable(), mime_type: z.string().nullable(),
+    byte_size: z.coerce.number().int().nullable(), chunk_count: z.coerce.number().int().nonnegative().default(0),
+    metadata: z.string().default("{}"), created_at: z.string(), updated_at: z.string(),
+});
+/** A token-aware, searchable segment belonging to a RAG source. */
+export const RagChunkSchema = z.object({
+    id: z.string().uuid(), source_id: z.string().uuid(), chunk_index: z.coerce.number().int().nonnegative(), content: z.string(),
+    token_count: z.coerce.number().int().nonnegative().default(0), heading_path: z.string().nullable(),
+    priority: z.coerce.number().int().min(0).max(10).default(5), tags: z.string().default("[]"), created_at: z.string(),
+});
+/** A RAG chunk enriched with FTS relevance rank and highlighted excerpt. */
+export const RagSearchResultSchema = RagChunkSchema.extend({ rank: z.coerce.number(), snippet: z.string() });

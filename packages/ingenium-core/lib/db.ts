@@ -81,7 +81,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh database — apply every migration in dependency order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -643,6 +643,36 @@ function runMigrations(db: Database.Database): void {
         db.exec(sql);
         logger.info("db", "Applied migration 045_pipeline_event_types.sql");
       }
+    }
+
+    // Migration 046: Add vault_config table for encrypted credential storage.
+    const vaultConfigCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='vault_config'"
+    ).get() as { count: number };
+    if (vaultConfigCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "046_vault.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 046_vault.sql");
+    }
+
+    // Migration 047: Create backup inventory and restore job tables.
+    const backupRecordsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='backup_records'",
+    ).get() as { count: number };
+    if (backupRecordsCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "047_backups.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 047_backups.sql");
+    }
+
+    // Migration 048: Create RAG ingestion, chunking, FTS, and embedding tables.
+    const ragSourcesCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='rag_sources'",
+    ).get() as { count: number };
+    if (ragSourcesCheck.count === 0) {
+      const sql = readFileSync(resolve(migrationsDir, "048_docs_rag.sql"), "utf-8");
+      db.exec(sql);
+      logger.info("db", "Applied migration 048_docs_rag.sql");
     }
   }
 }

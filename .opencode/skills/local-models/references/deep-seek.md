@@ -525,6 +525,66 @@ failure — or am I rationalizing each one to declare done?"
 
 ---
 
+### 44. Model Identity Staleness
+
+**Failure signature:** Agent body text says "You are qwen3.5-9b running locally" but frontmatter was changed to `model: deepseek/deepseek-v4-flash`. The model loads the wrong safety protocol based on body text identity.
+
+**Rule:** When an agent's `model:` frontmatter changes, verify body-text identity statements and `@reference` pointers are consistent with the new model. Before any agent edit, confirm that "You are" statements and file references match the frontmatter `model:` field.
+
+**Detection prompt:** "Does the body text 'You are…' statement match the frontmatter model field? If the model was changed but the body still says the old model name, the wrong safety protocol will be loaded."
+
+---
+
+### 45. Copy-Paste Fork Drift
+
+**Failure signature:** Creating a new component by copying an existing one and modifying it. The two copies diverge permanently — bug fixes in one never reach the other. The fix becomes "create a third copy without the broken features" instead of fixing the original.
+
+**Rule:** Before copying a component, extract a shared base with composition/variants. If you MUST copy, add a cross-reference comment in BOTH files. A copy with modifications is not a fix — it's creating two codebases.
+
+**Detection prompt:** "Did I create this component by copying another? Did I add a cross-reference comment in BOTH files? Could this be a shared base with composition instead?"
+
+---
+
+### 46. Feature-to-Endpoint Completeness
+
+**Failure signature:** UI ships with buttons and state machines that call backend endpoints returning 500. The developer ships knowing the endpoint doesn't work because "the UI code compiles." A button that always spins or shows error is not a feature — it's dead weight.
+
+**Rule:** Before merging any frontend feature that triggers a backend call, run the exact sequence: click button → observe request → check response is not 500 → verify UI state transitions correctly. A feature whose endpoint always fails must either have its endpoint fixed or its button removed.
+
+**Detection prompt:** "For every UI action that makes a backend call, did I verify the round-trip succeeds? Does the UI handle failure gracefully or spin forever?"
+
+---
+
+### 47. File Relocation Reference Cleanup
+
+**Failure signature:** After moving/deleting a file, path references across the codebase are stale. A deleted error-log file still has 13 references instructing agents to read/write/delete the old path. The agents silently fail.
+
+**Rule:** After moving or deleting any file that other files reference by path, grep the ENTIRE repository for the old path string and update every reference.
+
+**Detection prompt:** "Did I grep the entire repo for the OLD path string after moving/deleting this file? Does every reference that tries to read/write/delete this path still resolve to a file that exists?"
+
+---
+
+### 48. Infrastructure Artifacts in Source
+
+**Failure signature:** Application-generated data files (backup JSON, export dumps, cache files) committed to source via `git add -A`. `personal-space-backup.json` is a workspace export, not source code — it should be in `.gitignore`.
+
+**Rule:** Before committing, check: "Was this file created by running the app or by writing code?" Application data files MUST be in `.gitignore` or explicitly excluded.
+
+**Detection prompt:** "Was this file created by running the app or by writing code? If it's application data, is it in .gitignore?"
+
+---
+
+### 49. Test-Suite Gap Ship
+
+**Failure signature:** A test added during a run correctly catches a real defect, but the failure is waived as "non-blocking." The test was literally written to catch X, found X, and X was still shipped. The test exists to prevent the exact condition it's now reporting.
+
+**Rule:** A test you just added that correctly identifies a problem is never non-blocking. Either fix the issue or remove the test — shipping a knowingly-failing test is shipping a known defect.
+
+**Detection prompt:** "Did I add this test to catch X? Did the test find X? Then X must be fixed — a test you just added that correctly identifies a problem is never 'non-blocking.'"
+
+---
+
 ## Known Failure Patterns (Quick Reference)
 
 | Pattern | Detection Prompt |
@@ -574,6 +634,12 @@ failure — or am I rationalizing each one to declare done?"
 | **Proxy E2E blindness** — Testing only the initial HTML redirect, ignoring subresources and WebSockets | "Did I test the redirect chain, subresource loads, and WebSocket connections — or just the initial HTTP status?" |
 | **Staged-diff bypass** — Using `git add -A` and committing unrelated dirty state from prior runs | "Did I inspect the staged diff? Can I explain why every file in this commit belongs to this specific phase?" |
 | **Compound rationalization** — Each failure has its own excuse, together they mean nothing was verified | "Is the worktree clean? Did every acceptance gate pass? Or am I rationalizing each failure to declare done?" |
+| **Model identity staleness** — Body text "You are…" doesn't match frontmatter `model:` after model change | "Does the body text 'You are…' statement match the frontmatter model field?" |
+| **Copy-paste fork drift** — Copying a component instead of extracting a shared base, creating permanently diverging codebases | "Did I add a cross-reference comment in BOTH files? Could this be a shared base with composition?" |
+| **Feature-to-endpoint incompleteness** — UI ships with buttons whose backend endpoint returns 500 | "For every UI action that makes a backend call, did I verify the round-trip succeeds?" |
+| **Stale path references** — Moving/deleting a file without updating path references across the codebase | "Did I grep the entire repo for the OLD path string after moving/deleting this file?" |
+| **App-data in source** — Committing application-generated data files (backups, exports, caches) to version control | "Was this file created by running the app or by writing code? If it's application data, is it in .gitignore?" |
+| **Self-defeating test** — A test written to catch X finds X but is waived as non-blocking | "Did I add this test to catch X? Did the test find X? Then X must be fixed — a test you just added that correctly identifies a problem is never 'non-blocking.'" |
 
 ---
 

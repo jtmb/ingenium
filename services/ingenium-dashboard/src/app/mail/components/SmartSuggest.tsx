@@ -398,7 +398,7 @@ export default function SmartSuggest({
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded p-4">
         <p className="text-sm text-[var(--color-text-muted)]">
-          Configure a <a href="/?settings=general" className="text-[var(--color-text-link)] hover:underline">Synthesis LLM</a> in Settings to enable AI-drafted replies.
+          Configure a <a href="/?settings=providers" className="text-[var(--color-text-link)] hover:underline">primary LLM provider</a> in Settings to enable AI-drafted replies.
         </p>
       </div>
     );

@@ -6,6 +6,7 @@ import { api, Skill } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "../../lib/badgeTones";
 import FileTree from "../components/FileTree";
 import MarkdownViewer from "../components/MarkdownViewer";
+import ProposalReviewOverlay, { EnrichedObservation as EnrichedObs } from "../components/proposals/ProposalReviewOverlay";
 
 /** Active tab selection for the skills page. */
 type SkillsTab = "active" | "proposals" | "consolidated";
@@ -130,9 +131,9 @@ export default function SkillsPage() {
   const [proposalDetail, setProposalDetail] = useState<ProposalDto | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
-  const [reviewerName, setReviewerName] = useState("");
-  const [reviewReason, setReviewReason] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
   const [currentSkillContent, setCurrentSkillContent] = useState<string | null>(null);
+  const [enrichedObservations, setEnrichedObservations] = useState<EnrichedObs[]>([]);
 
   // ── Load skills ──────────────────────────────────────────────────
   useEffect(() => {
@@ -226,14 +227,22 @@ export default function SkillsPage() {
   const openProposal = async (proposal: ProposalDto) => {
     setSelectedProposal(proposal);
     setDetailLoading(true);
-    setReviewerName("");
-    setReviewReason("");
+    setActionError(null);
     setCurrentSkillContent(null);
+    setEnrichedObservations([]);
     try {
+      // Fetch enriched proposal detail (includes observations and current skill)
       const r = await api.skills.proposals.get(proposal.id, project);
-      setProposalDetail(r.data);
-      // Fetch current skill content for comparison
-      if (proposal.targetName) {
+      const detail = r.data as any;
+      setProposalDetail(detail);
+      // Extract enriched observations if available
+      if (Array.isArray(detail.observations)) {
+        setEnrichedObservations(detail.observations as EnrichedObs[]);
+      }
+      // Use currentSkill from enriched response if available, otherwise fetch
+      if (detail.currentSkill?.content) {
+        setCurrentSkillContent(detail.currentSkill.content);
+      } else if (proposal.targetName) {
         try {
           const skillR = await api.skills.get(proposal.targetName, project);
           setCurrentSkillContent(skillR.data?.content ?? null);
@@ -250,38 +259,45 @@ export default function SkillsPage() {
   const closeProposal = () => {
     setSelectedProposal(null);
     setProposalDetail(null);
+    setActionError(null);
   };
 
-  const handleApprove = async () => {
-    if (!selectedProposal || !reviewerName.trim()) return;
+  const handleApprove = async (reviewer: string, reason: string) => {
     setActionLoading(true);
+    setActionError(null);
     try {
-      await api.skills.proposals.approve(selectedProposal.id, reviewerName.trim(), reviewReason.trim() || undefined, project);
+      await api.skills.proposals.approve(selectedProposal!.id, reviewer, reason || undefined, project);
       closeProposal();
       loadProposals();
-    } catch {}
+    } catch (err: any) {
+      setActionError(err?.message ?? "Approval failed");
+    }
     setActionLoading(false);
   };
 
-  const handleReject = async () => {
-    if (!selectedProposal || !reviewerName.trim()) return;
+  const handleReject = async (reviewer: string, reason: string) => {
     setActionLoading(true);
+    setActionError(null);
     try {
-      await api.skills.proposals.reject(selectedProposal.id, reviewerName.trim(), reviewReason.trim() || undefined, project);
+      await api.skills.proposals.reject(selectedProposal!.id, reviewer, reason || undefined, project);
       closeProposal();
       loadProposals();
-    } catch {}
+    } catch (err: any) {
+      setActionError(err?.message ?? "Rejection failed");
+    }
     setActionLoading(false);
   };
 
-  const handleRollback = async () => {
-    if (!selectedProposal || !reviewerName.trim() || !reviewReason.trim()) return;
+  const handleRollback = async (reviewer: string, reason: string) => {
     setActionLoading(true);
+    setActionError(null);
     try {
-      await api.skills.proposals.rollback(selectedProposal.id, reviewerName.trim(), reviewReason.trim(), project);
+      await api.skills.proposals.rollback(selectedProposal!.id, reviewer, reason, project);
       closeProposal();
       loadProposals();
-    } catch {}
+    } catch (err: any) {
+      setActionError(err?.message ?? "Rollback failed");
+    }
     setActionLoading(false);
   };
 
@@ -492,225 +508,23 @@ export default function SkillsPage() {
             </div>
           )}
 
-          {/* ── Proposal detail overlay ──────────────────────────────── */}
-          {selectedProposal && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center" data-testid="proposal-overlay">
-              <div className="absolute inset-0 bg-black/50" onClick={closeProposal} />
-              <div className="relative mt-8 mb-8 w-11/12 max-w-7xl bg-[var(--color-surface)] rounded-lg shadow-2xl flex flex-col max-h-[90vh]">
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{selectedProposal.targetName}</h2>
-                      {renderProposalBadge(selectedProposal.proposalType)}
-                      {renderStatusBadge(selectedProposal.status)}
-                    </div>
-                    <p className="text-xs text-[var(--color-text-muted)] font-mono">{selectedProposal.id}</p>
-                  </div>
-                  <button onClick={closeProposal} className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] rounded-full">✕</button>
-                </div>
-
-                {/* Body */}
-                <div className="flex-1 overflow-y-auto p-6">
-                  {detailLoading ? (
-                    <p className="text-center py-12 text-[var(--color-text-muted)]">Loading details...</p>
-                  ) : !proposalDetail ? (
-                    <p className="text-center py-12 text-[var(--color-error-text)]">Failed to load proposal detail.</p>
-                  ) : (
-                    <div className="space-y-6">
-                      {/* Scores */}
-                      <div className="grid grid-cols-3 gap-4" data-testid="proposal-scores">
-                        <div className="bg-[var(--color-surface-muted)] p-3 rounded">
-                          <p className="text-xs text-[var(--color-text-muted)]">Quality</p>
-                          <p className="text-lg font-bold">{(proposalDetail.qualityScore * 100).toFixed(0)}%</p>
-                        </div>
-                        <div className="bg-[var(--color-surface-muted)] p-3 rounded">
-                          <p className="text-xs text-[var(--color-text-muted)]">Novelty</p>
-                          <p className="text-lg font-bold">{(proposalDetail.noveltyScore * 100).toFixed(0)}%</p>
-                        </div>
-                        <div className="bg-[var(--color-surface-muted)] p-3 rounded">
-                          <p className="text-xs text-[var(--color-text-muted)]">Contradiction</p>
-                          <p className="text-lg font-bold">{proposalDetail.contradictionFlag ? "Yes" : "No"}</p>
-                        </div>
-                      </div>
-
-                      {/* Content comparison */}
-                      <div>
-                        <h3 className="font-medium mb-2">Content Comparison</h3>
-                        <div className="grid grid-cols-2 gap-4" data-testid="proposal-diff">
-                          {/* Current content */}
-                          <div>
-                            <p className="text-xs text-[var(--color-text-muted)] mb-1 font-medium uppercase">Current</p>
-                            <div className="border border-[var(--color-border)] rounded p-3 bg-[var(--color-surface-muted)] max-h-64 overflow-y-auto">
-                              {proposalDetail.proposalType === "create" ? (
-                                <p className="text-sm text-[var(--color-text-muted)] italic">New skill — no current content</p>
-                              ) : currentSkillContent !== null ? (
-                                <pre className="text-xs font-mono whitespace-pre-wrap">{currentSkillContent || "(empty)"}</pre>
-                              ) : (
-                                <p className="text-sm text-[var(--color-text-muted)] italic">Loading...</p>
-                              )}
-                            </div>
-                          </div>
-                          {/* Proposed content */}
-                          <div>
-                            <p className="text-xs text-[var(--color-text-muted)] mb-1 font-medium uppercase">Proposed</p>
-                            <div className="border border-[var(--color-border)] rounded p-3 bg-[var(--color-surface-muted)] max-h-64 overflow-y-auto">
-                              {proposalDetail.proposedState ? (
-                                <pre className="text-xs font-mono whitespace-pre-wrap">{prettyJson(proposalDetail.proposedState)}</pre>
-                              ) : (
-                                <p className="text-sm text-[var(--color-text-muted)] italic">(none)</p>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Evidence */}
-                      {proposalDetail.evidence && proposalDetail.evidence.length > 0 && (
-                        <div>
-                          <h3 className="font-medium mb-2">Evidence</h3>
-                          <div className="border border-[var(--color-border)] rounded p-3 bg-[var(--color-surface-muted)] max-h-48 overflow-y-auto">
-                            <pre className="text-xs font-mono whitespace-pre-wrap" data-testid="proposal-evidence">{prettyJson(proposalDetail.evidence)}</pre>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Observation IDs */}
-                      {proposalDetail.observationIds && proposalDetail.observationIds.length > 0 && (
-                        <div>
-                          <h3 className="font-medium mb-2">Observation IDs</h3>
-                          <div className="flex flex-wrap gap-1" data-testid="proposal-observations">
-                            {(proposalDetail.observationIds as number[]).map((oid) => (
-                              <span key={oid} className={`${BADGE_BASE} bg-gray-100 text-gray-700 dark:bg-gray-500/20 dark:text-gray-300`}>#{oid}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Reviewer info */}
-                      {proposalDetail.reviewer && (
-                        <div className="bg-[var(--color-info-bg)] border border-[var(--color-info-border)] p-3 rounded text-sm">
-                          <p><span className="font-medium">Reviewer:</span> {proposalDetail.reviewer}</p>
-                          {proposalDetail.reviewReason && <p className="mt-1"><span className="font-medium">Reason:</span> {proposalDetail.reviewReason}</p>}
-                          {proposalDetail.reviewedAt && <p className="mt-1 text-[var(--color-text-muted)]">Reviewed: {new Date(proposalDetail.reviewedAt).toLocaleString()}</p>}
-                        </div>
-                      )}
-
-                      {/* Timeline */}
-                      <div className="text-xs text-[var(--color-text-muted)] space-y-1">
-                        <p>Created: {new Date(proposalDetail.createdAt).toLocaleString()}</p>
-                        {proposalDetail.appliedAt && <p>Applied: {new Date(proposalDetail.appliedAt).toLocaleString()}</p>}
-                        {proposalDetail.rolledBackAt && <p className="text-[var(--color-error-text)]">Rolled back: {new Date(proposalDetail.rolledBackAt).toLocaleString()}</p>}
-                      </div>
-
-                      {/* ── Action inputs ──────────────────────────── */}
-                      <div className="border-t pt-4 space-y-3">
-                        {/* Approve (pending) */}
-                        {selectedProposal.status === "pending" && (
-                          <div className="space-y-2 p-3 bg-[var(--color-success-bg)] border border-[var(--color-success-border)] rounded" data-testid="proposal-approve-section">
-                            <p className="text-sm font-medium text-[var(--color-success-text)]">Approve Proposal</p>
-                            <input
-                              placeholder="Your name (required)"
-                              value={reviewerName}
-                              onChange={(e) => setReviewerName(e.target.value)}
-                              className="w-full border border-[var(--color-border)] rounded p-2 text-sm"
-                              data-testid="proposal-approve-reviewer"
-                            />
-                            <input
-                              placeholder="Reason (optional)"
-                              value={reviewReason}
-                              onChange={(e) => setReviewReason(e.target.value)}
-                              className="w-full border border-[var(--color-border)] rounded p-2 text-sm"
-                              data-testid="proposal-approve-reason"
-                            />
-                            <button
-                              onClick={handleApprove}
-                              disabled={!reviewerName.trim() || actionLoading}
-                              className="px-4 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
-                              data-testid="proposal-approve-btn"
-                            >
-                              {actionLoading ? "Approving..." : "Approve"}
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Reject (pending) */}
-                        {selectedProposal.status === "pending" && (
-                          <div className="space-y-2 p-3 bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded" data-testid="proposal-reject-section">
-                            <p className="text-sm font-medium text-[var(--color-error-text)]">Reject Proposal</p>
-                            <input
-                              placeholder="Your name (required)"
-                              value={reviewerName}
-                              onChange={(e) => setReviewerName(e.target.value)}
-                              className="w-full border border-[var(--color-border)] rounded p-2 text-sm"
-                              data-testid="proposal-reject-reviewer"
-                            />
-                            <input
-                              placeholder="Reason (optional)"
-                              value={reviewReason}
-                              onChange={(e) => setReviewReason(e.target.value)}
-                              className="w-full border border-[var(--color-border)] rounded p-2 text-sm"
-                              data-testid="proposal-reject-reason"
-                            />
-                            <button
-                              onClick={handleReject}
-                              disabled={!reviewerName.trim() || actionLoading}
-                              className="px-4 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-700 disabled:opacity-50"
-                              data-testid="proposal-reject-btn"
-                            >
-                              {actionLoading ? "Rejecting..." : "Reject"}
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Rollback (applied) */}
-                        {selectedProposal.status === "applied" && (
-                          <div className="space-y-2 p-3 bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)] rounded" data-testid="proposal-rollback-section">
-                            <p className="text-sm font-medium text-[var(--color-warning-text)]">Rollback Proposal</p>
-                            <input
-                              placeholder="Your name (required)"
-                              value={reviewerName}
-                              onChange={(e) => setReviewerName(e.target.value)}
-                              className="w-full border border-[var(--color-border)] rounded p-2 text-sm"
-                              data-testid="proposal-rollback-reviewer"
-                            />
-                            <input
-                              placeholder="Reason (required)"
-                              value={reviewReason}
-                              onChange={(e) => setReviewReason(e.target.value)}
-                              className="w-full border border-[var(--color-border)] rounded p-2 text-sm"
-                              data-testid="proposal-rollback-reason"
-                            />
-                            <button
-                              onClick={handleRollback}
-                              disabled={!reviewerName.trim() || !reviewReason.trim() || actionLoading}
-                              className="px-4 py-1.5 bg-amber-600 text-white text-sm rounded hover:bg-amber-700 disabled:opacity-50"
-                              data-testid="proposal-rollback-btn"
-                            >
-                              {actionLoading ? "Rolling back..." : "Rollback"}
-                            </button>
-                          </div>
-                        )}
-
-                        {/* View Skill button (applied) */}
-                        {selectedProposal.status === "applied" && selectedProposal.targetName && (
-                          <div>
-                            <button
-                              onClick={() => { closeProposal(); setTab("active"); }}
-                              className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-                              data-testid="proposal-view-skill-btn"
-                            >
-                              View Skill
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+          {/* ── Proposal detail overlay (redesigned) ─────────────────── */}
+          <ProposalReviewOverlay
+            isOpen={selectedProposal !== null}
+            onClose={closeProposal}
+            proposal={selectedProposal!}
+            proposalDetail={proposalDetail}
+            detailLoading={detailLoading}
+            currentSkillContent={currentSkillContent}
+            enrichedObservations={enrichedObservations}
+            project={project}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onRollback={handleRollback}
+            actionLoading={actionLoading}
+            actionError={actionError}
+            onViewSkill={() => { closeProposal(); setTab("active"); }}
+          />
         </>
       )}
 
@@ -755,11 +569,3 @@ export default function SkillsPage() {
   );
 }
 
-/** Pretty-print any JSON value as a string. */
-function prettyJson(v: unknown): string {
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return String(v);
-  }
-}

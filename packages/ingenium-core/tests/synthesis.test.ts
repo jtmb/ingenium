@@ -104,6 +104,7 @@ beforeAll(async () => {
 
   // Set mock endpoint on global project
   setSetting(globalProjectId, "synthesis_endpoint", `http://localhost:${mockPort}`);
+  setSetting(globalProjectId, "synthesis_allow_private_network", "true");
 });
 
 afterAll(async () => {

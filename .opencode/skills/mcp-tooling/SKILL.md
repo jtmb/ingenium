@@ -1,6 +1,6 @@
 ---
 name: mcp-tooling
-description: "MCP tool integration and automation — Playwright browser automation (navigate, screenshot, inspect, interact, console), Thread MCP persistent memory (context save/retrieve, session lifecycle, doc upload), email client tools (list, search, read, send, draft, triage, suggest response, auto-draft, IMAP watcher), and future MCP tool integrations. Use when the user asks for browser automation, persistent memory operations, or any MCP-based tool workflow."
+description: "MCP tool integration and automation — Playwright browser automation (navigate, screenshot, inspect, interact, console), Docs RAG persistent memory (replacing Thread MCP — context save/retrieve, session lifecycle, doc upload), email client tools (list, search, read, send, draft, triage, suggest response, auto-draft, IMAP watcher), and future MCP tool integrations. Use when the user asks for browser automation, persistent memory operations, or any MCP-based tool workflow."
 alwaysApply: true
 ---
 
@@ -17,10 +17,10 @@ alwaysApply: true
 - "inspect the DOM for element problems"
 - "check console errors on the page"
 - "verify the page renders correctly"
-- "save this decision to Thread"
+- "save this decision" <!-- Thread retired → Docs RAG -->
 - "save context before we wrap up"
 - "what did we decide last session?"
-- "index these docs into Thread"
+- "index these docs into the workspace" <!-- Thread retired → Docs RAG -->
 - Any task involving MCP tool interaction, browser automation, or persistent memory
 
 ## 🔴 HARD RULEs
@@ -53,16 +53,15 @@ All Ingenium MCP tools use a **single `ingenium_` prefix** (OpenCode prepends th
 
 The pattern is: `ingenium_<noun>_<verb>`. Double-check the prefix before calling — the `ingenium_` prefix appears once, not twice.
 
-### 🔴 Save Context to Thread After Every Code Change
+### 🔴 Save Context to Docs RAG After Every Code Change <!-- Thread retired → Docs RAG -->
 
-After every code change (write/edit/delete/refactor), IMMEDIATELY save context to Thread before doing anything else:
-- Design decisions → `thread_create_entry` with priority 8, tags `["decision"]`
-- Bug fixes → `thread_create_entry` with priority 9, tags `["bug"]`, include root cause
-- User preferences → `thread_create_entry` with priority 7, tags `["preference"]`
-- Do NOT pass `session` param — the default session is always correct
+After every code change (write/edit/delete/refactor), IMMEDIATELY save context to the Ingenium Docs workspace:
+- Design decisions → `ingenium_docs_create_page` or `ingenium_docs_update_page` with relevant space/slug
+- Bug fixes → Document in Docs workspace. Include root cause.
+- User preferences → Document in Docs workspace.
 - Do NOT ask permission — just save silently
 
-### 🔴 Verify Before Destructive Thread Operations
+### 🔴 Verify Before Destructive Thread Operations <!-- Thread retired → Docs RAG. Rules retained for reference. -->
 
 When performing destructive operations (deletion, modification), ALWAYS verify first:
 - **Check server health** before any batch operation
@@ -72,15 +71,14 @@ When performing destructive operations (deletion, modification), ALWAYS verify f
 
 ### 🔴 Never Ask Permission to Use MCP Tools
 
-Use MCP tools (Playwright, Thread, etc.) proactively and silently. Never ask "can I take a screenshot?" or "should I save this to Thread?" — just do it.
+Use MCP tools (Playwright, Docs, etc.) proactively and silently. Never ask "can I take a screenshot?" or "should I save this?" — just do it.
 
-### 🔴 Full Export at Session End
+### 🔴 Full Export at Session End <!-- Thread retired → Docs RAG -->
 
 When the session ends (user says "thanks", "done", "that's all"), you MUST:
 1. Write full conversation transcript to `/tmp/opencode/session-{date}-transcript.md`
-2. Upload it to Thread via `thread_upload_file` with tags `["export", "transcript", "full-session"]`
-3. Save session summary, decisions, and git state as separate Thread entries
-4. Check for prior exports first — update existing entries rather than creating duplicates
+2. Save session summary, decisions, and git state to the Ingenium Docs workspace
+3. Check for prior exports first — update existing pages rather than creating duplicates
 
 ## Reference Files
 
@@ -89,10 +87,10 @@ When the session ends (user says "thanks", "done", "that's all"), you MUST:
 | [`references/playwright/setup.md`](references/playwright/setup.md) | Playwright MCP server configuration, prerequisites, troubleshooting |
 | [`references/playwright/tools.md`](references/playwright/tools.md) | Complete catalog of Playwright MCP browser automation tools |
 | [`references/playwright/patterns.md`](references/playwright/patterns.md) | Common workflows: page review, responsive check, error capture, click debugging |
-| [`references/thread/setup.md`](references/thread/setup.md) | Thread MCP setup — auto-init, bridge config, provider config, verification |
-| [`references/thread/lifecycle.md`](references/thread/lifecycle.md) | Thread session lifecycle — start/during/end protocols, mandatory export |
-| [`references/thread/doc-upload.md`](references/thread/doc-upload.md) | Documentation website upload — site discovery, content fetch, bulk import |
-| [`references/thread/conventions.md`](references/thread/conventions.md) | Thread conventions — priority guidelines, tag naming, never rules |
+| [`references/thread/setup.md`](references/thread/setup.md) | Thread MCP setup — RETIRED. Replaced by Docs RAG. Content retained for reference. |
+| [`references/thread/lifecycle.md`](references/thread/lifecycle.md) | Thread session lifecycle — RETIRED. Replaced by Docs RAG. Content retained for reference. |
+| [`references/thread/doc-upload.md`](references/thread/doc-upload.md) | Documentation website upload — RETIRED. Replaced by Docs RAG. Content retained for reference. |
+| [`references/thread/conventions.md`](references/thread/conventions.md) | Thread conventions — RETIRED. Replaced by Docs RAG. Content retained for reference. |
 | [`references/dev-browser/setup.md`](references/dev-browser/setup.md) | Dev Browser setup — installation, modes (headless/connect), WSL→Windows Chrome launch, HARD RULEs, troubleshooting |
 | [`references/dev-browser/tools.md`](references/dev-browser/tools.md) | Complete catalog of dev-browser API methods — browser control, page actions, CUA tools, DOM CUA tools, screenshots |
 | [`references/dev-browser/patterns.md`](references/dev-browser/patterns.md) | Common workflows: navigate+screenshot, form fill+submit, snapshot for AI analysis, WSL Chrome launch |

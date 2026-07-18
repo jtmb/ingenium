@@ -5,7 +5,7 @@ import { logger, getDb, MAX_ATTACHMENT_SIZE } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
-import { rateLimit } from "../lib/middleware/rate-limit.js";
+import { rateLimit, vaultRateLimiter } from "../lib/middleware/rate-limit.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
@@ -29,9 +29,39 @@ import { extractionRouter } from "../lib/routes/extraction.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { servicesRouter } from "../lib/routes/services.js";
 import { dashboardRouter } from "../lib/routes/dashboard.js";
+import { vaultRouter } from "../lib/routes/vault.js";
 import { router as docsRouter } from "../lib/routes/docs.js";
 import { router as docsAiRouter } from "../lib/routes/docs-ai.js";
+import { backupsRouter } from "../lib/routes/backups.js";
+import { ragRouter } from "../lib/routes/rag.js";
+import { projects as projectsDb } from "ingenium-core";
 import { startScheduler } from "../lib/scheduler.js";
+import { startBackupScheduler } from "../lib/backup-scheduler.js";
+
+/**
+ * Ensure the global-default project exists at startup.
+ *
+ * Canonical deployments use docker-entrypoint.sh to create this project via the
+ * API, but local development and one-shot processes (tsx scripts/api-server.ts)
+ * need it to exist before the scheduler and email engine can function.
+ *
+ * Idempotent: if the project already exists, this is a no-op.
+ */
+function ensureGlobalProject(): string | null {
+  try {
+    const existing = projectsDb.getGlobalProject();
+    if (existing) return existing.id;
+
+    // No global project — create it. This matches docker-entrypoint.sh behavior.
+    const created = projectsDb.createProject("global-default", true);
+    logger.info("api", `Created global-default project (${created.id}) for core functionality`);
+    return created.id;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn("api", `Failed to create global-default project: ${msg}. Email engine and cross-project features will be unavailable until one is created via /init-project or the Settings page.`);
+    return null;
+  }
+}
 
 // 🔴 Log SYNCHRONOUSLY with console.error — async logs die before process.exit(1)
 //    writes, hiding every crash from supervisord. See deep-seek Lessons 9 & 24.
@@ -91,6 +121,9 @@ app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/plugins", pluginsRouter);
 app.use("/api/v1/servers", serversRouter);
 app.use("/api/v1/settings", settingsRouter);
+app.use("/api/v1/vault/initialize", vaultRateLimiter);
+app.use("/api/v1/vault/unseal", vaultRateLimiter);
+app.use("/api/v1/vault", vaultRouter);
 app.use("/api/v1/agents", agentsRouter);
 app.use("/api/v1/observations", observationsRouter);
 app.use("/api/v1/personality", personalityRouter);
@@ -110,6 +143,8 @@ app.use("/api/v1/services", servicesRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
 app.use("/api/v1/docs", docsRouter);
 app.use("/api/v1/docs", docsAiRouter);
+app.use("/api/v1/backups", backupsRouter);
+app.use("/api/v1/rag", ragRouter);
 
 // Error handler must be registered AFTER all routes — Express 4 does not catch errors
 // from middleware registered below the error handler.
@@ -118,7 +153,14 @@ app.use(errorHandler);
 // Start server + scheduler
 app.listen(config.port, () => {
   logger.info("api", `ingenium-api listening on port ${config.port}`);
+
+  // 🔴 Ensure global-default project exists before starting the scheduler,
+  //    which depends on it for synthesis interval resolution and email engine.
+  //    This is idempotent — if the project already exists, it's a no-op.
+  ensureGlobalProject();
+
   startScheduler(config.port);
+  startBackupScheduler();
 
   // 🔴 Email: migrate any project-scoped accounts to global, start sync engine
   // Defer 10s to let the DB fully initialize (WAL recovery, migration locks settle)
@@ -131,7 +173,7 @@ app.listen(config.port, () => {
       // Start the sync engine instead of prefetch (engine owns all IMAP I/O now)
       startEngine(getGlobalProjectId());
       logger.info("api", "Email sync engine started for all connected accounts");
-    });
+    }).catch((err) => { logger.warn("api", `Email engine start deferred: ${err.message}`); });
   }, 10_000); // Delay to ensure DB is fully initialized
 
   // 🔴 Durability: run WAL checkpoint + integrity check at startup.

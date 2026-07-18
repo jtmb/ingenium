@@ -1,11 +1,13 @@
 ---
-title: "Thread MCP Setup — Configuration, Initialization, Authentication"
+title: "Thread MCP Setup — Configuration, Initialization, Authentication [RETIRED]"
 impact: HIGH
-impactDescription: "Ensures Thread MCP is properly configured and accessible for persistent memory"
-tags: [thread, mcp, setup, configuration, initialization]
+impactDescription: "[RETIRED — Replaced by Docs RAG] Ensures Thread MCP is properly configured and accessible for persistent memory"
+tags: [thread, mcp, setup, configuration, initialization, retired]
 ---
 
 ## Thread MCP Setup
+
+> 🔴 **RETIRED**: Thread has been replaced by the Ingenium Docs RAG system. This content is retained for reference only until full removal is verified. See `ingenium_docs_*` tools instead.
 
 ### Auto-Initialization Decision Tree
 

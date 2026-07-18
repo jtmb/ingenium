@@ -928,4 +928,311 @@ export declare const PipelineEventSchema: z.ZodObject<{
     parent_event_id?: number | undefined;
 }>;
 export type PipelineEvent = z.infer<typeof PipelineEventSchema>;
+/** Non-sensitive metadata for an encrypted vault item. */
+export declare const VaultItemSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    folder_id: z.ZodNullable<z.ZodString>;
+    name: z.ZodString;
+    type: z.ZodEnum<["login", "api_key", "note", "oauth"]>;
+    tags: z.ZodDefault<z.ZodString>;
+    urls: z.ZodDefault<z.ZodString>;
+    username: z.ZodNullable<z.ZodString>;
+    version: z.ZodDefault<z.ZodNumber>;
+    access_policy: z.ZodDefault<z.ZodString>;
+    expires_at: z.ZodNullable<z.ZodString>;
+    lease_duration_seconds: z.ZodNullable<z.ZodNumber>;
+    last_accessed_at: z.ZodNullable<z.ZodString>;
+    access_count: z.ZodDefault<z.ZodNumber>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    updated_at: string;
+    id: string;
+    name: string;
+    created_at: string;
+    type: "login" | "api_key" | "note" | "oauth";
+    project_id: string;
+    tags: string;
+    folder_id: string | null;
+    urls: string;
+    username: string | null;
+    version: number;
+    access_policy: string;
+    expires_at: string | null;
+    lease_duration_seconds: number | null;
+    last_accessed_at: string | null;
+    access_count: number;
+}, {
+    updated_at: string;
+    id: string;
+    name: string;
+    created_at: string;
+    type: "login" | "api_key" | "note" | "oauth";
+    project_id: string;
+    folder_id: string | null;
+    username: string | null;
+    expires_at: string | null;
+    lease_duration_seconds: number | null;
+    last_accessed_at: string | null;
+    tags?: string | undefined;
+    urls?: string | undefined;
+    version?: number | undefined;
+    access_policy?: string | undefined;
+    access_count?: number | undefined;
+}>;
+export type VaultItem = z.infer<typeof VaultItemSchema>;
+/** A folder used to organize vault items within a project. */
+export declare const VaultFolderSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    name: z.ZodString;
+    parent_folder_id: z.ZodNullable<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    name: string;
+    project_id: string;
+    parent_folder_id: string | null;
+}, {
+    id: string;
+    name: string;
+    project_id: string;
+    parent_folder_id: string | null;
+}>;
+export type VaultFolder = z.infer<typeof VaultFolderSchema>;
+/** An immutable audit record for vault activity. */
+export declare const VaultAuditSchema: z.ZodObject<{
+    id: z.ZodNumber;
+    project_id: z.ZodString;
+    event_type: z.ZodString;
+    item_id: z.ZodNullable<z.ZodString>;
+    actor: z.ZodString;
+    details: z.ZodNullable<z.ZodString>;
+    ip_address: z.ZodNullable<z.ZodString>;
+    user_agent: z.ZodNullable<z.ZodString>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: number;
+    created_at: string;
+    project_id: string;
+    actor: string;
+    event_type: string;
+    item_id: string | null;
+    details: string | null;
+    ip_address: string | null;
+    user_agent: string | null;
+}, {
+    id: number;
+    created_at: string;
+    project_id: string;
+    actor: string;
+    event_type: string;
+    item_id: string | null;
+    details: string | null;
+    ip_address: string | null;
+    user_agent: string | null;
+}>;
+export type VaultAudit = z.infer<typeof VaultAuditSchema>;
+/** The current status of the in-memory vault session and project inventory. */
+export declare const VaultStatusSchema: z.ZodObject<{
+    sealed: z.ZodBoolean;
+    items_count: z.ZodNumber;
+    folders_count: z.ZodNumber;
+    last_unsealed: z.ZodNullable<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    sealed: boolean;
+    items_count: number;
+    folders_count: number;
+    last_unsealed: string | null;
+}, {
+    sealed: boolean;
+    items_count: number;
+    folders_count: number;
+    last_unsealed: string | null;
+}>;
+export type VaultStatus = z.infer<typeof VaultStatusSchema>;
+/** Metadata for a project-scoped Ingenium and OpenCode database snapshot. */
+export declare const BackupRecordSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    filename: z.ZodString;
+    size_bytes: z.ZodNumber;
+    sha256: z.ZodString;
+    backup_type: z.ZodEnum<["manual", "scheduled_hourly", "scheduled_daily", "pre_restore"]>;
+    components: z.ZodDefault<z.ZodString>;
+    status: z.ZodDefault<z.ZodEnum<["pending", "in_progress", "completed", "failed"]>>;
+    error_message: z.ZodNullable<z.ZodString>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    status: "pending" | "failed" | "in_progress" | "completed";
+    project_id: string;
+    filename: string;
+    size_bytes: number;
+    sha256: string;
+    backup_type: "manual" | "scheduled_hourly" | "scheduled_daily" | "pre_restore";
+    components: string;
+    error_message: string | null;
+}, {
+    id: string;
+    created_at: string;
+    project_id: string;
+    filename: string;
+    size_bytes: number;
+    sha256: string;
+    backup_type: "manual" | "scheduled_hourly" | "scheduled_daily" | "pre_restore";
+    error_message: string | null;
+    status?: "pending" | "failed" | "in_progress" | "completed" | undefined;
+    components?: string | undefined;
+}>;
+export type BackupRecord = z.infer<typeof BackupRecordSchema>;
+/** Lifecycle state for a restore request associated with a backup snapshot. */
+export declare const BackupRestoreJobSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    backup_id: z.ZodNullable<z.ZodString>;
+    status: z.ZodDefault<z.ZodEnum<["validating", "confirmed", "applying", "completed", "failed", "rolled_back"]>>;
+    components: z.ZodDefault<z.ZodString>;
+    error_message: z.ZodNullable<z.ZodString>;
+    started_at: z.ZodNullable<z.ZodString>;
+    completed_at: z.ZodNullable<z.ZodString>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    status: "rolled_back" | "failed" | "completed" | "validating" | "confirmed" | "applying";
+    project_id: string;
+    completed_at: string | null;
+    started_at: string | null;
+    components: string;
+    error_message: string | null;
+    backup_id: string | null;
+}, {
+    id: string;
+    created_at: string;
+    project_id: string;
+    completed_at: string | null;
+    started_at: string | null;
+    error_message: string | null;
+    backup_id: string | null;
+    status?: "rolled_back" | "failed" | "completed" | "validating" | "confirmed" | "applying" | undefined;
+    components?: string | undefined;
+}>;
+export type BackupRestoreJob = z.infer<typeof BackupRestoreJobSchema>;
+/** An ingestion source for RAG-backed documentation search. */
+export declare const RagSourceSchema: z.ZodObject<{
+    id: z.ZodString;
+    project_id: z.ZodString;
+    title: z.ZodString;
+    source_type: z.ZodEnum<["file", "thread_import", "text", "url"]>;
+    source_path: z.ZodNullable<z.ZodString>;
+    source_hash: z.ZodNullable<z.ZodString>;
+    mime_type: z.ZodNullable<z.ZodString>;
+    byte_size: z.ZodNullable<z.ZodNumber>;
+    chunk_count: z.ZodDefault<z.ZodNumber>;
+    metadata: z.ZodDefault<z.ZodString>;
+    created_at: z.ZodString;
+    updated_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    updated_at: string;
+    id: string;
+    created_at: string;
+    project_id: string;
+    source_hash: string | null;
+    title: string;
+    metadata: string;
+    source_type: "file" | "thread_import" | "text" | "url";
+    source_path: string | null;
+    mime_type: string | null;
+    byte_size: number | null;
+    chunk_count: number;
+}, {
+    updated_at: string;
+    id: string;
+    created_at: string;
+    project_id: string;
+    source_hash: string | null;
+    title: string;
+    source_type: "file" | "thread_import" | "text" | "url";
+    source_path: string | null;
+    mime_type: string | null;
+    byte_size: number | null;
+    metadata?: string | undefined;
+    chunk_count?: number | undefined;
+}>;
+export type RagSource = z.infer<typeof RagSourceSchema>;
+/** A token-aware, searchable segment belonging to a RAG source. */
+export declare const RagChunkSchema: z.ZodObject<{
+    id: z.ZodString;
+    source_id: z.ZodString;
+    chunk_index: z.ZodNumber;
+    content: z.ZodString;
+    token_count: z.ZodDefault<z.ZodNumber>;
+    heading_path: z.ZodNullable<z.ZodString>;
+    priority: z.ZodDefault<z.ZodNumber>;
+    tags: z.ZodDefault<z.ZodString>;
+    created_at: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    content: string;
+    tags: string;
+    priority: number;
+    source_id: string;
+    chunk_index: number;
+    token_count: number;
+    heading_path: string | null;
+}, {
+    id: string;
+    created_at: string;
+    content: string;
+    source_id: string;
+    chunk_index: number;
+    heading_path: string | null;
+    tags?: string | undefined;
+    priority?: number | undefined;
+    token_count?: number | undefined;
+}>;
+export type RagChunk = z.infer<typeof RagChunkSchema>;
+/** A RAG chunk enriched with FTS relevance rank and highlighted excerpt. */
+export declare const RagSearchResultSchema: z.ZodObject<{
+    id: z.ZodString;
+    source_id: z.ZodString;
+    chunk_index: z.ZodNumber;
+    content: z.ZodString;
+    token_count: z.ZodDefault<z.ZodNumber>;
+    heading_path: z.ZodNullable<z.ZodString>;
+    priority: z.ZodDefault<z.ZodNumber>;
+    tags: z.ZodDefault<z.ZodString>;
+    created_at: z.ZodString;
+} & {
+    rank: z.ZodNumber;
+    snippet: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    id: string;
+    created_at: string;
+    content: string;
+    tags: string;
+    priority: number;
+    source_id: string;
+    chunk_index: number;
+    token_count: number;
+    heading_path: string | null;
+    rank: number;
+    snippet: string;
+}, {
+    id: string;
+    created_at: string;
+    content: string;
+    source_id: string;
+    chunk_index: number;
+    heading_path: string | null;
+    rank: number;
+    snippet: string;
+    tags?: string | undefined;
+    priority?: number | undefined;
+    token_count?: number | undefined;
+}>;
+export type RagSearchResult = z.infer<typeof RagSearchResultSchema>;
 //# sourceMappingURL=schema.d.ts.map

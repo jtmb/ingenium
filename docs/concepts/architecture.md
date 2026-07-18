@@ -14,7 +14,10 @@ Ingenium uses a **two-project identity model** distinguishing between server/pub
 - **Used by**: The container's own OpenCode session (opencode-webui), email service, and dashboard default
 - **Global config location**: `/home/appuser/.config/opencode/opencode.jsonc` (set by the Docker entrypoint at `scripts/docker-entrypoint.sh`)
 - **Plugin target**: Extension plugins inside the container use `INGENIUM_PROJECT=global-default` (set in `opencode.jsonc` at line 32 of the entrypoint)
-- **Created automatically** by `scripts/docker-entrypoint.sh` during container startup via `POST /api/v1/projects`
+- **Created automatically** in two contexts:
+  1. **Docker deployment** — `scripts/docker-entrypoint.sh` creates it during container startup via `POST /api/v1/projects`
+  2. **Local development** — The API server (`api-server.ts`) calls `ensureGlobalProject()` before the scheduler or email engine starts. This is idempotent: if the project already exists, it is a no-op.
+- If the global project cannot be created (DB error, permissions), the API logs a warning and degrades gracefully — the health endpoint and non-global routes still work, but the mail sync scheduler skips with the log message `Skipping mail sync — no global project configured`
 
 ### External Sessions
 - **Project name**: Derived from the worktree directory name (e.g., `gh-llm-bootstrap` for a repo cloned to `/home/user/repos/gh-llm-bootstrap`)
@@ -44,8 +47,8 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **210 registered tools**. Two extension-registered tools bring the complete system catalog to **212 tools across 24 categories**. The server talks to the API over HTTP. Zero DB access.
-- `ingenium-dashboard` is a Next.js 16 App Router frontend with **17 primary routes plus the Settings overlay**. It talks to the API over HTTP.
+- `ingenium-server` runs as an MCP stdio transport with **243 registered tools** across **28 categories**. Two extension-registered tools bring the complete catalog to **245**. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **20 primary routes plus the Settings overlay**. It talks to the API over HTTP.
 
 ## Provider Adapter Layer
 
@@ -241,7 +244,108 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 1. The pipeline catches the error and logs it to `result.errors`
 2. It attempts the backup provider with the same observation batch
 3. If both fail, Phase 1 trait results are still saved
-4. The Test Connection button tests both independently
+4. Provider saves validate configured base URLs before persisting changes
+
+## Chat Provider Architecture
+
+The Chat page (`/chat`) uses a **dual-source** provider model that merges user-managed providers with runtime-discovered OpenCode Zen free models. The architecture follows a three-layer projection with an additional runtime discovery loop:
+
+### Data Flow
+
+```
+                                      ┌─────────────────────────────────────┐
+                                      │  OpenCode Zen (runtime)            │
+                                      │  GET /api/v1/opencode/builtin-     │
+                                      │  providers                         │
+                                      └──────────┬──────────────────────────┘
+                                                 │ Filters to free (input=0,
+                                                 │ output=0) models only
+                                                 ▼
+Settings (Providers tab) ──PUT───▶  API (/api/v1/settings/provider-configs)
+                                          │
+                                     Saves to settings table
+                                      (ordered provider metadata + separate keys;
+                                       mirrors selected primary/backup roles into
+                                       legacy synthesis settings)
+                                          │
+                                     Projects into OpenCode global config.jsonc
+                                      as OpenCode ProviderConfig entries keyed by
+                                      each user-managed provider ID
+                                          │
+Chat page (/chat)  ◀──GET──  API (/api/v1/opencode/chat-config)
+                                     Returns sanitized config:
+                                     { primary, backup, agents, restartRequired,
+                                       providers: [...], defaultSelection }
+```
+
+The Chat page fetches `chat-config`, which internally:
+1. Reads **managed providers** from the settings DB (`llm_provider_configs`)
+2. Calls **`GET /builtin-providers`** against OpenCode's runtime provider catalog with a free-model filter
+3. **Merges** the two into a single `providers[]` array (managed entries first, builtin entry last)
+4. Computes a `defaultSelection` based on the priority hierarchy
+
+### Default Selection Logic
+
+The `defaultSelection` field tells the Chat page which provider+model to pre-select in the dropdown:
+
+| Priority | Candidate | Condition |
+|----------|-----------|-----------|
+| 1st | Managed primary provider | Whichever managed block has `roles` containing `"primary"` |
+| 2nd | OpenCode Zen default | The runtime `default.opencode` model (e.g., `"big-pickle"`) if it is a free model |
+| 3rd | First selectable provider | `providers[0]` combined with its `defaultModel` |
+
+If no managed providers exist and the OpenCode Zen runtime is unreachable, `defaultSelection` is `null` and the Chat page shows the "No LLM" banner.
+
+### Key Properties
+
+- **Atomic save**: `PUT /api/v1/settings/provider-configs` saves any number of provider blocks in one transaction. Omitting `apiKey` preserves the credential; an empty value clears it. Responses expose only `apiKeySet: boolean`.
+- **OpenCode projection**: Enabled blocks are written to the global `provider` object using OpenCode's `npm`, `options.baseURL`, and `models` schema. Removed managed IDs are removed without changing unrelated config entries. API keys are synchronized through OpenCode auth and never written to config files.
+- **Ingenium roles**: One block can be primary and one can be backup. Those selections are mirrored into the existing synthesis settings consumed by Chat and the synthesis engine; additional blocks remain available in OpenCode.
+- **Sanitized response**: `GET /api/v1/opencode/chat-config` strips `apiKey` from every provider — the Chat page never sees API keys. Only provider ID, model ID, and a display label are returned. The `providers[]` array includes both managed entries (`source: "managed"`) and the discovered builtin entry (`source: "builtin"`).
+- **Runtime builtin discovery**: `GET /api/v1/opencode/builtin-providers` queries OpenCode's runtime provider list and filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. The response shape is `{ providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`.
+- **Builtin providers are read-only**: The OpenCode Zen entry in the `providers[]` array has `source: "builtin"` to distinguish it from managed providers. It is never persisted to the DB, never written to OpenCode config, and is recomputed on every `chat-config` request. The Chat page treats it as a non-editable runtime option.
+- **"No LLM" state**: When no provider is configured and no builtin is available, the response returns `{ configured: false }` with `defaultSelection: null`. The Chat page shows a banner linking to Settings → Providers.
+- **Restart detection**: The response includes `restartRequired: boolean`. Saving provider blocks sets this flag to signal that OpenCode must restart before catalog changes take effect. Delivered once to the client and then cleared.
+
+### Agent Model Inheritance
+
+The `ingenium-chat` agent uses **no hardcoded `model` field** — it inherits the model from the Chat request's `modelID` parameter at send time. The agent also sets `hidden: true` to prevent it from appearing in OpenCode's non-Chat agent lists (e.g., the OpenCode Web/CLI agent selector).
+
+| Property | Value | Reason |
+|----------|-------|--------|
+| `model` | (not set) | Inherits from Chat request at runtime |
+| `hidden` | `true` | Only visible in Chat context, not OpenCode agent lists |
+
+## Broker Execution
+
+The **broker execution** system (`brokerExecute()` in `services/ingenium-api/lib/opencode-client.ts`) provides a generic LLM-call mechanism that routes requests through OpenCode's provider infrastructure:
+
+```
+RAG Ask / other features  ──▶  brokerExecute()
+                                     │
+                            Creates ephemeral OpenCode session
+                            (no agent, empty tools list)
+                                     │
+                            Sends prompt via /prompt endpoint
+                                     │
+                            Returns { ok, content, error }
+```
+
+### Architecture
+
+- **Multi-provider routing**: `brokerExecute()` uses the OpenCode session API to dispatch prompts against any configured provider/model combination — not just the synthesis LLM.
+- **Ephemeral sessions**: Each call creates a temporary OpenCode session without a named agent and with an empty `tools: {}` block (tool execution is denied). The session is not persisted or listed in the session catalog.
+- **Synchronous response**: The function waits for the prompt response and returns `{ ok: true, content }` on success, or `{ ok: false, error }` on failure.
+- **Timeout**: Configurable via `timeoutMs` parameter (default 30s).
+
+### Consumers
+
+| Feature | Consumer | Provider Used |
+|---------|----------|---------------|
+| **RAG Ask** | `POST /api/v1/rag/ask` | OpenCode's configured provider |
+| **AI features** | Future | Configurable via `providerID` param |
+
+The broker is used wherever a feature needs to make an LLM call without going through the synthesis pipeline's provider resolution. It treats OpenCode's provider config as the universal LLM gateway.
 
 ## Dataset Reference
 
@@ -249,8 +353,8 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 212 tools (210 server + 2 extension). Calls API via HTTP. Zero DB access. | No |
-| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 17 primary routes plus the Settings overlay. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 243 tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 20 primary routes plus the Settings overlay. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
 ## Status Page Architecture
@@ -258,18 +362,21 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 The `/status` page renders two distinct card types from separate data sources:
 
 - **Service cards** — supervisord-managed processes (ingenium-api, ingenium-dashboard, opencode-web, ttyd-opencode). Data sourced from `GET /api/v1/services/:name` which proxies `supervisor.getProcessInfo` XML-RPC calls. Cards show PID, port, uptime, exit code, and process logs.
-- **Application cards** — in-process scheduled tasks (synthesis-engine, email-client) running inside the `ingenium-api` Express process. Data sourced from `GET /api/v1/services/applications/:name` which queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineStatus()` directly. Cards show application-specific fields (interval, last run, pipeline stats, email account folders).
+- **Application cards** — in-process scheduled tasks and stateful modules (email-client, synthesis-engine, docs-workspace, tasks-board) running inside the `ingenium-api` Express process. Data sourced from `GET /api/v1/services/applications/:name` which queries the respective module directly. Cards show application-specific fields (interval, last run, pipeline stats, email account folders, doc/task counts).
+
+> **Service cards in local dev**: When running without supervisord, the supervisord XML-RPC endpoint is unreachable, so **service cards will not appear**. Application cards (in-process modules) remain fully available since they query the API process directly. Both card types render the same `ServiceOverlay` detail modal when clicked; the overlay correctly handles the absence of supervisord data.
 
 The detail overlay (`ServiceOverlay.tsx`) switches its data fetching and diagnostics grid based on the `type` prop (`"service"` vs. `"application"`). The `handleServiceClick()` function on the page determines the card type by checking which array the name appears in. See `services/ingenium-api/lib/routes/services.ts` for the API implementation and `services/ingenium-dashboard/src/app/status/page.tsx` for the frontend split.
 
 ## Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 17 primary route-based pages plus the Settings overlay (18 user-facing views):
+The Ingenium Dashboard (http://localhost:3000) provides 20 primary route-based pages plus the Settings overlay (21 user-facing views):
 
 | Page | Purpose |
 |------|---------|
 | `/` | Home — operational home dashboard with live metrics (learning stats, task counts, job counts, mail status) via `/api/v1/dashboard/summary` in a 2×2 card grid |
-| `/opencode` | Embedded OpenCode web UI iframe |
+| `/chat` | Ingenium Chat — standalone conversational agent interface |
+| `/opencode` | Embedded OpenCode Web/CLI iframes (no native chat) |
 | `/projects` | Project management (create, rename, archive, restore) |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
 | `/docs` | Documentation workspace with spaces, page tree, editor, search, templates, metadata, history, and trash |
@@ -287,11 +394,11 @@ The Ingenium Dashboard (http://localhost:3000) provides 17 primary route-based p
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
 | Settings (overlay) | Full-screen settings overlay opened with `?settings=<tab>`; `/settings` is a redirect entrypoint |
 
-Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` embedding, `/mail/[id]`, `/mail/oauth/callback`, and `/observations/[id]`. Together with the 17 primary routes, the App Router contains 22 page entrypoints. The dashboard talks to the API layer only — zero direct DB access.
+Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` embedding, `/mail/[id]`, `/mail/oauth/callback`, and `/observations/[id]`. Together with the 20 primary routes, the App Router contains 25 page entrypoints. The dashboard talks to the API layer only — zero direct DB access.
 
 ### MCP Tool Count
 
-The system exposes **212 tools** total = **210 server tools** (registered in `services/ingenium-server/scripts/mcp-server.ts`) + **2 extension tools** (`synthesize_observations`, `auto_observe_now`). Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
+The system exposes **245 catalog tools** across **28 categories**. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
 |----------|-------|-------|
@@ -328,13 +435,13 @@ The Express API uses `express.json({ limit: "2mb" })` for request body parsing. 
 
 ## Dashboard Features
 
-### OpenCode Web UI Embedded in Dashboard
-The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode toggle**:
+### OpenCode Web/CLI Embedded in Dashboard
+The dashboard includes an embedded OpenCode experience at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
 - **Web mode** — Embeds the OpenCode Web UI (`http://localhost:4098/`) in a full-viewport iframe. The session persists across tab navigation with a hidden iframe technique.
 - **CLI mode** — Embeds a ttyd terminal (`http://localhost:4099/`) in a full-viewport iframe. The xterm.js terminal connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing the same session state as the Web UI.
-- **Mode switch** — A right-edge glass tab (`OpenCodeSwitch` component) toggles between modes. The inactive iframe is hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
-- **Keyboard shortcut**: `Ctrl+Shift+\`` toggles between modes from anywhere on the page.
+- **Mode switch** — A right-edge glass tab toggles between Web and CLI modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
+- **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 - The `appuser` has passwordless `sudo` access inside the container for package installation.
@@ -359,6 +466,9 @@ highlight.js is used in two modes:
 - **Source mode** — highlights the entire code block content based on file extension
 Styles: `github.css` for light theme, `hljs-dark.css` for dark variant.
 
+### Shared Markdown Renderer
+All Markdown rendering across the dashboard uses a single `MarkdownDocument` component (`components/MarkdownDocument.tsx`). It wraps `marked` (with GFM) and `DOMPurify` for safety, with `prose dark:prose-invert` for typography. Shared consumers include `DocsEditor` (View/Split modes) and `MarkdownViewer` (Preview mode). The proposal comparison view intentionally bypasses Markdown rendering — both Current and Proposed panels show raw source text in matching `<pre>` blocks.
+
 ## Docker Deployment
 
 The project ships as a single Docker container via `Dockerfile` (multi-stage build, root) and `docker-compose.yml` (single service):
@@ -377,7 +487,7 @@ services:
 
 Inside the container, **supervisord** manages four processes:
 1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
-2. **Dashboard** (Next.js on :3000) — 17 primary routes plus the Settings overlay
+2. **Dashboard** (Next.js on :3000) — 20 primary routes plus the Settings overlay
 3. **opencode-web** (on :4098) — OpenCode web server (`--hostname 0.0.0.0` inside container; Compose publishes to host `127.0.0.1:4098` only)
 4. **ttyd-opencode** (on :4099) — OpenCode CLI terminal via ttyd (`ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace`). Serves an xterm.js terminal that the dashboard `/opencode` page embeds as a second iframe. The `appuser` has passwordless sudo access for package installation inside the container.
 

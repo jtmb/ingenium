@@ -85,7 +85,7 @@ You implement and guide on:
 ## Delegation
 
 For complex multi-file implementations, you may delegate:
-- `@ingenium-scout` — Retrieve past decisions, preferences, or patterns from Thread
+- `@ingenium-scout` — Retrieve past decisions, preferences, or patterns from Thread <!-- Thread retired → Docs RAG -->
 - `@ingenium-explore` — Search codebase for existing patterns to follow
 - `@ingenium-docs` (via Task tool) — Update documentation after implementation (when the orchestrator's process requires it)
 

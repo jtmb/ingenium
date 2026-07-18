@@ -11,7 +11,7 @@
  *    AGENTS.md HARD RULE #10 — reasoning models may return empty content.
  */
 
-import { emailCache } from "ingenium-core";
+import { emailCache, safeLlmFetch } from "ingenium-core";
 import { GmailProvider } from "./providers/gmail.js";
 import type { EmailAccount, OAuthToken } from "./types.js";
 
@@ -31,6 +31,7 @@ export interface LLMConfig {
   /** OpenAI-compatible API endpoint. Supports custom endpoints (e.g., Ollama, vLLM, LiteLLM). */
   endpoint?: string;
   apiKey?: string;
+  allowPrivateNetwork?: boolean;
 }
 
 // ── getVoiceSamples ─────────────────────────────────────────────────────────
@@ -101,7 +102,7 @@ export async function generateSmartReplies(
   const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       signal,
@@ -114,7 +115,7 @@ export async function generateSmartReplies(
         temperature: 0.7,
         max_tokens: 8192,
       }),
-    });
+    }, { allowPrivateNetwork: llmConfig.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
     if (!response.ok) return [];
 
@@ -224,7 +225,7 @@ ${emailBody}`;
   const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -236,7 +237,7 @@ ${emailBody}`;
         temperature: 0.3,
         max_tokens: 8192,
       }),
-    });
+    }, { allowPrivateNetwork: llmConfig.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
     if (!response.ok) return "";
 
@@ -287,7 +288,7 @@ ${text}`;
   const baseEndpoint = llmConfig.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   try {
-    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -299,7 +300,7 @@ ${text}`;
         temperature: 0.4,
         max_tokens: 8192,
       }),
-    });
+    }, { allowPrivateNetwork: llmConfig.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
     if (!response.ok) return "";
 

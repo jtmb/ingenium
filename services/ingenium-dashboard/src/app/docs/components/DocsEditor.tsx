@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { marked } from "marked";
-import DOMPurify from "dompurify";
+import MarkdownDocument from "../../components/MarkdownDocument";
 import { EditorView, lineNumbers, highlightActiveLine } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
@@ -26,47 +25,6 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v
 const AUTOSAVE_INTERVAL = 5000;
 /** PREVIEW_DEBOUNCE: shorter than autosave — only drives the live preview panel, not persistence. */
 const PREVIEW_DEBOUNCE = 300;
-
-marked.setOptions({ gfm: true, breaks: false });
-
-/**
- * Render Markdown to safe HTML with custom handling:
- * - [[page-slug]] → internal link placeholder
- * - > **Note:** ... → callout block with colored left border
- */
-export function renderMarkdown(content: string): string {
-  if (!content) return "";
-
-  // Pre-process: convert [[page-slug]] to internal links
-  let processed = content.replace(
-    /\[\[([^\]]+)\]\]/g,
-    (_match, slug) => `<a href="/docs/${slug}" class="internal-link" data-internal="true">${slug}</a>`,
-  );
-
-  // Pre-process: convert callout blocks (only when they start a line)
-  // Pattern: > **Note:** or > **Warning:** etc.
-  processed = processed.replace(
-    /^>\s*\*\*(Note|Warning|Info|Tip|Danger|Success):\*\*(.*?)(?:\n> (.*?))*(?=\n\n|\n(?!>)|$)/gm,
-    (_match, type: string, ..._rest: string[]) => {
-      // Reconstruct the full block content
-      const fullMatch = _match;
-      const contentWithoutCallout = fullMatch
-        .replace(/^>\s*\*\*(Note|Warning|Info|Tip|Danger|Success):\*\*/m, "")
-        .replace(/^>\s?/gm, "")
-        .trim();
-      const typeLower = type.toLowerCase();
-      return `<div class="callout callout-${typeLower}">
-<strong>${type}:</strong> ${contentWithoutCallout}
-</div>`;
-    },
-  );
-
-  const html = marked.parse(processed, { async: false }) as string;
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: ["h1","h2","h3","h4","h5","h6","p","br","hr","pre","code","blockquote","ul","ol","li","a","strong","em","del","table","thead","tbody","tr","th","td","img","div","span"],
-    ALLOWED_ATTR: ["href","target","data-internal","class","src","alt"],
-  });
-}
 
 async function fetchDraft(pageId: number): Promise<DocDraft | null> {
   try {
@@ -187,7 +145,6 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
    */
   const codeMirrorRef = useRef<HTMLDivElement>(null);
   const codeMirrorViewRef = useRef<EditorView | null>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef(content);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -527,12 +484,9 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
       <div className="flex-1 overflow-hidden">
         {/* View mode */}
         {editorMode === "view" && (
-          <div
-            className="prose prose-sm max-w-none dark:prose-invert p-6 overflow-y-auto h-full"
-            role="document"
-            aria-label="Page content"
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-          />
+          <div className="p-6 overflow-y-auto h-full" role="document" aria-label="Page content">
+            <MarkdownDocument content={content} />
+          </div>
         )}
 
         {/* Edit mode — textarea */}
@@ -560,13 +514,8 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
               <div ref={codeMirrorRef} className="h-full" />
             </div>
             {/* Right: Preview */}
-            <div className="w-1/2 overflow-y-auto p-4 prose prose-sm max-w-none dark:prose-invert">
-              <div
-                ref={previewRef}
-                role="document"
-                aria-label="Page content"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(splitPreview) }}
-              />
+            <div className="w-1/2 overflow-y-auto p-4" role="document" aria-label="Page content preview">
+              <MarkdownDocument content={splitPreview} />
             </div>
           </div>
         )}

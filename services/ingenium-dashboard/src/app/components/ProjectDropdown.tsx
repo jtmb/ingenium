@@ -7,12 +7,12 @@ import { api } from "@/lib/api";
 /**
  * Project switcher dropdown in the top navigation bar.
  *
- * Disabled on `/mail` and `/opencode` pages because those views operate on the
+ * Disabled on `/mail`, `/opencode`, and `/chat` pages because those views operate on the
  * global project context and switching projects mid-session would break the UX.
  */
 export default function ProjectDropdown() {
   const pathname = usePathname();
-  const disabled = pathname?.startsWith("/mail") || pathname?.startsWith("/opencode");
+  const disabled = pathname?.startsWith("/mail") || pathname?.startsWith("/opencode") || pathname?.startsWith("/chat");
   const activeProject = useProject();
   const [open, setOpen] = useState(false);
   const [projects, setProjects] = useState<any[]>([]);

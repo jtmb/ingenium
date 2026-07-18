@@ -1168,7 +1168,19 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
           return false;
         },
         removeFromDisk: () => removeAgentFromDisk(worktree, name),
-        pushToApi: async () => pushAgentToApi(worktree, project, name, "execution"),
+        pushToApi: async () => {
+          let cat = "execution";
+          const agentsDir = resolve(worktree, ".opencode", "agents");
+          if (existsSync(agentsDir)) {
+            for (const category of readdirSync(agentsDir)) {
+              if (existsSync(resolve(agentsDir, category, `${name}.md`))) {
+                cat = category;
+                break;
+              }
+            }
+          }
+          return pushAgentToApi(worktree, project, name, cat);
+        },
         changedLabel: "agents",
       },
       result,

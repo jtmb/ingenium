@@ -19,42 +19,16 @@ const API_URL = "http://localhost:4097/api/v1";
  * its own API request on first render.
  */
 let resolvedGlobalProject: string | null = null;
-let fetchPromise: Promise<string> | null = null;
+let fetchPromise: Promise<Array<{ name: string; is_global?: boolean; archived_at?: string }>> | null = null;
 
-async function resolveGlobalProject(): Promise<string> {
-  if (resolvedGlobalProject) return resolvedGlobalProject;
+async function fetchProjects(): Promise<Array<{ name: string; is_global?: boolean; archived_at?: string }>> {
   if (fetchPromise) return fetchPromise;
 
   fetchPromise = (async () => {
-    // 1. Check localStorage cache (survives page reloads)
-    if (typeof window !== "undefined") {
-      const cached = localStorage.getItem(GLOBAL_CACHE_KEY);
-      if (cached) {
-        resolvedGlobalProject = cached;
-        return cached;
-      }
-    }
-
-    // 2. Fetch from API and find the project with is_global=1
-    try {
-      const res = await fetch(`${API_URL}/projects`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const global = data.data?.find((p: { is_global?: boolean; name: string }) => p.is_global);
-      const name = global?.name || "global-default";
-      resolvedGlobalProject = name;
-      if (typeof window !== "undefined") {
-        try { localStorage.setItem(GLOBAL_CACHE_KEY, name); } catch { /* quota exceeded */ }
-      }
-      return name;
-    } catch {
-      // 3. Fallback — API unreachable, use the hardcoded default
-      resolvedGlobalProject = "global-default";
-      return "global-default";
-    } finally {
-      // Clear the dedup promise so a future call can retry
-      fetchPromise = null;
-    }
+    const res = await fetch(`${API_URL}/projects`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    return Array.isArray(data.data) ? data.data : [];
   })();
 
   return fetchPromise;
@@ -82,8 +56,8 @@ export function useProject() {
    * when the cache is already warm), then falls through to localStorage and finally
    * the static default. This ensures the first render shows the correct project name
    * without waiting for an API call.
-   */
-  const [resolvedGlobal, setResolvedGlobal] = useState<string>(() => {
+  */
+  const [activeProject, setActiveProject] = useState<string>(() => {
     if (resolvedGlobalProject) return resolvedGlobalProject;
     if (typeof window !== "undefined") {
       const cached = localStorage.getItem(GLOBAL_CACHE_KEY);
@@ -93,32 +67,28 @@ export function useProject() {
   });
 
   useEffect(() => {
-    // Only fetch the global project if there's NO explicit override —
-    // the URL param or a saved localStorage choice takes precedence.
-    const hasExplicitProject =
-      fromUrl ||
-      (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY));
-    if (!hasExplicitProject) {
-      resolveGlobalProject().then(setResolvedGlobal);
-    }
+    let cancelled = false;
+    const requested = fromUrl || (typeof window !== "undefined" ? localStorage.getItem(STORAGE_KEY) : null);
+    fetchProjects().then((projects) => {
+      if (cancelled) return;
+      const available = projects.filter((project) => !project.archived_at);
+      const selected = available.find((project) => project.name === requested);
+      const global = available.find((project) => project.is_global) ?? available[0];
+      const name = selected?.name ?? global?.name ?? "global-default";
+      resolvedGlobalProject = global?.name ?? "global-default";
+      setActiveProject(name);
+      try {
+        localStorage.setItem(STORAGE_KEY, name);
+        localStorage.setItem(GLOBAL_CACHE_KEY, resolvedGlobalProject);
+      } catch {
+        // Storage is an optimization only.
+      }
+    }).catch(() => {
+      if (!cancelled && !requested) setActiveProject("global-default");
+    });
+    return () => { cancelled = true; };
   }, [fromUrl]);
-
-  // 1. URL param always wins
-  if (fromUrl) {
-    if (typeof window !== "undefined") {
-      try { localStorage.setItem(STORAGE_KEY, fromUrl); } catch { /* ignore */ }
-    }
-    return fromUrl;
-  }
-
-  // 2. User-selected project (persisted by ProjectSelector or prior URL param)
-  if (typeof window !== "undefined") {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return stored;
-  }
-
-  // 3. Dynamically resolved global project (or its cached fallback)
-  return resolvedGlobal;
+  return activeProject;
 }
 
 export function persistProject(name: string) {

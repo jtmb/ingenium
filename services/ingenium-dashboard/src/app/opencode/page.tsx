@@ -4,17 +4,22 @@ import { useState, useEffect, useCallback } from "react";
 import OpenCodeFrame from "../components/OpenCodeFrame";
 import OpenCodeToolbar from "../components/OpenCodeToolbar";
 
+type OpenCodeMode = "web" | "cli";
+
 /**
- * OpenCode page — edge-to-edge dual-mode (Web/CLI) interface.
+ * OpenCode page — dual-mode interface: Web, CLI.
  *
- * Both iframes persist in the DOM after first mount. The inactive iframe
- * is hidden via opacity/visibility/pointer-events instead of display:none
- * to prevent xterm dimension zeroing on the CLI side.
+ * Renders iframe-based OpenCode interface with toolbar. Both iframes
+ * persist in the DOM after first mount. The inactive iframe is hidden via
+ * opacity/visibility/pointer-events instead of display:none to prevent
+ * xterm dimension zeroing on the CLI side.
  *
- * The integrated toolbar replaces the old floating glass OpenCodeSwitch tab.
+ * Mode is persisted to localStorage under the `opencode-mode` key.
+ * The legacy "chat" value is gracefully redirected to "web" since Chat
+ * is now a standalone page at /chat.
  */
 export default function OpenCodePage() {
-  const [mode, setMode] = useState<"web" | "cli">("web");
+  const [mode, setMode] = useState<OpenCodeMode>("web");
   const [cliMounted, setCliMounted] = useState(false);
   const [webLoaded, setWebLoaded] = useState(false);
   const [cliLoaded, setCliLoaded] = useState(false);
@@ -23,17 +28,18 @@ export default function OpenCodePage() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem("opencode-mode");
-      if (saved === "cli" || saved === "web") {
-        setMode(saved);
+      if (saved === "cli") {
+        setMode("cli");
       }
+      // "chat" and any other value fall back to "web" (default)
     } catch {
       // localStorage may be unavailable (SSR, incognito, etc.)
     }
   }, []);
 
-  // Lazy-mount CLI iframe on first CLI activation; persist mode choice
+  // Persist mode choice; lazy-mount CLI iframe on first CLI activation
   const handleModeChange = useCallback(
-    (newMode: "web" | "cli") => {
+    (newMode: OpenCodeMode) => {
       setMode(newMode);
       try {
         localStorage.setItem("opencode-mode", newMode);
@@ -47,7 +53,6 @@ export default function OpenCodePage() {
     [cliMounted],
   );
 
-  // Status indicator shows loaded state of the active iframe
   const isLoaded = mode === "web" ? webLoaded : cliLoaded;
 
   return (

@@ -114,11 +114,13 @@ extract_yaml_block() {
 get_field_value() {
     local fm="$1"
     local field="$2"
-    echo "$fm" | grep "^${field}:" | head -1 | sed 's/^'"${field}"': *//'
+    echo "$fm" | grep "^${field}:" | head -1 | sed 's/^'"${field}"': *//' || true
 }
 
 # ── Agent Capability Detection ────────────────────────────
-# Check if an agent is write-capable (edit:allow OR write:allow)
+# Check if an agent is write-capable (edit:allow OR write:allow).
+# Supports both flat form (edit: allow) and nested YAML form
+# (edit:\n  "*": allow) used by software-engineer agents.
 is_agent_write_capable() {
     local agent_name="$1"
 
@@ -136,14 +138,26 @@ is_agent_write_capable() {
     local perm_block
     perm_block=$(extract_yaml_block "permission" <<< "$fm")
 
-    local edit_val
-    edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}')
-    local write_val
-    write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}')
-
-    if [[ "$edit_val" == "allow" || "$write_val" == "allow" ]]; then
+    # Check flat form: "  edit: allow" or "  write: allow"
+    if echo "$perm_block" | grep -qE '^  (edit|write): allow$'; then
         return 0
     fi
+
+    # Check nested form: "  edit:" followed by a value containing "allow"
+    # at a deeper indent (e.g., "    \"*\": allow"). Extract the edit block
+    # and look for "allow" within it.
+    local edit_block
+    edit_block=$(echo "$perm_block" | awk '/^  edit:/{found=1; print; next} found && /^  [a-z]/{exit} found{print}')
+    if echo "$edit_block" | grep -q 'allow'; then
+        return 0
+    fi
+
+    local write_block
+    write_block=$(echo "$perm_block" | awk '/^  write:/{found=1; print; next} found && /^  [a-z]/{exit} found{print}')
+    if echo "$write_block" | grep -q 'allow'; then
+        return 0
+    fi
+
     return 1
 }
 
@@ -797,10 +811,30 @@ test_agents_table_task_block_coverage() {
         return
     fi
 
-    # Parse agent table from AGENTS.md — extract bold names from table rows
-    # Table rows begin with "| **agent-name** |"
+    # Extract the Agent Table section only (between "## Agent Table" and next "## " heading)
+    # This avoids parsing non-agent tables like Concurrency Limits, Writer Tiers, etc.
+    local agent_table_section
+    agent_table_section=$(awk '
+      /^## Agent Table$/ { capture=1; next }
+      capture && /^## / { capture=0; exit }
+      capture { print }
+    ' "$agents_md")
+
+    # Parse agent names from the Agent Table section — extract bold first-column labels
+    # Agent table rows look like: | **agent-name** | Type | Model | Skills Allowed |
     local table_agents
-    table_agents=$(grep -oP '^\| \*\*\K[^*]+(?=\*\* \|)' "$agents_md" || true)
+    table_agents=$(echo "$agent_table_section" | grep -oP '^\| \*\*\K[^*]+(?=\*\* \|)' || true)
+
+    # Regression guard: verify no policy/label-table rows leaked into agent name extraction
+    local non_agent_patterns="Active subagents per phase|Concurrent writers per wave|Remaining capacity|Write territory overlap|Fast|Premium|Terra|Transport name|Catalog name|Exposed tool name"
+    local leaked
+    leaked=$(echo "$table_agents" | grep -E "$non_agent_patterns" || true)
+    if [[ -n "$leaked" ]]; then
+        fail "Parser regression" "Policy/label table rows incorrectly parsed as agent names: $(echo "$leaked" | tr '\n' ' ')"
+        errors=$((errors + 1))
+    else
+        info "No policy-table labels leaked into agent name extraction"
+    fi
 
     # Collect all task block allowed subagents from ALL agent files
     declare -A TASK_TARGETS
@@ -862,8 +896,124 @@ test_agents_table_task_block_coverage() {
 }
 
 # ═══════════════════════════════════════════════════════════
-# Main
+# TEST 11 — Orchestration Policy: 12-Active/6-Writer + Terra Routing
+# Validates the canonical concurrency policy and Terra critical
+# routing are present where required and stale max-6 rules are absent.
 # ═══════════════════════════════════════════════════════════
+test_orchestration_policy() {
+    section "TEST 11 — Orchestration Policy (12-active/6-writer + Terra routing)"
+
+    local errors=0
+    local ORCHESTRATOR="$AGENTS_DIR/primary/ingenium-orchestrator.md"
+    local WORKFLOW_SOURCE="$SKILLS_DIR/engineering-workflow/references/sources/agent-workflow-patterns/source-index.md"
+    local AGENT_LIMITS="$SKILLS_DIR/engineering-workflow/references/sources/agent-workflow-patterns/references/agent-limits.md"
+
+    # ── Helper: scan a file for stale unqualified max-6-agents wording ──
+    # Legitimate: "6 concurrent writers", "max 6 writers", "6-writer cap"
+    # Stale:      "max 6 agents", "maximum of 6 agents", "6 concurrent agents"
+    check_no_stale_max6_agents() {
+        local file="$1"
+        local label="$2"
+        # Patterns that describe a 6-agent limit (stale — policy is now 12 agents / 6 writers).
+        # These explicitly reference "agent(s)" in the limit context, not "writer(s)".
+        local stale
+        stale=$(grep -Pin \
+            'max(imum)?\s*(of\s*)?6\s+concurrent\s+agents?\b|'\
+'max(imum)?\s*(of\s*)?6\s+agents?\b(?!\s*(and|with|\/|\-)\s*\d)|'\
+'\b6\s+concurrent\s+agents?\b|'\
+'\b6\s+agent\s+limit\b|'\
+'maximum\s+of\s+6\s+(active\s+)?agents?\s' \
+            "$file" || true)
+        if [[ -z "$stale" ]]; then
+            pass "No stale max-6-agents language in $label"
+            return 0
+        else
+            fail "$label" "Contains stale max-6-agents language: $stale"
+            errors=$((errors + 1))
+            return 1
+        fi
+    }
+
+    # ── 11a: Terra is in the orchestrator task allow-list ──
+    local orch_fm
+    orch_fm=$(extract_frontmatter "$ORCHESTRATOR")
+    local terra_allow
+    terra_allow=$(echo "$orch_fm" | grep -c '"ingenium-software-engineer-terra": "allow"' || true)
+    if [[ "$terra_allow" -ge 1 ]]; then
+        pass "Terra is in orchestrator task allow-list"
+    else
+        fail "Orchestrator" "ingenium-software-engineer-terra not found in task allow-list"
+        errors=$((errors + 1))
+    fi
+
+    # ── 11b: Check ALL three canonical policy sources for stale max-6-agents ──
+    check_no_stale_max6_agents "$ORCHESTRATOR" "orchestrator profile"
+    check_no_stale_max6_agents "$WORKFLOW_SOURCE" "workflow source-index"
+    check_no_stale_max6_agents "$AGENT_LIMITS" "agent-limits.md"
+
+    # ── 11c: agent-limits.md reference file exists ──
+    if [[ -f "$AGENT_LIMITS" ]]; then
+        pass "agent-limits.md reference file exists"
+    else
+        fail "agent-limits.md" "Missing reference file at $AGENT_LIMITS"
+        errors=$((errors + 1))
+    fi
+
+    # ── 11d: Orchestrator body contains 12-active/6-writer policy ──
+    local orch_body
+    orch_body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$ORCHESTRATOR")
+    local has_12active
+    has_12active=$(echo "$orch_body" | grep -cP '12.*active.*subagents.*per.*phase|12-Active.*6-Writer|12\s*active.*per\s*phase' || true)
+    local has_6writer
+    has_6writer=$(echo "$orch_body" | grep -cP '6\s*-?\s*[Ww]riter|Concurrent\s+writers.*\|.*\s+6\b' || true)
+    local has_territory
+    has_territory=$(echo "$orch_body" | grep -ciP 'exclusive.*territor|write.*territor.*overlap|territory.*reservation' || true)
+
+    local orch_policy_ok=true
+    if [[ "$has_12active" -lt 1 ]]; then
+        fail "Orchestrator" "Missing 12-active subagents policy language in body"
+        errors=$((errors + 1))
+        orch_policy_ok=false
+    fi
+    if [[ "$has_6writer" -lt 1 ]]; then
+        fail "Orchestrator" "Missing 6-concurrent-writers policy language in body"
+        errors=$((errors + 1))
+        orch_policy_ok=false
+    fi
+    if [[ "$has_territory" -lt 1 ]]; then
+        fail "Orchestrator" "Missing exclusive write territory language in body"
+        errors=$((errors + 1))
+        orch_policy_ok=false
+    fi
+    if $orch_policy_ok; then
+        pass "Orchestrator contains 12-active/6-writer policy with territory protocol"
+    fi
+
+    # ── 11e: Orchestrator contains Terra critical routing guidance ──
+    local has_terra_routing
+    has_terra_routing=$(echo "$orch_body" | \
+        grep -cP 'FIRST CHOICE.*auth.*secrets.*permissions|Terra.*first.*choice.*auth' || true)
+    if [[ "$has_terra_routing" -ge 1 ]]; then
+        pass "Orchestrator contains Terra critical routing (first choice for auth/secrets)"
+    else
+        fail "Orchestrator" "Missing Terra critical routing guidance (first choice for auth/secrets/permissions)"
+        errors=$((errors + 1))
+    fi
+
+    # ── 11f: source-index references agent-limits.md ──
+    local refs_limits
+    refs_limits=$(grep -c 'references/agent-limits.md' "$WORKFLOW_SOURCE" || true)
+    if [[ "$refs_limits" -ge 1 ]]; then
+        pass "Workflow source-index references agent-limits.md"
+    else
+        fail "Workflow source-index" "Missing reference to agent-limits.md"
+        errors=$((errors + 1))
+    fi
+
+    if [[ "$errors" -eq 0 ]]; then
+        pass "All orchestration policy checks passed"
+    fi
+}
 main() {
     echo "═══════════════════════════════════════════════════════"
     echo "  Agent Validation Tests"
@@ -881,6 +1031,7 @@ main() {
     test_model_identity_match
     test_body_skills_in_frontmatter
     test_agents_table_task_block_coverage
+    test_orchestration_policy
 
     echo ""
     echo "═══════════════════════════════════════════════════════"

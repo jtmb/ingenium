@@ -1,696 +1,352 @@
 "use client";
-import { useState, useEffect } from "react";
-import { api } from "../../../../lib/api";
+
+import { useEffect, useState } from "react";
+import { api, type ManagedProviderConfig, type ProviderRole } from "../../../../lib/api";
 import SettingRow from "../SettingRow";
 
-/** Get models array from a provider object. */
-function providerModels(p: any): [string, any][] {
-  return Object.entries(p?.models || {}) as [string, any][];
-}
+/** Internal type that adds a stable draft ID for React keys and collapse/key-visibility state. */
+type DraftProvider = ManagedProviderConfig & { _draftId?: string };
 
-/**
- * Sort providers for the dropdown: known providers first with a fixed ranking
- * (OpenCode free → Pro → Zen → Go → DeepSeek → Zen), then alphabetically.
- * Filters out providers with no models.
- */
-function sortProviders(providers: any[]): any[] {
-  const pinned: [string, number][] = [
-    ["opencode zen", 0],
-    ["opencode pro", 1],
-    ["opencode", 2],
-    ["go", 3],
-    ["deepseek", 4],
-    ["zen", 5],
-  ];
-  const rank = (p: any): number => {
-    const name = (p.name || "").toLowerCase();
-    for (const [kw, r] of pinned) {
-      if (name.includes(kw)) return r;
-    }
-    return 999;
+const PACKAGE_OPTIONS = [
+  ["@ai-sdk/openai-compatible", "OpenAI compatible"],
+  ["@ai-sdk/openai", "OpenAI"],
+  ["@ai-sdk/anthropic", "Anthropic"],
+  ["@ai-sdk/deepseek", "DeepSeek"],
+  ["@ai-sdk/google", "Google"],
+  ["@ai-sdk/azure", "Azure OpenAI"],
+  ["@ai-sdk/mistral", "Mistral"],
+  ["@ai-sdk/xai", "xAI"],
+  ["@ai-sdk/groq", "Groq"],
+  ["@ai-sdk/cohere", "Cohere"],
+  ["@ai-sdk/amazon-bedrock", "Amazon Bedrock"],
+  ["@openrouter/ai-sdk-provider", "OpenRouter"],
+] as const;
+
+function newProvider(index: number): DraftProvider {
+  return {
+    id: `provider-${index + 1}`,
+    _draftId: crypto.randomUUID(),
+    name: `Provider ${index + 1}`,
+    npm: "@ai-sdk/openai-compatible",
+    baseURL: "",
+    models: [""],
+    defaultModel: "",
+    roles: ["available"],
+    enabled: true,
+    apiKeySet: false,
   };
-  return [...providers]
-    .filter((p) => Object.keys(p.models || {}).length > 0)
-    .sort((a, b) => {
-      const ar = rank(a),
-        br = rank(b);
-      if (ar !== br) return ar - br;
-      return a.name.localeCompare(b.name);
-    });
 }
 
-/**
- * Synthesis pipeline settings: LLM provider selection (primary + backup),
- * API key management, custom endpoint support, and polling interval.
- *
- * Providers are fetched directly from the OpenCode HTTP API (port 4098) rather
- * than from the Ingenium API because OpenCode is the source of truth for
- * available LLM providers and their model listings.
- */
+/** Stable key for a provider — uses the draft ID when available so editing the `id` field
+ *  doesn't trigger a React key change that destroys and recreates the DOM element. */
+function draftKey(provider: DraftProvider): string {
+  return provider._draftId || provider.id;
+}
+
+function getPriorityRole(roles: ProviderRole[]): ProviderRole {
+  if (roles.includes("primary")) return "primary";
+  if (roles.includes("backup")) return "backup";
+  return "available";
+}
+
 export default function PipelinePanel() {
-  // Providers
-  const [providers, setProviders] = useState<any[]>([]);
-  const [loadingProviders, setLoadingProviders] = useState(true);
-  const [loadingConfig, setLoadingConfig] = useState(true);
-
-  // Primary
-  const [providerId, setProviderId] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
-  const [apiKeyState, setApiKeyState] = useState("");
-  const [endpoint, setEndpoint] = useState("");
-  const [isCustom, setIsCustom] = useState(false);
-  const [customModel, setCustomModel] = useState("");
-  const [showCustom, setShowCustom] = useState(false);
-
-  // Backup
-  const [showBackup, setShowBackup] = useState(false);
-  const [backupProviderId, setBackupProviderId] = useState("");
-  const [backupSelectedModel, setBackupSelectedModel] = useState("");
-  const [backupApiKey, setBackupApiKey] = useState("");
-  const [backupIsCustom, setBackupIsCustom] = useState(false);
-  const [backupCustomEndpoint, setBackupCustomEndpoint] = useState("");
-  const [backupCustomModel, setBackupCustomModel] = useState("");
-
-  // Interval
-  const [intervalMin, setIntervalMin] = useState(15);
-  const [loadingInterval, setLoadingInterval] = useState(true);
-
-  // Actions
+  const [providers, setProviders] = useState<DraftProvider[]>([]);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [llmStatus, setLlmStatus] = useState("");
+  const [status, setStatus] = useState("");
+  const [intervalMin, setIntervalMin] = useState(15);
 
-  // Password toggles
-  const [showPw, setShowPw] = useState<Record<string, boolean>>({});
-  const togglePw = (name: string) => setShowPw((prev) => ({ ...prev, [name]: !prev[name] }));
-
-  const [toast, setToast] = useState("");
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(""), 3000);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  // Derived
-  const selectedProvider = providers.find((p) => p.id === providerId);
-  const primaryModels = providerModels(selectedProvider);
-  const backupProvider = providers.find((p) => p.id === backupProviderId);
-  const backupModels = providerModels(backupProvider);
-  const sortedProviders = sortProviders(providers);
-
-  // Fetch providers from OpenCode's own HTTP API (port 4098).
-  // This is the canonical source for available LLM providers + their models.
-  useEffect(() => {
-    fetch("http://localhost:4098/provider?directory=/workspace")
-      .then((r) => r.json())
-      .then((d) => setProviders(d.all || []))
-      .catch(() => setProviders([]))
-      .finally(() => setLoadingProviders(false));
-  }, []);
-
-  // Load saved synthesis config — re-runs when providers arrive so we can
-  // match the stored model ID against the provider's model list.
   useEffect(() => {
     Promise.all([
-      api.settings.get("synthesis_provider", "global-default"),
-      api.settings.get("synthesis_api_key", "global-default"),
-      api.settings.get("synthesis_endpoint", "global-default"),
-      api.settings.get("synthesis_model", "global-default"),
+      api.settings.getProviderConfigs("global-default"),
+      api.settings.get("synthesis_interval_ms", "global-default"),
     ])
-      .then(([p, k, e, m]) => {
-        const pid = p.data?.value || "";
-        setProviderId(pid);
-        setIsCustom(pid === "__custom__");
-        if (k.data?.value) setApiKeyState(k.data.value);
-        if (e.data?.value) setEndpoint(e.data.value);
-        if (pid === "__custom__") {
-          if (m.data?.value) setCustomModel(m.data.value);
-          setShowCustom(true);
-        }
-        if (pid && pid !== "__custom__" && m.data?.value) {
-          const prov = providers.find((x) => x.id === pid);
-          if (prov) {
-            const match = Object.entries(prov.models || {}).find(
-              ([, v]: [string, any]) => v.id === m.data.value,
-            );
-            if (match) setSelectedModel(match[0]);
-          }
-        }
+      .then(([providerResponse, intervalResponse]) => {
+        setProviders(providerResponse.data.providers);
+        const ms = Number(intervalResponse.data.value);
+        if (Number.isFinite(ms) && ms >= 0) setIntervalMin(ms / 60000);
       })
-      .catch(() => {})
-      .finally(() => setLoadingConfig(false));
-  }, [providers]);
-
-  // Load backup synthesis config — same re-run pattern as primary.
-  useEffect(() => {
-    Promise.all([
-      api.settings.get("synthesis_backup_provider", "global-default"),
-      api.settings.get("synthesis_backup_model", "global-default"),
-      api.settings.get("synthesis_backup_endpoint", "global-default"),
-      api.settings.get("synthesis_backup_api_key", "global-default"),
-    ])
-      .then(([pr, m, e, k]) => {
-        const bPid = pr.data?.value || "";
-        if (bPid) {
-          setBackupProviderId(bPid);
-          setShowBackup(true);
-        }
-        setBackupIsCustom(bPid === "__custom__");
-        if (bPid === "__custom__") {
-          if (m.data?.value) setBackupCustomModel(m.data.value);
-          if (e.data?.value) setBackupCustomEndpoint(e.data.value);
-        } else if (bPid && m.data?.value) {
-          const bp = providers.find((x) => x.id === bPid);
-          if (bp) {
-            const match = Object.entries(bp.models || {}).find(
-              ([, v]: [string, any]) => v.id === m.data.value,
-            );
-            if (match) setBackupSelectedModel(match[0]);
-          }
-        }
-        if (k.data?.value) setBackupApiKey(k.data.value);
+      .catch((error: unknown) => {
+        setStatus(error instanceof Error ? error.message : "Unable to load provider configuration");
       })
-      .catch(() => {});
-  }, [providers]);
-
-  // Load synthesis polling interval.
-  useEffect(() => {
-    api.settings
-      .get("synthesis_interval_ms", "global-default")
-      .then((r) => {
-        const ms = parseInt(r.data.value, 10);
-        if (!isNaN(ms) && ms >= 0) setIntervalMin(ms / 60000);
-      })
-      .catch(() => {})
-      .finally(() => setLoadingInterval(false));
+      .finally(() => setLoading(false));
   }, []);
 
-  // ── Actions ──
-
-  const handleIntervalSave = async (min: number) => {
-    try {
-      await api.settings.set("synthesis_interval_ms", String(min * 60000), "global-default");
-      setToast("Interval updated ✓");
-    } catch (err: any) {
-      setToast(`Error: ${err.message}`);
-    }
+  const updateProvider = (index: number, patch: Partial<ManagedProviderConfig>) => {
+    setProviders((current) => current.map((provider, providerIndex) => (
+      providerIndex === index ? { ...provider, ...patch } : provider
+    )));
   };
 
-  /**
-   * Save both primary and backup LLM configuration to the global-default project.
-   * For non-custom providers, extracts the model ID and endpoint URL from the
-   * provider metadata. The `__custom__` sentinel signals ad-hoc provider details.
-   */
-  const saveLlmConfig = async () => {
+  const setRole = (index: number, role: ProviderRole) => {
+    setProviders((current) => current.map((provider, providerIndex) => {
+      if (providerIndex === index) {
+        return { ...provider, roles: role === "available" ? ["available"] : ["available", role] };
+      }
+      if (role !== "available" && provider.roles.includes(role)) {
+        return {
+          ...provider,
+          roles: ["available", ...provider.roles.filter((providerRole) => providerRole !== "available" && providerRole !== role)],
+        };
+      }
+      return provider;
+    }));
+  };
+
+  const updateModel = (providerIndex: number, modelIndex: number, model: string) => {
+    setProviders((current) => current.map((provider, index) => {
+      if (index !== providerIndex) return provider;
+      const previousModel = provider.models[modelIndex];
+      const models = provider.models.map((value, currentModelIndex) => currentModelIndex === modelIndex ? model : value);
+      return {
+        ...provider,
+        models,
+        defaultModel: provider.defaultModel === previousModel || !provider.defaultModel ? model : provider.defaultModel,
+      };
+    }));
+  };
+
+  const removeModel = (providerIndex: number, modelIndex: number) => {
+    setProviders((current) => current.map((provider, index) => {
+      if (index !== providerIndex || provider.models.length === 1) return provider;
+      const models = provider.models.filter((_, currentModelIndex) => currentModelIndex !== modelIndex);
+      return {
+        ...provider,
+        models,
+        defaultModel: models.includes(provider.defaultModel) ? provider.defaultModel : models[0] || "",
+      };
+    }));
+  };
+
+  const moveProvider = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= providers.length) return;
+    setProviders((current) => {
+      const next = [...current];
+      [next[index], next[target]] = [next[target]!, next[index]!];
+      return next;
+    });
+  };
+
+  const save = async () => {
     setSaving(true);
-    setLlmStatus("");
+    setStatus("");
     try {
-      let modelId = "";
-      let ep = "";
-
-      if (isCustom) {
-        modelId = customModel;
-        ep = endpoint;
-      } else {
-        const p = providers.find((x) => x.id === providerId);
-        const models = providerModels(p);
-        const model = models.find(([k]) => k === selectedModel) || models[0];
-        modelId = model ? model[1]?.id || "" : "";
-        ep = model ? model[1]?.api?.url || "" : "";
-      }
-
-      await api.settings.set("synthesis_model", modelId, "global-default");
-      await api.settings.set("synthesis_provider", providerId, "global-default");
-      if (apiKeyState) await api.settings.set("synthesis_api_key", apiKeyState, "global-default");
-      await api.settings.set("synthesis_endpoint", ep, "global-default");
-      setEndpoint(ep);
-
-      if (backupProviderId) {
-        await api.settings.set("synthesis_backup_provider", backupProviderId, "global-default");
-        if (backupIsCustom) {
-          if (backupCustomModel)
-            await api.settings.set("synthesis_backup_model", backupCustomModel, "global-default");
-          if (backupCustomEndpoint)
-            await api.settings.set(
-              "synthesis_backup_endpoint",
-              backupCustomEndpoint,
-              "global-default",
-            );
-        } else {
-          const bp = backupProvider;
-          const bModels = providerModels(bp);
-          const bModel = bModels.find(([k]) => k === backupSelectedModel) || bModels[0];
-          const bModelId = bModel ? bModel[1]?.id || "" : "";
-          const bEp = bModel ? bModel[1]?.api?.url || "" : "";
-          if (bModelId)
-            await api.settings.set("synthesis_backup_model", bModelId, "global-default");
-          if (bEp)
-            await api.settings.set("synthesis_backup_endpoint", bEp, "global-default");
-        }
-      }
-      if (backupApiKey)
-        await api.settings.set("synthesis_backup_api_key", backupApiKey, "global-default");
-
-      setLlmStatus("✅ Configuration saved");
-      setToast("LLM config saved ✓");
-    } catch (err: any) {
-      setLlmStatus(`❌ Save failed: ${err.message}`);
+      const providersToSave: ManagedProviderConfig[] = providers.map(
+        (p) => { const { _draftId: _unused, ...rest } = p; return rest as ManagedProviderConfig; },
+      );
+      const response = await api.settings.saveProviderConfigs(providersToSave, "global-default");
+      const refreshed = await api.settings.getProviderConfigs("global-default");
+      setProviders(refreshed.data.providers);
+      setStatus(response.data.warnings.length > 0
+        ? `Saved. ${response.data.warnings.join(" ")}`
+        : "Saved. Restart OpenCode to load provider changes.");
+    } catch (error: unknown) {
+      setStatus(error instanceof Error ? error.message : "Provider configuration could not be saved");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
-  /**
-   * Test both primary and backup LLM connections sequentially via the API's
-   * `testLlm` endpoint. Reports combined status (e.g., "✅ Primary OK | ✅ Backup OK").
-   */
-  const testLlmConnection = async () => {
-    setTesting(true);
-    setLlmStatus("");
+  const saveInterval = async (minutes: number) => {
+    setIntervalMin(minutes);
     try {
-      const modelId = isCustom
-        ? customModel
-        : (() => {
-            const models = primaryModels;
-            const match = models.find(([k]) => k === selectedModel) || models[0];
-            return match?.[1]?.id || selectedModel || providerId;
-          })();
-
-      let status = "";
-      const pr = await api.settings.testLlm(endpoint, modelId, apiKeyState);
-      status = pr.ok ? "✅ Primary OK" : `❌ Primary: ${pr.status || "error"} ${pr.message || ""}`;
-
-      if (backupProviderId) {
-        const bModelId = backupIsCustom
-          ? backupCustomModel
-          : (() => {
-              const models = backupModels;
-              const match = models.find(([k]) => k === backupSelectedModel) || models[0];
-              return match?.[1]?.id || backupSelectedModel || backupProviderId;
-            })();
-        const bEp = backupIsCustom
-          ? backupCustomEndpoint
-          : (backupModels[0]?.[1] as any)?.api?.url || backupCustomEndpoint;
-        const br = await api.settings.testLlm(bEp, bModelId, backupApiKey);
-        status += br.ok
-          ? " | ✅ Backup OK"
-          : ` | ❌ Backup: ${br.status || "error"} ${br.message || ""}`;
-      }
-
-      setLlmStatus(status);
-    } catch (err: any) {
-      setLlmStatus(`❌ ${err.message}`);
+      await api.settings.set("synthesis_interval_ms", String(minutes * 60000), "global-default");
+    } catch (error: unknown) {
+      setStatus(error instanceof Error ? error.message : "Synthesis interval could not be saved");
     }
-    setTesting(false);
   };
-
-  /**
-   * Reusable password input with show/hide toggle.
-   * Defined inline because it captures `showPw` and `togglePw` from the panel scope.
-   */
-  function PwInput({
-    value,
-    onChange,
-    placeholder,
-    name,
-  }: {
-    value: string;
-    onChange: (v: string) => void;
-    placeholder?: string;
-    name: string;
-  }) {
-    return (
-      <div className="flex items-center gap-1">
-        <input
-          type={showPw[name] ? "text" : "password"}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-56 text-[var(--color-text-primary)]"
-        />
-        <button
-          type="button"
-          onClick={() => togglePw(name)}
-          className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] whitespace-nowrap px-1"
-        >
-          {showPw[name] ? "Hide" : "Show"}
-        </button>
-      </div>
-    );
-  }
 
   return (
-    <div>
-      <div className="px-6 pt-5 pb-2">
-        <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">Synthesis LLM</h3>
-        <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-          Select an LLM provider for the self-learning pipeline to synthesize observations into skills
-          and update personality traits.
-        </p>
+    <div className="px-6 py-5">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div>
+          <h3 className="text-base font-semibold text-[var(--color-text-primary)]">LLM Providers</h3>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1 max-w-2xl">
+            Build the provider catalog used by OpenCode and Ingenium. Provider order is preserved;
+            primary and backup roles control synthesis and Chat defaults.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setProviders((current) => [...current, newProvider(current.length)])}
+          className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
+        >
+          + Add provider
+        </button>
       </div>
 
-      {loadingProviders || loadingConfig ? (
-        <div className="px-6 py-4 text-sm text-[var(--color-text-muted)] animate-pulse">
-          Loading provider list...
-        </div>
-      ) : providers.length === 0 && !isCustom ? (
-        <div className="px-6 py-4 text-sm text-[var(--color-warning-text)]">
-          No OpenCode providers detected. Configure a provider or use Custom Provider below.
-        </div>
-      ) : null}
-
-      <SettingRow label="Provider" description="Choose an LLM provider for synthesis">
-        <select
-          value={providerId}
-          onChange={(e) => {
-            const val = e.target.value;
-            setProviderId(val);
-            setIsCustom(val === "__custom__");
-            if (val === "__custom__") {
-              setEndpoint("");
-              setSelectedModel("");
-              setShowCustom(true);
-            } else if (val) {
-              const p = providers.find((x) => x.id === val);
-              const models = providerModels(p);
-              const firstModel = models[0];
-              setEndpoint((firstModel?.[1] as any)?.api?.url || "");
-              setSelectedModel(firstModel?.[0] || "");
-              setShowCustom(false);
-            } else {
-              setSelectedModel("");
-              setShowCustom(false);
-            }
-          }}
-          className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer w-64"
+      {loading ? (
+        <div className="py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse">Loading providers...</div>
+      ) : providers.length === 0 ? (
+        <button
+          type="button"
+          onClick={() => setProviders([newProvider(0)])}
+          className="w-full rounded-xl border border-dashed border-[var(--color-border)] px-6 py-12 text-center text-sm text-[var(--color-text-muted)] hover:border-blue-500 hover:text-[var(--color-text-primary)] cursor-pointer"
         >
-          <option value="">— No LLM (heuristics only) —</option>
-          <option value="__custom__">— Custom Provider —</option>
-          {sortedProviders.map((p) => {
-            const isFree = p.id === "opencode";
+          No providers configured. Add your first provider.
+        </button>
+      ) : (
+        <div className="space-y-4">
+          {providers.map((provider, index) => {
+            const key = draftKey(provider);
+            const isCollapsed = Boolean(collapsed[key]);
+            const priorityRole = getPriorityRole(provider.roles);
             return (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {isFree ? " (Free)" : ""}
-              </option>
+              <section
+                key={key}
+                className={`rounded-xl border bg-[var(--color-surface)] overflow-hidden ${
+                  priorityRole === "primary"
+                    ? "border-blue-500/70"
+                    : priorityRole === "backup"
+                      ? "border-amber-500/70"
+                      : "border-[var(--color-border)]"
+                }`}
+              >
+                <div className="flex items-center gap-3 px-4 py-3 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)]">
+                  <button
+                    type="button"
+                    onClick={() => setCollapsed((current) => ({ ...current, [key]: !isCollapsed }))}
+                    className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer"
+                    aria-label={isCollapsed ? `Expand ${provider.name}` : `Collapse ${provider.name}`}
+                  >
+                    {isCollapsed ? "▸" : "▾"}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-semibold text-[var(--color-text-primary)]">{provider.name || "Unnamed provider"}</span>
+                      {priorityRole !== "available" && (
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                          priorityRole === "primary" ? "bg-blue-500/15 text-blue-500" : "bg-amber-500/15 text-amber-500"
+                        }`}>
+                          {priorityRole}
+                        </span>
+                      )}
+                      {!provider.enabled && <span className="text-[10px] uppercase text-[var(--color-text-muted)]">Disabled</span>}
+                    </div>
+                    <div className="truncate font-mono text-[11px] text-[var(--color-text-muted)]">{provider.id}</div>
+                  </div>
+                  <button type="button" onClick={() => moveProvider(index, -1)} disabled={index === 0} className="px-1 text-sm text-[var(--color-text-muted)] disabled:opacity-30 cursor-pointer" aria-label={`Move ${provider.name} up`}>↑</button>
+                  <button type="button" onClick={() => moveProvider(index, 1)} disabled={index === providers.length - 1} className="px-1 text-sm text-[var(--color-text-muted)] disabled:opacity-30 cursor-pointer" aria-label={`Move ${provider.name} down`}>↓</button>
+                  <button
+                    type="button"
+                    onClick={() => setProviders((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+                    className="ml-1 rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 cursor-pointer"
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                {!isCollapsed && (
+                  <div className="p-4 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                        Display name
+                        <input value={provider.name} onChange={(event) => updateProvider(index, { name: event.target.value })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)]" />
+                      </label>
+                      <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                        Provider ID
+                        <input value={provider.id} onChange={(event) => updateProvider(index, { id: event.target.value.toLowerCase() })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-text-primary)]" />
+                      </label>
+                      <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                        Provider package
+                        <select value={provider.npm} onChange={(event) => updateProvider(index, { npm: event.target.value })} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                          {PACKAGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label} ({value})</option>)}
+                        </select>
+                      </label>
+                      <label className="text-xs font-medium text-[var(--color-text-secondary)]">
+                        Role
+                        <select value={priorityRole} onChange={(event) => setRole(index, event.target.value as ProviderRole)} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                          <option value="available">Available in OpenCode</option>
+                          <option value="primary">Primary for Ingenium</option>
+                          <option value="backup">Backup for Ingenium</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
+                      Base URL <span className="font-normal text-[var(--color-text-muted)]">(optional for native providers)</span>
+                      <input value={provider.baseURL} onChange={(event) => updateProvider(index, { baseURL: event.target.value })} placeholder="https://api.provider.com/v1" className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)]" />
+                    </label>
+
+                    <label className="block text-xs font-medium text-[var(--color-text-secondary)]">
+                      API key
+                      <div className="mt-1 flex gap-2">
+                        <input
+                          type={visibleKeys[key] ? "text" : "password"}
+                          value={provider.apiKey || ""}
+                          onChange={(event) => updateProvider(index, { apiKey: event.target.value || undefined })}
+                          placeholder={provider.apiKey === ""
+                            ? "Saved key will be cleared"
+                            : provider.apiKeySet ? "Saved key (leave blank to keep)" : "API key"}
+                          autoComplete="off"
+                          className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                        />
+                        <button type="button" onClick={() => setVisibleKeys((current) => ({ ...current, [key]: !current[key] }))} className="rounded border border-[var(--color-border)] px-3 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
+                          {visibleKeys[key] ? "Hide" : "Show"}
+                        </button>
+                        {provider.apiKeySet && (
+                          <button
+                            type="button"
+                            onClick={() => updateProvider(index, { apiKey: provider.apiKey === "" ? undefined : "" })}
+                            className="rounded border border-red-500/40 px-3 text-xs text-red-500 hover:bg-red-500/10 cursor-pointer"
+                          >
+                            {provider.apiKey === "" ? "Keep saved key" : "Clear saved key"}
+                          </button>
+                        )}
+                      </div>
+                    </label>
+
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-xs font-medium text-[var(--color-text-secondary)]">Models</span>
+                        <button type="button" onClick={() => updateProvider(index, { models: [...provider.models, ""] })} className="text-xs font-medium text-blue-500 hover:underline cursor-pointer">+ Add model</button>
+                      </div>
+                      <div className="space-y-2">
+                        {provider.models.map((model, modelIndex) => (
+                          <div key={modelIndex} className="flex items-center gap-2">
+                            <input type="radio" name={`default-model-${index}`} checked={provider.defaultModel === model && Boolean(model)} onChange={() => updateProvider(index, { defaultModel: model })} aria-label={`Use ${model || `model ${modelIndex + 1}`} as default`} />
+                            <input value={model} onChange={(event) => updateModel(index, modelIndex, event.target.value)} placeholder="model-id" className="min-w-0 flex-1 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-text-primary)]" />
+                            <button type="button" onClick={() => removeModel(index, modelIndex)} disabled={provider.models.length === 1} className="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-500/10 disabled:opacity-30 cursor-pointer">Remove</button>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">Select the radio button beside the default model.</p>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs font-medium text-[var(--color-text-secondary)] cursor-pointer">
+                      <input type="checkbox" checked={provider.enabled} onChange={(event) => updateProvider(index, { enabled: event.target.checked })} />
+                      Enabled in OpenCode
+                    </label>
+                  </div>
+                )}
+              </section>
             );
           })}
-        </select>
-      </SettingRow>
+        </div>
+      )}
 
-      {!isCustom && providerId && primaryModels.length > 0 && (
-        <SettingRow label="Model" description="Select a specific model from this provider">
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value)}
-            className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer w-64"
-          >
-            {primaryModels.map(([key, val]) => (
-              <option key={key} value={key}>
-                {key} {(val as any)?.id ? `(${(val as any).id})` : ""}
-              </option>
-            ))}
+      <div className="mt-6 border-t border-[var(--color-border)] pt-5">
+        <SettingRow label="Synthesis schedule" description="How often Ingenium processes observations">
+          <select value={String(intervalMin)} onChange={(event) => saveInterval(Number(event.target.value))} className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+            <option value="5">5 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">1 hour</option>
+            <option value="240">4 hours</option>
+            <option value="0">Disabled</option>
           </select>
         </SettingRow>
-      )}
-
-      {!isCustom && providerId && (
-        <SettingRow
-          label="API Key"
-          description={
-            providerId === "opencode"
-              ? "Optional for free tier"
-              : "API key for this provider"
-          }
-        >
-          <PwInput
-            name="synthesisApiKey"
-            value={apiKeyState}
-            onChange={setApiKeyState}
-            placeholder="sk-..."
-          />
-        </SettingRow>
-      )}
-
-      {/* Custom provider (collapsible) — uses __custom__ sentinel to toggle between predefined and ad-hoc provider */}
-      <div className="border-t border-[var(--color-border)]">
-        <button
-          type="button"
-          onClick={() => setShowCustom(!showCustom)}
-          className="w-full flex items-center gap-2 px-6 py-3 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] text-left cursor-pointer"
-        >
-          {showCustom ? "▾" : "▸"} Custom Provider
-        </button>
-        {showCustom && (
-          <div className="px-6 pb-4 space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                Base URL
-              </label>
-              <input
-                type="text"
-                value={endpoint}
-                onChange={(e) => setEndpoint(e.target.value)}
-                placeholder="https://api.myprovider.com/v1"
-                className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-full text-[var(--color-text-primary)]"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                  Model ID
-                </label>
-                <input
-                  type="text"
-                  value={isCustom ? customModel : ""}
-                  onChange={(e) => {
-                    setCustomModel(e.target.value);
-                    if (!isCustom) setIsCustom(true);
-                  }}
-                  placeholder="model-id"
-                  className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-full text-[var(--color-text-primary)]"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                  API Key
-                </label>
-                <PwInput
-                  name="synthesisApiKey"
-                  value={apiKeyState}
-                  onChange={setApiKeyState}
-                  placeholder="sk-..."
-                />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {loadingInterval ? (
-        <div className="px-6 py-4 text-sm text-[var(--color-text-muted)] animate-pulse">
-          Loading interval...
-        </div>
-      ) : (
-        <SettingRow label="Run every" description="How often the synthesis pipeline runs">
-          <div className="flex items-center gap-2">
-            <select
-              value={String(intervalMin)}
-              onChange={(e) => {
-                const min = Number(e.target.value);
-                setIntervalMin(min);
-                handleIntervalSave(min);
-              }}
-              className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
-            >
-              <option value="5">5 minutes</option>
-              <option value="15">15 minutes</option>
-              <option value="30">30 minutes</option>
-              <option value="60">1 hour</option>
-              <option value="240">4 hours</option>
-              <option value="0">Disabled</option>
-            </select>
-          </div>
-        </SettingRow>
-      )}
-
-      {/* Backup Provider (collapsible) — fallback if primary LLM is unreachable */}
-      <div className="border-t border-[var(--color-border)]">
-        <button
-          type="button"
-          onClick={() => setShowBackup(!showBackup)}
-          className="w-full flex items-center gap-2 px-6 py-3 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] text-left cursor-pointer"
-        >
-          {showBackup ? "▾" : "▸"} Backup Provider (fallback)
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={save} disabled={saving || loading} className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
+          {saving ? "Saving..." : "Save providers"}
         </button>
-        {showBackup && (
-          <div className="px-6 pb-4 space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                Provider
-              </label>
-              <select
-                value={backupProviderId}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setBackupProviderId(val);
-                  setBackupIsCustom(val === "__custom__");
-                  if (val === "__custom__") {
-                    setBackupSelectedModel("");
-                  } else if (val) {
-                    const p = providers.find((x) => x.id === val);
-                    const models = providerModels(p);
-                    setBackupSelectedModel(models[0]?.[0] || "");
-                  } else {
-                    setBackupSelectedModel("");
-                  }
-                }}
-                className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer w-64"
-              >
-                <option value="">— None —</option>
-                <option value="__custom__">— Custom Provider —</option>
-                {sortedProviders.map((p) => {
-                  const isFree = p.id === "opencode";
-                  return (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {isFree ? " (Free)" : ""}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-
-            {backupIsCustom && (
-              <div className="space-y-3 p-3 bg-[var(--color-surface-muted)] rounded border border-[var(--color-border)]">
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                    Endpoint
-                  </label>
-                  <input
-                    type="text"
-                    value={backupCustomEndpoint}
-                    onChange={(e) => setBackupCustomEndpoint(e.target.value)}
-                    placeholder="https://api.myprovider.com/v1"
-                    className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-full text-[var(--color-text-primary)]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                    Model ID
-                  </label>
-                  <input
-                    type="text"
-                    value={backupCustomModel}
-                    onChange={(e) => setBackupCustomModel(e.target.value)}
-                    placeholder="model-id"
-                    className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-full text-[var(--color-text-primary)]"
-                  />
-                </div>
-              </div>
-            )}
-
-            {backupProviderId && backupModels.length > 0 && !backupIsCustom && (
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                  Model
-                </label>
-                <select
-                  value={backupSelectedModel}
-                  onChange={(e) => setBackupSelectedModel(e.target.value)}
-                  className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer w-64"
-                >
-                  {backupModels.map(([key, val]) => (
-                    <option key={key} value={key}>
-                      {key} {(val as any)?.id ? `(${(val as any).id})` : ""}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {backupProviderId && (
-              <div>
-                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                  API Key
-                  {backupProviderId === "opencode" ? (
-                    <span className="font-normal ml-1">(optional for free tier)</span>
-                  ) : (
-                    ""
-                  )}
-                </label>
-                <PwInput
-                  name="backupApiKey"
-                  value={backupApiKey}
-                  onChange={setBackupApiKey}
-                  placeholder="sk-..."
-                />
-              </div>
-            )}
-          </div>
-        )}
+        {status && <span role="status" className="text-sm text-[var(--color-text-secondary)]">{status}</span>}
       </div>
-
-      <div className="px-6 py-4 border-t border-[var(--color-border)] flex items-center gap-3">
-        <button
-          onClick={saveLlmConfig}
-          disabled={saving}
-          className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
-        >
-          {saving ? "Saving..." : "Save"}
-        </button>
-        <button
-          onClick={testLlmConnection}
-          disabled={testing || !endpoint}
-          className="bg-[var(--color-surface)] text-[var(--color-text-primary)] px-4 py-1.5 rounded text-sm border border-[var(--color-border)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50 cursor-pointer"
-        >
-          {testing ? "Testing..." : "Test Connection"}
-        </button>
-        {llmStatus && (
-          <span
-            className={`text-sm ${
-              llmStatus.startsWith("✅")
-                ? "text-[var(--color-success-text)]"
-                : "text-[var(--color-error-text)]"
-            }`}
-          >
-            {llmStatus}
-          </span>
-        )}
-      </div>
-
-      {!loadingProviders && !loadingConfig && (
-        <div className="px-6 py-3 text-xs text-[var(--color-text-muted)] space-y-1">
-          {isCustom && customModel && endpoint && (
-            <div>
-              Using custom provider: <strong>{endpoint}</strong> model:{" "}
-              <strong>{customModel}</strong>
-            </div>
-          )}
-          {!isCustom && selectedProvider && (
-            <div>
-              Using <strong>{selectedModel || Object.keys(selectedProvider.models || {})[0]}</strong>{" "}
-              from {selectedProvider.name} via {endpoint}
-            </div>
-          )}
-          {providerId ? (
-            <div>
-              Synthesis runs every {intervalMin} minutes — observes → analyzes → creates/updates
-              skills. Current mode: <strong>LLM-driven skill synthesis</strong>
-            </div>
-          ) : (
-            <div>
-              Current mode: <strong>Heuristic trait-only synthesis</strong>. Observations still
-              processed into personality traits.
-            </div>
-          )}
-        </div>
-      )}
-
-      {toast && (
-        <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg z-50 text-sm">
-          {toast}
-        </div>
-      )}
     </div>
   );
 }

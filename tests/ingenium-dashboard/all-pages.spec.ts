@@ -501,52 +501,35 @@ test.describe("Settings Page", () => {
     await expect(page.locator('input[type="number"]')).toBeVisible();
   });
 
-  test("Synthesis LLM section has provider and model selectors", async ({ page }) => {
-    await goto(page, "/settings");
+  test("Providers settings exposes repeatable provider blocks", async ({ page }) => {
+    await goto(page, "/?settings=providers");
 
-    await expect(page.getByText("Synthesis LLM")).toBeVisible();
-
-    // Provider dropdown
-    const providerSelect = page.locator("select").first();
-    await expect(providerSelect).toBeVisible();
-
-    // Model dropdown
-    const modelSelect = page.locator("select").nth(1);
-    await expect(modelSelect).toBeVisible();
+    await expect(page.getByRole("heading", { name: "LLM Providers" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "+ Add provider" })).toBeVisible();
   });
 
   test("interval selector is present", async ({ page }) => {
-    await goto(page, "/settings");
+    await goto(page, "/?settings=providers");
 
-    await page.waitForTimeout(500);
-
-    // "Run every" combobox
-    await expect(page.getByText("Run every")).toBeVisible();
+    await expect(page.getByText("Synthesis schedule")).toBeVisible();
     const intervalSelect = page.locator("select").filter({ hasText: /minutes|hour|Disabled/ }).first();
     await expect(intervalSelect).toBeVisible();
   });
 
-  test("Save and Test Connection buttons exist", async ({ page }) => {
-    await goto(page, "/settings");
+  test("Save providers button exists", async ({ page }) => {
+    await goto(page, "/?settings=providers");
 
-    await expect(page.getByRole("button", { name: "Save" }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "Test Connection" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save providers" })).toBeVisible();
   });
 
-  test("backup provider section is collapsible", async ({ page }) => {
-    await goto(page, "/settings");
+  test("provider blocks are collapsible", async ({ page }) => {
+    await goto(page, "/?settings=providers");
+    const addButton = page.getByRole("button", { name: "+ Add provider" });
+    await addButton.click();
 
-    await page.waitForTimeout(500);
-
-    const backupToggle = page.getByRole("button", { name: /Backup Provider/i });
-    await expect(backupToggle).toBeVisible();
-
-    // Click to expand if collapsed
-    await backupToggle.click();
-    await page.waitForTimeout(300);
-
-    // Should show backup provider fields
-    const backupProviderSelect = page.locator("select").filter({ hasText: /Custom Provider|DeepSeek|OpenAI/ }).first();
-    await expect(backupProviderSelect).toBeVisible({ timeout: 3000 });
+    const collapse = page.getByRole("button", { name: /Collapse Provider/ }).last();
+    await expect(collapse).toBeVisible();
+    await collapse.click();
+    await expect(page.getByRole("button", { name: /Expand Provider/ }).last()).toBeVisible();
   });
 });

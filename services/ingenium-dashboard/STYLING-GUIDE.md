@@ -261,6 +261,7 @@ The Settings panel is a full-screen overlay (not a separate page). It uses the O
 |---------|-------|
 | Container | `fixed inset-0 z-50` with 16px margin, `rounded-lg shadow-2xl` |
 | Backdrop | `bg-black/50` |
+| Container Height | `h-[85vh]` fixed (not `max-h`) — prevents modal from resizing; tabs scroll internally via `overflow-y-auto` on the content panel |
 | Two-column | Sidebar `w-64 shrink-0` + Content `flex-1 overflow-y-auto` |
 | Animation | `animate-fadeIn` 200ms fade + scale 0.95→1 (via `<style jsx>`) |
 
@@ -289,15 +290,67 @@ Each setting row uses the `SettingRow` component:
 ### Tab Panels
 - **GeneralPanel**: Theme + Archive retention
 - **MailPanel**: OAuth credentials + sync intervals + window sizes
-- **PipelinePanel**: Synthesis LLM configuration (provider/model/key/custom/backup/test)
+- **PipelinePanel**: LLM provider catalog management (repeatable blocks, model lists, primary/backup roles)
 - **ConfigPanel**: Link to /config editor
 - All other tabs: `PlaceholderPanel` — centered icon + "No settings for {label} yet"
+
+### PipelinePanel — Draft Lifecycle & Hidden Panels
+
+The PipelinePanel manages a local `providers` state array of `DraftProvider` objects (a `ManagedProviderConfig` extended with a `_draftId` field for stable React keys). All edits (add, remove, reorder, collapse, field edits) are applied to this local state only.
+
+| Aspect | Behavior |
+|--------|----------|
+| **Save** | Clicking "Save providers" strips `_draftId` from each provider via destructuring and calls `api.settings.saveProviderConfigs()`. On success, it re-fetches the saved config from the API to replace local state. |
+| **Discard on close** | Closing the overlay unmounts all tab panels — local state is lost. Unsaved provider edits are discarded. |
+| **Survive tab switch** | Tab panels are rendered in a loop with `hidden` + `inert` attributes on inactive tabs (not unmounted). React state persists across tab switches within the same overlay session. |
+| **Collapse/expand** | Each provider block has a collapse toggle (▸/▾) tracked in a `collapsed` React state map keyed by `draftKey(provider)`. Collapsed blocks hide their fields. |
+| **API key visibility** | A separate `visibleKeys` state map toggles show/hide for each provider's API key field. |
+| **Empty state** | When no providers exist, a dashed-border placeholder card reads "No providers configured. Add your first provider." Clicking it adds one. |
+
+**Stable React keys for editable ID fields**: The `draftKey()` function uses `_draftId` (generated via `crypto.randomUUID()`) instead of the provider's `id` field so that editing the user-facing ID does not trigger a React key change (which would destroy and recreate the DOM element and its focus state).
+
+**Provider block borders**:
+| Role | Border color |
+|------|-------------|
+| Primary | `border-blue-500/70` |
+| Backup | `border-amber-500/70` |
+| Available | `border-[var(--color-border)]` |
 
 ### Adding a New Settings Tab
 1. Add an entry to `ALL_TABS` in `tabs.ts`
 2. Add a pathname mapping in `tabForPathname()` if routing-based auto-select is desired
 3. Create a panel component following the `SettingRow` pattern
 4. Wire it into `TAB_PANELS` in `SettingsOverlay.tsx`
+
+## Canonical Markdown Renderer — MarkdownDocument
+
+> 🔴 **Hard rule**: All Markdown rendering must use `MarkdownDocument` from `components/MarkdownDocument.tsx`. Never write inline `marked`/`DOMPurify` calls in page or component code.
+
+The `MarkdownDocument` component is the single source of truth for rendering Markdown in the dashboard. It uses:
+
+- **`marked`** with `gfm: true` for GFM (tables, strikethrough, task lists)
+- **`DOMPurify`** for sanitization (allowed tags and attributes explicitly configured)
+- **`prose prose-sm max-w-none dark:prose-invert`** for typography — dark mode is handled automatically by the prose-invert variant
+- Custom pre-processing for `[[page-slug]]` internal links and `> **Note:**` callout blocks
+
+### Consumers
+
+| Component | Mode | Notes |
+|-----------|------|-------|
+| `DocsEditor` | View & Split | Replaced inline renderMarkdown |
+| `MarkdownViewer` | Preview | Replaced custom regex-based parser |
+| Proposal comparison | N/A | Intentional exception — raw `<pre>` blocks, no Markdown rendering |
+
+### Dark Mode
+
+Dark-mode typography is handled entirely by Tailwind's `dark:prose-invert` class. No custom CSS variables or theme tokens are needed for Markdown body text. The component uses `text-[var(--color-text-primary)]` as a fallback for any non-prose elements.
+
+### Adding a New Consumer
+
+1. Import `MarkdownDocument` from `@/app/components/MarkdownDocument`
+2. Pass `content` (raw Markdown string) and optional `className`
+3. Do NOT add wrapping `bg`, `border`, or `shadow` containers — the prose styling is self-contained
+4. Do NOT use `dangerouslySetInnerHTML` with custom renderers — always use `MarkdownDocument`
 
 ## Dark Mode Badge / Pill Pattern
 
@@ -346,7 +399,7 @@ Each hue generates: `bg-{hue}-100 text-{hue}-700 dark:bg-{hue}-500/20 dark:text-
 3. **Nav uses `border-b` not `shadow`**. Flat design, not elevated.
 4. **All text must use gray-900/600/500 scale**. No custom hex colors in components.
 5. **Cards never have shadows** by default — only on hover via `hover:shadow-md transition-shadow`. Both classes must always appear together. No exceptions.
-6. **Page max-width is `max-w-6xl`**. No full-width layouts beyond navigation.
+6. **Page max-width is `max-w-6xl`**. No full-width layouts beyond navigation. Exception: `/chat` uses a full-bleed layout.
 7. **Every card on every page must have `hover:shadow-md transition-shadow`**. This includes settings cards, MCP server rows, MCP category cards, observations, pipeline events, and any other card-based element. If a new page adds cards, they MUST follow this rule.
 8. **Always use explicit border colors for critical borders**. Never use bare `border`/`border-t`/`divide-y` without an explicit border-color utility for visually important separators. The global default covers minor borders.
 9. **Must pair every `ring-offset-{n}` with `ring-offset-[var(--color-surface)]`**. Tailwind's default `--tw-ring-offset-color` is `#fff`, which creates a white halo in dark mode. This was fixed on the logs and pipeline pages and must be followed for any new `ring-offset` usage.
@@ -749,6 +802,73 @@ At narrow pane widths (below ~300px), the body snippet line is visually clipped 
 | Subject (read) | `text-[var(--color-text-secondary)] truncate` |
 | Body snippet | `text-sm text-[var(--color-text-muted)] truncate mt-0.5` |
 
+## Secrets Page (`/secrets`)
+
+The Secrets page implements a vault-based password manager with five distinct states.
+
+### Page-Level States
+
+| State | When | Display |
+|-------|------|---------|
+| **Loading** | Checking vault status via `GET /api/v1/vault/status` | Title + "Checking vault status..." text |
+| **First-run (sealed + not initialized)** | `sealed === true && initialized === false` | "Create Your Vault" CTA card + `CreateVaultModal` |
+| **Sealed (initialized)** | `sealed === true && initialized === true` | "Unseal Vault" CTA card + `UnsealModal` |
+| **Error (non-sealed)** | `error && !sealed` | Error panel + "Retry" button |
+| **Unsealed** | `sealed === false` | 3-pane layout: FolderTree \| ItemList \| ItemDetail |
+
+### CreateVaultModal — Validation States
+
+The CreateVaultModal (`components/CreateVaultModal.tsx`) is a passphrase creation dialog shown on first run. It has four validation dimensions and a checkbox gate:
+
+| State | Visual Indicator | Derivation |
+|-------|-----------------|------------|
+| **Empty** | Both fields empty, placeholder text shown ("At least 12 characters") | `passphrase.length === 0 && confirmation.length === 0` |
+| **Too short** | Passphrase field shows red `(n/12)` counter below input. `aria-invalid` set on input. | `passphrase.length > 0 && passphrase.length < 12` |
+| **Mismatch** | Confirmation shows red "Passphrases do not match" text. `aria-invalid` set on confirmation input. | `passphrase.length > 0 && confirmation.length > 0 && passphrase !== confirmation` |
+| **Match** | Green checkmark SVG + "Passphrases match" text | `passphrase.length > 0 && confirmation.length > 0 && passphrase === confirmation && passphrase.length >= 12` |
+| **Length OK** | Hint text turns green | `passphrase.length >= 12` |
+
+**Form gating logic**:
+```typescript
+const passwordsMatch = passphrase === confirmation && passphrase.length >= 12;
+const canSubmit = acknowledged && passwordsMatch && !loading;
+```
+
+The submit button is disabled until all three conditions are met: acknowledgement checkbox checked, passwords match and valid length, and not currently saving.
+
+### CreateVaultModal Layout
+
+| Element | Styling |
+|---------|---------|
+| Backdrop | `fixed inset-0 bg-black/50 z-50 flex items-center justify-center` |
+| Dialog card | `bg-[var(--color-surface)] p-6 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto` |
+| Lock icon | `w-10 h-10 text-blue-500` centered above title |
+| Warning banner | `bg-amber-50 border border-amber-200 p-3 rounded text-sm text-amber-800` with "No recovery key exists" message |
+| Passphrase input | `w-full border border-[var(--color-border)] rounded px-3 py-2 pr-10 text-sm` with show/hide toggle button |
+| Confirmation input | Same as passphrase input, with match/mismatch hint |
+| Checkbox | Standard `<input type="checkbox">` with label "I understand there is no passphrase recovery" |
+| Actions | Cancel (ghost) + "Create & Unseal Vault" (blue primary, `disabled:opacity-50`) |
+
+### UnsealModal Layout
+
+Simpler than CreateVaultModal — single passphrase field, no confirmation, no checkbox.
+
+| Element | Styling |
+|---------|---------|
+| Dialog card | `bg-[var(--color-surface)] p-6 rounded-lg shadow-xl w-96` |
+| Passphrase input | Same styling as CreateVaultModal |
+| Actions | Cancel (ghost) + "Unseal Vault" (blue primary, `disabled:opacity-50` until non-empty) |
+
+### 3-Pane Unsealed Layout
+
+| Pane | Width | Background | Content |
+|------|-------|------------|---------|
+| FolderTree | `w-56` | `bg-[var(--color-surface-muted)]` with `border-r` | Collapsible folder tree |
+| ItemList | `w-72` | surface with `border-r` | Filtered item list, "New item" button |
+| ItemDetail | `flex-1` | surface | Selected item details (CRUD) |
+
+The container uses `h-[calc(100dvh-160px)]` for full-viewport height with a `rounded` border and `overflow-hidden`. The Lock Vault button sits in the page header alongside the page title.
+
 ### `startX`/`startWidth` Ref-Based Resize Pattern
 
 Resizable panels (EmailList pane, reply composer) use a `useRef<{ startX: number; startWidth: number }>` pattern for pointer-driven resize:
@@ -778,7 +898,83 @@ const onPointerMove = useCallback((e: React.PointerEvent) => {
 - Use `w-2 cursor-col-resize hover:bg-blue-200 active:bg-blue-400 transition-colors shrink-0` on the drag handle
 - `role="separator"` with `aria-orientation="vertical"` and `aria-valuenow` for accessibility
 
-### SmartSuggest Variant Summary
+## Chat Page (`/chat`)
+
+The Chat page at `/chat` uses a full-bleed layout (`max-w-full`, no `max-w-6xl` constraint). All chat UI components live under `app/chat/components/`.
+
+### Header Selectors — Disabled States
+
+The ChatHeader renders three selectors (Provider, Model, Agent) plus an optional Variant selector. All three main selectors accept a `disabled` prop controlled by `ChatShell.selectorsDisabled`:
+
+```
+selectorsDisabled = chatConfigLoading || !!chatConfigError || !hasSelectableModel
+```
+
+| State | Visual | Condition |
+|-------|--------|-----------|
+| **Loading** | `disabled:opacity-40 disabled:cursor-not-allowed` on each `<select>` | `chatConfigLoading === true` |
+| **Error** | Same disabled styling + red error banner | `chatConfigError` is truthy |
+| **No providers** | Same disabled styling + blue banner linking to Settings | `hasSelectableModel === false` (availableProviders.length === 0) |
+| **Normal** | Standard select styling | Provider and model available |
+
+Disabled selectors all use the base select styling plus:
+```html
+<select disabled className="... disabled:opacity-40 disabled:cursor-not-allowed">
+```
+
+When `providers.length === 0`, the select shows a placeholder option:
+```html
+<option value="">No providers available</option>
+```
+
+The same empty option pattern applies to models and agents when their respective arrays are empty.
+
+### Free Model Badge
+
+Providers with `source === "builtin"` display a `(Free)` badge appended to their label in both desktop and mobile selectors:
+
+```
+{p.label}{p.source === "builtin" ? " (Free)" : ""}
+```
+
+The `source` field is set by the API's `ChatConfigResponse.providers[].source`. Built-in providers are auto-discovered from the OpenCode Zen free tier and require no API key.
+
+### ChatInput — No-Model Guard
+
+The `ChatInput` component has a `hasSelectableModel` prop. When `false`:
+- The send button is disabled (even if text is entered): `disabled={!hasText || !hasSelectableModel}`
+- Enter key does not send: `if (!hasSelectableModel) return;`
+- The handler `handleSend` returns early: `if (!hasSelectableModel) return;`
+
+The `ChatShell` passes `hasSelectableModel={availableProviders.length > 0}`.
+
+### Assistant Messages — Unboxed (No Card Wrapper)
+
+Assistant messages render **without** a card container — no `bg-white`, no `rounded`, no `border`, no `shadow`. The message text spans the full-width content area with left-aligned text and generous line height:
+
+| Property | Value | Tailwind |
+|----------|-------|----------|
+| Container | None (unboxed) | No `bg-*`, `rounded`, `border`, or `shadow` |
+| Text | 14px, relaxed leading | `text-sm leading-relaxed` |
+| Padding | 8px horizontal | `px-2` |
+| Color | Primary text token | `text-[var(--color-text-primary)]` |
+| Code blocks | Surface-muted background | `bg-[var(--color-surface-muted)]` |
+
+User messages are right-aligned with a blue accent background, distinguishing them from the unboxed assistant messages.
+
+### Chat Action Row
+
+Each assistant message has an action row beneath the text with three controls:
+
+| Element | Style | Notes |
+|---------|-------|-------|
+| **Copy icon** | `w-4 h-4 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer` | Copies message content |
+| **Retry button** | Icon-only (SVG), same sizing as Copy | No text label — compact |
+| **Model attribution** | `text-xs text-[var(--color-text-muted)]` | Right-aligned in the action row, shows model name |
+
+### Dark Mode
+
+Chat uses the same `--color-*` token system as the rest of the dashboard. No special dark-mode classes needed — tokens adapt automatically when `.dark` is applied to `<html>`.
 
 | Variant | When Used | Layout | Key Classes |
 |---------|-----------|--------|-------------|

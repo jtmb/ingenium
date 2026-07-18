@@ -21,7 +21,7 @@ export function getConfig(projectId: string, type: "project" | "global"): Config
  * even if the filesystem is read-only or the path is invalid.
  */
 export function saveConfig(projectId: string, type: "project" | "global", content: string): Config {
-  return execTransaction(() => {
+  const config = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const now = new Date().toISOString();
     const existing = db.prepare("SELECT * FROM configs WHERE project_id = ? AND type = ?").get(projectId, type) as Config | undefined;
@@ -46,9 +46,10 @@ export function saveConfig(projectId: string, type: "project" | "global", conten
       const cfgErrStack = e instanceof Error ? e.stack : undefined;
       logger.warn("configs", `Failed to write config to disk: ${cfgErrMsg}`, { error: cfgErrMsg, name: cfgErrName, stack: cfgErrStack?.split("\n").slice(0, 5).join("\n") });
     }
-    checkpointAfterWrite();
     return db.prepare("SELECT * FROM configs WHERE project_id = ? AND type = ?").get(projectId, type) as Config;
   });
+  checkpointAfterWrite();
+  return config;
 }
 
 /**

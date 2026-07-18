@@ -117,6 +117,20 @@ db.close();
     supervisorctl start opencode-web 2>/dev/null || true
   fi
 fi
+# Ensure ingenium-chat agent is available to OpenCode runtime
+# OpenCode scans its worktree's .opencode/agents/ for agent definitions.
+# The agent file at /app/.opencode/agents/ is invisible to OpenCode because
+# the worktree is /workspace (mounted volume). Copy it to /workspace so
+# OpenCode discovers it at startup.
+mkdir -p /workspace/.opencode/agents
+cp /app/.opencode/agents/chat/ingenium-chat.md /workspace/.opencode/agents/ingenium-chat.md 2>/dev/null || true
+
+# Ensure ingenium-llm-broker agent is available to OpenCode runtime
+if [ -f /app/.opencode/agents/execution/ingenium-llm-broker.md ]; then
+  mkdir -p /workspace/.opencode/agents
+  cp /app/.opencode/agents/execution/ingenium-llm-broker.md /workspace/.opencode/agents/ingenium-llm-broker.md 2>/dev/null || true
+fi
+
 # Keep container alive as PID 1. Normally `exec supervisord` would serve
 # this role, but we backgrounded it above to run setup steps. `wait` is
 # the POSIX-compliant way to block indefinitely on the background process

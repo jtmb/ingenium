@@ -2,9 +2,11 @@
 
 import { useEffect, useRef } from "react";
 
+export type OpenCodeToolbarMode = "web" | "cli";
+
 interface OpenCodeToolbarProps {
-  mode: "web" | "cli";
-  onModeChange: (newMode: "web" | "cli") => void;
+  mode: OpenCodeToolbarMode;
+  onModeChange: (newMode: OpenCodeToolbarMode) => void;
   isLoaded: boolean;
 }
 
@@ -15,7 +17,7 @@ interface OpenCodeToolbarProps {
  * and a status indicator (green=loaded, red=loading). Replaces the old
  * floating glass OpenCodeSwitch tab.
  *
- * Keyboard shortcut: Ctrl+Shift+` toggles Web/CLI mode.
+ * Keyboard shortcut: Ctrl+Shift+` toggles Web ↔ CLI mode.
  */
 export default function OpenCodeToolbar({
   mode,
@@ -35,7 +37,7 @@ export default function OpenCodeToolbar({
   const onModeChangeRef = useRef(onModeChange);
   onModeChangeRef.current = onModeChange;
 
-  // Global keyboard shortcut: Ctrl+Shift+` — registered once, reads refs for current values
+  // Global keyboard shortcut: Ctrl+Shift+` — toggles Web ↔ CLI
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.code === "Backquote") {
@@ -70,8 +72,9 @@ export default function OpenCodeToolbar({
 
   return (
     <div className="flex items-center justify-between px-3 h-9 bg-[var(--color-surface)] border-b border-[var(--color-border)] shrink-0 select-none">
-      {/* Left: Segmented Web/CLI toggle */}
-      <div className="flex items-center">
+      {/* Left: Web | CLI toggle */}
+      <div className="flex items-center gap-2">
+        {/* Segmented Web | CLI toggle */}
         <div className="flex rounded-md border border-[var(--color-border)] overflow-hidden">
           <button
             type="button"
@@ -85,6 +88,7 @@ export default function OpenCodeToolbar({
             ].join(" ")}
             aria-pressed={mode === "web"}
             aria-label="Switch to Web mode"
+            data-testid="chat-toolbar-mode-web"
           >
             Web
           </button>
@@ -100,6 +104,7 @@ export default function OpenCodeToolbar({
             ].join(" ")}
             aria-pressed={mode === "cli"}
             aria-label="Switch to CLI mode"
+            data-testid="chat-toolbar-mode-cli"
           >
             CLI
           </button>

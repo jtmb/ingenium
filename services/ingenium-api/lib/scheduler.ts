@@ -155,8 +155,18 @@ function getMailSyncInterval(): number {
 
 async function triggerMailSyncForAllProjects(): Promise<void> {
   try {
+    // Guard: skip mail sync entirely if no global project exists.
+    // The engine requires a global project for account storage — without it,
+    // every call to getGlobalProjectId() would throw.
+    let globalId: string;
+    try {
+      globalId = getGlobalProjectId();
+    } catch {
+      logger.debug("mail-sync", "Skipping mail sync — no global project configured");
+      return;
+    }
+
     const engineStatus = getEngineStatus();
-    const globalId = getGlobalProjectId();
     const accounts = listAccounts(globalId);
 
     if (!engineStatus.running || !engineStatus.heartbeatAt) {

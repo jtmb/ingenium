@@ -24,52 +24,55 @@ import { config } from "../../config/index.js";
  * `clearRateLimitEntries()` drops the entire map.
  */
 const MAX_ENTRIES = 10_000;
-const requestCounts = new Map<string, { count: number; resetAt: number }>();
 
-/** Sweep expired entries — called when map crosses the threshold. */
-function pruneStaleEntries(now: number): void {
-  for (const [ip, entry] of requestCounts) {
-    if (now > entry.resetAt) {
-      requestCounts.delete(ip);
+export function createRateLimiter(maxRequests: number, windowMs = 60_000) {
+  const requestCounts = new Map<string, { count: number; resetAt: number }>();
+
+  const rateLimiter = (req: Request, res: Response, next: NextFunction): void => {
+    const ip = req.ip ?? "unknown";
+    const now = Date.now();
+    const entry = requestCounts.get(ip);
+
+    // First request for this IP, or window has expired — start a fresh window
+    if (!entry || now > entry.resetAt) {
+      // Prune before growing — deterministic, no setInterval leak
+      if (requestCounts.size >= MAX_ENTRIES) {
+        for (const [staleIp, staleEntry] of requestCounts) {
+          if (now > staleEntry.resetAt) requestCounts.delete(staleIp);
+        }
+      }
+      requestCounts.set(ip, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
     }
-  }
-}
 
-/** Reset the rate-limit store entirely — exposed for test cleanup only. */
-export function clearRateLimitEntries(): void {
-  requestCounts.clear();
-}
-
-export function rateLimit(req: Request, res: Response, next: NextFunction): void {
-  const ip = req.ip ?? "unknown";
-  const now = Date.now();
-  const entry = requestCounts.get(ip);
-
-  // First request for this IP, or window has expired — start a fresh window
-  if (!entry || now > entry.resetAt) {
-    // Prune before growing — deterministic, no setInterval leak
-    if (requestCounts.size >= MAX_ENTRIES) {
-      pruneStaleEntries(now);
+    entry.count++;
+    if (entry.count > maxRequests) {
+      // RFC 7231 Retry-After header tells the client how many seconds to wait
+      res.set("Retry-After", String(Math.ceil((entry.resetAt - now) / 1000)));
+      res.status(429).json({
+        error: {
+          code: "RATE_LIMITED",
+          message: "Too many requests. Please wait before retrying.",
+          details: null,
+          requestId: `req_${Math.random().toString(36).slice(2, 10)}`,
+        },
+      });
+      return;
     }
-    requestCounts.set(ip, { count: 1, resetAt: now + 60_000 });
+
     next();
-    return;
-  }
+  };
 
-  entry.count++;
-  if (entry.count > config.rateLimit) {
-    // RFC 7231 Retry-After header tells the client how many seconds to wait
-    res.set("Retry-After", String(Math.ceil((entry.resetAt - now) / 1000)));
-    res.status(429).json({
-      error: {
-        code: "RATE_LIMITED",
-        message: "Too many requests. Please wait before retrying.",
-        details: null,
-        requestId: `req_${Math.random().toString(36).slice(2, 10)}`,
-      },
-    });
-    return;
-  }
-
-  next();
+  return Object.assign(rateLimiter, { clear: () => requestCounts.clear() });
 }
+
+const defaultRateLimiter = createRateLimiter(config.rateLimit);
+
+/** Reset the default rate-limit store entirely — exposed for test cleanup only. */
+export function clearRateLimitEntries(): void {
+  defaultRateLimiter.clear();
+}
+
+export const rateLimit = defaultRateLimiter;
+export const vaultRateLimiter = createRateLimiter(5);

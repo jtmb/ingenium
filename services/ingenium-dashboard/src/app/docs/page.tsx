@@ -50,7 +50,7 @@ function IconAlert() {
 // Right sidebar tabs
 // ---------------------------------------------------------------------------
 
-type SidebarTab = "metadata" | "tags" | "backlinks" | "comments" | "history" | "projects" | "attachments" | "trash";
+type SidebarTab = "metadata" | "tags" | "backlinks" | "comments" | "history" | "projects" | "attachments" | "trash" | "ask";
 
 const SIDEBAR_TABS: { key: SidebarTab; label: string; pageScoped: boolean }[] = [
   { key: "metadata", label: "Info", pageScoped: true },
@@ -60,6 +60,7 @@ const SIDEBAR_TABS: { key: SidebarTab; label: string; pageScoped: boolean }[] = 
   { key: "backlinks", label: "Backlinks", pageScoped: true },
   { key: "comments", label: "Comments", pageScoped: true },
   { key: "history", label: "History", pageScoped: true },
+  { key: "ask", label: "Ask Docs", pageScoped: false },
   { key: "trash", label: "Trash", pageScoped: false },
 ];
 
@@ -116,6 +117,7 @@ function RightSidebar({
         {selectedTab === "history" && page && <HistoryPanel pageId={page.id} onRestore={() => onPageMutated()} />}
         {selectedTab === "projects" && page && <ProjectLinksTab pageId={page.id} />}
         {selectedTab === "attachments" && page && <AttachmentsTab pageId={page.id} />}
+        {selectedTab === "ask" && <AskDocsPanel />}
         {selectedTab === "trash" && selectedSpaceId && <TrashPanel spaceId={selectedSpaceId} />}
       </div>
     </div>
@@ -430,6 +432,172 @@ function AttachmentsTab({ pageId }: { pageId: number }) {
               </button>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Ask Docs panel (RAG)
+// ---------------------------------------------------------------------------
+
+interface RagCitation {
+  id: string;
+  title: string;
+  score: number;
+}
+
+interface RagAnswer {
+  answer: string;
+  citations: RagCitation[];
+}
+
+function AskDocsPanel() {
+  const [question, setQuestion] = useState("");
+  const [result, setResult] = useState<RagAnswer | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleAsk = useCallback(async () => {
+    const q = question.trim();
+    if (!q) return;
+    setLoading(true);
+    setError("");
+    setResult(null);
+    try {
+      await api.rag.ingest();
+      const res = await api.rag.ask(q);
+      setResult(res?.data ?? null);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to get answer");
+    } finally {
+      setLoading(false);
+    }
+  }, [question]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleAsk();
+      }
+    },
+    [handleAsk],
+  );
+
+  // Render answer with citation markers
+  const renderAnswer = useCallback((text: string) => {
+    // Replace [N] citation markers with superscript links
+    const parts = text.split(/(\[\d+\])/g);
+    return parts.map((part, i) => {
+      const match = part.match(/\[(\d+)\]/);
+      if (match) {
+        const cap = match[1]!;
+        const idx = parseInt(cap, 10);
+        const citation = result?.citations?.[idx - 1];
+        return (
+          <sup key={i} className="text-xs text-blue-600 dark:text-blue-400 font-semibold">
+            <span title={citation?.title}>{`[${idx}]`}</span>
+          </sup>
+        );
+      }
+      return <span key={i}>{part}</span>;
+    });
+  }, [result]);
+
+  return (
+    <div className="p-3 space-y-3">
+      {/* Input area */}
+      <div className="flex gap-1.5">
+        <input
+          type="text"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask a question about your documentation…"
+          className="flex-1 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] px-2 py-1.5 placeholder:text-[var(--color-text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+          disabled={loading}
+        />
+        <button
+          type="button"
+          onClick={handleAsk}
+          disabled={loading || !question.trim()}
+          className="px-2.5 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 shrink-0"
+        >
+          {loading ? (
+            <span className="flex items-center gap-1">
+              <svg className="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Asking…
+            </span>
+          ) : (
+            "Ask"
+          )}
+        </button>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="flex items-start gap-2 p-2 text-xs text-red-700 bg-red-50 dark:bg-red-950/30 dark:text-red-400 rounded">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" className="mt-0.5 shrink-0">
+            <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.2" />
+            <path d="M7 4.5v3M7 10v.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && !error && !result && (
+        <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" className="text-[var(--color-text-muted)]">
+            <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <p className="text-sm text-[var(--color-text-muted)]">
+            Ask a question about your documentation
+          </p>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div className="space-y-2 animate-pulse">
+          <div className="h-3 bg-[var(--color-surface-hover)] rounded w-full" />
+          <div className="h-3 bg-[var(--color-surface-hover)] rounded w-5/6" />
+          <div className="h-3 bg-[var(--color-surface-hover)] rounded w-4/6" />
+          <div className="h-3 bg-[var(--color-surface-hover)] rounded w-3/4" />
+        </div>
+      )}
+
+      {/* Answer */}
+      {result && (
+        <div className="space-y-3">
+          <div className="text-xs text-[var(--color-text-primary)] leading-relaxed whitespace-pre-wrap break-words">
+            {renderAnswer(result.answer)}
+          </div>
+
+          {/* Sources list */}
+          {result.citations.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] mb-2">
+                Sources ({result.citations.length})
+              </p>
+              <div className="space-y-1">
+                {result.citations.map((cite, idx) => (
+                  <div
+                    key={cite.id}
+                    className="block px-2 py-1.5 bg-[var(--color-surface-muted)] rounded text-xs text-[var(--color-text-secondary)] truncate"
+                  >
+                    <span className="font-semibold text-[var(--color-text-muted)] mr-1">[{idx + 1}]</span>
+                    {cite.title}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

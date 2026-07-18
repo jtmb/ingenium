@@ -46,7 +46,7 @@ git log --all -p -S "<pattern>" --pretty=format:"%H %ai %s"
 
 - Search all branches and tags for the leaked pattern
 - Report which commits introduced/exposed the secret
-- Create a Thread entry for each confirmed leak
+- Create a Docs page for each confirmed leak <!-- Thread retired → Docs RAG -->
 
 ### 3. Report
 
@@ -61,7 +61,7 @@ For each finding, include: file path, line number, what's wrong, and a concrete 
 ### 4. Remediate
 
 For confirmed leaks in git history:
-1. Create a Thread entry with the commit SHA and fix instructions
+1. Create a Docs page with the commit SHA and fix instructions <!-- Thread retired → Docs RAG -->
 2. Rotate the secret immediately
 3. Purge with `git filter-branch` or BFG
 4. Reference affected skills (`@development-conventions`, `@devops-conventions`)
@@ -70,7 +70,8 @@ For confirmed leaks in git history:
 
 ```bash
 # Hardcoded secrets
-THREAD_API_TOKEN="sk-..."
+# THREAD_API_TOKEN retired — replaced by Docs RAG auth
+# THREAD_API_TOKEN="sk-..."
 API_KEY="abc123"
 password = "admin"
 

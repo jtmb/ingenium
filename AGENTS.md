@@ -2,7 +2,7 @@
 
 This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.opencode/skills/<name>/` with a split-skill format (SKILL.md + metadata.json + references/).
 
-> 🔴 **Security**: Never commit `THREAD_API_TOKEN` to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder in `opencode.json`.
+> 🔴 **Security**: Never commit API tokens to source. Use placeholder values in config files.
 
 > 🔴 **Never state a fact without verifying against source files.** If you claim "X uses Y", you must have READ the file containing X. If you claim "Z imports W", you must have GREP'd for the import. If you cannot verify in one read or grep, say "I'm not sure — let me check" instead of guessing confidently.
 
@@ -16,6 +16,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 |---------|-------------|
 | [🔴 HARD RULEs](#-hard-rules-summary) | Non-negotiable rules |
 | [Repository Structure](#repository-structure) | Package and service layout |
+| [🔴 Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) | 12-active/6-writer concurrency, writer tiers, phase declarations |
 | [Database Isolation](#-mandatory--database-isolation) | DB access boundaries |
 | [Docker Deployment](#docker-deployment) | Ports, volumes, health |
 | [Testing](#testing) | Test commands |
@@ -98,15 +99,15 @@ packages/
 
 services/
 ├── ingenium-api/         # Express REST API on :4097. Sole DB authority.
-├── ingenium-server/      # MCP stdio server with 210 tools. HTTP to API. Zero DB access.
-└── ingenium-dashboard/   # Next.js 16 App Router frontend (18 primary routes + Settings overlay). HTTP to API. Zero DB access.
+├── ingenium-server/      # MCP stdio server with 243 tools. HTTP to API. Zero DB access.
+└── ingenium-dashboard/   # Next.js 16 App Router frontend (20 primary routes + Settings overlay). HTTP to API. Zero DB access.
 ```
 
 **API-First Architecture:** Dashboard and server import ZERO core/server code. All data flows through the API layer.
 
 ## Agent Table
 
-**12 agents total: 2 primary + 10 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
+**13 agents total: 2 primary + 11 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
 
 | Agent | Type | Model | Skills Allowed |
 |-------|------|-------|----------------|
@@ -118,6 +119,7 @@ services/
 | **vision-bridge** | Subagent | `qwen/qwen3.5-9b` | `local-models` |
 | **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
+| **ingenium-software-engineer-terra** | Subagent | `openai/gpt-5.6-terra` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
 | **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
@@ -139,7 +141,7 @@ The full pattern is `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `inge
 
 ### Dashboard Pages
 
-The Ingenium Dashboard (http://localhost:3000) provides 18 primary routes plus the Settings overlay (19 user-facing views):
+The Ingenium Dashboard (http://localhost:3000) provides 20 primary routes plus the Settings overlay (21 user-facing views):
 
 | Page | Purpose |
 |------|---------|
@@ -149,6 +151,8 @@ The Ingenium Dashboard (http://localhost:3000) provides 18 primary routes plus t
 | `/projects` | Project management (create, rename, archive, restore) |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
 | `/docs` | Documentation workspace (spaces, editor, search, templates, history, trash) |
+| `/secrets` | Encrypted secrets vault (scrypt key derivation, AES-256-GCM, full audit trail) |
+| `/backups` | Backup & restore management (create snapshots, schedule, restore preview/execute) |
 | `/jobs` | Job queue and background task monitoring |
 | `/logs` | Structured logging and event viewer |
 | `/mail` | 3-pane email client (FolderSidebar, EmailList, EmailReader), AccountSetup when no accounts configured |
@@ -156,12 +160,12 @@ The Ingenium Dashboard (http://localhost:3000) provides 18 primary routes plus t
 | `/tasks` | Kanban board (todo → in_progress → review → done) |
 | `/plugins` | Plugin lifecycle (enable, disable, configure) |
 | `/agents` | Agent profiles (model, mode, enable/disable) |
-| `/mcp-servers` | MCP servers + Tool Manager (212 catalog tools, 24 categories, search, category filter) |
+| `/mcp-servers` | MCP servers + Tool Manager (245 catalog tools, 28 categories, search, category filter) |
 | `/config` | OpenCode config editor (Project/Global tabs, sync from disk, save) |
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
-| Settings (overlay) | Full-screen overlay via gear icon. 4 functional tabs (General, Mail, Pipeline, Config), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. |
+| Settings (overlay) | Full-screen overlay via gear icon. 4 functional tabs (General, Mail, Providers, Config), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. |
 
 > **Nav bar layout**: Settings gear far-right. **ProjectDropdown** (folder icon) to its left for project switching — disabled on `/mail` and `/opencode`. Chat link added to the Workspace group alongside OpenCode. The dashboard talks to the API layer only — zero direct DB access.
 
@@ -169,10 +173,51 @@ The Ingenium Dashboard (http://localhost:3000) provides 18 primary routes plus t
 
 Ingenium uses a **two-project identity model**:
 
-- **Server/public project** (`global-default`, `is_global=1`) — The container's own OpenCode session. Created automatically by `scripts/docker-entrypoint.sh`.
+- **Server/public project** (`global-default`, `is_global=1`) — The container's own OpenCode session. Created automatically at startup — by `scripts/docker-entrypoint.sh` in Docker, or by `ensureGlobalProject()` in the API server for local development.
 - **External sessions** — Named after their repo worktree (e.g., `gh-llm-bootstrap`). The `INGENIUM_PROJECT` env var controls which project the extension plugins write to.
 
 **Key rule**: Use `global-default` for shared resources from within the container. For external sessions, `INGENIUM_PROJECT` in the MCP server config determines the target. See [docs/VARIABLES.md](docs/VARIABLES.md).
+
+---
+
+## 🔴 Orchestration Policy — 12-Active / 6-Writer Phase Scheduler
+
+The orchestrator follows a **behavioral** concurrency policy for parallel subagent execution. This is **not an OpenCode configuration field** — it is a documented scheduling discipline enforced by the orchestrator's own delegation logic in `@ingenium-orchestrator`.
+
+### Concurrency Limits
+
+| Limit | Value | Scope |
+|-------|-------|-------|
+| **Active subagents per phase** | 12 | Total simultaneous subagents (writers + read-only) in a single orchestration phase |
+| **Concurrent writers per wave** | 6 | Subagents with `edit: allow` or `write: allow` permissions |
+| **Remaining capacity** | 6 | Reserved for read-only agents (explore, QA, docs, security, browser, scout, vision) |
+| **Write territory overlap** | 0 | No two writers may touch the same file/directory path concurrently |
+
+### Writer Tiers and Routing
+
+| Tier | Model | When to route |
+|------|-------|---------------|
+| **Fast** | `deepseek/deepseek-v4-flash` | Routine isolated work: bug fixes, simple refactors, test authoring, single-package scope |
+| **Premium** | `deepseek/deepseek-v4-pro` | Complex architecture-wide / cross-cutting work: multi-file refactoring, architectural changes, performance-critical code |
+| **Terra** | `openai/gpt-5.6-terra` | 🔴 **First choice for critical work**: auth/secrets/permissions; migrations/data integrity; Docker/runtime outages; multi-service contracts; cross-package refactors; persistent high-risk failures. Higher reasoning throughput via GPT-5.6 Terra OAuth. |
+
+### Phase Declaration Protocol
+
+Every orchestration phase MUST declare before dispatch:
+
+1. **Active count** — total subagents to spawn (max 12)
+2. **Writer count** — total writers among them (max 6)
+3. **Exclusive territories** — file/directory ownership per writer; zero overlap
+4. **Dependencies** — serialization order for writers sharing territories across waves
+5. **Verification owners** — which QA/docs agent reviews which writer's output
+
+Conflicting writers (touching the same file) MUST be serialized across waves — never dispatched simultaneously.
+
+### Restart Required for New Agent Profiles
+
+Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCode before the agent becomes invocable by `@` mention. The agent must also be registered in the `opencode.json` agents array.
+
+> See the [orchestrator agent profile](./.opencode/agents/primary/ingenium-orchestrator.md) for the full policy specification, dispatch examples, and collision resolution rules.
 
 ---
 
@@ -259,7 +304,7 @@ docker compose exec ingenium npm run test   # Execute inside container
 - **Volumes**: `ingenium-data` (/app/.ingenium), `opencode-config`, `opencode-data`. Workspace bind-mount: `~/repos` → `/workspace`.
 - **OpenCode Web/CLI**: Dashboard `/opencode` page has dual-mode iframes (Web: :4098, CLI: ttyd :4099). Glass tab toggle with `Ctrl+Shift+\``. Mode persisted in `localStorage`.
 - **Direct terminal attachment**: `opencode attach http://localhost:4098 --dir /workspace`
-- **OpenCode Access**: The Dashboard iframe connects directly to OpenCode Web at `http://localhost:4098/`. OpenCode Web enforces HTTP Basic Auth via the `OPENCODE_SERVER_PASSWORD` environment variable. The browser's native auth prompt handles credentials — no custom proxy middleware needed.
+- **OpenCode Access**: The Dashboard iframe connects directly to OpenCode Web at `http://localhost:4098/`. The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty so the iframe never opens a native login prompt. Compose publishes port 4098 to host loopback only (`127.0.0.1`). The root `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
 - 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks in the API Express process. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts).
 - 🔴 **Docker sudo**: `appuser` has passwordless sudo for package installs.
 - 🔴 **Docker git**: `git` package installed for OpenCode repo creation.
@@ -272,7 +317,7 @@ docker compose exec ingenium npm run test   # Execute inside container
 bash tests/test-self-improving.sh        # All 4 detection pipeline tests
 bash tests/test-self-improving.sh -v     # Verbose output
 bash tests/enforce-no-db-leaks.sh        # CI gate: verify no DB access leaks
-bash tests/test-agent-validation.sh      # Agent validation checks (12 agents)
+bash tests/test-agent-validation.sh      # Agent validation checks (13 agents)
 bash tests/test-append-only-files.sh     # Verify append-only file constraints
 
 npm run test --workspace=packages/ingenium-core          # Unit tests
@@ -294,7 +339,7 @@ The self-learning pipeline captures observations about user behavior, consolidat
 - Observation types: `correction`, `preference`, `pattern`, `insight`, `feedback`, `behavior`, `terminology`, `workflow`, `error`, `goal`
 - Confidence model: traits start at 0.10–0.15, gain +0.15 per confirmation, cap at 0.95, display threshold ≥0.30
 - Scheduled maintenance: extraction → synthesis every 15 minutes (configurable via `SYNTHESIS_INTERVAL_MS`); extension session events run resource sync separately
-- LLM synthesis backup provider: configured in Settings → Synthesis LLM
+- LLM providers: managed as repeatable OpenCode-compatible blocks in Settings → Providers; one primary and one backup role feed synthesis
 - Cross-project synthesis: evaluates patterns across all projects, `ingenium_synthesis_cross_project` tool
 
 ---
@@ -342,7 +387,7 @@ For quick reference, here are the non-negotiable rules from above:
 
 | # | Rule | Section |
 |---|------|---------|
-| 1 | Never commit `THREAD_API_TOKEN` | Header |
+| 1 | Never commit API tokens to source | Header |
 | 2 | Verify every claim against source files | Header |
 | 3 | Load matching skills before any action | [Load Skills](#-mandatory--load-skills-before-acting) |
 | 4 | Run `/synthesize` + `/sync-skills` + `ingenium_observe` after code changes | [Self-Improvement](#-mandatory--self-improvement) |
@@ -359,6 +404,11 @@ For quick reference, here are the non-negotiable rules from above:
 | 15 | `synthesis-engine`/`email-client` are NOT supervisord processes | [Docker](#key-docker-notes) |
 | 16 | Plugin lifecycle MUST sync disk + `opencode.json` plugin array | [Plugin Conventions](#plugin--skill-conventions) |
 | 17 | Auto-observer registered in DB + both opencode configs | [Plugin Conventions](#plugin--skill-conventions) |
+| 18 | Orchestration policy is behavioral — not an OpenCode config concurrency field | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
+| 19 | Never exceed 12 active subagents or 6 concurrent writers per phase; serialize conflicting writers | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
+| 20 | Declare phase (active count, writers, territories, dependencies, verification) before dispatch | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
+| 21 | Terra is first choice for critical work (auth, migrations, Docker, multi-service, cross-package, high-risk) | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
+| 22 | Restart OpenCode for newly-added agent profiles to become invocable | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
 
 ---
 

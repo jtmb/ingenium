@@ -190,7 +190,7 @@ User interacts with OpenCode (:4098)
 | **MCP Server** | Tool handlers that forward to API layer |
 | **Dashboard** | UI for viewing and managing observations/personality/pipeline events |
 | **Database** | SQLite with three core tables (`observations` with FTS5, `personality_traits` with confidence tracking, `pipeline_events` with parent-child nesting) plus `personality_profile` aggregated view |
-| **LLM Provider** | (Optional) OpenAI-compatible API for extraction (Phase 0), trait consolidation (Phase 1), and skill synthesis (Phase 2), configured via Settings → Synthesis LLM with model dropdown, API key, endpoint URL, and backup provider |
+| **LLM Provider** | (Optional) OpenCode-compatible provider blocks for extraction (Phase 0), trait consolidation (Phase 1), and skill synthesis (Phase 2), configured via Settings → Providers. One block can be primary and one backup; additional blocks remain available in OpenCode. **API keys are never exposed** in responses or OpenCode config files — the API returns only `apiKeySet: boolean`. |
 
 ---
 

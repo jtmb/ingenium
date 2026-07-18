@@ -97,7 +97,7 @@ describe("synthesis LLM", () => {
     const obs = [makeObs(1, "pattern", "Test observation")];
     // Point at a port nothing is listening on to trigger a fetch error
     const result = await callSynthesisLLM(
-      obs, [], [], "http://127.0.0.1:19999", "test-model", "bad-key",
+      obs, [], [], "http://127.0.0.1:19999", "test-model", "bad-key", undefined, true,
     );
     expect(result.skills_to_create).toEqual([]);
     expect(result.skills_to_update).toEqual([]);
@@ -109,7 +109,7 @@ describe("synthesis LLM", () => {
     const obs = [makeObs(1, "pattern", "Test")];
     controller.abort();
     const result = await callSynthesisLLM(
-      obs, [], [], endpoint(), "test-model", "test-key", controller.signal,
+      obs, [], [], endpoint(), "test-model", "test-key", controller.signal, true,
     );
     expect(result.skills_to_create).toEqual([]);
     expect(result.skills_to_update).toEqual([]);
@@ -123,7 +123,7 @@ describe("synthesis LLM", () => {
     // validateResponse(null) → early return with empty arrays
     setMockResponse(mockContent("null"));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toEqual([]);
     expect(result.skills_to_update).toEqual([]);
@@ -134,7 +134,7 @@ describe("synthesis LLM", () => {
   it("returns empty result when response is an empty object", async () => {
     setMockResponse(mockContent("{}"));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toEqual([]);
     expect(result.skills_to_update).toEqual([]);
@@ -147,7 +147,7 @@ describe("synthesis LLM", () => {
     // Content has no JSON object pattern → tryParseJSON returns null
     setMockResponse(mockContent("not json at all — no braces here"));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toEqual([]);
     expect(result.skills_to_update).toEqual([]);
@@ -182,7 +182,7 @@ describe("synthesis LLM", () => {
     };
     setMockResponse(mockContent(JSON.stringify(valid)));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toHaveLength(1);
     expect(result.skills_to_create[0]).toMatchObject({
@@ -212,7 +212,7 @@ describe("synthesis LLM", () => {
     }));
     setMockResponse(mockContent(JSON.stringify({ skills_to_create: tenSkills })));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toHaveLength(5);
   });
@@ -234,7 +234,7 @@ describe("synthesis LLM", () => {
     };
     setMockResponse(mockContent(JSON.stringify(badNames)));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toHaveLength(2);
     // /[^a-z0-9-]/gi → replace with "-", then toLowerCase
@@ -252,7 +252,7 @@ describe("synthesis LLM", () => {
     };
     setMockResponse(mockContent(JSON.stringify(traits)));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.personality_traits).toHaveLength(3);
     expect(result.personality_traits![0].confidence).toBe(0.95);
@@ -275,7 +275,7 @@ describe("synthesis LLM", () => {
     };
     setMockResponse(mockContent(JSON.stringify(payload)));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toHaveLength(1);
     expect(result.skills_to_create[0].name).toBe("valid");
@@ -290,7 +290,7 @@ describe("synthesis LLM", () => {
     const markdownWrapped = '```json\n{"skills_to_create":[{"name":"extracted-skill","description":"Extracted","content":"content"}],"summary":"Done"}\n```';
     setMockResponse(mockContent(markdownWrapped));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toHaveLength(1);
     expect(result.skills_to_create[0].name).toBe("extracted-skill");
@@ -306,7 +306,7 @@ describe("synthesis LLM", () => {
     };
     setMockResponse(mockContent(JSON.stringify(payload)));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_update).toHaveLength(2);
     expect(result.skills_to_update[0].patch_type).toBe("add-rule");
@@ -333,7 +333,7 @@ describe("synthesis LLM", () => {
     };
     setMockResponse(mockContent(JSON.stringify(payload)));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toHaveLength(1);
     expect(result.skills_to_create[0].reference_files).toHaveLength(2);
@@ -352,7 +352,7 @@ describe("synthesis LLM", () => {
       ],
     })));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toHaveLength(1);
     expect(result.skills_to_create[0].reference_files).toHaveLength(10);
@@ -370,7 +370,7 @@ describe("synthesis LLM", () => {
     };
     setMockResponse(mockContent(JSON.stringify(payload)));
     const result = await callSynthesisLLM(
-      [makeObs(1)], [], [], endpoint(), "model", "key",
+      [makeObs(1)], [], [], endpoint(), "model", "key", undefined, true,
     );
     expect(result.skills_to_create).toHaveLength(1);
     // Should NOT double the prefix
@@ -446,7 +446,7 @@ describe("enrichObservations", () => {
     setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
 
     const obs = [{ type: "correction", content: "no, use 2-space indentation" }];
-    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    const result = await enrichObservations(obs, endpoint(), "model", "key", undefined, true);
     expect(result).toHaveLength(1);
     expect(result[0].skip).toBe(false);
     expect(result[0].enriched_content).toBe("User prefers 2-space indentation over 4-space");
@@ -465,7 +465,7 @@ describe("enrichObservations", () => {
       { type: "correction", content: "this is fucked" },
       { type: "correction", content: "no, use 2-space" },
     ];
-    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    const result = await enrichObservations(obs, endpoint(), "model", "key", undefined, true);
     expect(result).toHaveLength(2);
     expect(result[0].skip).toBe(true);
     expect(result[0].enriched_content).toBeUndefined();
@@ -481,7 +481,7 @@ describe("enrichObservations", () => {
     setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
 
     const obs = [{ type: "workflow", content: "run tests first" }];
-    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    const result = await enrichObservations(obs, endpoint(), "model", "key", undefined, true);
     expect(result).toHaveLength(1);
     expect(result[0].enriched_content).toBe("User always runs tests before committing");
     expect(result[0].skip).toBe(false);
@@ -491,7 +491,7 @@ describe("enrichObservations", () => {
     setMockResponse(mockContent(JSON.stringify({ not_enriched: true })));
 
     const obs = [{ type: "correction", content: "should use tabs" }];
-    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    const result = await enrichObservations(obs, endpoint(), "model", "key", undefined, true);
     expect(result).toHaveLength(1);
     expect(result[0].skip).toBe(false);
     expect(result[0].enriched_content).toBeUndefined();
@@ -502,7 +502,7 @@ describe("enrichObservations", () => {
     setMockResponse({ error: "server error" }, 500);
 
     const obs = [{ type: "correction", content: "fix the naming" }];
-    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    const result = await enrichObservations(obs, endpoint(), "model", "key", undefined, true);
     expect(result).toHaveLength(1);
     expect(result[0].skip).toBe(false);
     expect(result[0].enriched_content).toBeUndefined();
@@ -511,7 +511,7 @@ describe("enrichObservations", () => {
   it("returns originals on network error with fallback retry", async () => {
     // Point at unreachable port — will trigger fetch error, retry, then fallback
     const obs = [{ type: "preference", content: "I like concise errors" }];
-    const result = await enrichObservations(obs, "http://127.0.0.1:19999", "model", "key");
+    const result = await enrichObservations(obs, "http://127.0.0.1:19999", "model", "key", undefined, true);
     expect(result).toHaveLength(1);
     expect(result[0].skip).toBe(false);
     expect(result[0].enriched_content).toBeUndefined();
@@ -521,7 +521,7 @@ describe("enrichObservations", () => {
     const controller = new AbortController();
     controller.abort();
     const obs = [{ type: "correction", content: "no, use different approach" }];
-    const result = await enrichObservations(obs, endpoint(), "model", "key", controller.signal);
+    const result = await enrichObservations(obs, endpoint(), "model", "key", controller.signal, true);
     expect(result).toHaveLength(1);
     expect(result[0].skip).toBe(false);
     expect(result[0].enriched_content).toBeUndefined();
@@ -534,7 +534,7 @@ describe("enrichObservations", () => {
     setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
 
     const obs = [{ type: "correction", content: "no, use 2-space", context: "Agent used 4-space indentation\nUser: no, use 2-space\nAgent: OK switching" }];
-    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    const result = await enrichObservations(obs, endpoint(), "model", "key", undefined, true);
     expect(result).toHaveLength(1);
     expect(result[0].context).toBe("Agent used 4-space indentation\nUser: no, use 2-space\nAgent: OK switching");
     expect(result[0].enriched_content).toBe("User prefers 2-space indentation");
@@ -562,7 +562,7 @@ describe("enrichObservations", () => {
     const endpoint = `http://localhost:${port}`;
 
     const obs = [{ type: "correction", content: "no, use 2-space" }];
-    const result = await enrichObservations(obs, endpoint, "model", "key");
+    const result = await enrichObservations(obs, endpoint, "model", "key", undefined, true);
 
     expect(callCount).toBe(2);
     expect(result).toHaveLength(1);
@@ -579,7 +579,7 @@ describe("enrichObservations", () => {
     setMockResponse(mockContent(JSON.stringify(enrichmentResponse)));
 
     const obs = [{ type: "correction", content: "do X" }];
-    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    const result = await enrichObservations(obs, endpoint(), "model", "key", undefined, true);
     expect(result).toHaveLength(1);
     expect(result[0].enriched_content).toBeUndefined(); // too short
     expect(result[0].skip).toBe(false);
@@ -597,7 +597,7 @@ describe("enrichObservations", () => {
       { type: "preference", content: "obs2" },
       { type: "workflow", content: "obs3" },
     ];
-    const result = await enrichObservations(obs, endpoint(), "model", "key");
+    const result = await enrichObservations(obs, endpoint(), "model", "key", undefined, true);
     expect(result).toHaveLength(3);
     expect(result[0].enriched_content).toBeUndefined(); // no match
     expect(result[1].enriched_content).toBeUndefined(); // no match
@@ -648,6 +648,7 @@ describe("consolidateTraits", () => {
     setSetting(globalProjectId, "synthesis_model", "test-model");
     setSetting(globalProjectId, "synthesis_api_key", "test-key");
     setSetting(globalProjectId, "synthesis_endpoint", `http://localhost:${mockPort}`);
+    setSetting(globalProjectId, "synthesis_allow_private_network", "true");
   });
 
   it("returns null when not configured", async () => {

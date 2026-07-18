@@ -15,80 +15,23 @@ Before you begin, make sure you have these installed:
 
 | Tool | Minimum Version | Check Command |
 |------|----------------|---------------|
-| **Node.js** | 22+ | `node --version` |
-| **npm** | (ships with Node 22+) | `npm --version` |
-| **OpenCode** | latest | `opencode --version` |
+| **Docker** | 24+ | `docker --version` |
+| **Docker Compose** | v2 | `docker compose version` |
 | **git** | any modern version | `git --version` |
 
 ---
 
-## Step 1 — Clone and Install
+## Step 1 — Clone
 
 ```bash
 git clone https://github.com/jtmb/ingenium.git
 cd ingenium
-npm install
-```
-
-This installs dependencies for all packages in the monorepo:
-- `packages/ingenium-core` — shared library (SQLite WAL + FTS5, Zod schemas)
-- `packages/ingenium-email` — IMAP/SMTP email client with OAuth2 support for Gmail and Outlook
-- `services/ingenium-api` — Express REST API gateway
-- `services/ingenium-server` — MCP stdio server
-- `services/ingenium-dashboard` — Next.js 16 frontend
-
----
-
-## Step 2 — Build the MCP Server
-
-```bash
-cd services/ingenium-server
-npx tsc
-cd ../..
-```
-
-This produces `services/ingenium-server/dist/scripts/mcp-server.js` — the MCP server entry point.
-
----
-
-## Step 3 — Add the MCP Server to OpenCode (Project-Level)
-
-Open the project's `opencode.json` at the repo root and verify that the `ingenium` entry is present and enabled:
-
-```json
-{
-  "mcp": {
-    "servers": {
-      "ingenium": {
-        "type": "local",
-        "command": ["node", "/absolute/path/to/ingenium/services/ingenium-server/dist/scripts/mcp-server.js"],
-        "enabled": true,
-        "environment": {
-          "INGENIUM_API_URL": "http://localhost:4097/api/v1",
-          "INGENIUM_API_TIMEOUT": "10000",
-          "LOG_LEVEL": "info"
-        }
-      }
-    }
-  }
-}
 ```
 
 ---
 
-## Step 4 — Add the MCP Server Globally (Optional)
 
-To make Ingenium available in **all** your OpenCode projects, add the same entry to your global OpenCode config:
-
-```bash
-~/.config/opencode/opencode.jsonc
-```
-
----
-
-## Step 5 — Start the Services
-
-### Docker Deployment (Recommended)
+## Step 2 — Start the Services
 
 ```bash
 docker compose up --build
@@ -100,13 +43,18 @@ This starts all services in a single container:
 - **opencode-web** on 0.0.0.0:4098 inside container (Compose publishes to host `127.0.0.1:4098`)
 - **ttyd-opencode** on 0.0.0.0:4099 inside container (Compose publishes to host `127.0.0.1:4099`)
 
-### Local Development Setup
+The API server idempotently creates the `global-default` project at startup if none exists — no manual setup needed.
 
-```bash
-./run.sh dev
-```
+### Troubleshooting Startup Issues
 
-## Step 6 — Verify
+| Symptom | Cause | Resolution |
+|---------|-------|------------|
+| Email engine not running | No global project — mail sync skips gracefully when `global-default` is absent | The API creates it automatically on startup. If you see `Skipping mail sync — no global project configured` in the logs, create one via `ingenium_project_init` or the dashboard `/projects` page |
+| Health endpoint works but routes return errors | DB not fully initialized (WAL recovery in progress) | Wait a few seconds and retry. The API runs a WAL checkpoint + integrity check at startup |
+| Synthesis never runs | No enabled provider block has the Primary for Ingenium role | Configure a primary block in Settings → Providers. The scheduler logs `Synthesis LLM not configured` when idle |
+| Synthesis LLM settings appear blank after restart | Docker volume (`ingenium-data`) is new or empty — no saved settings exist | Re-enter the provider, model, and API key in Settings → Providers. API keys are never stored in responses; the UI shows "Saved key" or "API key" placeholder to indicate whether a credential is stored |
+
+## Step 3 — Verify
 
 Navigate to [http://localhost:3000](http://localhost:3000) to see the dashboard. Check API health:
 
@@ -114,12 +62,12 @@ Navigate to [http://localhost:3000](http://localhost:3000) to see the dashboard.
 curl http://localhost:4097/api/v1/projects
 ```
 
-## Step 7 — Configure Synthesis LLM (Optional)
+## Step 4 — Configure Synthesis LLM (Optional)
 
-1. Navigate to **Settings → Synthesis LLM** in the dashboard
-2. Select a provider and model
-3. Enter the API key
-4. Click **Test Connection** → **Save**
+1. Navigate to **Settings → Providers** in the dashboard
+2. Add a provider block and configure its provider ID, npm package, and models
+3. Mark the block **Primary for Ingenium** and enter its API key
+4. Click **Save providers**, then restart OpenCode
 
 ---
 
@@ -127,7 +75,7 @@ curl http://localhost:4097/api/v1/projects
 
 Once everything is running:
 
-- **Explore the dashboard** — click through all 17 primary routes plus the Settings overlay
+- **Explore the dashboard** — click through all 20 primary routes plus the Settings overlay
 - **Read feature guides** — see `usage/` for per-feature instructions
 - **Initialize a project** — use `/init-project` command or `ingenium_project_init` MCP tool
 - **Learn the self-learning pipeline** — read `concepts/self-learning.md`

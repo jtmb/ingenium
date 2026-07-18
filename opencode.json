@@ -7,6 +7,7 @@
   },
   "permission": "allow",
   "mcp": {
+    // Thread retired — migrated to Docs RAG. Remove after verification.
     "thread": {
       "type": "local",
       "command": [
@@ -15,7 +16,7 @@
         "thread_bridge.bridge"
       ],
       "cwd": "/home/brajam/.thread-bridge",
-      "enabled": true,
+      "enabled": false,
       "environment": {
         "THREAD_SERVER_URL": "http://localhost:5000",
         "THREAD_DEFAULT_SESSION": "gh-llm-bootstrap",
@@ -43,7 +44,10 @@
         "npx",
         "-y",
         "@playwright/mcp@latest",
-        "--caps=vision"
+        "--caps=vision",
+        "--headless",
+        "--executable-path",
+        "/home/brajam/.cache/ms-playwright/chromium-1232/chrome-linux64/chrome"
       ],
       "enabled": true
     }

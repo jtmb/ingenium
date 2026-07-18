@@ -6,13 +6,13 @@ import { usePathname } from "next/navigation";
  * Page-level layout wrapper.
  *
  * Pages get full-bleed or constrained-width layouts:
- * - `/opencode`, `/docs` → zero padding (immersive, fills entire viewport)
+ * - `/opencode`, `/docs`, `/chat` → zero padding (immersive, fills entire viewport)
  * - `/mail`, `/tasks`, `/mail/*` → full-width with padding (3-pane mail, kanban board)
  * - Everything else → responsive constrained `max-w-screen-2xl` centered layout
  */
 export default function MainContainer({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isImmersive = pathname === "/opencode" || pathname === "/docs";
+  const isImmersive = pathname === "/opencode" || pathname === "/docs" || pathname === "/chat";
   const fullWidth =
     pathname === "/mail" ||
     pathname === "/tasks" ||

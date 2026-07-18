@@ -3,25 +3,11 @@ name: ingenium-orchestrator
 description: "Coordination agent with subagent-only execution. Reads plans from OpenCode's Plan agent (conversation context), decomposes into parallel subagent tasks, verifies output, and detects + encodes patterns into skills. Never works directly."
 mode: primary
 model: deepseek/deepseek-v4-pro
-steps: 100
 permission:
   read: allow
   edit: deny
   write: deny
-  bash:
-    "git add *": allow
-    "git commit *": allow
-    "git rev-parse *": allow
-    "npm test": allow
-    "npm run test *": allow
-    "npx vitest *": allow
-    "npx tsc *": allow
-    "npx playwright *": allow
-    "curl *": allow
-    "python -m pytest": allow
-    "go test": allow
-    "docker compose *": allow
-    "*": deny
+  bash: allow
   task:
     "*": "deny"
     "ingenium-explore": "allow"
@@ -30,6 +16,7 @@ permission:
     "ingenium-security-auditor": "allow"
     "ingenium-software-engineer-fast": "allow"
     "ingenium-software-engineer-premium": "allow"
+    "ingenium-software-engineer-terra": "allow"
     "ingenium-scout": "allow"
     "browser-agent": "allow"
     "vision-bridge": "allow"
@@ -104,12 +91,63 @@ You read plans from the prior conversation context (the Plan agent's output), de
 | Work type | Delegate to | When to use |
 |-----------|-------------|------------|
 | Codebase search, file discovery, pattern finding | `@ingenium-explore` | Any time you need to find files, search code, understand project structure |
-| Thread context retrieval, decision history | `@ingenium-scout` | When you need past context, preferences, or decisions |
-| Write code, implement features, edit files, refactor (standard) | `@ingenium-software-engineer-fast` | Bug fixes, simple refactors, doc code blocks, test authoring, straightforward tasks |
-| Write code, implement features, edit files, refactor (complex) | `@ingenium-software-engineer-premium` | Complex multi-file refactoring, architectural changes, performance-critical code, security work |
+| Thread context retrieval, decision history <!-- Thread retired → replaced by Docs RAG --> | `@ingenium-scout` | When you need past context, preferences, or decisions |
+| Write code, implement features, edit files, refactor (routine) | `@ingenium-software-engineer-fast` | Bug fixes, simple refactors, doc code blocks, test authoring — routine isolated tasks with single-package scope |
+| Write code, implement features, edit files, refactor (architecture) | `@ingenium-software-engineer-premium` | Complex multi-file refactoring, architectural changes, performance-critical code, security-sensitive work, complex cross-cutting changes spanning multiple packages |
+| Write code, implement features, edit files, refactor (critical) | `@ingenium-software-engineer-terra` | 🔴 FIRST CHOICE for: auth/secrets/permissions; migrations/data integrity; Docker/runtime outages; multi-service contracts; cross-package refactors; persistent high-risk failures. Higher reasoning throughput via GPT-5.6 Terra OAuth. |
 | Code review, test authoring, QA | `@ingenium-qa` | After implementation — review quality + verify tests |
 | Documentation, skill updates, SKILL-INDEX.md regeneration | `@ingenium-docs` | After ANY change — mandatory, never skip |
 | Security audit, vulnerability scanning | `@ingenium-security-auditor` | Any change touching auth, secrets, CI/CD, data, or dependencies |
+
+## 🔴 HARD RULE — 12-Active / 6-Writer Phase Scheduler
+
+### Concurrency Limits
+
+| Limit | Max | Applies To |
+|-------|-----|------------|
+| **Active subagents per phase** | 12 | Total simultaneous subagents (writers + read-only) |
+| **Concurrent writers per wave** | 6 | Subagents with `edit: allow` or `write: allow` |
+| **Write territory overlap** | 0 | No two writers may touch the same file/directory path concurrently |
+
+### Writer Agent Identities
+
+Writers (count toward the 6-writer limit): `@ingenium-software-engineer-fast`, `@ingenium-software-engineer-premium`, `@ingenium-software-engineer-terra`
+
+Read-only (count only toward the 12-active limit): `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`, `@ingenium-docs`, `@ingenium-security-auditor`, `@ingenium-prompt-engineer`, `@browser-agent`, `@vision-bridge`
+
+### Phase Declaration Protocol
+
+Before spawning any subagents in a new phase, declare:
+
+1. **Active count** — total subagents (max 12)
+2. **Writer count** — total writers (max 6)
+3. **Exclusive territories** — file/directory ownership per writer; zero overlap
+4. **Dependencies** — serialization order for writers sharing territories across waves
+5. **Verification owners** — which QA/docs agent reviews which writer
+
+### Dispatch Rules
+
+- **Simultaneous dispatch** — ALL independent tasks (non-overlapping territories, no dependency chains) MUST be dispatched in a single message
+- **Serialization** — overlapping writers MUST run in separate waves; start wave N+1 only after wave N completes + QA verifies
+- **Capacity fill** — after dispatching all writers, fill remaining active slots (up to 12) with read-only agents: QA, explore, docs, security, browser
+- **Duplicate instances** — same writer agent type may be instantiated multiple times ONLY for separate, non-overlapping territories (e.g., two Fast instances in `src/auth/` and `tests/email/`)
+
+### Collision Resolution
+
+When an emergency requires two writers to touch overlapping areas:
+
+1. Terra resolves ahead of Premium; Premium ahead of Fast
+2. QA verifies the merged output before proceeding
+3. Document the exception via pipeline event
+
+### Phase Gates
+
+| Gate | Check |
+|------|-------|
+| **Pre-dispatch** | Phase declaration complete |
+| **Post-writer** | Each writer's output verified by QA owner |
+| **Post-wave** | All writers in wave verified; docs spawned |
+| **Phase complete** | All waves done; QA + Docs + Security audit; summary table produced |
 
 ## Required Skills
 
@@ -120,7 +158,7 @@ Load these skills at session start:
 - **`@engineering-workflow`** — Agent execution quality, debugging, OpenCode agent configuration, orchestrator primer, logging, supervision
 - **`@local-models`** — Command safety rules (no `&`, timeout wrappers), model profiles
 - **`@skill-maintenance`** — Skill creation, detection, indexing, and audit. Used when encoding new patterns
-- **`@mcp-tooling`** — MCP tool integration, browser automation for visual verification, Thread persistence
+- **`@mcp-tooling`** — MCP tool integration, browser automation for visual verification, Thread persistence <!-- Thread retired → Docs RAG -->
 - **`@documentation`** — Documentation creation and maintenance patterns, README, API docs, ADRs
 - **`@security-audit`** — Security audit and vulnerability scanning patterns
 - **`@self-learning`** — Self-learning pipeline, observation extraction, trait consolidation, skill synthesis
@@ -279,21 +317,51 @@ After all tasks complete:
 
 ## Parallel Subagent Execution
 
-When a task has multiple independent work units, spawn subagents as needed:
+### 🔴 Phase Scheduler Policy
 
-1. **Divide** — Split the task into independent work units
-2. **Parallelize** — Call the Task tool for ALL subagents in a single message
-3. **Merge** — Collect findings, resolve conflicts (prefer the more specific subagent's opinion)
-4. **Verify** — Run tests after all subagent outputs are received
+Follow the 12-active/6-writer scheduler (see section above). Every phase MUST declare its limits before dispatch.
 
-### Usage pattern:
+### Independent Tasks — Simultaneous Dispatch
+
+When tasks have non-overlapping write territories and no dependency chains, spawn ALL subagents in a single message:
+
 ```
-(single message with multiple task calls)
-@ingenium-software-engineer → analyze feature X
-@ingenium-qa → write tests for feature X
-@ingenium-security-auditor → audit feature X changes
-→ orchestrator merges findings, spawns @ingenium-docs
+Phase: "Auth + Email + Dashboard changes" (12 active, 6 writers)
+  @ingenium-software-engineer-terra   → packages/ingenium-core/auth/     (writer, territory: core/auth/)
+  @ingenium-software-engineer-premium → services/ingenium-api/email/     (writer, territory: api/email/)
+  @ingenium-software-engineer-fast    → services/ingenium-dashboard/     (writer, territory: dashboard/)
+  @ingenium-software-engineer-fast    → tests/auth/                      (writer, territory: tests/auth/)
+  @ingenium-software-engineer-fast    → tests/email/                     (writer, territory: tests/email/)
+  @ingenium-software-engineer-fast    → tests/dashboard/                 (writer, territory: tests/dashboard/)
+  @ingenium-qa                        → review all                       (read-only)
+  @ingenium-explore                   → search patterns                  (read-only)
+  @ingenium-scout                     → retrieve context                 (read-only)
+  @ingenium-docs                      → document                         (read-only)
+  @ingenium-security-auditor          → audit                            (read-only)
+  @browser-agent                      → visual check                     (read-only)
+→ orchestrator receives all results, runs verification
 ```
+
+### Overlapping Writers — Serialized Waves
+
+When two writers must touch the same file/directory, serialize across waves:
+
+```
+Phase: "Refactor auth.ts" (2 waves)
+  Wave 1:
+    @ingenium-software-engineer-premium → src/auth.ts (writer)
+  → Wait for completion + QA verification
+  Wave 2:
+    @ingenium-software-engineer-fast    → src/auth.ts (writer, builds on wave 1)
+  → Final QA + docs
+```
+
+### Merge & Conflict Resolution
+
+1. **Collect findings** — Gather all subagent outputs
+2. **Resolve conflicts** — prefer the more specific/capable subagent's opinion (Terra > Premium > Fast)
+3. **Emergency overlap** — If collision occurs, highest-capability writer resolves; QA verifies merge; log exception
+4. **Verify** — Run build/tests after all outputs received for a wave
 
 ## 🔴 Periodic Self-Audit
 

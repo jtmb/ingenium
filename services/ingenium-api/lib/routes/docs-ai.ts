@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { synthesisLlm } from "ingenium-core";
+import { logger, safeLlmFetch, synthesisLlm } from "ingenium-core";
 
 /**
  * AI-assisted documentation routes for the Docs wiki.
@@ -101,7 +101,7 @@ Return ONLY the rewritten text. Do not include any preamble or explanation.`;
 }
 
 // ── POST /ai ───────────────────────────────────────────────────────────────────
-// Reuses the Synthesis LLM config (Settings → Synthesis LLM) so users don't need
+// Reuses the primary LLM config (Settings → Providers) so users don't need
 // a separate API key for documentation features.
 
 router.post("/ai", async (req: Request, res: Response) => {
@@ -148,7 +148,7 @@ router.post("/ai", async (req: Request, res: Response) => {
     // temperature 0.5 balances creativity (tone rewrites) with consistency (outlines, summaries)
     // max_tokens 8192: 🔴 must NOT fall back to reasoning_content — this ensures the model
     // allocates enough output tokens for full document transformations
-    const response = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -160,12 +160,14 @@ router.post("/ai", async (req: Request, res: Response) => {
         temperature: 0.5,
         max_tokens: 8192,
       }),
-    });
+    }, { allowPrivateNetwork: config.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
     if (!response.ok) {
-      const errText = await response.text().catch(() => "unknown error");
+      logger.warn("docs-ai", `LLM upstream request failed with status ${response.status}`);
+      // Release the upstream body to prevent connection-pool exhaustion
+      await response.body?.cancel();
       res.status(502).json({
-        error: { code: "LLM_ERROR", message: `LLM API returned ${response.status}: ${errText.slice(0, 200)}` },
+        error: { code: "LLM_ERROR", message: "The AI service returned an error. Please try again later." },
       });
       return;
     }
@@ -175,7 +177,14 @@ router.post("/ai", async (req: Request, res: Response) => {
     const result = json.choices?.[0]?.message?.content || "";
 
     res.json({ data: { result } });
-  } catch (err: any) {
-    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
+  } catch (err) {
+    logger.error("docs-ai", "AI documentation request failed");
+    if (err instanceof Error && err.message.startsWith("endpoint ")) {
+      res.status(502).json({
+        error: { code: "LLM_ERROR", message: "The AI service returned an error. Please try again later." },
+      });
+      return;
+    }
+    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Unable to generate documentation assistance. Please try again later." } });
   }
 });

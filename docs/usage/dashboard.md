@@ -10,11 +10,11 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 ## Getting Started
 
 ```bash
-# Start all services (single container via supervisord)
+# Production — single container via supervisord
 docker compose up --build
 ```
 
-Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-web (binds **0.0.0.0**:4098 inside container, Compose publishes to host `127.0.0.1:4098`), and ttyd-opencode (binds **0.0.0.0**:4099 inside container by default, Compose publishes to host `127.0.0.1:4099`). Both bind 0.0.0.0 inside the container so Docker port forwarding and supervisord health checks work — host access is restricted to 127.0.0.1 by Docker Compose. The MCP server registers **210 tools**; the complete catalog has **212** when the two extension tools are included. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-web (binds **0.0.0.0**:4098 inside container, Compose publishes to host `127.0.0.1:4098`), and ttyd-opencode (binds **0.0.0.0**:4099 inside container by default, Compose publishes to host `127.0.0.1:4099`). Both bind 0.0.0.0 inside the container so Docker port forwarding and supervisord health checks work — host access is restricted to 127.0.0.1 by Docker Compose. The MCP server registers **243 tools** across **28 categories**; 2 extension tools bring the catalog to 245. Build-time UID matching ensures write access to workspace.
 
 ### Connecting an MCP Client
 
@@ -50,6 +50,34 @@ The extension package ships three OpenCode plugins — `observer.ts` (session ev
   ]
 }
 ```
+
+### Routes
+
+The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
+
+| Page | Purpose |
+|------|---------|
+| `/` | Home — operational dashboard with live metrics |
+| `/chat` | Ingenium Chat — standalone conversational agent interface |
+| `/opencode` | Embedded OpenCode Web/CLI iframes |
+| `/projects` | Project management |
+| `/skills` | Skills grid with detail overlay |
+| `/docs` | Documentation workspace |
+| `/secrets` | Encrypted secrets vault — password manager with scrypt key derivation and AES-256-GCM. First-run creates a vault; subsequent visits unseal the existing vault. |
+| `/backups` | Backup and restore management — create snapshots, view history, schedule automated backups |
+| `/jobs` | Job queue and background task monitoring |
+| `/logs` | Structured logging and event viewer |
+| `/mail` | 3-pane email client |
+| `/status` | Service status — supervisord process states |
+| `/tasks` | Kanban board |
+| `/plugins` | Plugin lifecycle management |
+| `/agents` | Agent profiles |
+| `/mcp-servers` | MCP servers + Tool Manager |
+| `/config` | OpenCode config editor |
+| `/observations` | Self-learning observations |
+| `/personality` | Personality traits |
+| `/pipeline` | Pipeline event timeline |
+| Settings (overlay) | Full-screen settings overlay
 
 ## Skills
 
@@ -123,16 +151,35 @@ The extension package ships three OpenCode plugins — `observer.ts` (session ev
 - Events auto-poll every 3 seconds (pause/resume button available)
 - Filter events using pill buttons: All, Agent, Plugin, Synthesis, Trait
 
+## Chat
+
+**What it does**: Standalone conversational AI interface using OpenCode's native chat API. Separated from the `/opencode` OpenCode Web/CLI iframe page.
+
+**How to use**:
+- Navigate to `/chat` in the dashboard
+- Select a **Provider**, **Model**, and **Agent** from the header selectors. Selectors are disabled (`opacity-40 cursor-not-allowed`) when loading, when the chat config API failed, or when no providers are available. Providers with `source === "builtin"` show a **"(Free)"** badge — these are auto-discovered from the OpenCode Zen built-in provider (free tier, no API key required).
+- **No LLM configured state**: When no providers exist (`isConfigured === false`), a blue info banner links to Settings → Providers. The send button is blocked, all selectors are disabled, and the composer has `hasSelectableModel={false}` preventing sends. Once a provider is configured and saved (with OpenCode restart), selectors populate dynamically from `GET /api/v1/settings/chat-config`.
+- Attach files via the paperclip button (max 5, 10MB each) or drag-and-drop. Images show inline previews; text files show code-block previews; binary files show download links.
+- Use the **Instructions** toggle (gear icon) to set a system prompt for the conversation.
+- Session management via collapsible sidebar: create, rename (double-click title), and delete sessions. On mobile (<768px) the sidebar becomes a drawer overlay.
+- Fork, share (copy link to clipboard), and compact conversations via header action buttons.
+- Footer reads "OpenCode Chat".
+
+**API**: Uses `GET /api/v1/settings/chat-config` to fetch sanitized provider/agent/model data. Messages are sent through OpenCode's native session `send()` API with provider/model selection.
+
 ## Settings
 
-**What it does**: Global application settings management. Configure archive retention period, synthesis LLM provider, backup provider, and synthesis interval.
+**What it does**: Global application settings management. Configure archive retention, an arbitrary OpenCode-compatible provider catalog, Ingenium provider roles, and synthesis interval.
 
 **How to use**:
 - Navigate to `/settings` in the dashboard
 - **Archive retention**: Set the number of days projects stay in the archive (1-365)
-- **Synthesis LLM**: Select an LLM provider for Phase 2 skill synthesis
-- **Backup Provider**: Optionally configure a fallback LLM provider
+- **Providers**: Add, reorder, collapse, enable, and remove provider blocks. Each block owns its OpenCode ID, npm package, base URL, API key, and model list
+- **Provider drafts**: Changes made in the PipelinePanel (Providers tab) are local state — they survive tab switches within the Settings overlay (e.g., switching from Providers → General → back to Providers) because inactive tab panels are hidden (via `hidden` + `inert`), not unmounted. However, closing the overlay discards all unsaved provider edits. Click "Save providers" to persist to the API.
+- **Provider roles**: Mark one block as Ingenium primary and one as backup; all remaining blocks stay available in OpenCode
+- **Credentials**: API keys are never returned by the API or written to OpenCode config; saved keys are represented by an `apiKeySet` placeholder
 - **Synthesis Interval**: Set how often the synthesis pipeline runs
+- Restart OpenCode after saving provider catalog changes
 
 ## Agents
 
@@ -153,6 +200,24 @@ The extension package ships three OpenCode plugins — `observer.ts` (session ev
 - Use the **Global** tab to edit `opencode.jsonc` for global configuration
 - Click **Sync from disk** to reload config from the filesystem
 - Click **Save** to persist editor content to the DB and write to disk
+
+## Secrets
+
+**What it does**: Encrypted secrets vault — password manager with scrypt key derivation and AES-256-GCM. Stores sensitive credentials (API keys, passwords, tokens) in folders, secured by a user-chosen passphrase that is never stored server-side.
+
+**How to use**:
+- Navigate to `/secrets` in the dashboard
+- **First-run (vault not initialized)**: The page shows a "Create Your Vault" button. Clicking opens the **CreateVaultModal** — a passphrase creation dialog with two password fields (passphrase + confirmation), a warning banner about non-recoverability, an acknowledgement checkbox, and a "Create & Unseal Vault" submit button. The submit is gated on: passphrase ≥12 characters, both fields match, and the acknowledgement checkbox checked.
+- **Routine access (vault initialized but sealed)**: The page shows an "Unseal Vault" button. The **UnsealModal** is a simpler dialog with a single passphrase input and "Unseal Vault" button. On failure, shows a red error message.
+- **Unsealed state**: A 3-pane layout appears — FolderTree (left), ItemList (center), ItemDetail (right). Use the "Lock Vault" button in the header to re-seal. Items can be created, read, updated, and deleted.
+- **CreateVaultModal validation states**:
+  - **Empty**: No input yet; fields show placeholder text "At least 12 characters"
+  - **Too short**: When passphrase length > 0 but < 12, shows red "(n/12)" counter
+  - **Mismatch**: When both fields have values and they differ, shows "Passphrases do not match" in red
+  - **Match + valid**: When both match and length ≥ 12, shows a green checkmark and "Passphrases match"
+  - **Checkbox gated**: Submit button remains disabled until the acknowledgement is checked AND passphrases are valid
+
+**API**: `GET /api/v1/vault/status`, `POST /api/v1/vault/initialize`, `POST /api/v1/vault/unseal`, `POST /api/v1/vault/seal`, `GET /api/v1/vault/folders`, `GET /api/v1/vault/items`, `POST /api/v1/vault/items`, `PATCH /api/v1/vault/items/:id`, `DELETE /api/v1/vault/items/:id`, `POST /api/v1/vault/folders`, `DELETE /api/v1/vault/folders/:id`
 
 ---
 

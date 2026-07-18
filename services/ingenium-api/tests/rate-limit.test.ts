@@ -182,3 +182,31 @@ describe("rateLimit — TTL pruning", () => {
     expect(next2).toHaveBeenCalled();
   });
 });
+
+describe("vaultRateLimiter", () => {
+  it("limits unseal and initialization attempts to five per IP", async () => {
+    const { vaultRateLimiter } = await import("../lib/middleware/rate-limit.js");
+    vaultRateLimiter.clear();
+    const request = { ip: "10.0.0.10" } as Request;
+
+    for (let i = 0; i < 5; i++) {
+      vaultRateLimiter(request, {
+        set: vi.fn(),
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn().mockReturnThis(),
+      } as unknown as Response, vi.fn());
+    }
+
+    const response = {
+      set: vi.fn(),
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn().mockReturnThis(),
+    } as unknown as Response;
+    const next = vi.fn();
+    vaultRateLimiter(request, response, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(response.status).toHaveBeenCalledWith(429);
+    vaultRateLimiter.clear();
+  });
+});
