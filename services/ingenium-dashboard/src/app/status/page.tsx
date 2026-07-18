@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import ServiceOverlay from "./ServiceOverlay";
 import { badgeTones } from "../../lib/badgeTones";
+import { getApiBase } from "@/lib/api";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -57,7 +58,7 @@ interface StatusResponse {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4097/api/v1";
+const API_URL = getApiBase();
 // 2s poll matches supervisord's native XML-RPC update cadence and gives
 // near-real-time feedback for process start/stop/restart cycles.
 const POLL_INTERVAL = 2000;

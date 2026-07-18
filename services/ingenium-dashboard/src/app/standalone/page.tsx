@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import WorkspaceControl from "../components/WorkspaceControl";
 import type { WorkspaceControlProps } from "../components/WorkspaceControl";
 import { api, type DocSpace } from "@/lib/api";
+import { getOpenCodeWebUrl, getOpenCodeCliUrl } from "@/lib/runtime-urls";
 
 /**
  * StandalonePage — Renders page content WITHOUT the full layout chrome
@@ -117,6 +118,10 @@ function StandaloneOpenCode() {
   const [mode, setMode] = useState<"web" | "cli">("web");
   const [cliMounted, setCliMounted] = useState(false);
 
+  // Derive iframe URLs from runtime location for correct protocol/hostname
+  const webUrl = getOpenCodeWebUrl();
+  const cliUrl = getOpenCodeCliUrl();
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem("opencode-mode");
@@ -134,7 +139,7 @@ function StandaloneOpenCode() {
     <div className="relative w-full h-full">
       {/* Web iframe */}
       <iframe
-        src="http://localhost:4098/"
+        src={webUrl}
         className="absolute inset-0 w-full h-full border-0"
         style={{
           opacity: mode === "web" ? 1 : 0,
@@ -151,7 +156,7 @@ function StandaloneOpenCode() {
       {/* CLI iframe — lazy-mounted */}
       {cliMounted && (
         <iframe
-          src="http://localhost:4099/"
+          src={cliUrl}
           className="absolute inset-0 w-full h-full border-0"
           style={{
             opacity: mode === "cli" ? 1 : 0,

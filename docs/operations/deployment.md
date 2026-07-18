@@ -110,8 +110,8 @@ healthcheck:
 
 The dashboard `/opencode` page features a **dual-mode** interface:
 
-- **Web mode** — Embeds `http://localhost:4098/` in a full-viewport iframe
-- **CLI mode** — Embeds `http://localhost:4099/` in a full-viewport iframe
+- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts`: loopback HTTP deployments (localhost/127.0.0.1) use the direct port (`http://localhost:4098/`); LAN HTTP and all HTTPS deployments use a same-origin reverse-proxy path (`/opencode-web/`) to avoid mixed-content errors and cross-origin issues. Overridable via `NEXT_PUBLIC_OPENCODE_WEB_URL` (relative same-origin paths only).
+- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. URL resolution follows the same pattern: loopback HTTP → `http://localhost:4099/`, LAN HTTP / HTTPS → `/opencode-cli/` (overridable via `NEXT_PUBLIC_OPENCODE_CLI_URL`, relative same-origin paths only). The iframe runs `opencode attach http://localhost:4098 --dir /workspace`, sharing session state with the Web UI.
 - **Glass tab**: Right-edge toggle (`backdrop-blur-sm`, `fixed right-0 top-1/2`). Expands on hover. Keyboard shortcut: `Ctrl+Shift+\``
 - **Dual-iframe architecture**: Both iframes remain in the DOM. Inactive one hidden via `opacity: 0` / `visibility: hidden` / `pointer-events: none` (not `display:none`) to prevent xterm dimension zeroing
 - **Mode persistence**: Saved in `localStorage` under `opencode-mode`

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useProject } from "../../../lib/ProjectContext";
+import { getApiBase } from "@/lib/api";
 
 /**
  * AccountSetup — two modes: provider selection grid and manual (app password) form.
@@ -36,7 +37,7 @@ export default function AccountSetup({
   const [testResult, setTestResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+  const apiBase = getApiBase();
   const project = useProject();
 
   // Check if OAuth credentials are configured in settings

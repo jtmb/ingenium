@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useEffect } from "react";
+import { getOpenCodeWebUrl, getOpenCodeCliUrl } from "@/lib/runtime-urls";
 
 interface OpenCodeFrameProps {
   mode: "web" | "cli";
@@ -28,6 +29,10 @@ export default function OpenCodeFrame({
 }: OpenCodeFrameProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Derive iframe URLs from runtime location for correct protocol/hostname
+  const webUrl = getOpenCodeWebUrl();
+  const cliUrl = getOpenCodeCliUrl();
+
   // Observe container size changes to provide stable dimensions to ttyd / OpenCode
   useEffect(() => {
     const el = containerRef.current;
@@ -51,7 +56,7 @@ export default function OpenCodeFrame({
     <div ref={containerRef} className="absolute inset-0">
       {/* Web iframe — always mounted */}
       <iframe
-        src="http://localhost:4098/"
+        src={webUrl}
         className="absolute inset-0 w-full h-full border-0"
         style={{
           opacity: mode === "web" ? 1 : 0,
@@ -69,7 +74,7 @@ export default function OpenCodeFrame({
       {/* CLI iframe — lazy-mounted on first CLI activation */}
       {cliMounted && (
         <iframe
-          src="http://localhost:4099/"
+          src={cliUrl}
           className="absolute inset-0 w-full h-full border-0"
           style={{
             opacity: mode === "cli" ? 1 : 0,

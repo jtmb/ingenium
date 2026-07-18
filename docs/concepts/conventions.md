@@ -8,8 +8,8 @@ description: Naming, file organization, error handling, git practices, and datab
 ## OpenCode Web/CLI Embedded in Dashboard
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
-- **Web mode** — Embeds the OpenCode Web UI (`http://localhost:4098/`) in a full-viewport iframe
-- **CLI mode** — Embeds a ttyd terminal (`http://localhost:4099/`) in a full-viewport iframe, running `opencode attach http://localhost:4098 --dir /workspace`
+- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved: loopback HTTP → `http://localhost:4098/`, LAN HTTP / HTTPS → `/opencode-web/` (same-origin proxy path). Overridable via `NEXT_PUBLIC_OPENCODE_WEB_URL` (relative same-origin paths only).
+- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. URL resolution follows the same pattern: loopback HTTP → `http://localhost:4099/`, LAN HTTP / HTTPS → `/opencode-cli/` (overridable via `NEXT_PUBLIC_OPENCODE_CLI_URL`, relative same-origin paths only). Runs `opencode attach http://localhost:4098 --dir /workspace`, sharing session state.
 - **Mode switch** — A right-edge glass tab (`OpenCodeSwitch` component with `backdrop-blur-sm`) toggles between modes. The inactive iframe is hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage`.

@@ -1,5 +1,15 @@
-/** @default "http://localhost:4097/api/v1" — overridden via NEXT_PUBLIC_API_URL env var at build or runtime. */
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4097/api/v1";
+/**
+ * Canonical browser API base URL.
+ *
+ * Defaults to relative `/api/v1` for same-origin access through the Next.js proxy.
+ * A deployment may override the relative proxy prefix, but never direct the browser
+ * to the private API service.
+ */
+export function getApiBase(): string {
+  const configured = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+  return configured.startsWith("/") && !configured.startsWith("//") ? configured.replace(/\/+$/, "") : "/api/v1";
+}
+
 /**
  * Default project for API calls when no explicit project is selected.
  * The API resolves this to the global-default project (is_global=1).
@@ -15,7 +25,7 @@ const DEFAULT_PROJECT = "global-default";
  *   can pass FormData (for file uploads) without the default JSON header
  */
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${getApiBase()}${path}`, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -1173,7 +1183,7 @@ export const api = {
         ),
       /** GET /pages/:pageId/attachments/:attId/download — returns download URL. The caller opens this as a blob download. */
       downloadUrl: (pageId: number, attId: number, project = DEFAULT_PROJECT): string =>
-        `${API_URL}/docs/pages/${pageId}/attachments/${attId}/download?project=${encodeURIComponent(project)}`,
+        `${getApiBase()}/docs/pages/${pageId}/attachments/${attId}/download?project=${encodeURIComponent(project)}`,
       /** DELETE /pages/:pageId/attachments/:attId */
       delete: (pageId: number, attId: number, project = DEFAULT_PROJECT) =>
         request(`/docs/pages/${pageId}/attachments/${attId}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
@@ -1326,7 +1336,7 @@ export const api = {
       request(`/backups/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
     /** GET /backups/:id/download — download URL for a backup file (returns a redirect-able URL string) */
     download: (id: string, project = DEFAULT_PROJECT): string =>
-      `${API_URL}/backups/${encodeURIComponent(id)}/download?project=${encodeURIComponent(project)}`,
+      `${getApiBase()}/backups/${encodeURIComponent(id)}/download?project=${encodeURIComponent(project)}`,
     restore: {
       /** GET /backups/:id/restore/preview — preview what would be restored */
       preview: (id: string, project = DEFAULT_PROJECT) =>

@@ -9,7 +9,7 @@ description: Iframe sandbox configuration, risk assessment, and deferred securit
 > `sandbox="allow-scripts allow-same-origin"`. Expansion to service-specific
 > tokens (forms, popups, modals, downloads) and CSP/frame-ancestor policy
 > remain deferred pending runtime testing.
-> **Last updated**: 2026-07-16
+> **Last updated**: 2026-07-18
 
 ---
 
@@ -22,16 +22,27 @@ additional standalone iframes in `services/ingenium-dashboard/src/app/standalone
 
 | Iframe | Source | Sandbox | Purpose |
 |--------|--------|---------|---------|
-| OpenCode Web (dashboard) | `http://localhost:4098/` | `allow-scripts allow-same-origin` | OpenCode Web UI |
-| ttyd Terminal (dashboard) | `http://localhost:4099/` | `allow-scripts allow-same-origin` | OpenCode CLI via ttyd + xterm.js |
-| OpenCode Web (standalone) | `http://localhost:4098/` | `allow-scripts allow-same-origin` | Standalone OpenCode Web UI |
-| ttyd Terminal (standalone) | `http://localhost:4099/` | `allow-scripts allow-same-origin` | Standalone OpenCode CLI terminal |
+| OpenCode Web (dashboard) | `Dynamic` (see below) | `allow-scripts allow-same-origin` | OpenCode Web UI |
+| ttyd Terminal (dashboard) | `Dynamic` (see below) | `allow-scripts allow-same-origin` | OpenCode CLI via ttyd + xterm.js |
+| OpenCode Web (standalone) | `Dynamic` (see below) | `allow-scripts allow-same-origin` | Standalone OpenCode Web UI |
+| ttyd Terminal (standalone) | `Dynamic` (see below) | `allow-scripts allow-same-origin` | Standalone OpenCode CLI terminal |
+
+### Dynamic Origin Resolution
+
+The iframe `src` is **not hardcoded to localhost:4098/4099**. It is derived at runtime by `services/ingenium-dashboard/src/lib/runtime-urls.ts` based on the dashboard's own protocol and hostname:
+
+| Dashboard Protocol | Web iframe src | CLI iframe src |
+|-------------------|----------------|----------------|
+| **HTTP** | `http://<dashboard-host>:4098/` | `http://<dashboard-host>:4099/` |
+| **HTTPS** | `/opencode-web/` (same-origin proxy path) | `/opencode-cli/` (same-origin proxy path) |
+
+Overrides are available via `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL`. Under HTTPS, using `http://hostname:4098/` directly would be a mixed-content error, so a same-origin reverse-proxy path is used automatically.
 
 ### Current iframe attributes (both dashboard iframes)
 
 ```html
 <iframe
-  src="http://localhost:4098/"     <!-- or :4099 -->
+  src="<dynamically-resolved>"    <!-- :4098/:4099 or /opencode-web//opencode-cli/ -->
   class="absolute inset-0 w-full h-full border-0"
   style="{{ opacity, visibility, pointerEvents }}"
   aria-hidden="{{ condition }}"
@@ -49,7 +60,7 @@ while still allowing the embedded services to function:
 
 - `allow-scripts` enables JavaScript execution (React, Monaco editor, xterm.js)
 - `allow-same-origin` enables WebSocket connections, localStorage, and API
-  calls within the iframe's own origin (localhost:4098 or :4099)
+  calls within the iframe's own origin (dynamically resolved host:port or same-origin proxy)
 
 **What the baseline sandbox prevents:**
 - Access to the dashboard's cookies, localStorage, and sessionStorage
@@ -143,7 +154,7 @@ storage and network resources within the sandbox constraints.
 
 ```html
 <iframe
-  src="http://localhost:4098/"     <!-- or :4099 -->
+  src="<dynamically-resolved>"    <!-- :4098/:4099 or same-origin proxy path -->
   sandbox="allow-scripts allow-same-origin"
   allow="clipboard-write"
   ...
@@ -152,7 +163,8 @@ storage and network resources within the sandbox constraints.
 
 Both OpenCode Web and ttyd use the **identical** `sandbox` token set in
 the current baseline. This is a conservative starting point that ensures
-both services function without breakage.
+both services function without breakage. The iframe `src` is resolved
+dynamically by `runtime-urls.ts` — see [Dynamic Origin Resolution](#dynamic-origin-resolution) above.
 
 ### Tokens Baseline Already Deploys
 

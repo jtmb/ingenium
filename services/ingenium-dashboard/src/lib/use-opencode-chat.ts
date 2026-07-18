@@ -2,6 +2,7 @@
 
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
 import { opencode, type OpenCodePart, type FilePart, type OpenCodePromptParams } from "./opencode";
+import { getApiBase } from "./api";
 import type {
   QuestionItem as ChatQuestionItem,
   QuestionOption,
@@ -410,7 +411,7 @@ function normalizeMessages(rawMessages: OpenCodeApiMessage[]): ChatMessage[] {
 /*  SSE connection state machine (fetch + ReadableStream)             */
 /* ------------------------------------------------------------------ */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4097/api/v1";
+const API_URL = getApiBase();
 
 interface SSEConnection {
   abortController: AbortController;

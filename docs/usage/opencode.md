@@ -13,8 +13,8 @@ For the conversational chat interface, see [Ingenium Chat](/chat).
 
 ## OpenCode Web/CLI Mode Switch
 
-- **Web mode** — Embeds the OpenCode Web UI (`http://localhost:4098/`) in a full-viewport iframe. The session persists across tab navigation with a hidden iframe technique.
-- **CLI mode** — Embeds a ttyd terminal (`http://localhost:4099/`) in a full-viewport iframe. The xterm.js terminal connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing the same session state as the Web UI.
+- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts`: loopback HTTP (localhost/127.0.0.1) uses the direct port (`http://localhost:4098/`); LAN HTTP and HTTPS deployments use a same-origin reverse-proxy path (`/opencode-web/`) to avoid mixed-content and cross-origin issues. Overridable via `NEXT_PUBLIC_OPENCODE_WEB_URL` (relative same-origin paths only). The session persists across tab navigation with a hidden iframe technique.
+- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. URL resolution follows the same pattern: loopback HTTP → `http://localhost:4099/`, LAN HTTP / HTTPS → `/opencode-cli/` (overridable via `NEXT_PUBLIC_OPENCODE_CLI_URL`, relative same-origin paths only). The xterm.js terminal connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing the same session state as the Web UI.
 - **Mode switch** — A right-edge glass tab toggles between modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` switches between modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
