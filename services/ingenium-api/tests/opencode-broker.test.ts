@@ -123,8 +123,7 @@ describe("brokerExecute — auth guard", () => {
     expect(result.ok).toBe(false);
     expect(result.content).toBe("");
     expect(result.error).toBeDefined();
-    // brokerExecute returns the error message (not the code) from the upstream client
-    expect(result.error).toMatch(/OPENCODE_SERVER_PASSWORD/i);
+    expect(result.error).toBe("broker session unavailable");
   });
 });
 
@@ -248,7 +247,8 @@ describe("brokerExecute — mocked lifecycle", () => {
     // Verify error result
     expect(result.ok).toBe(false);
     expect(result.content).toBe("");
-    expect(result.error).toBeDefined();
+    expect(result.error).toBe("broker request failed");
+    expect(JSON.stringify(result)).not.toContain("LLM provider error");
 
     // Verify 3 fetch calls: create + send + delete
     expect(fetchSpy).toHaveBeenCalledTimes(3);
@@ -285,7 +285,8 @@ describe("brokerExecute — mocked lifecycle", () => {
 
     expect(result.ok).toBe(false);
     expect(result.content).toBe("");
-    expect(result.error).toBeDefined();
+    expect(result.error).toBe("broker session unavailable");
+    expect(JSON.stringify(result)).not.toContain("OpenCode unavailable");
 
     // Only one fetch call — no delete attempted
     expect(fetchSpy).toHaveBeenCalledTimes(1);

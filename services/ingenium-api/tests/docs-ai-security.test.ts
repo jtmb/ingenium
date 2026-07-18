@@ -4,17 +4,17 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
 const mocks = vi.hoisted(() => ({
-  resolveLLMConfig: vi.fn(),
+  executeSynthesisBroker: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
-  safeLlmFetch: vi.fn(),
 }));
 
 vi.mock("ingenium-core", () => ({
-  synthesisLlm: { resolveLLMConfig: mocks.resolveLLMConfig },
+  projects: { getProject: (name: string) => name === "docs-ai-test" ? { id: "docs-project" } : undefined },
   logger: { warn: mocks.warn, error: mocks.error },
-  safeLlmFetch: mocks.safeLlmFetch,
 }));
+
+vi.mock("../lib/opencode-client.js", () => ({ executeSynthesisBroker: mocks.executeSynthesisBroker }));
 
 const nativeFetch = globalThis.fetch;
 let server: Server | null = null;
@@ -42,8 +42,7 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  mocks.resolveLLMConfig.mockReturnValue({ model: "test-model", endpoint: "https://provider.invalid", allowPrivateNetwork: true });
-  mocks.safeLlmFetch.mockImplementation((url: string, init: RequestInit) => fetch(url, init));
+  mocks.executeSynthesisBroker.mockResolvedValue({ ok: false, content: "", error: "upstream unavailable" });
 });
 
 afterAll(async () => {
@@ -51,7 +50,7 @@ afterAll(async () => {
 });
 
 function postAi(): Promise<Response> {
-  return nativeFetch(`${baseUrl}/api/v1/docs/ai`, {
+  return nativeFetch(`${baseUrl}/api/v1/docs/ai?project=docs-ai-test`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "summarize", content: "Test documentation" }),
@@ -61,7 +60,7 @@ function postAi(): Promise<Response> {
 describe("POST /docs/ai error handling", () => {
   it("does not expose upstream response text", async () => {
     const upstreamBody = "provider diagnostics must remain private";
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(upstreamBody, { status: 503 })));
+    mocks.executeSynthesisBroker.mockResolvedValue({ ok: false, content: "", error: upstreamBody });
 
     const response = await postAi();
     const body = await response.json();
@@ -71,12 +70,11 @@ describe("POST /docs/ai error handling", () => {
       error: { code: "LLM_ERROR", message: "The AI service returned an error. Please try again later." },
     });
     expect(JSON.stringify(body)).not.toContain(upstreamBody);
-    expect(mocks.warn).toHaveBeenCalledWith("docs-ai", "LLM upstream request failed with status 503");
+    expect(mocks.warn).toHaveBeenCalledWith("docs-ai", "Broker request failed", { projectId: "docs-project" });
   });
 
   it("releases upstream body on non-ok response (connection hygiene)", async () => {
-    const upstreamResponse = new Response("upstream sensitive body", { status: 502 });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(upstreamResponse));
+    mocks.executeSynthesisBroker.mockResolvedValue({ ok: false, content: "", error: "upstream sensitive body" });
 
     const response = await postAi();
     const body = await response.json();
@@ -85,13 +83,12 @@ describe("POST /docs/ai error handling", () => {
     expect(body).toEqual({
       error: { code: "LLM_ERROR", message: "The AI service returned an error. Please try again later." },
     });
-    // bodyUsed is true after cancel() — proves the stream was released
-    expect(upstreamResponse.bodyUsed).toBe(true);
+    expect(JSON.stringify(body)).not.toContain("upstream sensitive body");
   });
 
   it("does not expose thrown error messages", async () => {
     const thrownMessage = "connection failed for provider endpoint";
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error(thrownMessage)));
+    mocks.executeSynthesisBroker.mockRejectedValue(new Error(thrownMessage));
 
     const response = await postAi();
     const body = await response.json();
@@ -105,8 +102,7 @@ describe("POST /docs/ai error handling", () => {
   });
 
   it("sanitizes endpoint validation failures as upstream errors", async () => {
-    mocks.resolveLLMConfig.mockReturnValue({ model: "test-model", endpoint: "http://localhost:11434" });
-    mocks.safeLlmFetch.mockRejectedValue(new Error("endpoint points to an internal/private network address"));
+    mocks.executeSynthesisBroker.mockResolvedValue({ ok: false, content: "", error: "endpoint points to an internal/private network address" });
 
     const response = await postAi();
     const body = await response.json();

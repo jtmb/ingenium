@@ -1,4 +1,4 @@
-import { logger } from "ingenium-core";
+import { logger, settings } from "ingenium-core";
 import { config } from "../config/index.js";
 
 /**
@@ -948,7 +948,7 @@ export async function brokerExecute(params: {
     logger.warn(source, "Failed to create broker session", {
       code: created.error.code,
     });
-    return { ok: false, content: "", error: created.error.message };
+    return { ok: false, content: "", error: "broker session unavailable" };
   }
 
   const sessionId = created.id;
@@ -969,7 +969,7 @@ export async function brokerExecute(params: {
       logger.warn(source, `Failed to send prompt for broker session ${sessionId}`, {
         code: sent.error.code,
       });
-      return { ok: false, content: "", error: sent.error.message };
+      return { ok: false, content: "", error: "broker request failed" };
     }
 
     const deadline = Date.now() + timeoutMs;
@@ -981,7 +981,7 @@ export async function brokerExecute(params: {
         logger.warn(source, `Failed to poll broker session ${sessionId}`, {
           code: messages.error.code,
         });
-        return { ok: false, content: "", error: messages.error.message };
+        return { ok: false, content: "", error: "broker response unavailable" };
       }
 
       const lastMessage = messages[messages.length - 1];
@@ -1003,9 +1003,9 @@ export async function brokerExecute(params: {
     logger.warn(source, `Broker session ${sessionId} timed out`, { timeoutMs });
     return { ok: false, content: "", error: "timeout" };
   } catch (err: unknown) {
-    const error = err instanceof Error ? err.message : "Broker execution failed";
-    logger.error(source, `Broker session ${sessionId} failed: ${error}`);
-    return { ok: false, content: "", error };
+    const error = err instanceof Error ? err.name : "BrokerError";
+    logger.error(source, `Broker session ${sessionId} failed`, { error });
+    return { ok: false, content: "", error: "broker execution failed" };
   } finally {
     const deleted = await opencodeClient.deleteSession(sessionId);
     if (isOpenCodeError(deleted)) {
@@ -1014,4 +1014,46 @@ export async function brokerExecute(params: {
       });
     }
   }
+}
+
+/**
+ * API-owned synthesis adapter. Core never imports this module: API routes use it
+ * for interactive AI work, while legacy direct HTTP execution remains available
+ * only to core deployments that have not configured the broker.
+ */
+export type SynthesisBrokerExecutor = (params: {
+  providerID: string;
+  modelID: string;
+  system: string;
+  user: string;
+  timeoutMs?: number;
+}) => Promise<{ ok: boolean; content: string; error?: string }>;
+
+export async function executeSynthesisBroker(params: {
+  projectId: string;
+  system: string;
+  user: string;
+  timeoutMs?: number;
+  /** Test-only/integration seam; production uses the tool-denied broker session. */
+  executor?: SynthesisBrokerExecutor;
+}): Promise<{ ok: boolean; content: string; error?: string }> {
+  const primary = {
+    providerID: settings.getSetting(params.projectId, "synthesis_provider") || "",
+    modelID: settings.getSetting(params.projectId, "synthesis_model") || "",
+  };
+  const secondary = {
+    providerID: settings.getSetting(params.projectId, "synthesis_backup_provider") || "",
+    modelID: settings.getSetting(params.projectId, "synthesis_backup_model") || "",
+  };
+  const choices = [primary, secondary].filter((choice, index, all) =>
+    choice.providerID && choice.modelID && all.findIndex((other) =>
+      other.providerID === choice.providerID && other.modelID === choice.modelID) === index,
+  );
+  if (choices.length === 0) return { ok: false, content: "", error: "no synthesis provider configured" };
+
+  for (const choice of choices) {
+    const result = await (params.executor ?? brokerExecute)({ ...choice, system: params.system, user: params.user, timeoutMs: params.timeoutMs });
+    if (result.ok) return result;
+  }
+  return { ok: false, content: "", error: "all configured synthesis providers failed" };
 }

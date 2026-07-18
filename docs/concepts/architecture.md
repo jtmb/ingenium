@@ -235,16 +235,33 @@ Every plugin lifecycle operation (create, enable, disable, delete, update) trigg
 
 ## Backup LLM Provider Architecture
 
-The synthesis pipeline uses a two-tier LLM provider architecture for fault tolerance:
+The system uses two parallel LLM dispatch modes for fault tolerance:
 
-1. **Primary provider**: Configured via Settings (provider, model, API key, endpoint)
-2. **Backup provider**: Optional failover (same configuration shape)
+### Direct Mode (Synthesis Pipeline)
+
+The core self-learning pipeline (`callSynthesisLLM` in `synthesis-llm.ts`) makes direct HTTP calls to the LLM endpoint:
+
+1. **Primary provider**: Configured via Settings (provider, model, API key, endpoint) with 60s timeout
+2. **Backup provider**: Optional failover (same configuration shape) with 60s timeout
 
 If the primary LLM call fails during Phase 2 skill synthesis:
-1. The pipeline catches the error and logs it to `result.errors`
-2. It attempts the backup provider with the same observation batch
-3. If both fail, Phase 1 trait results are still saved
-4. Provider saves validate configured base URLs before persisting changes
+1. The pipeline retries once with a slightly reworded prompt (same model)
+2. If the retry also fails, the error is logged and trait results from Phase 1 are still saved
+3. Provider saves validate configured base URLs via `validateEndpointUrl()` before persisting changes
+
+### Broker Mode (Interactive Features)
+
+Docs AI, RAG Ask, and Job Suggestions use `executeSynthesisBroker()` which routes through OpenCode's provider infrastructure:
+
+1. Reads primary (`synthesis_provider` + `synthesis_model`) and secondary (`synthesis_backup_provider` + `synthesis_backup_model`) from settings
+2. Deduplicates identical `(providerID, modelID)` pairs
+3. Tries primary first; falls back to secondary on failure
+4. **Hard 30-second timeout cap** on every call regardless of what `timeoutMs` is passed
+5. Creates ephemeral OpenCode sessions (no agent, empty tools) for each call
+
+### Same-Provider Different-Model Support
+
+The broker allows primary and backup to share the same provider with different models (e.g., primary `deepseek:fast-model`, backup `deepseek:thorough-model`). Only identical `(providerID, modelID)` pairs are suppressed.
 
 ## Chat Provider Architecture
 
@@ -380,12 +397,27 @@ RAG Ask / other features  ──▶  brokerExecute()
 
 ### Consumers
 
-| Feature | Consumer | Provider Used |
-|---------|----------|---------------|
-| **RAG Ask** | `POST /api/v1/rag/ask` | OpenCode's configured provider |
-| **AI features** | Future | Configurable via `providerID` param |
+| Feature | Consumer | Provider Resolution |
+|---------|----------|---------------------|
+| **Docs AI** | `POST /api/v1/docs/ai` | Synthesis primary/backup (broker resolves `synthesis_provider` + `synthesis_model`) |
+| **RAG Ask** | `POST /api/v1/rag/ask` | Synthesis primary/backup |
+| **Job Suggestions** | `POST /api/v1/jobs/suggest` | Synthesis primary/backup |
 
 The broker is used wherever a feature needs to make an LLM call without going through the synthesis pipeline's provider resolution. It treats OpenCode's provider config as the universal LLM gateway.
+
+### 30-Second Hard Cap
+
+Every broker call is capped at **30 seconds maximum** regardless of the `timeoutMs` argument passed:
+
+```typescript
+const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 30_000, 0), 30_000);
+```
+
+The function creates an ephemeral OpenCode session, sends the prompt, and polls for completion with exponential backoff (500ms base, 30s max delay). If the deadline is exceeded, it returns `{ ok: false, error: "timeout" }` and immediately deletes the broker session. This prevents LLM calls from hanging indefinitely in interactive contexts.
+
+### Fallback Chain
+
+`executeSynthesisBroker()` iterates through deduplicated `(providerID, modelID)` choices in order: primary first, then secondary. If a provider returns `{ ok: false }`, the next choice is tried. If all configured choices fail, it returns `{ ok: false, error: "all configured synthesis providers failed" }` with no further retry.
 
 ## Dataset Reference
 

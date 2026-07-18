@@ -129,8 +129,9 @@ app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/plugins", pluginsRouter);
 app.use("/api/v1/servers", serversRouter);
 app.use("/api/v1/settings", settingsRouter);
-app.use("/api/v1/vault/initialize", vaultRateLimiter);
-app.use("/api/v1/vault/unseal", vaultRateLimiter);
+// Keep every vault endpoint (including reveal, folders, and audit) behind one
+// prefix-level limiter. Route-specific lists are easy to bypass as routes grow.
+app.use("/api/v1/vault", vaultRateLimiter);
 app.use("/api/v1/vault", vaultRouter);
 app.use("/api/v1/agents", agentsRouter);
 app.use("/api/v1/observations", observationsRouter);

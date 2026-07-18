@@ -190,7 +190,7 @@ User interacts with OpenCode (:4098)
 | **MCP Server** | Tool handlers that forward to API layer |
 | **Dashboard** | UI for viewing and managing observations/personality/pipeline events |
 | **Database** | SQLite with three core tables (`observations` with FTS5, `personality_traits` with confidence tracking, `pipeline_events` with parent-child nesting) plus `personality_profile` aggregated view |
-| **LLM Provider** | (Optional) OpenCode-compatible provider blocks for extraction (Phase 0), trait consolidation (Phase 1), and skill synthesis (Phase 2), configured via Settings → Providers. One block can be primary and one backup; additional blocks remain available in OpenCode. **API keys are never exposed** in responses or OpenCode config files — the API returns only `apiKeySet: boolean`. |
+| **LLM Provider** | (Optional) OpenCode-compatible provider blocks for extraction (Phase 0), trait consolidation (Phase 1), and skill synthesis (Phase 2), configured via Settings → Providers. One block can be primary and one backup; additional blocks remain available in OpenCode. **API keys are never exposed** in responses or OpenCode config files — the API returns only `apiKeySet: boolean`. API keys are stored in the encrypted vault (`vault_items`, AES-256-GCM), never in plaintext settings. Legacy `synthesis_api_key` / `synthesis_backup_api_key` / `llm_provider_api_keys` settings are auto-migrated into the vault on first read. |
 
 ---
 
@@ -231,9 +231,17 @@ Extraction Engine (extraction.ts)
       → If no synthesis LLM configured, extraction creates 0 observations
       → Zero regex fallback to garbage
       → Pipeline event: extraction_failed (or extraction_completed with 0 observations)
-```
 
-### When It Runs
+### LLM Dispatch Modes
+
+The system uses two LLM dispatch modes depending on the feature:
+
+| Mode | Mechanism | Timeout | Used By | Configuration Source |
+|------|-----------|---------|---------|---------------------|
+| **Direct** | `callSynthesisLLM()` / `safeLlmFetch()` — calls LLM endpoint directly via HTTP | 60s | Self-learning pipeline (Phase 0 extraction, Phase 1 consolidation, Phase 2 skill synthesis), Email suggestions/summaries | `resolveLLMConfig()` — global→project→env vars chain |
+| **Broker** | `executeSynthesisBroker()` — creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s hard cap** (`Math.min(Math.max(timeoutMs, 0), 30_000)`) | Docs AI, RAG Ask, Job Suggestions | `synthesis_provider` + `synthesis_model` settings (primary/backup fallback chain with dedup) |
+
+The core pipeline uses direct calls (60s timeout) for batch processing. Interactive features use the broker (30s cap) for responsiveness and OpenCode model routing.
 
 | Trigger | Mechanism |
 |---------|-----------|

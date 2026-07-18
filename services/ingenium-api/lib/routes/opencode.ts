@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import multer from "multer";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -107,14 +107,15 @@ function pruneOAuthAttempts(): void {
 
 function oauthCallbackPage(res: Response, status: number, title: string, message: string): void {
   const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character]!);
+  const nonce = randomBytes(16).toString("base64");
   res.set({
     "Cache-Control": "no-store",
-    "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
   });
-  res.status(status).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><script>window.close()</script></body></html>`);
+  res.status(status).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><script nonce="${nonce}">window.close()</script></body></html>`);
 }
 
 /**
@@ -1047,6 +1048,10 @@ function isSafeIdentifier(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value);
 }
 
+function isValidProviderKey(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= 8192 && !/[\x00-\x1F\x7F]/.test(value);
+}
+
 function validateOAuthInputs(value: unknown): Record<string, string> | null {
   if (value === undefined) return {};
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -1073,7 +1078,7 @@ function isSafeOAuthUrl(value: string): boolean {
 
 opencodeRouter.post("/integrations/:integrationID/connect/key", async (req, res) => {
   if (!guardPassword(req, res)) return;
-  if (!isSafeIdentifier(req.params.integrationID) || typeof req.body?.key !== "string" || !req.body.key.trim() || req.body.key.length > 8192) {
+  if (!isSafeIdentifier(req.params.integrationID) || !isValidProviderKey(req.body?.key)) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "API key is required" } });
     return;
   }
@@ -1159,6 +1164,11 @@ opencodeRouter.post("/auth/:providerID", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const directory = req.query.directory as string | undefined;
   const body = req.body || {};
+
+  if (!isSafeIdentifier(req.params.providerID) || (body.key !== undefined && !isValidProviderKey(body.key))) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A valid API key is required" } });
+    return;
+  }
 
   // Redact key from logging
   const bodyForLog = { ...body };

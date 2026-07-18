@@ -446,7 +446,8 @@ describe("Native provider integrations", () => {
 
     expect(callback.headers.get("cache-control")).toBe("no-store");
     expect(callback.headers.get("content-security-policy")).toContain("default-src 'none'");
-    expect(callback.headers.get("content-security-policy")).toContain("script-src 'unsafe-inline'");
+    expect(callback.headers.get("content-security-policy")).toMatch(/script-src 'nonce-[^']+'/);
+    expect(callback.headers.get("content-security-policy")).toContain("object-src 'none'");
     expect(callback.headers.get("referrer-policy")).toBe("no-referrer");
     expect(callback.headers.get("x-frame-options")).toBe("DENY");
     expect(await callback.text()).toContain("window.close()");

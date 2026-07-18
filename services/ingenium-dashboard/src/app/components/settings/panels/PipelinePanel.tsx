@@ -70,6 +70,8 @@ export default function PipelinePanel() {
   const [intervalMin, setIntervalMin] = useState(15);
   const [primaryProviderId, setPrimaryProviderId] = useState("");
   const [backupProviderId, setBackupProviderId] = useState("");
+  const [primaryModelId, setPrimaryModelId] = useState("");
+  const [backupModelId, setBackupModelId] = useState("");
   const [nativeProviders, setNativeProviders] = useState<OpenCodeProvider[]>([]);
   const [integrations, setIntegrations] = useState<OpenCodeIntegration[]>([]);
   const [connectProviderId, setConnectProviderId] = useState<string | null>(null);
@@ -99,8 +101,10 @@ export default function PipelinePanel() {
     ])
       .then(([providerResponse, intervalResponse, runtime, integrationResponse]) => {
         setProviders(providerResponse.data.providers);
-        setPrimaryProviderId(providerResponse.data.providers.find((provider) => provider.roles.includes("primary"))?.id ?? "");
-        setBackupProviderId(providerResponse.data.providers.find((provider) => provider.roles.includes("backup"))?.id ?? "");
+        setPrimaryProviderId(providerResponse.data.synthesis?.primary.providerId ?? providerResponse.data.providers.find((provider) => provider.roles.includes("primary"))?.id ?? "");
+        setPrimaryModelId(providerResponse.data.synthesis?.primary.modelId ?? "");
+        setBackupProviderId(providerResponse.data.synthesis?.secondary.providerId ?? providerResponse.data.providers.find((provider) => provider.roles.includes("backup"))?.id ?? "");
+        setBackupModelId(providerResponse.data.synthesis?.secondary.modelId ?? "");
         const ms = Number(intervalResponse.data.value);
         if (Number.isFinite(ms) && ms >= 0) setIntervalMin(ms / 60000);
         setNativeProviders(runtime.all);
@@ -164,7 +168,10 @@ export default function PipelinePanel() {
           return { ...rest, roles } as ManagedProviderConfig;
         },
       );
-      const response = await api.settings.saveProviderConfigs(providersToSave, "global-default");
+      const response = await api.settings.saveProviderConfigs(providersToSave, "global-default", {
+        primary: { providerId: primaryProviderId, modelId: primaryModelId || providers.find((p) => p.id === primaryProviderId)?.defaultModel || "" },
+        secondary: { providerId: backupProviderId, modelId: backupModelId || providers.find((p) => p.id === backupProviderId)?.defaultModel || "" },
+      });
       const refreshed = await api.settings.getProviderConfigs("global-default");
         setProviders(refreshed.data.providers);
         setPrimaryProviderId(refreshed.data.providers.find((provider) => provider.roles.includes("primary"))?.id ?? "");
@@ -297,6 +304,7 @@ export default function PipelinePanel() {
   };
 
   const disconnectNativeProvider = async (providerId: string) => {
+    if (!window.confirm("Disconnect this provider? Its OpenCode credential will be removed.")) return;
     setStatus("");
     try {
       await opencode.auth.disconnect(providerId);
@@ -527,17 +535,30 @@ export default function PipelinePanel() {
               Primary
               <select value={primaryProviderId} onChange={(event) => {
                 setPrimaryProviderId(event.target.value);
-                if (backupProviderId === event.target.value) setBackupProviderId("");
+                const model = providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? "";
+                setPrimaryModelId(model);
+                if (backupProviderId === event.target.value && (!backupModelId || backupModelId === model)) {
+                  setBackupProviderId("");
+                  setBackupModelId("");
+                }
               }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="">Not configured</option>
                 {providers.filter((provider) => provider.enabled).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
               </select>
+              <select aria-label="Primary model" value={primaryModelId} onChange={(event) => setPrimaryModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!primaryProviderId}>
+                <option value="">Select model</option>
+                {providers.find((provider) => provider.id === primaryProviderId)?.models.filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
+              </select>
             </label>
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
               Secondary
-              <select value={backupProviderId} onChange={(event) => setBackupProviderId(event.target.value)} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+              <select value={backupProviderId} onChange={(event) => { setBackupProviderId(event.target.value); setBackupModelId(providers.find((provider) => provider.id === event.target.value)?.defaultModel ?? ""); }} className="mt-1 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
                 <option value="">Not configured</option>
-                {providers.filter((provider) => provider.enabled && provider.id !== primaryProviderId).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
+                {providers.filter((provider) => provider.enabled).map((provider) => <option key={provider.id} value={provider.id}>{provider.name} ({provider.id})</option>)}
+              </select>
+              <select aria-label="Secondary model" value={backupModelId} onChange={(event) => setBackupModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!backupProviderId}>
+                <option value="">Select model</option>
+                {providers.find((provider) => provider.id === backupProviderId)?.models.filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
               </select>
             </label>
           </div>
