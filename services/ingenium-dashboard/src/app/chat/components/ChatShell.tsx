@@ -151,9 +151,6 @@ export default function ChatShell() {
     label: a.label,
   })) ?? [];
 
-  /** Whether provider config was updated and OpenCode needs restart. */
-  const restartRequired = chatConfig?.restartRequired ?? false;
-
   /** A prompt can run only when the selected provider exposes the selected model. */
   const hasSelectableModel = currentModels.some((model) => model.id === modelId);
 
@@ -457,27 +454,6 @@ export default function ChatShell() {
           onMcpOpen={() => setMcpDrawerOpen(true)}
           permissionCount={chat.permissions.length}
         />
-        {/* Restart-required banner */}
-        {restartRequired && (
-          <div className="px-4 py-2 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2 shrink-0">
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              className="shrink-0"
-              aria-hidden="true"
-            >
-              <circle cx="8" cy="8" r="6" />
-              <path strokeLinecap="round" d="M8 5v2.5M8 10.5h.005" />
-            </svg>
-            <span className="truncate">
-              Provider config updated. Restart Ingenium to load provider changes.
-            </span>
-          </div>
-        )}
         {/* No-LLM-configured warning */}
         {!hasSelectableModel && !chatConfigLoading && !chatConfigError && (
           <div className="px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 text-sm text-blue-700 dark:text-blue-300 flex items-center gap-2 shrink-0">

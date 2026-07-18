@@ -294,7 +294,42 @@ Each setting row uses the `SettingRow` component:
 - **ConfigPanel**: Link to /config editor
 - All other tabs: `PlaceholderPanel` — centered icon + "No settings for {label} yet"
 
-### PipelinePanel — Draft Lifecycle & Hidden Panels
+### PipelinePanel — Draft Lifecycle & Native Provider Cards
+
+The PipelinePanel manages both **custom (managed) providers** and **native OpenCode provider integrations** in a single scrollable panel.
+
+#### Native Provider Cards
+
+Two sub-sections appear above the custom provider list:
+
+1. **Connected providers** — A list of already-connected native providers, each rendered as a horizontal card: name + model count (left), Disconnect button (right). Shows "No native providers connected." dashed-border empty state when none are connected.
+2. **Native providers** — A `md:grid-cols-2` grid of cards for popular providers (OpenCode, OpenAI, Anthropic, GitHub Copilot, DeepSeek). Each card shows provider name, model count, and either a "Connected" green badge or a "Connect" button. Clicking Connect opens a modal dialog.
+
+#### Connect Dialog (Modal)
+
+A `fixed inset-0 z-[80]` modal with `bg-black/60` backdrop and `max-w-lg rounded-xl` card:
+
+| Element | Styling |
+|---------|---------|
+| Header | Provider name + "Models will be loaded automatically from OpenCode." subtitle |
+| Login method | `<select>` with standard select classes (only shown when multiple methods exist) |
+| Prompt fields | Dynamic form fields per integration method prompts (text inputs or selects) |
+| API key field | Key-based connections: password input with standard input classes |
+| OAuth buttons | "Continue in browser" opens OAuth URL in new tab; auto-mode shows "Waiting for authorization..."; code-mode shows Authorization code input + "Complete connection" |
+| Cancel | `×` button in header, calls `closeConnect()` which cancels pending attempts |
+
+#### Synthesis Provider Selectors
+
+Two separate dropdown selectors below the custom provider list, labeled **Primary** and **Secondary**, rendered in a `md:grid-cols-2` grid:
+
+| Property | Styling |
+|----------|---------|
+| Container | `mt-3 grid gap-4 md:grid-cols-2` |
+| Select elements | Standard select classes (`border border-[var(--color-border)] rounded bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer`) |
+| Option filter | Primary options include all enabled providers; Secondary excludes the selected Primary (`provider.id !== primaryProviderId`) |
+| Mutual exclusion | Selecting a provider as Primary removes it from Secondary options; selecting a provider as Secondary while already Primary sets Primary to empty |
+
+#### Draft Lifecycle & State Management
 
 The PipelinePanel manages a local `providers` state array of `DraftProvider` objects (a `ManagedProviderConfig` extended with a `_draftId` field for stable React keys). All edits (add, remove, reorder, collapse, field edits) are applied to this local state only.
 

@@ -273,9 +273,11 @@ Settings (Providers tab) ──PUT───▶  API (/api/v1/settings/provider-c
                                       each user-managed provider ID
                                           │
 Chat page (/chat)  ◀──GET──  API (/api/v1/opencode/chat-config)
-                                     Returns sanitized config:
-                                     { primary, backup, agents, restartRequired,
-                                       providers: [...], defaultSelection }
+                                      Returns sanitized config:
+                                      { primary, backup, agents,
+                                        providers: [...], defaultSelection }
+                                      OpenCode live-reloads provider config
+                                      changes — no restart required
 ```
 
 The Chat page fetches `chat-config`, which internally:
@@ -305,7 +307,7 @@ If no managed providers exist and the OpenCode Zen runtime is unreachable, `defa
 - **Runtime builtin discovery**: `GET /api/v1/opencode/builtin-providers` queries OpenCode's runtime provider list and filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. The response shape is `{ providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`.
 - **Builtin providers are read-only**: The OpenCode Zen entry in the `providers[]` array has `source: "builtin"` to distinguish it from managed providers. It is never persisted to the DB, never written to OpenCode config, and is recomputed on every `chat-config` request. The Chat page treats it as a non-editable runtime option.
 - **"No LLM" state**: When no provider is configured and no builtin is available, the response returns `{ configured: false }` with `defaultSelection: null`. The Chat page shows a banner linking to Settings → Providers.
-- **Restart detection**: The response includes `restartRequired: boolean`. Saving provider blocks sets this flag to signal that OpenCode must restart before catalog changes take effect. Delivered once to the client and then cleared.
+- **Live reload**: Saving provider blocks triggers an OpenCode config reload in-process — no restart required. Provider changes take effect for new sessions immediately.
 
 ### Agent Model Inheritance
 
@@ -315,6 +317,44 @@ The `ingenium-chat` agent uses **no hardcoded `model` field** — it inherits th
 |----------|-------|--------|
 | `model` | (not set) | Inherits from Chat request at runtime |
 | `hidden` | `true` | Only visible in Chat context, not OpenCode agent lists |
+
+## Native Provider OAuth Integration
+
+Native OpenCode provider integrations use two OAuth modes, both handled by a public `GET /auth/callback` endpoint registered **before** the auth middleware:
+
+- **Auto mode (default)**: OpenCode opens a local HTTP listener on `localhost:1455` inside the container. The Docker Compose file maps `127.0.0.1:1455` on the host to port `4097` (the API). When the OAuth provider redirects the browser to `http://localhost:1455/auth/callback`, it reaches the API, which validates the state from the `pendingOAuthAttempts` Map (10-min TTL), consumes the state (preventing replay), and forwards the callback to OpenCode's internal listener. The user sees an "Authorization received" page.
+- **Code mode**: The API receives the OAuth code and state, validates and consumes the state, then calls `opencodeClient.completeIntegrationAttempt()` with the code. The user sees an "Authorization complete" page.
+
+> 🔴 Both modes consume the state parameter before forwarding or exchanging, preventing redirect replay. Malformed states (>1024 chars or containing control characters) are rejected with 400.
+
+### Integration States
+
+| State | Storage | Lifecycle |
+|-------|---------|-----------|
+| Pending OAuth attempt | `pendingOAuthAttempts` Map (in-memory) | Created on `POST /integrations/:id/connect/oauth`. 10-min TTL. Pruned on every callback. |
+| Integration credentials | OpenCode internal DB | Managed by OpenCode auth API, not exposed to Ingenium DB. |
+| Connected provider models | OpenCode runtime catalog | Auto-discovered after successful connection. |
+
+## Settings Provider Panel (PipelinePanel)
+
+The Settings overlay's Providers tab (`PipelinePanel.tsx`) manages both native OpenCode provider connections and custom OpenAI-compatible endpoints:
+
+### Native Provider Cards
+
+Connected native providers render as a **Connected providers** list (cards with name, model count, and Disconnect button). Available native providers render in a **Native providers** grid with Connect buttons. Each card shows provider name, model count, and connection state. Clicking Connect opens a modal dialog (`Connect {providerName}`) with:
+
+- **Login method selector** — drops down available auth methods (API key vs OAuth) when multiple exist
+- **Prompt inputs** — dynamic form fields per the integration's method prompts (region selector, etc.)
+- **API key field** — for key-based connections
+- **OAuth flow** — "Continue in browser" button opens the OAuth URL in a new tab. Auto-mode polls for completion; code-mode shows an Authorization code input field with "Complete connection" button
+
+### Custom Provider Cards
+
+Custom (managed) providers render as collapsible sections with fields for: display name, provider ID, package selector (OpenAI-compatible, Anthropic, etc.), base URL, API key (show/hide toggle, clear, keep-saved-key), and a models list with radio-button default model selection. Providers can be reordered (↑/↓), collapsed, removed, and toggled on/off.
+
+### Synthesis Provider Selectors
+
+Two separate dropdown selectors below the custom provider list let users designate **Primary** and **Secondary** (backup) synthesis providers from the enabled custom providers. Primary selection automatically excludes it from the Secondary options (mutual exclusion enforced client-side). A synthesis interval selector (5 min to Disabled) controls the scheduled extraction → synthesis cycle.
 
 ## Broker Execution
 
@@ -379,7 +419,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 20 primary route-based p
 | `/opencode` | Embedded OpenCode Web/CLI iframes (no native chat) |
 | `/projects` | Project management (create, rename, archive, restore) |
 | `/skills` | Skills grid with detail overlay, syntax highlighting |
-| `/docs` | Documentation workspace with spaces, page tree, editor, search, templates, metadata, history, and trash |
+| `/docs` | Documentation workspace with spaces, page tree, editor (autoFocus on rename inline bar for immediate typing), search, templates, metadata, history, and trash |
 | `/jobs` | Job queue and background task monitoring — create/edit modal with 2-column responsive layout (metadata left, prompt_template right) and magic-wand button for AI job config generation from description |
 | `/logs` | Structured logging and event viewer |
 | `/mail` | Mail (inbox, compose, reader, auto-responses) — email client interface |
@@ -481,6 +521,7 @@ services:
       - "4097:4097"   # API
       - "3000:3000"   # Dashboard
       - "127.0.0.1:4098:4098"   # opencode-web (binds 0.0.0.0 inside container via `--hostname 0.0.0.0`; Compose publishes to host loopback only)
+      - "127.0.0.1:1455:4097"   # OAuth callback proxy (host loopback → API)
     volumes:
       - ingenium-data:/app/.ingenium
 ```
@@ -508,8 +549,9 @@ docker compose up --build
 | `4097` | API | Express REST gateway (sole DB authority) |
 | `127.0.0.1:4098` | opencode-web | OpenCode Web UI (host loopback only; container binds **0.0.0.0** via `--hostname 0.0.0.0`) |
 | `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
+| `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → container `:4097` (API). OpenCode redirects OAuth provider callbacks here; the API validates state, consumes it (preventing replay), and either forwards to OpenCode's internal listener (auto mode) or completes the exchange (code mode). |
 
-> Note: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099.
+> Note: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099, 1455.
 
 ### Volume Configurations
 

@@ -16,7 +16,7 @@ import { describe, it, expect, afterEach, vi, beforeAll, afterAll } from "vitest
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { opencodeRouter } from "../lib/routes/opencode.js";
+import { createOAuthCallbackRateLimiter, handleOAuthCallback, opencodeRouter } from "../lib/routes/opencode.js";
 import { opencodeClient, request, buildAuthHeader } from "../lib/opencode-client.js";
 
 /* ── Configuration ───────────────────────────────────────────────────────── */
@@ -31,7 +31,9 @@ let apiUrl: string;
 
 function buildApp(): express.Express {
   const app = express();
+  app.set("trust proxy", false);
   app.use(express.json());
+  app.get("/auth/callback", createOAuthCallbackRateLimiter(), handleOAuthCallback);
   app.use("/api/v1/opencode", opencodeRouter);
   return app;
 }
@@ -230,6 +232,259 @@ describe("Provider list sanitization", () => {
     expect(body.data.connected).toEqual([]);
 
     spy.mockRestore();
+  });
+});
+
+describe("Native provider integrations", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("returns native auth methods and connection state", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "listIntegrations").mockResolvedValue({
+      location: {},
+      data: [{ id: "deepseek", name: "DeepSeek", methods: [{ type: "key" }], connections: [] }],
+    });
+
+    const res = await fetch(`${apiUrl}/integrations?directory=/workspace`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.data.data[0]).toMatchObject({ id: "deepseek", methods: [{ type: "key" }] });
+  });
+
+  it("rejects malformed OAuth prompt inputs before calling OpenCode", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    const begin = vi.spyOn(opencodeClient, "beginIntegrationOAuth");
+
+    const res = await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: { tenant: "bad\nvalue" } }),
+    });
+
+    expect(res.status).toBe(422);
+    expect(begin).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsafe OAuth authorization URLs", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-1", url: "javascript:alert(1)", instructions: "", mode: "auto", time: { created: 1, expires: 2 } },
+    });
+    vi.spyOn(opencodeClient, "cancelIntegrationAttempt").mockResolvedValue("");
+
+    const res = await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
+    });
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ error: { code: "UNSAFE_OAUTH_URL", message: "Provider returned an unsafe authorization URL" } });
+  });
+
+  it("accepts IPv6 loopback OAuth callback URLs", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-ipv6", url: "http://[::1]:1455/auth/callback?state=ipv6-state", instructions: "", mode: "code", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+    });
+
+    const res = await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("completes a code OAuth attempt through the fixed callback", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: {
+        attemptID: "attempt-1",
+        url: "https://auth.openai.com/authorize?state=state-1",
+        instructions: "",
+        mode: "code",
+        time: { created: Date.now(), expires: Date.now() + 60_000 },
+      },
+    });
+    const complete = vi.spyOn(opencodeClient, "completeIntegrationAttempt").mockResolvedValue("connected");
+
+    const begin = await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
+    });
+    expect(begin.status).toBe(200);
+
+    const callback = await fetch(`${baseUrl}/auth/callback?state=state-1&code=oauth-code`);
+    expect(callback.status).toBe(200);
+    expect(await callback.text()).toContain("Authorization complete");
+    expect(complete).toHaveBeenCalledWith("attempt-1", "oauth-code");
+  });
+
+  it("forwards auto OAuth callbacks to OpenCode's local listener", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: {
+        attemptID: "attempt-auto",
+        url: "https://auth.openai.com/authorize?state=state-auto",
+        instructions: "",
+        mode: "auto",
+        time: { created: Date.now(), expires: Date.now() + 60_000 },
+      },
+    });
+
+    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
+    });
+    const originalFetch = globalThis.fetch;
+    const forward = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    const callback = await originalFetch(`${baseUrl}/auth/callback?state=state-auto&code=oauth-code`);
+
+    expect(callback.status).toBe(200);
+    expect(await callback.text()).toContain("Authorization received");
+    expect(forward).toHaveBeenCalledWith("http://localhost:1455/auth/callback?code=oauth-code&state=state-auto");
+  });
+
+  it("uses a validated configured auto OAuth callback forward URL", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubEnv("OPENCODE_OAUTH_CALLBACK_FORWARD_URL", "http://[::1]:1455/auth/callback");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-configured-forward", url: "https://auth.openai.com/authorize?state=configured-forward-state", instructions: "", mode: "auto", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+    });
+    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
+    });
+    const originalFetch = globalThis.fetch;
+    const forward = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    await originalFetch(`${baseUrl}/auth/callback?state=configured-forward-state&code=oauth-code`);
+
+    expect(forward).toHaveBeenCalledWith("http://[::1]:1455/auth/callback?code=oauth-code&state=configured-forward-state");
+  });
+
+  it("consumes OAuth callback state to prevent code replay", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: {
+        attemptID: "attempt-2",
+        url: "https://auth.openai.com/authorize?state=state-2",
+        instructions: "",
+        mode: "code",
+        time: { created: Date.now(), expires: Date.now() + 60_000 },
+      },
+    });
+    const complete = vi.spyOn(opencodeClient, "completeIntegrationAttempt").mockResolvedValue("connected");
+
+    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
+    });
+    await fetch(`${baseUrl}/auth/callback?state=state-2&code=oauth-code`);
+    const replay = await fetch(`${baseUrl}/auth/callback?state=state-2&code=oauth-code`);
+
+    expect(replay.status).toBe(400);
+    expect(complete).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the attempt when the provider rejects authorization", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-3", url: "https://auth.openai.com/authorize?state=state-3", instructions: "", mode: "code", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+    });
+    const cancel = vi.spyOn(opencodeClient, "cancelIntegrationAttempt").mockResolvedValue("cancelled");
+
+    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
+    });
+    const callback = await fetch(`${baseUrl}/auth/callback?state=state-3&error=access_denied`);
+
+    expect(callback.status).toBe(400);
+    expect(await callback.text()).toContain("Authorization was cancelled");
+    expect(cancel).toHaveBeenCalledWith("attempt-3");
+  });
+
+  it("returns a safe error page when OAuth completion throws", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "beginIntegrationOAuth").mockResolvedValue({
+      location: {},
+      data: { attemptID: "attempt-4", url: "https://auth.openai.com/authorize?state=state-4", instructions: "", mode: "code", time: { created: Date.now(), expires: Date.now() + 60_000 } },
+    });
+    vi.spyOn(opencodeClient, "completeIntegrationAttempt").mockRejectedValue(new Error("network unavailable"));
+
+    await fetch(`${apiUrl}/integrations/openai/connect/oauth`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ methodID: "chatgpt-browser", inputs: {} }),
+    });
+    const callback = await fetch(`${baseUrl}/auth/callback?state=state-4&code=oauth-code`);
+
+    expect(callback.status).toBe(502);
+    expect(await callback.text()).toContain("Authorization could not be completed");
+  });
+
+  it("sets restrictive response headers while allowing the callback window to close", async () => {
+    const callback = await fetch(`${baseUrl}/auth/callback?state=invalid-state`);
+
+    expect(callback.headers.get("cache-control")).toBe("no-store");
+    expect(callback.headers.get("content-security-policy")).toContain("default-src 'none'");
+    expect(callback.headers.get("content-security-policy")).toContain("script-src 'unsafe-inline'");
+    expect(callback.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(callback.headers.get("x-frame-options")).toBe("DENY");
+    expect(await callback.text()).toContain("window.close()");
+  });
+
+  it("rate limits unauthenticated callback requests by the socket client IP", async () => {
+    const app = express();
+    app.set("trust proxy", false);
+    app.get("/auth/callback", createOAuthCallbackRateLimiter(2, 60_000), handleOAuthCallback);
+    const limitedServer = createServer(app);
+    await new Promise<void>((resolve) => limitedServer.listen(0, "127.0.0.1", resolve));
+    const port = (limitedServer.address() as AddressInfo).port;
+
+    try {
+      const first = await fetch(`http://127.0.0.1:${port}/auth/callback?state=one`, { headers: { "X-Forwarded-For": "198.51.100.99" } });
+      const second = await fetch(`http://127.0.0.1:${port}/auth/callback?state=two`, { headers: { "X-Forwarded-For": "198.51.100.100" } });
+      const limited = await fetch(`http://127.0.0.1:${port}/auth/callback?state=three`);
+
+      expect(first.status).toBe(400);
+      expect(second.status).toBe(400);
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("retry-after")).toBeTruthy();
+    } finally {
+      await new Promise<void>((resolve) => limitedServer.close(() => resolve()));
+    }
+  });
+
+  it("does not expose upstream OpenCode error details through proxy routes", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.spyOn(opencodeClient, "listIntegrations").mockResolvedValue({
+      error: { code: "HTTP_500", message: "stack trace /srv/opencode token=secret-value" },
+    } as any);
+
+    const response = await fetch(`${apiUrl}/integrations`);
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body).toEqual({ error: { code: "HTTP_500", message: "OpenCode request failed." } });
   });
 });
 

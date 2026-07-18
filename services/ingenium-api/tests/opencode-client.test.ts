@@ -381,6 +381,19 @@ describe("opencodeClient — method routing", () => {
     expect(result).toEqual({ healthy: true, version: "1.18.3" });
   });
 
+  it("updateGlobalConfig() patches the running global configuration", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { provider: {} }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.updateGlobalConfig({ provider: { lmstudio: { models: {} } } });
+
+    const url = fetchSpy.mock.calls[0][0] as string;
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(url).toContain("/global/config");
+    expect(init.method).toBe("PATCH");
+    expect(init.body).toBe(JSON.stringify({ config: { provider: { lmstudio: { models: {} } } } }));
+  });
+
   it("listSessions() calls GET /session with directory query", async () => {
     const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, [{ id: "s1" }]));
     vi.stubGlobal("fetch", fetchSpy);
@@ -391,6 +404,30 @@ describe("opencodeClient — method routing", () => {
     expect(url).toContain("/session");
     expect(url).toContain("directory=%2Fworkspace");
     expect(Array.isArray(result)).toBe(true);
+  });
+
+  it("listIntegrations() discovers native authentication methods", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { location: {}, data: [] }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.listIntegrations("/workspace");
+
+    const url = fetchSpy.mock.calls[0][0] as string;
+    expect(url).toContain("/api/integration");
+    expect(url).toContain("location.directory=%2Fworkspace");
+  });
+
+  it("beginIntegrationOAuth() forwards only the method and prompt inputs", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(mockResponse(200, { location: {}, data: { attemptID: "attempt-1" } }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await opencodeClient.beginIntegrationOAuth("openai", "chatgpt-browser", { tenant: "example" });
+
+    const url = fetchSpy.mock.calls[0][0] as string;
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(url).toContain("/api/integration/openai/connect/oauth");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(JSON.stringify({ methodID: "chatgpt-browser", inputs: { tenant: "example" } }));
   });
 
   it("sendPrompt() calls POST /session/:id/message with parts body", async () => {

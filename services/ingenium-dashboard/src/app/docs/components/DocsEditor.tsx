@@ -223,9 +223,8 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
    * DOM element changes (source uses a full-width div, split uses a left-half div). Keeping
    * the old view attached to a destroyed DOM node produces a blank editor.
    *
-   * `content` is included as a dependency so the new view starts with the current content
-   * on mode switch. Every-keystroke re-creation is avoided because React bails out when
-   * the same reference is passed — the effect only fires when editorMode or content changes.
+    * The current content is read from `contentRef` when a mode switch creates the editor.
+    * Content changes must not recreate the view because that drops keyboard focus.
    */
   useEffect(() => {
     if (editorMode !== "source" && editorMode !== "split") {
@@ -250,7 +249,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
       }
     });
     const view = new EditorView({
-      doc: content,
+      doc: contentRef.current,
       extensions: [
         lineNumbers(),
         highlightActiveLine(),
@@ -264,7 +263,16 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     });
     codeMirrorViewRef.current = view;
     return () => { /* destroy handled in mode-switch path above */ };
-  }, [editorMode, content]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editorMode]);
+
+  // Apply content changes made outside CodeMirror without replacing its focused DOM node.
+  useEffect(() => {
+    const view = codeMirrorViewRef.current;
+    if (!view) return;
+    const current = view.state.doc.toString();
+    if (current === content) return;
+    view.dispatch({ changes: { from: 0, to: current.length, insert: content } });
+  }, [content]);
 
   // ── Mode change handler ────────────────────────────────────────────────────
   const handleModeChange = useCallback(

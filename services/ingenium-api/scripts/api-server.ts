@@ -24,7 +24,7 @@ import { commandsRouter } from "../lib/routes/commands.js";
 import { configRouter } from "../lib/routes/configs.js";
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
 import { logsRouter } from "../lib/routes/logs.js";
-import { opencodeRouter } from "../lib/routes/opencode.js";
+import { createOAuthCallbackRateLimiter, handleOAuthCallback, opencodeRouter } from "../lib/routes/opencode.js";
 import { extractionRouter } from "../lib/routes/extraction.js";
 import { jobsRouter } from "../lib/routes/jobs.js";
 import { servicesRouter } from "../lib/routes/services.js";
@@ -85,6 +85,11 @@ process.on("unhandledRejection", (reason: unknown) => {
 
 const app = express();
 
+// Do not trust X-Forwarded-For by default. This API is directly exposed in local
+// development and Docker; deployments behind a proxy must configure a trusted
+// proxy explicitly rather than allowing clients to choose their rate-limit IP.
+app.set("trust proxy", false);
+
 // ════════════════════════════════════════════════════════════════════════════
 // Middleware pipeline — order matters:
 //   1. Security headers  (helmet)
@@ -105,6 +110,9 @@ app.use(express.json({ limit: "2mb" }));
 // MAX_ATTACHMENT_SIZE (from ingenium-core) sets the body parser limit for file uploads;
 // converting bytes → MB for the human-readable `limit` string passed to urlencoded.
 app.use(express.urlencoded({ limit: `${Math.round(MAX_ATTACHMENT_SIZE / (1024 * 1024))}mb`, extended: true }));
+// OpenAI redirects the browser to localhost:1455/auth/callback. Docker maps that
+// fixed port to this API; state is validated by the handler before completion.
+app.get("/auth/callback", createOAuthCallbackRateLimiter(), handleOAuthCallback);
 app.use(rateLimit);
 app.use(authMiddleware);
 

@@ -603,7 +603,7 @@ The Docs Workspace dashboard at `/docs` provides an immersive responsive 3-pane 
 | **Archive** | Archive button in top bar — soft-deletes to trash | `DELETE /pages/:id` |
 | **Restore** | `TrashPanel` — restore button per archived page | `POST /pages/:id/restore` |
 | **Move** | `MovePageDialog` — select new parent from tree; self+descendant exclusion prevents cycles | `POST /pages/:id/move` |
-| **Rename** | Inline rename bar — triggered from tree context, updates title | `PUT /pages/:id` |
+| **Rename** | Inline rename bar with `autoFocus` — triggered from tree context, input auto-focuses for immediate typing, Enter submits, Escape cancels | `PUT /pages/:id` |
 | **Delete attachment** | Attachments tab — per-file delete button | `DELETE /pages/:id/attachments/:attId` |
 | **Link/unlink project** | Linked tab — input field + link button, per-link unlink | `POST /pages/:id/projects`, `DELETE /pages/:id/projects/:projectId` |
 
