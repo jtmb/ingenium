@@ -43,6 +43,8 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 | API Reference | [docs/develop/api.md](docs/develop/api.md) |
 | MCP Tools Reference | [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md) |
 | Docs Workspace | [docs/reference/docs-workspace.md](docs/reference/docs-workspace.md) |
+| Context Memory | [docs/concepts/architecture.md](docs/concepts/architecture.md#context-memory-architecture-phase-3) |
+| RAG Indexing | [docs/concepts/architecture.md](docs/concepts/architecture.md#rag-indexing-architecture-phase-3) |
 
 ---
 

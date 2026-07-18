@@ -121,6 +121,7 @@ const PLANS_ENDPOINTS = [
   "POST /api/v1/context",
   "GET /api/v1/context/search",
 ];
+const CONTEXT_ENDPOINTS = [...PLANS_ENDPOINTS, "GET /api/v1/context/:id", "PATCH /api/v1/context/:id", "DELETE /api/v1/context/:id", "POST /api/v1/context/batch"];
 
 const PROJECTS_ENDPOINTS = [
   "GET /api/v1/projects",
@@ -989,6 +990,10 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     defaultEnabled: true,
     apiEndpoints: PLANS_ENDPOINTS,
   },
+  { name: "ingenium_context_get", category: "Context", description: "Get a canonical agent memory entry.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
+  { name: "ingenium_context_update", category: "Context", description: "Update a canonical agent memory entry.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
+  { name: "ingenium_context_delete", category: "Context", description: "Delete a canonical agent memory entry.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
+  { name: "ingenium_context_batch_get", category: "Context", description: "Retrieve canonical agent memory entries by ID.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
 
   // ── Projects (10) ────────────────────────────────────
   {

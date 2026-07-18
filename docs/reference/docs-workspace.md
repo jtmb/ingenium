@@ -571,6 +571,36 @@ The AI actions endpoint (`POST /ai`) uses `max_tokens: 8192` and **never falls b
 
 ---
 
+## RAG Indexing Lifecycle
+
+Pages in the Docs Workspace are automatically indexed into the RAG (Retrieval-Augmented Generation) system at lifecycle boundaries. This means every published page is searchable via `ingenium_docs_search_semantic` and answerable via `ingenium_docs_ask` without manual re-indexing.
+
+| Lifecycle Event | RAG Action | Source Path |
+|----------------|------------|-------------|
+| `publishPage()` | Creates/replaces chunk index | `docs-page:{page.id}` |
+| `updatePage()` (published) | Updates chunk index | `docs-page:{page.id}` |
+| `archivePage()` | Deletes from index | — |
+| `restorePage()` | Creates chunk index | `docs-page:{page.id}` |
+
+See `indexPublishedDoc()` in `packages/ingenium-core/lib/tools/rag.ts` and its call sites in `docs.ts`.
+
+For canonical repository docs (`docs/**/*.md`), use `POST /api/v1/rag/ingest` or `ingenium_docs_ingest` — these are indexed with `source_type='file'` and `source_path='docs/relative/path.md'`, NOT as editable Docs Workspace pages.
+
+### RAG Tools
+
+| MCP Tool | API Route | Purpose |
+|----------|-----------|---------|
+| `ingenium_docs_search_semantic` | `GET /rag/search?q=` | BM25 FTS5 full-text search |
+| `ingenium_docs_ask` | `POST /rag/ask` | LLM-grounded Q&A with citations |
+| `ingenium_docs_ingest` | `POST /rag/sources` | Manual document ingestion |
+| `ingenium_docs_rag_sources_list` | `GET /rag/sources` | List indexed sources |
+| `ingenium_docs_rag_source_get` | `GET /rag/sources/:id` | Get source detail |
+| `ingenium_docs_rag_source_delete` | `DELETE /rag/sources/:id` | Remove source + chunks |
+| `ingenium_docs_rag_reingest` | `POST /rag/sources/:id/ingest` | Replace source content |
+| `ingenium_docs_rag_stats` | `GET /rag/stats` | Index statistics |
+
+See [../concepts/architecture.md](../concepts/architecture.md) for the full RAG indexing architecture, embedding strategy, chunker details, and citation format.
+
 ## MCP Tool Catalog (48 Documentation Tools — 🟢 CALLER ALIGNED)
 
 All tools are in the `"Documentation"` category, default-enabled, and per-project scoped. The canonical tool names and their mapping to API endpoints are defined in [mcp-tool-catalog.ts](../../packages/ingenium-core/lib/tools/mcp-tool-catalog.ts) (the `DOCS_ENDPOINTS` array at line 233).
