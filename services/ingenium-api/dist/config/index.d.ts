@@ -12,5 +12,6 @@ export declare const config: {
     rateLimit: number;
     corsOrigin: string;
     coreDbPath: string;
+    opencodeUrl: string;
 };
 //# sourceMappingURL=index.d.ts.map

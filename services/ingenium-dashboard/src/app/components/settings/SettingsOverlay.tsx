@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ALL_TABS, tabForPathname } from "./tabs";
@@ -18,9 +18,12 @@ import type { ComponentType } from "react";
 const TAB_PANELS: Record<string, ComponentType> = {
   general: GeneralPanel,
   mail: MailPanel,
-  pipeline: PipelinePanel,
+  providers: PipelinePanel,
   config: ConfigPanel,
 };
+
+/** Only tabs that have real panel components registered — hides tabs with PlaceholderPanel fallback. */
+const VISIBLE_TABS = ALL_TABS.filter((t) => TAB_PANELS[t.id] !== undefined);
 
 /** Resolves a tab ID to either a registered panel component or the generic placeholder. */
 function TabPanel({ tabId, activeTab }: { tabId: string; activeTab: SettingsTab }) {
@@ -44,14 +47,22 @@ export default function SettingsOverlay() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  // SSR guard: defer portal rendering until client hydration completes.
+  // `createPortal(..., document.body)` cannot run during SSR because
+  // `document` is undefined on the server, even inside a Suspense boundary.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   const settingsParam = searchParams.get("settings");
   const isOpen = settingsParam !== null;
 
-  const currentTabId = settingsParam && ALL_TABS.some((t) => t.id === settingsParam)
+  const currentTabId = settingsParam && VISIBLE_TABS.some((t) => t.id === settingsParam)
     ? settingsParam
-    : tabForPathname(pathname);
+    : VISIBLE_TABS.some((t) => t.id === tabForPathname(pathname))
+      ? tabForPathname(pathname)
+      : VISIBLE_TABS[0]?.id ?? "general";
 
-  const activeTab: SettingsTab = ALL_TABS.find((t) => t.id === currentTabId) ?? ALL_TABS[0]!;
+  const activeTab: SettingsTab = VISIBLE_TABS.find((t) => t.id === currentTabId) ?? VISIBLE_TABS[0]!;
 
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -76,9 +87,9 @@ export default function SettingsOverlay() {
     if (e.key === "Tab") {
       const modal = document.querySelector('[role="dialog"]');
       if (!modal) return;
-      const focusable = modal.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
+      const focusable = Array.from(modal.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )).filter((el) => !el.closest("[hidden]") && !el.closest("[inert]"));
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       if (!first || !last) return;
@@ -94,6 +105,8 @@ export default function SettingsOverlay() {
   }, [close]);
 
   useEffect(() => {
+    // Only execute DOM operations after client hydration (mounted guard).
+    if (!mounted) return;
     if (isOpen) {
       previousFocus.current = document.activeElement as HTMLElement;
       // Focus the close button after a tick (wait for render)
@@ -112,22 +125,22 @@ export default function SettingsOverlay() {
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
     };
-  }, [isOpen, handleKeyDown]);
+  }, [isOpen, handleKeyDown, mounted]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !mounted) return null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={close} />
 
       <div 
-        className="relative w-11/12 max-w-7xl max-h-[85vh] flex bg-[var(--color-surface)] rounded-lg shadow-2xl overflow-hidden"
+        className="relative w-11/12 max-w-7xl h-[85vh] flex bg-[var(--color-surface)] rounded-lg shadow-2xl overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
       >
         <SettingsSidebar
-          tabs={ALL_TABS}
+          tabs={VISIBLE_TABS}
           activeTab={currentTabId}
           onSelect={selectTab}
         />
@@ -154,13 +167,17 @@ export default function SettingsOverlay() {
             className="md:hidden mx-6 mt-3 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)]"
             aria-label="Settings category"
           >
-            {ALL_TABS.map(tab => (
+            {VISIBLE_TABS.map(tab => (
               <option key={tab.id} value={tab.id}>{tab.label}</option>
             ))}
           </select>
 
           <div className="flex-1 overflow-y-auto">
-            <TabPanel tabId={activeTab.id} activeTab={activeTab} />
+            {VISIBLE_TABS.map((tab) => (
+              <div key={tab.id} hidden={tab.id !== activeTab.id} inert={tab.id !== activeTab.id || undefined}>
+                <TabPanel tabId={tab.id} activeTab={tab} />
+              </div>
+            ))}
           </div>
         </div>
       </div>

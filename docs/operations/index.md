@@ -25,16 +25,16 @@ Deployment, maintenance, and recovery procedures for the Ingenium system.
 ## Quick Reference
 
 ```bash
-# Start all services
+# Production — single container via supervisord
 docker compose up --build
 
-# View logs
+# View logs (Docker)
 docker compose logs -f
 
-# Execute inside container
+# Execute inside container (Docker)
 docker compose exec ingenium /bin/bash
 
-# Backup database
+# Backup database (Docker)
 docker compose exec ingenium bash -c "sqlite3 /app/.ingenium/data.db '.backup /app/.ingenium/data.db.backup'"
 ```
 

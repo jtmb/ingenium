@@ -29,6 +29,10 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_API_TOKEN` | _(none)_ | `lib/middleware/auth.ts` | Optional bearer token for API authentication |
 | `CORS_ORIGIN` | `http://localhost:3000` | `config/index.ts` | Allowed CORS origin for browser requests |
 | `SYNTHESIS_INTERVAL_MS` | `900000` | `scheduler.ts` | Scheduled synthesis + extraction interval (15 min), 0 = disabled |
+| `SYNTHESIS_MODEL` | _(none)_ | `synthesis-llm.ts` | Fallback synthesis model name (used when no provider config is saved in DB) |
+| `SYNTHESIS_API_KEY` | _(none)_ | `synthesis-llm.ts` | Fallback synthesis API key (used when no provider config is saved in DB) |
+| `SYNTHESIS_ENDPOINT` | _(none)_ | `synthesis-llm.ts` | Fallback synthesis endpoint URL (used when no provider config is saved in DB) |
+| `SYNTHESIS_ALLOW_PRIVATE_NETWORK` | `false` | `synthesis-llm.ts` | When `true`, bypasses SSRF protection for the synthesis endpoint. Required for local inference servers (Ollama, LM Studio, vLLM). |
 | `INGENIUM_OPENCODE_DB_PATH` | `/var/opencode/opencode.db` | extraction engine | OpenCode SQLite DB path for server-side extraction |
 
 ## MCP Server (`services/ingenium-server`)
@@ -59,7 +63,16 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
-| `OPENCODE_SERVER_PASSWORD` | _(none, required)_ | `scripts/docker-entrypoint.sh` | **Required.** Auth password for OpenCode web server |
+| `OPENCODE_SERVER_PASSWORD` | _(none, required)_ | `scripts/docker-entrypoint.sh`, `ingenium-api` (OpenCode proxy routes) | **Required.** Server-side API proxy guard credential. The browser-facing OpenCode Web child overrides it to empty and is restricted to host loopback. |
+| `OPENCODE_SERVER_URL` | `http://localhost:4098` | `ingenium-api` (opencode client) | Base URL of the OpenCode web server |
+
+> Multer file uploads for `/api/v1/opencode/upload` are stored at `/tmp/ingenium-chat-uploads/`.
+
+## Backups
+
+| Variable | Default | Used By | Description |
+|----------|---------|---------|-------------|
+| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | `backup-scheduler.ts`, `routes/backups.ts` | Directory for backup snapshot files (Ingenium + OpenCode DB pairs) |
 | `THREAD_API_TOKEN` | _(none)_ | OpenCode config | API token for Thread MCP server. 🔴 **Never commit to source.** |
 
 ---

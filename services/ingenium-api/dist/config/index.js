@@ -13,4 +13,5 @@ export const config = {
     rateLimit: parseInt(process.env.INGENIUM_API_RATE_LIMIT ?? "100", 10),
     corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:3000",
     coreDbPath: process.env.INGENIUM_CORE_DB_PATH ?? resolve(process.cwd(), ".ingenium", "data.db"),
+    opencodeUrl: process.env.OPENCODE_SERVER_URL ?? "http://localhost:4098",
 };

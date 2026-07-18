@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Router, Response } from "express";
 import { logger, emailCache, synthesisLlm, settings } from "ingenium-core";
 import {
@@ -144,7 +145,8 @@ async function withImapConnection<T>(
   } catch (err) {
     // DO NOT disconnect — the error handler on ImapFlow cleans up dead connections.
     // Disconnecting here kills the shared pool for all concurrent requests.
-    console.error(`[email] IMAP error for ${account.email}:`, (err as Error).message);
+    const accountHash = createHash("sha256").update(account.email).digest("hex").slice(0, 16);
+    logger.error("email", `IMAP operation failed: ${(err as Error).message}`, { accountHash });
     throw err;
   }
 }
@@ -611,7 +613,7 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     const suggestions = await generateSmartReplies(
       targetEmail,
       voiceSamples,
-      { model: llmConfig.model, endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey },
+      { model: llmConfig.model, endpoint: llmConfig.endpoint, apiKey: llmConfig.apiKey, allowPrivateNetwork: llmConfig.allowPrivateNetwork },
     );
 
     // Persist to cache

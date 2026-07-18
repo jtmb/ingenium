@@ -264,7 +264,7 @@ export function disableAgent(projectId: string, name: string): Agent | undefined
  * - Skills list
  */
 export function syncAgentFromDisk(projectId: string, name: string): Agent | undefined {
-  const categories = ["primary", "execution", "research", "security"];
+  const categories = ["primary", "execution", "research", "security", "chat"];
   let filePath = "";
   let category = "";
 

@@ -133,10 +133,27 @@ function IconList() {
   );
 }
 
+function IconSave() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M3 2h7l3 3v8a1 1 0 01-1 1H4a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 2v4H5V2M5 8h6v5H5zM7 10h2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function IconHeart() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path d="M14 6c0 4-6 7-6 7s-6-3-6-7a3.5 3.5 0 016-2.236A3.5 3.5 0 0114 6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconMessageSquare() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2 3a1 1 0 011-1h10a1 1 0 011 1v7a1 1 0 01-1 1H5l-3 3V3z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -166,6 +183,16 @@ function IconServer() {
       <rect x="1.5" y="9.5" width="13" height="5" rx="1" stroke="currentColor" strokeWidth="1.2" />
       <circle cx="5" cy="4" r="0.75" fill="currentColor" />
       <circle cx="5" cy="12" r="0.75" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconKey() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M11 5a3 3 0 11-6 0 3 3 0 016 0z" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M8 8v4.5M5.5 10l2.5 2.5M10.5 10L8 12.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="8" cy="5" r="1" fill="currentColor" />
     </svg>
   );
 }
@@ -224,6 +251,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Workspace",
     defaultOpen: true,
     items: [
+      { label: "Chat", href: "/chat", icon: <IconMessageSquare /> },
       { label: "OpenCode", href: "/opencode", icon: <IconTerminal /> },
       { label: "Mail", href: "/mail", icon: <IconMail /> },
       { label: "Tasks", href: "/tasks", icon: <IconCheckSquare /> },
@@ -248,6 +276,7 @@ const NAV_GROUPS: NavGroup[] = [
     defaultOpen: true,
     items: [
       { label: "Jobs", href: "/jobs", icon: <IconClock /> },
+      { label: "Backups", href: "/backups", icon: <IconSave /> },
       { label: "Logs", href: "/logs", icon: <IconList /> },
       { label: "Status", href: "/status", icon: <IconHeart /> },
     ],
@@ -261,6 +290,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Plugins", href: "/plugins", icon: <IconPlug /> },
       { label: "MCP Servers", href: "/mcp-servers", icon: <IconServer /> },
       { label: "Config", href: "/config", icon: <IconGear /> },
+      { label: "Secrets", href: "/secrets", icon: <IconKey /> },
     ],
   },
 ];

@@ -21,6 +21,7 @@ description: Canonical reference for all environment variables used across the I
 | `INGENIUM_API_TIMEOUT` | `10000` | ingenium-server | API request timeout in ms |
 | `INGENIUM_API_TOKEN` | _(none)_ | ingenium-api | Optional bearer token for API authentication |
 | `INGENIUM_API_URL` | `http://localhost:4097/api/v1` | ingenium-server | Base URL for API calls from MCP server |
+| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | ingenium-api | Backup snapshot storage directory |
 | `INGENIUM_CORE_DB_PATH` | `./.ingenium/data.db` (host) / `/app/.ingenium/data` (container) | core + API | SQLite database file path |
 | `INGENIUM_EMAIL_ENCRYPTION_KEY` | _(required, no default)_ | ingenium-email, docker-entrypoint.sh | **64 hex characters** (32 bytes) for AES-256-GCM credential encryption |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | ingenium-core | Global config path for skills/plugins/commands |
@@ -34,7 +35,7 @@ description: Canonical reference for all environment variables used across the I
 | `NODE_ENV` | _(none)_ | services | Node environment (production/development) |
 | `OAUTH_REDIRECT_URI` | `http://localhost:3000/mail/oauth/callback` | ingenium-email | OAuth2 callback URL |
 | `OBSERVER_CHECK_INTERVAL` | `0` | observer plugin | Session idle check interval, 0 = disabled |
-| `OPENCODE_SERVER_PASSWORD` | _(none, required, no default)_ | OpenCode server, docker-entrypoint.sh | **Required.** Auth password for OpenCode web server |
+| `OPENCODE_SERVER_PASSWORD` | _(none, required, no default)_ | API proxy, docker-entrypoint.sh | **Required.** Server-side OpenCode proxy guard credential; not used by the loopback-only browser iframe process. |
 | `SYNTHESIS_INTERVAL_MS` | `900000` | ingenium-api | Scheduled synthesis interval (15 min), 0 = disabled |
 | `THREAD_API_TOKEN` | _(none)_ | OpenCode config | API token for Thread MCP server. 🔴 **Never commit to source.** |
 

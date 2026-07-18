@@ -37,7 +37,7 @@ function mockReasoningOnly(reasoning: string): any {
 
 /** Construct an LLMConfig pointing at the mock server. */
 function config(): LLMConfig {
-  return { model: "test-model", apiKey: "test-key", endpoint: endpoint() };
+  return { model: "test-model", apiKey: "test-key", endpoint: endpoint(), allowPrivateNetwork: true };
 }
 
 beforeAll(async () => {
@@ -235,7 +235,7 @@ describe("generateJobConfig", () => {
 
   it("handles network error gracefully (no endpoint, no throw)", async () => {
     const result = await generateJobConfig(
-      { model: "test", endpoint: "http://127.0.0.1:19999" },
+      { model: "test", endpoint: "http://127.0.0.1:19999", allowPrivateNetwork: true },
       "Test network error",
     );
     expect(result).toEqual({

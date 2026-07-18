@@ -1,11 +1,13 @@
 ---
-title: "Thread MCP Session Lifecycle — Start, During, End Protocols"
+title: "Thread MCP Session Lifecycle — Start, During, End Protocols [RETIRED]"
 impact: HIGH
-impactDescription: "Standardizes when and how to save context to Thread throughout a session"
-tags: [thread, mcp, session, lifecycle, export, memory]
+impactDescription: "[RETIRED — Replaced by Docs RAG] Standardizes when and how to save context to Thread throughout a session"
+tags: [thread, mcp, session, lifecycle, export, memory, retired]
 ---
 
 ## Thread MCP Session Lifecycle
+
+> 🔴 **RETIRED**: Thread has been replaced by the Ingenium Docs RAG system. This content is retained for reference only until full removal is verified. Use `ingenium_docs_*` tools for persistent memory instead.
 
 ### 🔴 Session Name Rules
 

@@ -341,6 +341,7 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
           model: llmConfig.model,
           endpoint: llmConfig.endpoint,
           apiKey: llmConfig.apiKey,
+          allowPrivateNetwork: llmConfig.allowPrivateNetwork,
         },
         controller.signal,
       );

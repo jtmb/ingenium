@@ -145,6 +145,13 @@ const PLUGINS_ENDPOINTS = [
   "GET /api/v1/plugins/:name/source",
 ];
 
+const PROVIDERS_ENDPOINTS = [
+  "GET /opencode/providers",
+  "POST /opencode/auth/:providerID",
+  "DELETE /opencode/auth/:providerID",
+  "GET /opencode/auth/status",
+];
+
 const SERVERS_ENDPOINTS = [
   "GET /api/v1/servers",
   "POST /api/v1/servers",
@@ -246,6 +253,43 @@ const OPENCODE_ENDPOINTS = [
 
 const DASHBOARD_ENDPOINTS = [
   "GET /api/v1/dashboard/summary",
+];
+
+const VAULT_ENDPOINTS = [
+  "GET /api/v1/vault/status",
+  "POST /api/v1/vault/unseal",
+  "POST /api/v1/vault/seal",
+  "GET /api/v1/vault/items",
+  "POST /api/v1/vault/items",
+  "GET /api/v1/vault/items/:id",
+  "PUT /api/v1/vault/items/:id",
+  "DELETE /api/v1/vault/items/:id",
+  "POST /api/v1/vault/generate-password",
+  "GET /api/v1/vault/audit",
+];
+
+const BACKUPS_ENDPOINTS = [
+  "GET /api/v1/backups",
+  "POST /api/v1/backups",
+  "GET /api/v1/backups/:id",
+  "GET /api/v1/backups/:id/download",
+  "DELETE /api/v1/backups/:id",
+  "POST /api/v1/backups/restore/preview",
+  "POST /api/v1/backups/restore",
+  "GET /api/v1/backups/restore/:jobId",
+  "GET /api/v1/backups/schedule",
+  "PUT /api/v1/backups/schedule",
+];
+
+const RAG_ENDPOINTS = [
+  "GET /api/v1/rag/search",
+  "POST /api/v1/rag/ask",
+  "POST /api/v1/rag/sources",
+  "GET /api/v1/rag/sources",
+  "GET /api/v1/rag/sources/:id",
+  "DELETE /api/v1/rag/sources/:id",
+  "POST /api/v1/rag/sources/:id/ingest",
+  "GET /api/v1/rag/stats",
 ];
 
 const DOCS_ENDPOINTS = [
@@ -1086,6 +1130,40 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     apiEndpoints: PLUGINS_ENDPOINTS,
   },
 
+  // ── Providers (4) ────────────────────────────────────
+  {
+    name: "ingenium_provider_list",
+    category: "Providers",
+    description: "List all available LLM providers from OpenCode",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROVIDERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_provider_connect",
+    category: "Providers",
+    description: "Connect a provider with an API key",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROVIDERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_provider_disconnect",
+    category: "Providers",
+    description: "Disconnect a provider",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROVIDERS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_provider_status",
+    category: "Providers",
+    description: "Get provider connection status (keys redacted)",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: PROVIDERS_ENDPOINTS,
+  },
+
   // ── Servers (5) ──────────────────────────────────────
   {
     name: "ingenium_server_list",
@@ -1668,6 +1746,236 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
     projectScope: "per-project",
     defaultEnabled: true,
     apiEndpoints: DASHBOARD_ENDPOINTS,
+  },
+
+  // ── Vault (11) ────────────────────────────────────────
+  {
+    name: "ingenium_vault_status",
+    category: "Vault",
+    description: "Get vault status (sealed/unsealed/error).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_unseal",
+    category: "Vault",
+    description: "Unseal the vault with a passphrase.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_seal",
+    category: "Vault",
+    description: "Seal (lock) the vault.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_item_list",
+    category: "Vault",
+    description: "List vault items, optionally filtered by folder.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_item_create",
+    category: "Vault",
+    description: "Create a new vault item (password, note, etc.).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_item_get",
+    category: "Vault",
+    description: "Get a vault item by ID (metadata only — no secret value).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_item_update",
+    category: "Vault",
+    description: "Update a vault item's value.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_item_delete",
+    category: "Vault",
+    description: "Delete a vault item by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_password_gen",
+    category: "Vault",
+    description: "Generate a secure random password.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+  {
+    name: "ingenium_vault_audit_list",
+    category: "Vault",
+    description: "List vault audit log entries.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: VAULT_ENDPOINTS,
+  },
+
+  // ── Backups (10) ───────────────────────────────────────
+  {
+    name: "ingenium_backup_create",
+    category: "Backups",
+    description: "Create a new backup with an optional type (e.g. 'full', 'skills', 'config').",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_list",
+    category: "Backups",
+    description: "List all backups for a project.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_get",
+    category: "Backups",
+    description: "Get a single backup by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_download",
+    category: "Backups",
+    description: "Download a backup archive to a validated path — never returns raw binary.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_delete",
+    category: "Backups",
+    description: "Delete a backup by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_restore_preview",
+    category: "Backups",
+    description: "Preview what a restore would do without executing it.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_restore_start",
+    category: "Backups",
+    description: "Start a restore operation. Requires confirm=true to proceed.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_restore_status",
+    category: "Backups",
+    description: "Get the status of a restore operation by job ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_schedule_get",
+    category: "Backups",
+    description: "Get the current backup schedule configuration.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+  {
+    name: "ingenium_backup_schedule_set",
+    category: "Backups",
+    description: "Set/update the backup schedule configuration.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: BACKUPS_ENDPOINTS,
+  },
+
+  // ── RAG (8) ─────────────────────────────────────────────
+  {
+    name: "ingenium_docs_search_semantic",
+    category: "RAG",
+    description: "Semantic search across RAG document index.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: RAG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_docs_ask",
+    category: "RAG",
+    description: "Ask a question against the RAG index and receive an LLM-grounded answer.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: RAG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_docs_ingest",
+    category: "RAG",
+    description: "Create a new source and ingest a document into the RAG index.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: RAG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_docs_rag_sources_list",
+    category: "RAG",
+    description: "List all RAG document sources.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: RAG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_docs_rag_source_get",
+    category: "RAG",
+    description: "Get a single RAG source by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: RAG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_docs_rag_source_delete",
+    category: "RAG",
+    description: "Delete a RAG source by ID.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: RAG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_docs_rag_reingest",
+    category: "RAG",
+    description: "Re-ingest an existing RAG source with new text content.",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: RAG_ENDPOINTS,
+  },
+  {
+    name: "ingenium_docs_rag_stats",
+    category: "RAG",
+    description: "Get RAG index statistics (document count, chunk count, etc.).",
+    projectScope: "per-project",
+    defaultEnabled: true,
+    apiEndpoints: RAG_ENDPOINTS,
   },
 
   // ── Documentation (48) ────────────────────────────────

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, type ReactNode } from "react";
 
 export interface WorkspaceControlProps {
   /** Current page identifier for state encoding in popout URL */
-  pageId: "opencode" | "mail" | "docs";
+  pageId: "opencode" | "mail" | "docs" | "chat";
   /** Optional state params to encode in popout URL (e.g., account, folder, messageId for mail) */
   stateParams?: Record<string, string>;
   /** Extra controls to render alongside the standard ones */

@@ -56,7 +56,7 @@ function StandaloneContent() {
   });
 
   // ── Invalid or missing page ──────────────────────────────────────────
-  if (!page || !["opencode", "mail", "docs"].includes(page)) {
+  if (!page || !["opencode", "mail", "docs", "chat"].includes(page)) {
     return (
       <div className="fixed inset-0 z-50 bg-[var(--color-surface)] flex items-center justify-center">
         <div className="text-center space-y-4">
@@ -77,7 +77,7 @@ function StandaloneContent() {
 
   // ── Page title ───────────────────────────────────────────────────────
   const pageTitle =
-    page === "opencode" ? "OpenCode" : page === "mail" ? "Mail" : "Docs";
+    page === "opencode" ? "OpenCode" : page === "mail" ? "Mail" : page === "chat" ? "Chat" : "Docs";
 
   return (
     <div className="fixed inset-0 z-50 bg-[var(--color-surface)] flex flex-col">
@@ -99,6 +99,7 @@ function StandaloneContent() {
       {/* Page content */}
       <div className="flex-1 min-h-0">
         {page === "opencode" && <StandaloneOpenCode />}
+        {page === "chat" && <StandaloneChat />}
         {page === "mail" && <StandaloneMail />}
         {page === "docs" && <StandaloneDocs />}
       </div>
@@ -205,6 +206,45 @@ function StandaloneOpenCode() {
       </div>
     </div>
   );
+}
+
+/**
+ * Standalone Chat view — lazy-imports the ChatShell component.
+ * The ChatPage is self-contained and works without parent layout chrome.
+ */
+function StandaloneChat() {
+  const [ChatPageComponent, setChatPageComponent] = useState<React.ComponentType | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    import("../chat/page")
+      .then((mod) => setChatPageComponent(() => mod.default))
+      .catch(() => setError("Failed to load Chat page"));
+  }, []);
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-full text-[var(--color-text-muted)]">
+        <p>{error}</p>
+      </div>
+    );
+  }
+
+  if (!ChatPageComponent) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="flex flex-col items-center gap-3 text-[var(--color-text-muted)]">
+          <svg className="animate-spin w-6 h-6" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+          <span className="text-sm">Loading Chat…</span>
+        </div>
+      </div>
+    );
+  }
+
+  return <ChatPageComponent />;
 }
 
 /**

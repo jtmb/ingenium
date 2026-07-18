@@ -1,6 +1,6 @@
 # ingenium-server
 
-MCP stdio server with 210 tools. Calls the API via HTTP. Zero DB access.
+MCP stdio server with 243 tools. Calls the API via HTTP. Zero DB access.
 
 ## Architecture
 
@@ -10,7 +10,7 @@ MCP stdio server with 210 tools. Calls the API via HTTP. Zero DB access.
 
 ## Tools
 
-210 server tools across 24 categories (Settings, Skills, Observe, Observations, Personality, Synthesis, Extraction, Tasks, Plans, Projects, Plugins, Servers, Agents, Commands, Config, Email, Logs, Jobs, Pipeline, Status, Health, OpenCode, Dashboard, Documentation). The complete system catalog contains 212 entries after adding the two extension tools. All server tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
+243 server tools across 28 categories. The complete system catalog contains 245 entries after adding the two extension tools. All server tools are wrapped with `wrapHandler()` — if a tool is disabled for the project, it returns a `TOOL_DISABLED` error.
 
 ## Configuration
 

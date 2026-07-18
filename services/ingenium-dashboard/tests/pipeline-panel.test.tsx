@@ -1,0 +1,186 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import React from "react";
+
+const { getProviderConfigs, saveProviderConfigs } = vi.hoisted(() => ({
+  getProviderConfigs: vi.fn(),
+  saveProviderConfigs: vi.fn(),
+}));
+
+vi.mock("../src/lib/api", () => ({
+  api: {
+    settings: {
+      getProviderConfigs,
+      saveProviderConfigs,
+      get: vi.fn().mockResolvedValue({ data: { value: "900000" } }),
+      set: vi.fn().mockResolvedValue({ data: {} }),
+    },
+  },
+}));
+
+import PipelinePanel from "../src/app/components/settings/panels/PipelinePanel";
+
+const providerFixture = [
+  {
+    id: "openai-main",
+    name: "OpenAI Main",
+    npm: "@ai-sdk/openai",
+    baseURL: "https://api.openai.com/v1",
+    models: ["gpt-4.1", "gpt-4.1-mini"],
+    defaultModel: "gpt-4.1",
+    roles: ["available", "primary"],
+    enabled: true,
+    apiKeySet: true,
+  },
+  {
+    id: "anthropic-backup",
+    name: "Anthropic Backup",
+    npm: "@ai-sdk/anthropic",
+    baseURL: "https://api.anthropic.com/v1",
+    models: ["claude-sonnet-4-6"],
+    defaultModel: "claude-sonnet-4-6",
+    roles: ["available", "backup"],
+    enabled: true,
+    apiKeySet: true,
+  },
+  {
+    id: "deepseek-extra",
+    name: "DeepSeek Extra",
+    npm: "@ai-sdk/deepseek",
+    baseURL: "https://api.deepseek.com/v1",
+    models: ["deepseek-chat"],
+    defaultModel: "deepseek-chat",
+    roles: ["available"],
+    enabled: true,
+    apiKeySet: false,
+  },
+];
+
+beforeEach(() => {
+  getProviderConfigs.mockResolvedValue({ data: { providers: providerFixture } });
+  saveProviderConfigs.mockResolvedValue({ data: { saved: true, restartRequired: true, warnings: [] } });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+describe("provider block panel", () => {
+  it("renders every configured provider as an independent block", async () => {
+    render(<PipelinePanel />);
+
+    expect(await screen.findByText("OpenAI Main")).not.toBeNull();
+    expect(screen.getByText("Anthropic Backup")).not.toBeNull();
+    expect(screen.getByText("DeepSeek Extra")).not.toBeNull();
+    expect(screen.getByDisplayValue("gpt-4.1-mini")).not.toBeNull();
+  });
+
+  it("adds providers and model rows without replacing existing blocks", async () => {
+    render(<PipelinePanel />);
+    await screen.findByText("OpenAI Main");
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add provider" }));
+    expect(screen.getByText("Provider 4")).not.toBeNull();
+    expect(screen.getByText("OpenAI Main")).not.toBeNull();
+
+    const addModelButtons = screen.getAllByRole("button", { name: "+ Add model" });
+    fireEvent.click(addModelButtons[3]!);
+    expect(screen.getAllByPlaceholderText("model-id")).toHaveLength(6);
+  });
+
+  it("keeps saved credentials redacted and submits all provider blocks", async () => {
+    render(<PipelinePanel />);
+    await screen.findByText("OpenAI Main");
+
+    expect(screen.getAllByPlaceholderText("Saved key (leave blank to keep)")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Save providers" }));
+
+    await vi.waitFor(() => expect(saveProviderConfigs).toHaveBeenCalledTimes(1));
+    expect(saveProviderConfigs.mock.calls[0]![0]).toHaveLength(3);
+    expect(saveProviderConfigs.mock.calls[0]![0][0]).not.toHaveProperty("apiKey");
+  });
+
+  it("requires an explicit action to clear a saved credential", async () => {
+    render(<PipelinePanel />);
+    await screen.findByText("OpenAI Main");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear saved key" })[0]!);
+    expect(screen.getByPlaceholderText("Saved key will be cleared")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save providers" }));
+
+    await vi.waitFor(() => expect(saveProviderConfigs).toHaveBeenCalledTimes(1));
+    expect(saveProviderConfigs.mock.calls[0]![0][0].apiKey).toBe("");
+  });
+
+  it("uses role arrays and demotes the existing priority provider", async () => {
+    render(<PipelinePanel />);
+    await screen.findByText("OpenAI Main");
+
+    fireEvent.change(screen.getAllByLabelText("Role")[1]!, { target: { value: "primary" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save providers" }));
+
+    await vi.waitFor(() => expect(saveProviderConfigs).toHaveBeenCalledTimes(1));
+    const savedProviders = saveProviderConfigs.mock.calls[0]![0];
+    expect(savedProviders[0].roles).toEqual(["available"]);
+    expect(savedProviders[1].roles).toEqual(["available", "primary"]);
+  });
+
+  // ── Bug-fix regression tests ──────────────────────────────────────────────
+
+  it("strips _draftId before saving", async () => {
+    render(<PipelinePanel />);
+    await screen.findByText("OpenAI Main");
+
+    // Add a new provider — gets a _draftId
+    fireEvent.click(screen.getByRole("button", { name: "+ Add provider" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save providers" }));
+
+    await vi.waitFor(() => expect(saveProviderConfigs).toHaveBeenCalledTimes(1));
+    const saved = saveProviderConfigs.mock.calls[0]![0] as Record<string, unknown>[];
+
+    // Every saved provider must be free of the internal draft marker
+    for (const provider of saved) {
+      expect(provider).not.toHaveProperty("_draftId");
+    }
+    expect(saved).toHaveLength(4);
+  });
+
+  it("retains focus in the provider ID input when typing a new ID", async () => {
+    render(<PipelinePanel />);
+    await screen.findByText("OpenAI Main");
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add provider" }));
+
+    const idInputs = screen.getAllByLabelText("Provider ID");
+    const newIdInput = idInputs[3]!;
+
+    newIdInput.focus();
+    expect(document.activeElement).toBe(newIdInput);
+
+    // Changing the provider ID value — with the _draftId-based key the DOM
+    // element stays mounted and keeps focus.
+    fireEvent.change(newIdInput, { target: { value: "my-custom-provider" } });
+
+    expect(document.activeElement).toBe(newIdInput);
+    expect(screen.getByDisplayValue("my-custom-provider")).not.toBeNull();
+  });
+
+  it("preserves newly added provider across re-renders (draft survival)", async () => {
+    render(<PipelinePanel />);
+    await screen.findByText("OpenAI Main");
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add provider" }));
+    expect(screen.getByText("Provider 4")).not.toBeNull();
+
+    // Change the display name — verifies state updates correctly
+    const nameInputs = screen.getAllByLabelText("Display name");
+    fireEvent.change(nameInputs[3]!, { target: { value: "Draft Provider" } });
+    expect(screen.getByText("Draft Provider")).not.toBeNull();
+
+    // All original providers remain intact
+    expect(screen.getByText("OpenAI Main")).not.toBeNull();
+    expect(screen.getByText("Anthropic Backup")).not.toBeNull();
+    expect(screen.getByText("DeepSeek Extra")).not.toBeNull();
+  });
+});

@@ -1,13 +1,66 @@
 ---
 title: Backup and Restore
-description: Database backup and restore procedures, migration recovery for the Ingenium SQLite database.
+description: Database backup and restore procedures, automated backup scheduling, migration recovery for the Ingenium SQLite database.
 ---
 
 # Backup and Restore Procedures
 
 This document covers backup and restore procedures for the Ingenium SQLite database and associated data.
 
+The system supports **automated backup scheduling** (hourly/daily with configurable retention) and **dual-database snapshots** (Ingenium core DB + OpenCode session DB) — both manual and scheduled — backed by SHA-256 manifest verification and a restore-job lifecycle.
+
 ---
+
+## Automated Backup System
+
+A background scheduler (`backup-scheduler.ts`) creates consistent snapshots on a configurable schedule. Backups consist of a pair of SQLite Backup API snapshots (Ingenium + OpenCode DB) stored in the backup directory.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | Directory for backup snapshot files |
+
+Schedule configuration is managed via:
+
+- **MCP tools**: `ingenium_backup_schedule_get`, `ingenium_backup_schedule_set`
+- **Dashboard**: `/backups` page schedule panel
+- **Default**: Scheduling is disabled until enabled. Retention defaults to 24 hourly, 7 daily, and 10 manual snapshots.
+
+### Schedule Types
+
+| Type | Frequency | Typical Retention |
+|------|-----------|-------------------|
+| `scheduled_hourly` | Every hour | 24 snapshots |
+| `scheduled_daily` | Once daily | 7 snapshots |
+| `manual` | On demand | Configurable |
+| `pre_restore` | Reserved for pre-restore safety snapshots | Configurable |
+
+### Backup Storage
+
+Each backup creates two files in `INGENIUM_BACKUPS_DIR`:
+
+```text
+.backups/
+├── <uuid>.db               # Ingenium core DB snapshot
+└── <uuid>.opencode.db       # OpenCode session DB snapshot
+```
+
+A `backup_records` DB table stores metadata: SHA-256 hashes, backup type, component manifest, and status. The manifest JSON includes `schema_version`, `ingenium` component (filename, sha256, size_bytes), and `opencode` component.
+
+### Schedule Management via MCP
+
+```typescript
+// Get current schedule
+const schedule = await ingenium_backup_schedule_get({ project: "global-default" });
+
+// Set schedule — hourly enabled, 48-hour retention
+await ingenium_backup_schedule_set({
+  project: "global-default",
+  hourly: { enabled: true, retention: 48 },
+  daily: { enabled: true, retention: 14 },
+});
+```
 
 ## Database Location
 
@@ -17,7 +70,56 @@ In Docker, this is on the `ingenium-data` volume mounted at `/app/.ingenium/`.
 
 ---
 
+## Backup Management via Dashboard
+
+Navigate to **`/backups`** in the dashboard to:
+
+- View all backups in a table with type badges, size, and timestamps
+- Create a new manual backup with a single click
+- Download backup files for off-site storage
+- Delete old backups
+- Configure the automated schedule with hourly and daily toggles
+
 ## Backup Procedures
+
+### Creating a Backup via MCP
+
+```typescript
+// Manual backup
+const result = await ingenium_backup_create({
+  project: "global-default",
+  type: "manual",
+});
+
+// List all backups
+const backups = await ingenium_backup_list({ project: "global-default" });
+
+// Get a specific backup
+const backup = await ingenium_backup_get({ project: "global-default", backup_id: "<uuid>" });
+```
+
+### Restore Preview & Confirmation
+
+```typescript
+// Preview what would be restored
+const preview = await ingenium_backup_restore_preview({ backup_id: "<uuid>" });
+
+// Confirm a validated restore job (requires explicit confirmation)
+const job = await ingenium_backup_restore_start({
+  project: "global-default",
+  backup_id: "<uuid>",
+  confirm: true,
+});
+
+// Check restore status
+const status = await ingenium_backup_restore_status({ job_id: "<job-uuid>" });
+```
+
+The API currently records a confirmed restore job and returns `restartRequired: true`; applying a confirmed snapshot remains an operator-controlled maintenance action. The restore preflight validates:
+1. Backup record exists in DB
+2. Component files exist on disk with matching SHA-256
+3. Ingenium snapshot passes `PRAGMA integrity_check`
+4. Snapshot has migration 047 schema (`backup_records` table exists)
 
 ### Hot Backup (WAL Mode)
 

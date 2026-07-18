@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { skills, skillGovernance, synthesis, getSkillsBase, maintenanceLocks } from "ingenium-core";
+import { skills, skillGovernance, synthesis, getSkillsBase, maintenanceLocks, observations } from "ingenium-core";
 import type { Skill, SkillVersion, SkillLineage, SkillProposal } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import fs from "fs";
@@ -221,7 +221,8 @@ skillsRouter.get("/proposals", (req, res) => {
   res.json({ data: list.map(proposalToDto), total: list.length });
 });
 
-/** GET /proposals/:proposalId — get a single proposal by ID. */
+/** GET /proposals/:proposalId — get a single proposal by ID.
+ *  Supports ?enrich=true (default) to include currentSkill, observations, and sourceSkill. */
 skillsRouter.get("/proposals/:proposalId", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -231,7 +232,64 @@ skillsRouter.get("/proposals/:proposalId", (req, res) => {
       res.status(404).json({ error: { code: "NOT_FOUND", message: `Proposal '${req.params.proposalId}' not found` } });
       return;
     }
-    res.json({ data: proposalToDto(p) });
+    const dto = proposalToDto(p);
+
+    // Enrichment — default on, skip when ?enrich=false
+    const enrich = req.query.enrich !== "false";
+    if (enrich) {
+      // currentSkill: fetch current state of the target skill
+      if (p.target_name) {
+        const current = skills.getSkill(projectId, p.target_name);
+        if (current) {
+          (dto as any).currentSkill = {
+            name: current.name,
+            description: current.description,
+            content: current.content,
+            category: (current as any).category ?? null,
+            tags: current.tags ?? null,
+            revision: current.revision,
+          };
+        } else {
+          (dto as any).currentSkill = null;
+        }
+      }
+
+      // observations: batch-fetch summaries for each observation ID
+      const obsIds = Array.isArray(dto.observationIds) ? (dto.observationIds as number[]) : [];
+      if (obsIds.length > 0) {
+        const obsRows = observations.getObservationsByIds(obsIds.filter(id => typeof id === "number"));
+        (dto as any).observations = obsRows.map(o => ({
+          id: o.id,
+          type: o.observation_type,
+          contentPreview: (o.content || "").slice(0, 200),
+          importance: o.importance,
+          source: o.source,
+          sessionId: o.session_id ?? null,
+        }));
+      } else {
+        (dto as any).observations = [];
+      }
+
+      // sourceSkill: for merge proposals, fetch the source skill
+      if (p.proposal_type === "merge" && p.source_project_id && p.source_name) {
+        const source = skills.getSkill(p.source_project_id, p.source_name);
+        if (source) {
+          (dto as any).sourceSkill = {
+            projectId: p.source_project_id,
+            name: source.name,
+            description: source.description,
+            content: source.content,
+            category: (source as any).category ?? null,
+            tags: source.tags ?? null,
+            revision: source.revision,
+          };
+        } else {
+          (dto as any).sourceSkill = null;
+        }
+      }
+    }
+
+    res.json({ data: dto });
   } catch (err) {
     if (err instanceof skillGovernance.GovernanceError) {
       res.status(governanceErrorStatus(err)).json(governanceErrorPayload(err));

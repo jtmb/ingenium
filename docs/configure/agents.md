@@ -7,7 +7,7 @@ description: Agent profiles, pipeline lifecycle, and subagent invocation for the
 
 ## Overview
 
-12 agents total: 2 primary, 10 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. A dedicated **chat agent** (`ingenium-chat`) handles conversational interactions with read-only access. Ten specialized subagents handle search, context, prompt engineering, implementation (2 tiers), review, documentation, security, browser automation, and vision analysis.
+13 agents total: 2 primary, 11 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. A dedicated **chat agent** (`ingenium-chat`) handles conversational interactions with read-only access. Eleven specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, security, browser automation, vision analysis, and terra-throughput.
 
 ### Chat Agent Model Inheritance
 
@@ -15,7 +15,7 @@ The `ingenium-chat` agent uses **Settings-backed model resolution** rather than 
 
 - **No `model` field** — The agent inherits its model from the Chat request's `modelID` parameter at send time, not from a static agent config.
 - **`hidden: true`** — Prevents the agent from appearing in OpenCode's non-Chat agent selectors (e.g., the OpenCode Web/CLI agent dropdown). It is only visible in the Chat page's agent selector.
-- **Provider from Settings** — The available providers and models come from the Settings Pipeline tab (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
+- **Provider from Settings** — The available providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
 
 This design means the Chat page always uses the same LLM that the self-learning pipeline is configured with, avoiding confusion about which model is in use.
 
@@ -67,6 +67,7 @@ flowchart TB
 | **vision-bridge** | Subagent | `qwen/qwen3.5-9b` | LM Studio | Read-only (`read: allow`) | `local-models` | Vision analysis — reads screenshot files and produces structured technical descriptions for non-vision models |
 | **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Complex multi-file refactoring, architectural changes, performance-critical code |
+| **ingenium-software-engineer-terra** | Subagent | `openai/gpt-5.6-terra` | OpenAI OAuth | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Standard fixes, test authoring, routine refactors leveraging GPT-5.6 Terra OAuth |
 | **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` | Code review + test verification. Reviews tests, does NOT write production code or author tests |
 | **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Edit + Write (`edit: allow, write: allow, bash: deny`) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` | Documentation + skill updates — observations are auto-extracted by the server-side engine |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` | Security audit + git-history leak scanning |
@@ -135,6 +136,47 @@ flowchart LR
 
 ---
 
+## Orchestration Policy — 12-Active / 6-Writer Phase Scheduler
+
+The orchestrator (`@ingenium-orchestrator`) follows a **behavioral** concurrency policy for parallel subagent execution. This is **not an OpenCode configuration field** — it is a documented scheduling discipline enforced by the orchestrator's own phase-scheduling logic.
+
+### Concurrency Limits
+
+| Limit | Value | Scope |
+|-------|-------|-------|
+| **Active subagents per phase** | 12 | Total simultaneous subagents (writers + read-only) in a single orchestration phase |
+| **Concurrent writers per wave** | 6 | Subagents with `edit: allow` or `write: allow` permissions |
+| **Remaining capacity** | 6 | Reserved for read-only agents (explore, QA, docs, security, browser, scout, vision) |
+| **Write territory overlap** | 0 | No two writers may touch the same file/directory path concurrently |
+
+### Writer Tiers and Routing
+
+| Tier | Model | When to route |
+|------|-------|---------------|
+| **Fast** | `deepseek/deepseek-v4-flash` | Routine isolated work: bug fixes, simple refactors, test authoring, single-package scope |
+| **Premium** | `deepseek/deepseek-v4-pro` | Complex architecture-wide / cross-cutting work: multi-file refactoring, architectural changes, performance-critical code |
+| **Terra** | `openai/gpt-5.6-terra` | 🔴 **First choice for critical work**: auth/secrets/permissions; migrations/data integrity; Docker/runtime outages; multi-service contracts; cross-package refactors; persistent high-risk failures. Higher reasoning throughput via GPT-5.6 Terra OAuth. |
+
+### Phase Declaration Protocol
+
+Every orchestration phase MUST declare before dispatch:
+
+1. **Active count** — total subagents to spawn (max 12)
+2. **Writer count** — total writers among them (max 6)
+3. **Exclusive territories** — file/directory ownership per writer; zero overlap
+4. **Dependencies** — serialization order for writers sharing territories across waves
+5. **Verification owners** — which QA/docs agent reviews which writer's output
+
+Conflicting writers (touching the same file) MUST be serialized across waves — never dispatched simultaneously.
+
+### Restart Required for New Agent Profiles
+
+Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCode before the agent becomes invocable by `@` mention. The agent must also be registered in the `opencode.json` agents array.
+
+> See the [orchestrator agent profile](../../.opencode/agents/primary/ingenium-orchestrator.md) for the full policy specification, dispatch examples, and collision resolution rules.
+
+---
+
 ## Per-Agent Profiles
 
 Full details for each agent are available in the agent definition files at `.opencode/agents/`. See also the [IGENIUM orchestrator agent](../.opencode/agents/primary/ingenium-orchestrator.md) for orchestrator-specific controls and the full pipeline flow.
@@ -145,6 +187,7 @@ Full details for each agent are available in the agent definition files at `.ope
 |----------|--------|-------|------|
 | DeepSeek V4 Pro (API) | `ingenium-software-engineer-premium`, `ingenium-orchestrator` | 2 | Paid |
 | DeepSeek V4 Flash (API) | `ingenium-security-auditor` | 1 | Paid |
+| OpenAI GPT-5.6 Terra (OAuth) | `ingenium-software-engineer-terra` | 1 | Paid (user OpenAI subscription) |
 | qwen3.5-9b (LM Studio) | `ingenium-explore`, `ingenium-prompt-engineer`, `ingenium-scout`, `vision-bridge`, `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs` | 8 | Local |
 
 **Model configuration**: Model assignments are defined per-agent in their `.md` agent profile files (stored in `.opencode/agents/` and the DB `agents` table).
@@ -165,5 +208,6 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
 | ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Read/Write | orchestrator only |
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |
+| ingenium-software-engineer-terra | `@ingenium-software-engineer-terra` | Read/Write | orchestrator only |
 | ingenium-qa | `@ingenium-qa` | Read-only | orchestrator only |
 | ingenium-docs | `@ingenium-docs` | Edit + Write (`edit: allow, write: allow, bash: deny`) | orchestrator only |

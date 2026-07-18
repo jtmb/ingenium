@@ -13,7 +13,7 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 
 **Dockerfile note:** The Dockerfile runtime stage does not copy `data/migrations/`. New migration `.sql` files must be manually placed (bind-mounted or copied) into the container for incremental DBs.
 
-## Migration File List (001–045)
+## Migration File List (001–048)
 
 ### Foundation (001–014)
 
@@ -34,6 +34,36 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 | 013 | `013_fix_plugins_unique.sql` | Rebuilds `plugins` table with `UNIQUE(project_id, name)` instead of `UNIQUE(name)` |
 | 014 | `014_configs.sql` | Creates `configs` table for opencode.json content round-trip editing |
 
+### Governance Migrations (020–044)
+
+| # | File | Purpose |
+|---|------|---------|
+| 020 | `020_kanban_board.sql` | Creates `kanban_boards` and `kanban_columns` tables for task board config |
+| 021 | `021_jobs.sql` | Creates `jobs` table with cron scheduling, event triggers, and timeout support |
+| 022 | `022_email_cache.sql` | Creates `email_cache` table for IMAP email headers + body caching |
+| 023 | `023_fix_servers_unique.sql` | Rebuilds `servers` table with `UNIQUE(project_id, name)` |
+| 024 | `024_skills_unique_per_project.sql` | ⚠️ Rebuilds `skills` table to add `UNIQUE(project_id, name)` — resolves 120-error sync storms | **High** |
+| 025 | `025_email_string_ids.sql` | ⚠️ Rebuilds email tables with string IDs (Gmail REST API transition) | **High** |
+| 026 | `026_email_suggestions.sql` | Creates `email_suggestions` cache table for smart replies |
+| 027 | `027_email_summaries.sql` | Creates `email_summaries` cache table for LLM summaries |
+| 028 | `028_email_suggestion_queue.sql` | Creates `email_suggestion_queue` for batched suggestion processing |
+| 029 | `029_docs_spaces.sql` | Creates `docs_spaces` table for documentation workspace spaces |
+| 030 | `030_docs_pages.sql` | Creates `docs_pages` with revision tracking, FTS, and tree hierarchy |
+| 031 | `031_docs_pages_fts.sql` | Creates FTS5 virtual table for docs pages full-text search |
+| 032 | `032_docs_drafts.sql` | Creates `docs_drafts` table for autosave support |
+| 033 | `033_docs_versions.sql` | Creates `docs_versions` for page revision history |
+| 034 | `034_docs_tags.sql` | Creates `docs_tags` and `page_tags` for tag management |
+| 035 | `035_docs_links.sql` | Creates `docs_links` for inter-page backlinks |
+| 036 | `036_docs_comments.sql` | Creates `docs_comments` for threaded page comments |
+| 037 | `037_docs_project_links.sql` | Creates `page_projects` for linking pages to projects |
+| 038 | `038_docs_attachments.sql` | Creates `docs_attachments` with path traversal prevention |
+| 039 | `039_docs_templates.sql` | Creates `docs_templates` for page templates |
+| 040 | `040_docs_integrity.sql` | Adds FK + CHECK constraints for docs referential integrity |
+| 041 | `041_skill_maintenance_locks.sql` | Creates `skill_maintenance_locks` for concurrent skill maintenance |
+| 042 | `042_skill_versions.sql` | Creates `skill_versions` for skill rollback history |
+| 043 | `043_skill_lineage.sql` | Creates `skill_lineage` for provenance tracking across merges |
+| 044 | `044_skill_proposals.sql` | Creates `skill_proposals` table — governance proposal lifecycle with review/rejection/rollback |
+
 ### Critical Migration Sequence (015–019)
 
 | # | File | Purpose | Risk |
@@ -46,7 +76,16 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 
 ---
 
-*Full migration list continues through 045. See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
+### Feature Migrations (045–048)
+
+| # | File | Purpose |
+|---|------|---------|
+| 045 | `045_pipeline_event_types.sql` | Adds `skill_created`, `skill_updated`, and proposal event types to `pipeline_events` CHECK constraint |
+| 046 | `046_vault.sql` | Creates `vault_config`, `vault_folders`, `vault_items`, and `vault_audit_log` — encrypted secrets vault with scrypt key derivation, AES-256-GCM envelope encryption, and full audit trail |
+| 047 | `047_backups.sql` | Creates `backup_records` and `backup_restore_jobs` — dual-snapshot (Ingenium + OpenCode DB) backup/restore with SHA-256 manifest validation and migration-compatibility checks |
+| 048 | `048_docs_rag.sql` | Creates `rag_sources`, `rag_chunks`, `rag_chunks_fts` (FTS5), `rag_embeddings`, `rag_ingestion_state`, and `rag_thread_imports` — RAG pipeline with token-aware chunking, embedding storage, and resumable Thread imports |
+
+*See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
 
 ## 🔴 WAL Safety — checkpointAfterWrite Outside Transaction
 

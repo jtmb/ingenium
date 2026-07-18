@@ -128,6 +128,20 @@ export function getObservation(id: number): Observation | undefined {
 }
 
 /**
+ * Batch-fetch observations by IDs. Uses a single parameterized query with
+ * dynamically built IN clause placeholders. Returns only matching rows.
+ * Empty input or no matches returns an empty array.
+ */
+export function getObservationsByIds(ids: number[]): Observation[] {
+  if (!ids.length) return [];
+  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+  const placeholders = ids.map(() => "?").join(",");
+  return db.prepare(
+    `SELECT * FROM observations WHERE id IN (${placeholders})`
+  ).all(...ids) as Observation[];
+}
+
+/**
  * Update selected fields of an observation. Only the provided fields are changed.
  * Dynamically builds the SET clause to avoid writing unchanged columns.
  * Returns null if the observation doesn't exist (changes === 0).

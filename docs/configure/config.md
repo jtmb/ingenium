@@ -39,4 +39,5 @@ OpenCode configuration editor with Project and Global tabs. Allows editing `open
 - Core: `packages/ingenium-core/lib/tools/configs.ts`
 
 ## Related Docs
-- [settings.md](settings.md) — Application settings and Synthesis LLM configuration
+- [Synthesis Pipeline](synthesis.md) — Synthesis LLM configuration
+- [API Reference](../develop/api.md#settings--llm-config) — LLM config endpoint documentation

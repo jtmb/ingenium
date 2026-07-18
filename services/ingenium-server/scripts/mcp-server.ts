@@ -35,6 +35,10 @@ import * as statusTools from "../lib/tools/status.js";
 import { healthCheck } from "../lib/tools/health.js";
 import { opencodeMessages } from "../lib/tools/opencode.js";
 import * as docsTools from "../lib/tools/docs.js";
+import * as ragTools from "../lib/tools/rag.js";
+import * as providerTools from "../lib/tools/providers.js";
+import * as vaultTools from "../lib/tools/vault.js";
+import * as backupTools from "../lib/tools/backups.js";
 
 // ── Tool State Check Wrapper ──────────────────────────────
 // NOTE: Duplicates config.apiUrl because this is evaluated at module load time before config is imported.
@@ -2014,6 +2018,308 @@ server.registerTool(
   "docs_get_stats",
   { description: "Get documentation statistics", inputSchema: { project: projectParam } },
   wrapHandler(C("docs_get_stats"), async ({ project }) => docsTools.docsGetStats(project)),
+);
+
+// ── RAG (Retrieval-Augmented Generation) ─────────────────
+
+server.registerTool(
+  "docs_search_semantic",
+  {
+    description: "Semantic search across RAG document index.",
+    inputSchema: { project: projectParam, query: z.string(), limit: z.number().optional() },
+  },
+  wrapHandler(C("docs_search_semantic"), async ({ project, query, limit }) => ragTools.ragSearch(project, query, limit)),
+);
+
+server.registerTool(
+  "docs_ask",
+  {
+    description: "Ask a question against the RAG index and receive an LLM-grounded answer.",
+    inputSchema: { project: projectParam, question: z.string() },
+  },
+  wrapHandler(C("docs_ask"), async ({ project, question }) => ragTools.ragAsk(project, question)),
+);
+
+server.registerTool(
+  "docs_ingest",
+  {
+    description: "Create a new source and ingest a document into the RAG index.",
+    inputSchema: { project: projectParam, title: z.string(), text: z.string(), format: z.string().optional() },
+  },
+  wrapHandler(C("docs_ingest"), async ({ project, title, text, format }) => ragTools.ragIngestDocument(project, title, text, format)),
+);
+
+server.registerTool(
+  "docs_rag_sources_list",
+  {
+    description: "List all RAG document sources.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler(C("docs_rag_sources_list"), async ({ project }) => ragTools.ragListSources(project)),
+);
+
+server.registerTool(
+  "docs_rag_source_get",
+  {
+    description: "Get a single RAG source by ID.",
+    inputSchema: { project: projectParam, sourceId: z.string() },
+  },
+  wrapHandler(C("docs_rag_source_get"), async ({ project, sourceId }) => ragTools.ragGetSource(project, sourceId)),
+);
+
+server.registerTool(
+  "docs_rag_source_delete",
+  {
+    description: "Delete a RAG source by ID.",
+    inputSchema: { project: projectParam, sourceId: z.string() },
+  },
+  wrapHandler(C("docs_rag_source_delete"), async ({ project, sourceId }) => ragTools.ragDeleteSource(project, sourceId)),
+);
+
+server.registerTool(
+  "docs_rag_reingest",
+  {
+    description: "Re-ingest an existing RAG source with new text content.",
+    inputSchema: { project: projectParam, sourceId: z.string(), text: z.string(), format: z.string().optional() },
+  },
+  wrapHandler(C("docs_rag_reingest"), async ({ project, sourceId, text, format }) => ragTools.ragReingest(project, sourceId, text, format)),
+);
+
+server.registerTool(
+  "docs_rag_stats",
+  {
+    description: "Get RAG index statistics (document count, chunk count, etc.).",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler(C("docs_rag_stats"), async ({ project }) => ragTools.ragStats(project)),
+);
+
+// ── Providers ──────────────────────────────────────────
+
+server.registerTool(
+  "provider_list",
+  { description: "List all available LLM providers from OpenCode", inputSchema: { project: projectParam } },
+  wrapHandler(C("provider_list"), async ({ project }) => providerTools.providerList(project)),
+);
+
+server.registerTool(
+  "provider_connect",
+  {
+    description: "Connect a provider with an API key",
+    inputSchema: {
+      project: projectParam,
+      providerId: z.string(),
+      key: z.string(),
+      metadata: z.string().optional(),
+    },
+  },
+  wrapHandler(C("provider_connect"), async ({ project, providerId, key, metadata }) =>
+    providerTools.providerConnect(project, providerId, key, metadata)),
+);
+
+server.registerTool(
+  "provider_disconnect",
+  { description: "Disconnect a provider", inputSchema: { project: projectParam, providerId: z.string() } },
+  wrapHandler(C("provider_disconnect"), async ({ project, providerId }) => providerTools.providerDisconnect(project, providerId)),
+);
+
+server.registerTool(
+  "provider_status",
+  { description: "Get provider connection status (keys redacted)", inputSchema: { project: projectParam } },
+  wrapHandler(C("provider_status"), async ({ project }) => providerTools.providerStatus(project)),
+);
+
+// ── Vault ──────────────────────────────────────────────
+
+server.registerTool(
+  "vault_status",
+  { description: "Get vault status (sealed/unsealed/error).", inputSchema: { project: projectParam } },
+  wrapHandler(C("vault_status"), async ({ project }) => vaultTools.vaultStatus(project)),
+);
+
+server.registerTool(
+  "vault_unseal",
+  {
+    description: "Unseal the vault with a passphrase.",
+    inputSchema: { project: projectParam, passphrase: z.string() },
+  },
+  wrapHandler(C("vault_unseal"), async ({ project, passphrase }) => vaultTools.vaultUnseal(project, passphrase)),
+);
+
+server.registerTool(
+  "vault_seal",
+  { description: "Seal (lock) the vault.", inputSchema: { project: projectParam } },
+  wrapHandler(C("vault_seal"), async ({ project }) => vaultTools.vaultSeal(project)),
+);
+
+server.registerTool(
+  "vault_item_list",
+  {
+    description: "List vault items, optionally filtered by folder.",
+    inputSchema: { project: projectParam, folder: z.string().optional() },
+  },
+  wrapHandler(C("vault_item_list"), async ({ project, folder }) => vaultTools.vaultItemList(project, folder)),
+);
+
+server.registerTool(
+  "vault_item_create",
+  {
+    description: "Create a new vault item (password, note, etc.).",
+    inputSchema: {
+      project: projectParam,
+      name: z.string(),
+      type: z.string(),
+      value: z.string(),
+      folderId: z.string().optional(),
+      tags: z.string().optional(),
+      urls: z.string().optional(),
+      username: z.string().optional(),
+    },
+  },
+  wrapHandler(C("vault_item_create"), async ({ project, name, type, value, folderId, tags, urls, username }) =>
+    vaultTools.vaultItemCreate(project, name, type, value, folderId, tags, urls, username)),
+);
+
+server.registerTool(
+  "vault_item_get",
+  {
+    description: "Get a vault item by ID (metadata only — no secret value).",
+    inputSchema: { project: projectParam, itemId: z.string() },
+  },
+  wrapHandler(C("vault_item_get"), async ({ project, itemId }) => vaultTools.vaultItemGet(project, itemId)),
+);
+
+server.registerTool(
+  "vault_item_update",
+  {
+    description: "Update a vault item's value.",
+    inputSchema: { project: projectParam, itemId: z.string(), value: z.string() },
+  },
+  wrapHandler(C("vault_item_update"), async ({ project, itemId, value }) => vaultTools.vaultItemUpdate(project, itemId, value)),
+);
+
+server.registerTool(
+  "vault_item_delete",
+  {
+    description: "Delete a vault item by ID.",
+    inputSchema: { project: projectParam, itemId: z.string() },
+  },
+  wrapHandler(C("vault_item_delete"), async ({ project, itemId }) => vaultTools.vaultItemDelete(project, itemId)),
+);
+
+server.registerTool(
+  "vault_password_gen",
+  {
+    description: "Generate a secure random password.",
+    inputSchema: { project: projectParam, length: z.number().optional() },
+  },
+  wrapHandler(C("vault_password_gen"), async ({ project, length }) => vaultTools.vaultPasswordGen(project, length)),
+);
+
+server.registerTool(
+  "vault_audit_list",
+  {
+    description: "List vault audit log entries.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler(C("vault_audit_list"), async ({ project }) => vaultTools.vaultAuditList(project)),
+);
+
+// ── Backups (10) ────────────────────────────────────────
+
+server.registerTool(
+  "backup_create",
+  {
+    description: "Create a new backup with an optional type (e.g. 'full', 'skills', 'config').",
+    inputSchema: { project: projectParam, type: z.string().optional() },
+  },
+  wrapHandler(C("backup_create"), async ({ project, type }) => backupTools.backupCreate(project, type)),
+);
+
+server.registerTool(
+  "backup_list",
+  {
+    description: "List all backups for a project.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler(C("backup_list"), async ({ project }) => backupTools.backupList(project)),
+);
+
+server.registerTool(
+  "backup_get",
+  {
+    description: "Get a single backup by ID.",
+    inputSchema: { project: projectParam, backupId: z.string() },
+  },
+  wrapHandler(C("backup_get"), async ({ project, backupId }) => backupTools.backupGet(project, backupId)),
+);
+
+server.registerTool(
+  "backup_download",
+  {
+    description: "Download a backup archive and write it to a validated path — never returns raw binary.",
+    inputSchema: { project: projectParam, backupId: z.string(), outputPath: z.string() },
+  },
+  wrapHandler(C("backup_download"), async ({ project, backupId, outputPath }) =>
+    backupTools.backupDownload(project, backupId, outputPath)),
+);
+
+server.registerTool(
+  "backup_delete",
+  {
+    description: "Delete a backup by ID.",
+    inputSchema: { project: projectParam, backupId: z.string() },
+  },
+  wrapHandler(C("backup_delete"), async ({ project, backupId }) => backupTools.backupDelete(project, backupId)),
+);
+
+server.registerTool(
+  "backup_restore_preview",
+  {
+    description: "Preview what a restore would do without executing it.",
+    inputSchema: { project: projectParam, backupId: z.string() },
+  },
+  wrapHandler(C("backup_restore_preview"), async ({ project, backupId }) =>
+    backupTools.backupRestorePreview(project, backupId)),
+);
+
+server.registerTool(
+  "backup_restore_start",
+  {
+    description: "Start a restore operation. Requires confirm=true to proceed.",
+    inputSchema: { project: projectParam, backupId: z.string() },
+  },
+  wrapHandler(C("backup_restore_start"), async ({ project, backupId }) =>
+    backupTools.backupRestoreStart(project, backupId)),
+);
+
+server.registerTool(
+  "backup_restore_status",
+  {
+    description: "Get the status of a restore operation by job ID.",
+    inputSchema: { project: projectParam, jobId: z.string() },
+  },
+  wrapHandler(C("backup_restore_status"), async ({ project, jobId }) =>
+    backupTools.backupRestoreStatus(project, jobId)),
+);
+
+server.registerTool(
+  "backup_schedule_get",
+  {
+    description: "Get the current backup schedule configuration.",
+    inputSchema: { project: projectParam },
+  },
+  wrapHandler(C("backup_schedule_get"), async ({ project }) => backupTools.backupScheduleGet(project)),
+);
+
+server.registerTool(
+  "backup_schedule_set",
+  {
+    description: "Set/update the backup schedule configuration.",
+    inputSchema: { project: projectParam, config: z.record(z.unknown()) },
+  },
+  wrapHandler(C("backup_schedule_set"), async ({ project, config }) =>
+    backupTools.backupScheduleSet(project, config)),
 );
 
 // ── Start ───────────────────────────────────────────────

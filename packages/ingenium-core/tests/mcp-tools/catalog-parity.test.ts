@@ -167,8 +167,8 @@ describe("MCP Tool Catalog Parity", () => {
 
   // 8. Verify catalog total count
   it("catalog has the expected number of tools", () => {
-    // 211 from mcp-server.ts + 2 extension tools = 213
-    expect(MCP_TOOL_CATALOG.length, "catalog should contain 211 server + 2 extension tools = 213 total").toBe(213);
+    // 243 from mcp-server.ts + 2 extension tools = 245
+    expect(MCP_TOOL_CATALOG.length, "catalog should contain 243 server + 2 extension tools = 245 total").toBe(245);
   });
 
   // 9. All catalog entries have the "ingenium_" prefix (except extension tools)

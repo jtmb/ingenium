@@ -5,8 +5,8 @@ description: Naming, file organization, error handling, git practices, and datab
 
 # Conventions
 
-## OpenCode Web UI Embedded in Dashboard
-The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode interface**:
+## OpenCode Web/CLI Embedded in Dashboard
+The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
 - **Web mode** — Embeds the OpenCode Web UI (`http://localhost:4098/`) in a full-viewport iframe
 - **CLI mode** — Embeds a ttyd terminal (`http://localhost:4099/`) in a full-viewport iframe, running `opencode attach http://localhost:4098 --dir /workspace`
@@ -91,6 +91,33 @@ Every skill in the DB has a `file_tree` column (TEXT, JSON map of relative paths
 - **Split-skill format on disk**: Each skill is a directory with `SKILL.md` (main content + YAML frontmatter), `metadata.json` (tags, alwaysApply), and optional `references/` directory for auxiliary docs.
 - **Skills live at `.opencode/skills/`** — edit SKILL.md here, then use the dashboard or `ingenium_skill_sync` to persist changes to the DB.
 - **Runtime copy at `.opencode/skills/`** is automatically written from the DB. Do not edit — changes will be overwritten unless synced back.
+
+## SSR Portal Guard — `createPortal` + `mounted` Pattern
+
+Components that use `createPortal(..., document.body)` **must defer rendering until client hydration completes** to prevent `document is not defined` SSR errors. The pattern:
+
+```tsx
+"use client";
+import { createPortal } from "react-dom";
+import { useState, useEffect } from "react";
+
+export default function PortalComponent() {
+  // SSR guard: createPortal(..., document.body) cannot run during SSR
+  // because document is undefined on the server.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  if (!mounted) return null;
+
+  return createPortal(/* ... */, document.body);
+}
+```
+
+**Components using this pattern:**
+- `SettingsOverlay.tsx` — full-screen settings overlay
+- `ServiceOverlay.tsx` — status detail overlay (both service and application types)
+
+The `Overlay.tsx` shared component does NOT include this guard — it relies on callers passing `isOpen={false}` during SSR. For directly rendered portals (always in the DOM tree), the `mounted` guard is mandatory.
 
 ## 🔴 Skill Data Integrity & Security Rules
 

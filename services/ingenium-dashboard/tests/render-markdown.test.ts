@@ -1,5 +1,24 @@
-import { describe, it, expect } from "vitest";
-import { renderMarkdown } from "../src/app/docs/components/DocsEditor";
+import { describe, it, expect, vi } from "vitest";
+
+// dompurify requires a browser window to initialize; in vitest's jsdom
+// environment the ESM module evaluates before jsdom injects window into
+// the module scope, so we mock it here to provide a working sanitize.
+vi.mock("dompurify", () => {
+  return {
+    default: {
+      sanitize: (html: string, config: any) => {
+        // Basic tag stripping for test XSS assertions
+        let result = html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+        // Strip javascript: URLs
+        result = result.replace(/\bjavascript:\s*/gi, "");
+        return result;
+      },
+      isSupported: true,
+    },
+  };
+});
+
+import { renderMarkdown } from "../src/app/components/MarkdownDocument";
 
 describe("renderMarkdown", () => {
   it("renders headings", () => {

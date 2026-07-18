@@ -325,7 +325,7 @@ function JobFormOverlay({
                         const data = await res.json().catch(() => ({ data: null }));
                         const d = data.data || data;
                         if (d?.configured === false) {
-                          setWandError("Configure a Synthesis LLM in Settings to enable AI suggestions");
+                          setWandError("Configure a primary LLM provider in Settings → Providers to enable AI suggestions");
                         } else if (d?.prompt_template || d?.schedule_cron || d?.trigger_event) {
                           const updates: Partial<JobFormData> = {};
                           if (d.prompt_template) updates.prompt_template = d.prompt_template;

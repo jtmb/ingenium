@@ -1,11 +1,11 @@
 ---
 title: MCP Tools Reference
-description: Complete reference for all 212 Ingenium MCP tools across 24 categories.
+description: Complete reference for all 245 Ingenium MCP tools across 28 categories.
 ---
 
 # MCP Tools Reference
 
-All **212 tools** across **24 categories** (210 server tools + 2 extension tools: `synthesize_observations`, `auto_observe_now`), grouped by what they do. Every tool needs a **project** name (except where noted).
+All **245 tools** across **28 categories**, grouped by what they do. Every tool needs a **project** name (except where noted).
 
 The canonical catalog (source of truth) lives at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
@@ -111,6 +111,58 @@ OpenCode applies the server key (`ingenium`) as a prefix. Transport names are un
 
 `ingenium_config_get`, `ingenium_config_set`, `ingenium_config_sync`.
 
+## PROVIDERS — LLM provider management (4 tools)
+
+| Tool | What it does |
+|------|-------------|
+| `ingenium_provider_list` | Lists all available LLM providers from OpenCode |
+| `ingenium_provider_connect` | Connect a provider with an API key |
+| `ingenium_provider_disconnect` | Disconnect a provider |
+| `ingenium_provider_status` | Get provider connection status (keys always redacted) |
+
+## VAULT — Encrypted secrets store (10 tools)
+
+| Tool | What it does |
+|------|-------------|
+| `ingenium_vault_status` | Get vault status (sealed/unsealed) |
+| `ingenium_vault_unseal` | Unseal the vault with a passphrase |
+| `ingenium_vault_seal` | Seal (lock) the vault |
+| `ingenium_vault_item_list` | List vault items, optionally by folder |
+| `ingenium_vault_item_create` | Create a new vault item (password, note, API key, etc.) |
+| `ingenium_vault_item_get` | Get a vault item's metadata (not the secret value) |
+| `ingenium_vault_item_update` | Update a vault item's value (re-encrypts) |
+| `ingenium_vault_item_delete` | Delete a vault item (soft-delete with audit) |
+| `ingenium_vault_password_gen` | Generate a secure random password |
+| `ingenium_vault_audit_list` | List vault audit log entries |
+
+## BACKUPS — Database snapshots and restore (10 tools)
+
+| Tool | What it does |
+|------|-------------|
+| `ingenium_backup_create` | Create a new backup snapshot (Ingenium + OpenCode DB) |
+| `ingenium_backup_list` | List all backups for a project |
+| `ingenium_backup_get` | Get a single backup record by ID |
+| `ingenium_backup_download` | Download a backup archive to a validated path |
+| `ingenium_backup_delete` | Delete a backup by ID |
+| `ingenium_backup_restore_preview` | Preview what a restore would do without executing |
+| `ingenium_backup_restore_start` | Start a restore operation (requires `confirm=true`) |
+| `ingenium_backup_restore_status` | Get the current status of a restore job |
+| `ingenium_backup_schedule_get` | Get the current backup schedule configuration |
+| `ingenium_backup_schedule_set` | Set/update the backup schedule configuration |
+
+## RAG — Retrieval-Augmented Generation index (8 tools)
+
+| Tool | What it does |
+|------|-------------|
+| `ingenium_docs_search_semantic` | Semantic search across the RAG document index |
+| `ingenium_docs_ask` | Ask a question against the RAG index, receives LLM-grounded answer with citations |
+| `ingenium_docs_ingest` | Create a new source and ingest a document into the RAG index |
+| `ingenium_docs_rag_sources_list` | List all RAG document sources |
+| `ingenium_docs_rag_source_get` | Get a single RAG source by ID |
+| `ingenium_docs_rag_source_delete` | Delete a RAG source by ID |
+| `ingenium_docs_rag_reingest` | Re-ingest an existing RAG source with new text |
+| `ingenium_docs_rag_stats` | Get RAG index statistics (document count, chunk count, etc.) |
+
 ## SERVERS — Child MCP servers
 
 `ingenium_server_list`, `ingenium_server_add`, `ingenium_server_remove`, `ingenium_server_update`, `ingenium_server_sync_all`.
@@ -139,4 +191,4 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Grand total: 212 tools across 24 categories (210 server + 2 extension).**
+**Grand total: 245 tools across 28 categories — Projects, Skills, Observe, Observations, Personality, Synthesis, Extraction, Pipeline, Status, Health, OpenCode, Tasks, Plans, Plugins, Commands, Settings, Config, Providers, Vault, Backups, RAG, Servers, Agents, Email, Logs, Jobs, Documentation, Dashboard.**

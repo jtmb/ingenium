@@ -144,6 +144,11 @@ function formatTimestamp(seconds?: number): string {
  * - "application" → fetches in-process engine state (pipeline stats, email accounts)
  */
 export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayProps) {
+  // SSR guard: `createPortal(..., document.body)` cannot run during SSR because
+  // `document` is undefined on the server. Defer rendering until after hydration.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   const [detail, setDetail] = useState<ServiceDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
 
@@ -226,6 +231,8 @@ export default function ServiceOverlay({ name, type, onClose }: ServiceOverlayPr
     : appDetail?.state ?? "";
 
   const badge = stateBadgeStyle(displayState);
+
+  if (!mounted) return null;
 
   return createPortal(
     <div

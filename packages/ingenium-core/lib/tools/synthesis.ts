@@ -281,6 +281,8 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
             endpointSetting,
             config.model,
             config.apiKey,
+            undefined,
+            gid ? getSetting(gid, "synthesis_allow_private_network") === "true" : false,
           );
           llmInsights = llmResult.insights || [];
         } catch (primaryErr: any) {
@@ -304,6 +306,8 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
                 backupEndpoint,
                 backupModel,
                 backupApiKey || undefined,
+                undefined,
+                gid ? getSetting(gid, "synthesis_backup_allow_private_network") === "true" : false,
               );
               llmInsights = llmResult.insights || [];
             } catch (backupErr: any) {
@@ -330,8 +334,9 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
               always_apply: 0,
               file_tree: fileTree || null,
             });
+            const batchSessionIds = [...new Set(batch.map(o => o.session_id).filter(Boolean))];
             const evidenceJson = JSON.stringify([
-              { trigger: "LLM synthesis", observation_ids: batch.map(o => o.id), model: synthModel },
+              { trigger: "LLM synthesis", observation_ids: batch.map(o => o.id), session_ids: batchSessionIds, model: synthModel },
             ]);
             const proposal = skillGovernance.createProposal(
               projectId,
@@ -387,8 +392,9 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
                 always_apply: (existing as any).always_apply ?? 0,
                 file_tree: mergedFileTree || (existing as any).file_tree || null,
               });
+              const batchSessionIds = [...new Set(batch.map(o => o.session_id).filter(Boolean))];
               const evidenceJson = JSON.stringify([
-                { trigger: "LLM synthesis update", observation_ids: batch.map(o => o.id), model: synthModel, patch_type: skillToUpdate.patch_type },
+                { trigger: "LLM synthesis update", observation_ids: batch.map(o => o.id), session_ids: batchSessionIds, model: synthModel, patch_type: skillToUpdate.patch_type },
               ]);
               const proposal = skillGovernance.createProposal(
                 projectId,

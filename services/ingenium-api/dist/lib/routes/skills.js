@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { skills, skillGovernance, synthesis, getSkillsBase, maintenanceLocks } from "ingenium-core";
+import { skills, skillGovernance, synthesis, getSkillsBase, maintenanceLocks, observations } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import fs from "fs";
 import path from "path";
@@ -212,7 +212,8 @@ skillsRouter.get("/proposals", (req, res) => {
     const list = skillGovernance.listProposals(projectId, statusFilter);
     res.json({ data: list.map(proposalToDto), total: list.length });
 });
-/** GET /proposals/:proposalId — get a single proposal by ID. */
+/** GET /proposals/:proposalId — get a single proposal by ID.
+ *  Supports ?enrich=true (default) to include currentSkill, observations, and sourceSkill. */
 skillsRouter.get("/proposals/:proposalId", (req, res) => {
     const projectId = requireProject(req, res);
     if (!projectId)
@@ -223,7 +224,63 @@ skillsRouter.get("/proposals/:proposalId", (req, res) => {
             res.status(404).json({ error: { code: "NOT_FOUND", message: `Proposal '${req.params.proposalId}' not found` } });
             return;
         }
-        res.json({ data: proposalToDto(p) });
+        const dto = proposalToDto(p);
+        // Enrichment — default on, skip when ?enrich=false
+        const enrich = req.query.enrich !== "false";
+        if (enrich) {
+            // currentSkill: fetch current state of the target skill
+            if (p.target_name) {
+                const current = skills.getSkill(projectId, p.target_name);
+                if (current) {
+                    dto.currentSkill = {
+                        name: current.name,
+                        description: current.description,
+                        content: current.content,
+                        category: current.category ?? null,
+                        tags: current.tags ?? null,
+                        revision: current.revision,
+                    };
+                }
+                else {
+                    dto.currentSkill = null;
+                }
+            }
+            // observations: batch-fetch summaries for each observation ID
+            const obsIds = Array.isArray(dto.observationIds) ? dto.observationIds : [];
+            if (obsIds.length > 0) {
+                const obsRows = observations.getObservationsByIds(obsIds.filter(id => typeof id === "number"));
+                dto.observations = obsRows.map(o => ({
+                    id: o.id,
+                    type: o.observation_type,
+                    contentPreview: (o.content || "").slice(0, 200),
+                    importance: o.importance,
+                    source: o.source,
+                    sessionId: o.session_id ?? null,
+                }));
+            }
+            else {
+                dto.observations = [];
+            }
+            // sourceSkill: for merge proposals, fetch the source skill
+            if (p.proposal_type === "merge" && p.source_project_id && p.source_name) {
+                const source = skills.getSkill(p.source_project_id, p.source_name);
+                if (source) {
+                    dto.sourceSkill = {
+                        projectId: p.source_project_id,
+                        name: source.name,
+                        description: source.description,
+                        content: source.content,
+                        category: source.category ?? null,
+                        tags: source.tags ?? null,
+                        revision: source.revision,
+                    };
+                }
+                else {
+                    dto.sourceSkill = null;
+                }
+            }
+        }
+        res.json({ data: dto });
     }
     catch (err) {
         if (err instanceof skillGovernance.GovernanceError) {

@@ -13,6 +13,7 @@ import { logEvent } from "./pipeline-events.js";
 import { getFullLLMSynthesisConfig, isLLMSynthesisConfigured } from "./synthesis-llm.js";
 import { getDb } from "../db.js";
 import { logger } from "../logger.js";
+import { safeLlmFetch } from "./endpoint-policy.js";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -20,6 +21,8 @@ interface CandidateMessage {
   text: string;
   time_created: number;
   hash: string;
+  messageId?: string;
+  sessionId?: string;
 }
 
 interface ExtractionRule {
@@ -195,7 +198,7 @@ function buildBatchUserPrompt(messages: CandidateMessage[]): string {
 
 export async function callLLMForExtraction(
   messages: CandidateMessage[],
-  config: { model: string; endpoint: string; apiKey?: string },
+  config: { model: string; endpoint: string; apiKey?: string; allowPrivateNetwork?: boolean },
 ): Promise<{ rules: ExtractionRule[]; failed: boolean }> {
   const userContent = buildBatchUserPrompt(messages);
 
@@ -214,7 +217,7 @@ export async function callLLMForExtraction(
   // Single retry with json_object fallback (no response_format on retry)
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(`${baseEndpoint}/v1/chat/completions`, {
+      const res = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -230,7 +233,7 @@ export async function callLLMForExtraction(
           response_format: undefined,
         }),
         signal: controller.signal,
-      });
+      }, { allowPrivateNetwork: config.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
       clearTimeout(timeout);
 
@@ -371,19 +374,20 @@ export async function runExtraction(
     const seenHashes = getSeenHashes(projectId);
     let newHashesAdded = false;
 
-    const rawCandidates = messages.filter((m) => {
+    const rawCandidates: CandidateMessage[] = [];
+    for (const m of messages) {
       const ts = m.time_created;
       if (ts > highestTimestamp) highestTimestamp = ts;
 
-      if (!isCandidate(m.text)) return false;
+      if (!isCandidate(m.text)) continue;
 
       const hash = hashText(m.text.trim());
-      if (seenHashes.has(hash)) return false;
+      if (seenHashes.has(hash)) continue;
 
       seenHashes.add(hash);
       newHashesAdded = true;
-      return true;
-    }).map(m => ({ ...m, hash: hashText(m.text.trim()) }));
+      rawCandidates.push({ ...m, hash });
+    }
 
     candidates = rawCandidates.length;
 
@@ -409,6 +413,7 @@ export async function runExtraction(
         model: llmConfig.model,
         endpoint: llmConfig.endpoint,
         apiKey: llmConfig.apiKey,
+        allowPrivateNetwork: llmConfig.allowPrivateNetwork,
       });
 
       if (failed) {
@@ -426,13 +431,18 @@ export async function runExtraction(
         );
 
         try {
+          const context = originatingMsg?.messageId || originatingMsg?.sessionId
+            ? JSON.stringify({ sessionId: originatingMsg.sessionId, messageId: originatingMsg.messageId, text: (originatingMsg?.text || "").slice(0, 500) })
+            : (originatingMsg?.text || "").slice(0, 500);
+
           storeObservation(
             projectId,
             obsType,
             rule.content,
             rule.importance ?? 6,
             "auto-observer",
-            (originatingMsg?.text || "").slice(0, 500),
+            context,
+            originatingMsg?.sessionId,
           );
           created++;
         } catch (err: any) {

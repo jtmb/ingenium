@@ -8,7 +8,7 @@ description: Canonical contract for the Documentation Workspace API — routes, 
 > **STATUS**: ✅ ROUTES VERIFIED (W1B) + ✅ DASHBOARD UI (W2) — The Express API implements **52 canonical endpoints** (51 in `docs.ts` + 1 in `docs-ai.ts`). All 6 backward-compatibility aliases have been **removed** from the API. All routes have DTO camelCase mapping, ownership checks, and error mapping.  
 > 🟢 **MCP handlers: ALIGNED** — All 7 handler defects verified as fixed in `services/ingenium-server/lib/tools/docs.ts`. Handlers use canonical paths with pageId scoping.  
 > 🟢 **Dashboard client: ALIGNED** — All paths verified in `services/ingenium-dashboard/src/lib/api.ts`. PUT (not PATCH), `expectedRevision` camelCase, pageId in all comment/version/trash routes.  
-> 🟢 **DOCS_ENDPOINTS catalog: ALIGNED** (49 entries; 3 source-verified gaps in `mcp-tool-catalog.ts:233-283`) — Gaps: slug-lookup `GET /pages` (not in array), non-resolve `PUT /comments/:commentId` (not in array), and `POST /docs/ai` (docs-ai.ts, separate router).  
+> 🟢 **DOCS_ENDPOINTS catalog: ALIGNED** (49 entries; 3 source-verified gaps in `mcp-tool-catalog.ts`) — Gaps: slug-lookup `GET /pages` (not in array), non-resolve `PUT /comments/:commentId` (not in array), and `POST /docs/ai` (docs-ai.ts, separate router).
 > 🟢 **Route parity test: ALIGNED** — `tests/route-parity-docs.test.ts` (385 lines) has green assertions for all 3 layers.  
 > 🟢 **Dashboard UI (W2): IMPLEMENTED** — `/docs` is an immersive responsive 3-pane workspace with tree refresh/mutations, named create dialog, explicit publish, archive/trash/restore, move with cycle prevention, rename, project links, attachments, panel tabs (Info/Tags/Backlinks/Comments/History/Linked/Files/Trash), FTS5 search, template picker, and import/export entry actions. `/standalone` routes into `/docs?space=...` as a docs-space selector/creator. Navigation Docs link is active (stale Coming Soon badge removed). See [docs-workspace Dashboard UI](#dashboard-ui-w2) below.
 > 🔴 **W3 Editor (TipTap/source)**: Rich WYSIWYG TipTap editor and source-mode split pane remain pending. Current editor is a basic textarea-based Markdown editor. W3 E2E Playwright proof also pending.
@@ -79,11 +79,13 @@ This reference defines the canonical contract for the Docs Workspace API, models
 | HTTP Status | Code | Meaning |
 |-------------|------|---------|
 | 400 | `BAD_REQUEST` | Missing/ invalid required field |
+| 400 | `LLM_NOT_CONFIGURED` | No LLM configured in Settings (AI-only) |
 | 404 | `NOT_FOUND` | Resource does not exist |
 | 409 | `CONFLICT` | Slug/name uniqueness violation OR optimistic concurrency failure |
 | 413 | `PAYLOAD_TOO_LARGE` | Import data or attachment exceeds size limit |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | Attachment MIME type not in allowlist |
-| 500 | `INTERNAL_ERROR` | Unexpected server error |
+| 500 | `INTERNAL_ERROR` | Unexpected server error; AI transport/internal failures return generic message with no details leaked |
+| 502 | `LLM_ERROR` | AI upstream returned an error, no upstream body leaked in response (AI-only) |
 
 ---
 
@@ -377,6 +379,18 @@ These live under `/api/v1/docs/ai` (separate router in `docs-ai.ts`):
 | POST | `/ai` | `{ action, content, title?, selectedText? }` | `{ result: string }` |
 
 Supported actions: `outline`, `continue`, `rewrite`, `summarize`, `fix_grammar`, `tone_professional`, `tone_casual`, `tone_technical`.
+
+#### 🔴 AI Error Contract
+
+The `POST /docs/ai` endpoint returns the following error codes on top of the general codes above:
+
+| HTTP Status | Code | Condition | Upstream body leaked? |
+|-------------|------|-----------|-----------------------|
+| 400 | `LLM_NOT_CONFIGURED` | No primary LLM model configured in Settings → Providers | N/A |
+| 502 | `LLM_ERROR` | Upstream LLM provider returned a non-2xx response | ❌ No — only the HTTP status is logged server-side |
+| 500 | `INTERNAL_ERROR` | Transport failure (network error, JSON parse failure, etc.) | ❌ No — only generic message returned; thrown error details logged server-side only |
+
+> 🔴 **Body safety**: The response NEVER includes upstream LLM provider response body text, thrown Error messages, or internal diagnostics. Upstream non-ok response bodies are released via `response.body?.cancel()` to prevent connection-pool exhaustion. All error details are logged server-side via `logger.warn`/`logger.error` with source `"docs-ai"`. Verified by `docs-ai-security.test.ts` (3 tests: upstream body non-leakage, connection hygiene body release on non-ok, and thrown error non-leakage).
 
 ---
 
