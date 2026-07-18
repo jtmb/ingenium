@@ -5,7 +5,7 @@ import {
   getRewrites,
   OPENCODE_CLI_DESTINATION,
   OPENCODE_WEB_DESTINATION,
-} from "@/proxy";
+} from "@/proxy-config";
 
 describe("Dashboard same-origin proxy configuration", () => {
   it("routes API and OpenCode services only to container loopback", () => {

@@ -2,11 +2,12 @@
  * Trusted-LAN proxy and Content-Security-Policy configuration for the
  * Ingenium Dashboard.
  *
- * Exports the CSP builder and rewrite rules used by next.config.js so
- * the security model is documented, type-safe, and independently testable.
+ * Exports the CSP builder and rewrite rules that mirror the inline
+ * configuration in next.config.js, so the security model is documented,
+ * type-safe, and independently testable.
  *
- * This module is referenced by next.config.js but may also be imported
- * by test suites to verify CSP and rewrite constraints.
+ * This module may be imported by test suites to assert CSP and rewrite
+ * constraints.
  */
 
 // ── Internal API proxy ────────────────────────────────────────────────────
