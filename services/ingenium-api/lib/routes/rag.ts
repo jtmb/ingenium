@@ -10,14 +10,12 @@
  *   GET    /search               — Hybrid full-text search
  *   POST   /ask                  — Natural-language Q&A (context → brokerExecute)
  *   GET    /stats                — RAG statistics
- *   POST   /import/thread        — Import Thread JSON export
- *   GET    /import/thread/status — Import checkpoints
  *   POST   /export               — Export all RAG sources as JSON
  */
 
 import { Router } from "express";
-import { randomUUID } from "node:crypto";
-import { getDb, execTransaction, checkpointAfterWrite, logger, rag, ragChunker } from "ingenium-core";
+import { createHash, randomUUID } from "node:crypto";
+import { getDb, execTransaction, checkpointAfterWrite, logger, rag } from "ingenium-core";
 import { executeSynthesisBroker } from "../opencode-client.js";
 import { requireProject } from "../helpers.js";
 
@@ -34,10 +32,9 @@ function dbPath(): string {
 const SOURCE = "rag-routes";
 
 /** Resolve format string to a valid source_type column value. */
-function normalizeSourceType(format?: string): "text" | "file" | "thread_import" | "url" {
+function normalizeSourceType(format?: string): "text" | "file" | "url" {
   if (!format) return "text";
   const f = format.toLowerCase();
-  if (f === "thread_import" || f === "thread") return "thread_import";
   if (f === "file") return "file";
   if (f === "url") return "url";
   return "text";
@@ -77,9 +74,9 @@ ragRouter.post("/sources", (req, res) => {
     return;
   }
 
-  const sourceTypeVal = (typeof sourceType === "string" && sourceType.trim())
-    ? sourceType.trim()
-    : normalizeSourceType(format);
+  const sourceTypeVal = normalizeSourceType(
+    typeof sourceType === "string" && sourceType.trim() ? sourceType : format,
+  );
 
   const metadata = JSON.stringify({
     originalFormat: format ?? "text",
@@ -115,6 +112,60 @@ ragRouter.post("/sources", (req, res) => {
       created_at: row.created_at,
     },
   });
+});
+
+// ---------------------------------------------------------------------------
+// POST /sources/canonical — Idempotent, hash-verified logical source import
+// ---------------------------------------------------------------------------
+
+ragRouter.post("/sources/canonical", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+
+  const { title, text, sourcePath, expectedHash, mimeType, metadata, priority, tags } = req.body ?? {};
+  if (typeof title !== "string" || !title.trim() || typeof text !== "string" || !text.trim()) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "title and text are required" } });
+    return;
+  }
+  if (typeof sourcePath !== "string" || sourcePath.length > 512 || !/^import:[A-Za-z0-9._:/-]+$/.test(sourcePath) || sourcePath.includes("..")) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "sourcePath must be a safe import: logical path" } });
+    return;
+  }
+  if (typeof expectedHash !== "string" || !/^[a-f0-9]{64}$/.test(expectedHash)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "expectedHash must be a lowercase SHA-256 hash" } });
+    return;
+  }
+  if (mimeType !== undefined && (typeof mimeType !== "string" || mimeType.length > 128 || !/^[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+$/.test(mimeType))) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "mimeType must be a valid media type" } });
+    return;
+  }
+  const actualHash = createHash("sha256").update(text).digest("hex");
+  if (actualHash !== expectedHash) {
+    res.status(422).json({ error: { code: "HASH_MISMATCH", message: "Imported content does not match expectedHash" } });
+    return;
+  }
+  if (metadata !== undefined && (!metadata || typeof metadata !== "object" || Array.isArray(metadata))) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "metadata must be an object" } });
+    return;
+  }
+  if (tags !== undefined && (!Array.isArray(tags) || tags.some((tag) => typeof tag !== "string" || tag.length > 64))) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "tags must contain strings up to 64 characters" } });
+    return;
+  }
+
+  try {
+    const source = rag.ingestCanonicalSource(projectId, title.trim(), text, {
+      sourceType: "text",
+      sourcePath,
+      mimeType,
+      metadata: metadata ?? {},
+      priority,
+      tags,
+    });
+    res.json({ data: source });
+  } catch (error) {
+    res.status(422).json({ error: { code: "IMPORT_FAILED", message: error instanceof Error ? error.message : "Canonical import failed" } });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -416,291 +467,6 @@ ragRouter.get("/stats", (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /import/thread — Import Thread JSON export
-//
-// Accepts: { sessions: [{ name, description, entries: [{ content, priority, tags, created_at }] }] }
-// Returns: { imported_sessions, imported_entries, errors }
-// Supports resume via rag_thread_imports checkpoints.
-// ---------------------------------------------------------------------------
-
-interface ThreadEntry {
-  content: string;
-  priority?: number;
-  tags?: string[];
-  created_at?: string;
-}
-
-ragRouter.post("/import/thread", (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
-
-  const { sessions } = req.body ?? {};
-
-  if (!Array.isArray(sessions) || sessions.length === 0) {
-    res.status(422).json({
-      error: { code: "VALIDATION_ERROR", message: "sessions is required (non-empty array)" },
-    });
-    return;
-  }
-
-  // Validate session structure
-  for (const s of sessions) {
-    if (typeof s.name !== "string" || !s.name.trim()) {
-      res.status(422).json({
-        error: { code: "VALIDATION_ERROR", message: "Each session requires a non-empty name" },
-      });
-      return;
-    }
-    if (s.entries !== undefined && !Array.isArray(s.entries)) {
-      res.status(422).json({
-        error: { code: "VALIDATION_ERROR", message: `Session '${s.name}' entries must be an array` },
-      });
-      return;
-    }
-  }
-
-  const db = getDb(dbPath());
-  let importedSessions = 0;
-  let importedEntries = 0;
-  const errors: Array<{ session: string; error: string }> = [];
-
-  for (const session of sessions) {
-    const sessionName = session.name.trim();
-    const entries = Array.isArray(session.entries) ? session.entries : [];
-    const description = typeof session.description === "string" ? session.description : null;
-
-    try {
-      // Check for existing import checkpoint
-      const existingImport = db.prepare(
-        `SELECT ti.*, s.title as source_title
-         FROM rag_thread_imports ti
-         JOIN rag_sources s ON s.id = ti.source_id
-         WHERE ti.thread_session_name = ? AND s.project_id = ?
-         ORDER BY ti.created_at DESC LIMIT 1`,
-      ).get(sessionName, projectId) as any;
-
-      if (existingImport && existingImport.completed === 1) {
-        // Already fully imported — skip
-        importedSessions++;
-        continue;
-      }
-
-      let sourceId: string;
-      let lastEntryIdx = -1; // 0-based index of last successfully imported entry
-
-      if (existingImport && existingImport.completed === 0) {
-        // Resume an incomplete import
-        sourceId = existingImport.source_id;
-        lastEntryIdx = typeof existingImport.last_entry_id === "number" ? existingImport.last_entry_id : -1;
-        logger.info(SOURCE, `Resuming Thread import for session '${sessionName}'`, {
-          sourceId,
-          lastEntryIdx,
-          projectId,
-        });
-      } else {
-        // Create a new source for this session
-        sourceId = randomUUID();
-        const sourceTitle = `Thread: ${sessionName}`;
-        const metadata = JSON.stringify({
-          source: "thread_import",
-          sessionName,
-          description: description || "",
-          entryCount: entries.length,
-        });
-
-        execTransaction(() => {
-          db.prepare(
-            `INSERT INTO rag_sources (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, chunk_count, metadata, created_at, updated_at)
-             VALUES (?, ?, ?, 'thread_import', NULL, NULL, NULL, 0, 0, ?, datetime('now'), datetime('now'))`,
-          ).run(sourceId, projectId, sourceTitle, metadata);
-        });
-        checkpointAfterWrite();
-
-        // Create import tracking record
-        execTransaction(() => {
-          db.prepare(
-            `INSERT INTO rag_thread_imports (source_id, thread_session_name, entries_total, entries_imported, last_entry_id, completed, created_at)
-             VALUES (?, ?, ?, 0, NULL, 0, datetime('now'))`,
-          ).run(sourceId, sessionName, entries.length);
-        });
-        checkpointAfterWrite();
-
-        logger.info(SOURCE, `Created Thread import source for session '${sessionName}'`, {
-          sourceId,
-          entryCount: entries.length,
-          projectId,
-        });
-      }
-
-      // Process entries
-      if (entries.length > 0) {
-        const insertChunk = db.prepare(
-          `INSERT INTO rag_chunks (id, source_id, chunk_index, content, token_count, heading_path, priority, tags)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        );
-
-        let entriesProcessed = 0;
-
-        execTransaction(() => {
-          // Get current max chunk_index for this source
-          const maxIdx = db.prepare(
-            "SELECT COALESCE(MAX(chunk_index), -1) as max_idx FROM rag_chunks WHERE source_id = ?",
-          ).get(sourceId) as { max_idx: number };
-          let chunkIdx = maxIdx.max_idx + 1;
-
-          for (let i = 0; i < entries.length; i++) {
-            // Skip already-imported entries (using entry array index)
-            if (i <= lastEntryIdx) continue;
-
-            const entry = entries[i]!;
-            if (!entry.content || typeof entry.content !== "string" || !entry.content.trim()) {
-              continue;
-            }
-
-            // Clamp priority to valid range [0, 10]
-            const priority = typeof entry.priority === "number"
-              ? Math.max(0, Math.min(10, Math.round(entry.priority)))
-              : 5;
-            const tags = Array.isArray(entry.tags) ? JSON.stringify(entry.tags) : "[]";
-
-            // Chunk the entry content
-            const chunks = ragChunker.chunkText(entry.content, { source: sourceId });
-
-            for (const chunk of chunks) {
-              insertChunk.run(
-                randomUUID(),
-                sourceId,
-                chunkIdx++,
-                chunk.content,
-                chunk.tokens,
-                chunk.heading ?? null,
-                priority,
-                tags,
-              );
-            }
-
-            // Update progress after each entry
-            db.prepare(
-              `UPDATE rag_thread_imports
-               SET entries_imported = entries_imported + 1,
-                   last_entry_id = ?
-               WHERE source_id = ?`,
-            ).run(i, sourceId);
-
-            entriesProcessed++;
-            importedEntries++;
-          }
-
-          // Update source byte_size and chunk_count
-          const totalChunkCount = chunkIdx;
-          let totalBytes = 0;
-          entries.forEach((e: ThreadEntry) => {
-            if (e.content && typeof e.content === "string") totalBytes += e.content.length;
-          });
-
-          db.prepare(
-            `UPDATE rag_sources
-             SET chunk_count = ?,
-                 byte_size = COALESCE(byte_size, 0) + ?,
-                 updated_at = datetime('now')
-             WHERE id = ?`,
-          ).run(totalChunkCount, totalBytes, sourceId);
-        });
-        checkpointAfterWrite();
-
-        const totalImported = existingImport
-          ? (existingImport.entries_imported || 0) + entriesProcessed
-          : entriesProcessed;
-
-        logger.info(SOURCE, `Processed ${entriesProcessed} entries for session '${sessionName}'`, {
-          sourceId,
-          totalImported,
-          projectId,
-        });
-      }
-
-      // Mark import as complete
-      execTransaction(() => {
-        db.prepare(
-          `UPDATE rag_thread_imports
-           SET completed = 1
-           WHERE source_id = ?`,
-        ).run(sourceId);
-      });
-      checkpointAfterWrite();
-
-      importedSessions++;
-
-      // Audit log
-      logger.info("rag-audit", `Thread import completed: session='${sessionName}' source=${sourceId} entries=${entries.length}`, {
-        projectId,
-        sessionName,
-        sourceId,
-        entryCount: entries.length,
-      });
-    } catch (err: any) {
-      logger.error(SOURCE, `Failed to import session '${sessionName}': ${err.message}`, { projectId });
-      errors.push({ session: sessionName, error: err.message || "Unknown error" });
-
-      // Mark import as failed so it can be resumed later
-      try {
-        execTransaction(() => {
-          db.prepare(
-            `UPDATE rag_thread_imports
-             SET completed = 0
-             WHERE thread_session_name = ?`,
-          ).run(sessionName);
-        });
-        checkpointAfterWrite();
-      } catch (_) {
-        // Best-effort
-      }
-    }
-  }
-
-  res.status(201).json({
-    imported_sessions: importedSessions,
-    imported_entries: importedEntries,
-    errors,
-  });
-});
-
-// ---------------------------------------------------------------------------
-// GET /import/thread/status — Import checkpoints
-// ---------------------------------------------------------------------------
-
-ragRouter.get("/import/thread/status", (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
-
-  const db = getDb(dbPath());
-
-  const imports = db.prepare(
-    `SELECT ti.*, s.title as source_title, s.created_at as source_created_at
-     FROM rag_thread_imports ti
-     JOIN rag_sources s ON s.id = ti.source_id
-     WHERE s.project_id = ?
-     ORDER BY ti.created_at DESC`,
-  ).all(projectId) as any[];
-
-  res.json({
-    data: imports.map((imp) => ({
-      id: imp.id,
-      source_id: imp.source_id,
-      source_title: imp.source_title,
-      thread_session_name: imp.thread_session_name,
-      entries_total: imp.entries_total,
-      entries_imported: imp.entries_imported,
-      last_entry_id: imp.last_entry_id,
-      completed: imp.completed === 1,
-      created_at: imp.created_at,
-      source_created_at: imp.source_created_at,
-    })),
-    total: imports.length,
-  });
-});
-
-// ---------------------------------------------------------------------------
 // POST /export — Export all RAG sources as JSON (backup/migration)
 // ---------------------------------------------------------------------------
 
@@ -740,30 +506,12 @@ ragRouter.post("/export", (req, res) => {
     };
   });
 
-  // Also export thread import checkpoints
-  const threadImports = db.prepare(
-    `SELECT ti.* FROM rag_thread_imports ti
-     JOIN rag_sources s ON s.id = ti.source_id
-     WHERE s.project_id = ?
-     ORDER BY ti.created_at DESC`,
-  ).all(projectId) as any[];
-
   res.json({
     data: {
       version: 1,
       project_id: projectId,
       exported_at: new Date().toISOString(),
       sources: exportData,
-      thread_imports: threadImports.map((ti) => ({
-        id: ti.id,
-        source_id: ti.source_id,
-        thread_session_name: ti.thread_session_name,
-        entries_total: ti.entries_total,
-        entries_imported: ti.entries_imported,
-        last_entry_id: ti.last_entry_id,
-        completed: ti.completed === 1,
-        created_at: ti.created_at,
-      })),
     },
   });
 });

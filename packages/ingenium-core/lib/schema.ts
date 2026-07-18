@@ -497,7 +497,7 @@ export type BackupRestoreJob = z.infer<typeof BackupRestoreJobSchema>;
 /** An ingestion source for RAG-backed documentation search. */
 export const RagSourceSchema = z.object({
   id: z.string().uuid(), project_id: z.string(), title: z.string().min(1),
-  source_type: z.enum(["file", "thread_import", "text", "url"]),
+  source_type: z.enum(["file", "text", "url"]),
   source_path: z.string().nullable(), source_hash: z.string().nullable(), mime_type: z.string().nullable(),
   byte_size: z.coerce.number().int().nullable(), chunk_count: z.coerce.number().int().nonnegative().default(0),
   metadata: z.string().default("{}"), created_at: z.string(), updated_at: z.string(),

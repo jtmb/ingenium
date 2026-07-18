@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useProject } from "../../../lib/ProjectContext";
 import { getApiBase } from "@/lib/api";
 
 /**
@@ -21,9 +20,13 @@ import { getApiBase } from "@/lib/api";
 export default function AccountSetup({
   onComplete,
   onCancel,
+  project,
+  reconnectAccount,
 }: {
   onComplete: () => void;
   onCancel: () => void;
+  project: string;
+  reconnectAccount?: { id: string; email: string; provider: string; authType?: string; imapHost?: string; imapPort?: number; smtpHost?: string; smtpPort?: number };
 }) {
   const [mode, setMode] = useState<"select" | "manual">("select");
 
@@ -38,7 +41,16 @@ export default function AccountSetup({
   const [error, setError] = useState<string | null>(null);
 
   const apiBase = getApiBase();
-  const project = useProject();
+
+  useEffect(() => {
+    if (reconnectAccount?.authType !== "app_password") return;
+    setMode("manual");
+    setEmail(reconnectAccount.email);
+    setImapHost(reconnectAccount.imapHost ?? "");
+    setImapPort(String(reconnectAccount.imapPort ?? 993));
+    setSmtpHost(reconnectAccount.smtpHost ?? "");
+    setSmtpPort(String(reconnectAccount.smtpPort ?? 465));
+  }, [reconnectAccount]);
 
   // Check if OAuth credentials are configured in settings
   const [credsConfigured, setCredsConfigured] = useState<boolean | null>(null);
@@ -65,37 +77,37 @@ export default function AccountSetup({
         return;
       }
       localStorage.setItem("oauth_provider", provider);
+      localStorage.setItem("oauth_project", project);
+      if (reconnectAccount) localStorage.setItem("oauth_account_id", reconnectAccount.id);
+      else localStorage.removeItem("oauth_account_id");
       window.location.href = json.data.url;
     } catch (err: any) {
       setError(`OAuth failed: ${err.message}`);
     }
   };
 
-  /** HACK: Create-then-test-then-delete pattern. Testing requires an existing
-   *  account record (the API validates the connection by ID), but we also don't
-   *  want to leave a broken account in the DB if the connection fails.
-   *  If connection succeeds, the account stays (user just needs to hit "Add Account"
-   *  which effectively creates a duplicate — but the backend handles dedup by email).
-   *  NOTE: This means a successful test + failure to add creates a dangling account.
-   *  TODO: Replace with a dedicated test-endpoint that doesn't require an account ID. */
   const handleTestConnection = async () => {
     setTesting(true);
     setTestResult(null);
     try {
-      const createRes = await fetch(`${apiBase}/emails/accounts?project=${project}`, {
-        method: "POST",
+      const payload = {
+        email,
+        name: email.split("@")[0],
+        provider: "custom",
+        authType: "app_password",
+        imapHost: imapHost || undefined,
+        imapPort: imapPort ? parseInt(imapPort, 10) : undefined,
+        smtpHost: smtpHost || undefined,
+        smtpPort: smtpPort ? parseInt(smtpPort, 10) : undefined,
+        appPassword: password,
+      };
+      const credentialUrl = reconnectAccount
+        ? `${apiBase}/emails/accounts/${reconnectAccount.id}/credentials?project=${project}`
+        : `${apiBase}/emails/accounts?project=${project}`;
+      const createRes = await fetch(credentialUrl, {
+        method: reconnectAccount ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email,
-          name: email.split("@")[0],
-          provider: "custom",
-          authType: "app_password",
-          imapHost: imapHost || undefined,
-          imapPort: imapPort ? parseInt(imapPort, 10) : undefined,
-          smtpHost: smtpHost || undefined,
-          smtpPort: smtpPort ? parseInt(smtpPort, 10) : undefined,
-          appPassword: password,
-        }),
+        body: JSON.stringify(reconnectAccount ? { appPassword: password } : payload),
       });
       const createData = await createRes.json();
       if (!createRes.ok) {
@@ -104,7 +116,7 @@ export default function AccountSetup({
         return;
       }
 
-      const accountId = createData.data?.id;
+      const accountId = reconnectAccount?.id ?? createData.data?.id;
       if (!accountId) {
         setTestResult("Account created but no ID returned");
         setTesting(false);
@@ -117,7 +129,7 @@ export default function AccountSetup({
       const testData = await testRes.json();
       if (testRes.ok && testData.data?.success) {
         setTestResult("Connection successful");
-      } else {
+      } else if (!reconnectAccount) {
         setTestResult(testData.data?.error || testData.error?.message || "Connection failed");
         await fetch(`${apiBase}/emails/accounts/${accountId}?project=${project}`, {
           method: "DELETE",
@@ -132,10 +144,13 @@ export default function AccountSetup({
 
   const handleAddAccount = async () => {
     try {
-      const res = await fetch(`${apiBase}/emails/accounts?project=${project}`, {
-        method: "POST",
+      const url = reconnectAccount
+        ? `${apiBase}/emails/accounts/${reconnectAccount.id}/credentials?project=${project}`
+        : `${apiBase}/emails/accounts?project=${project}`;
+      const res = await fetch(url, {
+        method: reconnectAccount ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(reconnectAccount ? { appPassword: password } : {
           email,
           name: email.split("@")[0],
           provider: "custom",
@@ -160,6 +175,45 @@ export default function AccountSetup({
 
   // Provider selection grid
   if (mode === "select") {
+    if (reconnectAccount) {
+      const provider = reconnectAccount.provider.toLowerCase();
+      const canUseOAuth = provider === "gmail" || provider === "outlook";
+      return (
+        <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-5 max-w-xl mx-auto">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Reconnect Email Account</h2>
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              Authorize <strong>{reconnectAccount.email}</strong> again. Existing cached mail and account settings will be retained.
+            </p>
+          </div>
+          {error && (
+            <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3">
+              <p className="text-[var(--color-error-text)] text-sm">{error}</p>
+            </div>
+          )}
+          {canUseOAuth ? (
+            <button
+              type="button"
+              onClick={() => handleOAuthRedirect(provider)}
+              className="w-full bg-blue-600 text-white px-4 py-3 rounded font-medium hover:bg-blue-700 cursor-pointer"
+            >
+              Reconnect with {provider === "gmail" ? "Google" : "Microsoft"}
+            </button>
+          ) : (
+            <p className="rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] p-3 text-sm text-[var(--color-warning-text)]">
+              This account uses manual credentials. Add updated credentials through manual setup.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] py-2 px-4 rounded text-sm font-medium cursor-pointer"
+          >
+            Cancel
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-6 max-w-xl mx-auto">
         <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Add Email Account</h2>
@@ -227,7 +281,7 @@ export default function AccountSetup({
   // Manual / app password form
   return (
     <div className="bg-[var(--color-surface)] p-6 rounded-lg border border-[var(--color-border)] space-y-4 max-w-xl mx-auto">
-      <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">Manual Setup</h2>
+      <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">{reconnectAccount ? "Update Email Credentials" : "Manual Setup"}</h2>
 
       <div>
         <label className="block text-sm font-medium text-[var(--color-text-primary)] mb-1">Email</label>
@@ -236,6 +290,7 @@ export default function AccountSetup({
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          disabled={Boolean(reconnectAccount)}
           className="w-full border border-[var(--color-border)] rounded px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)]"
         />
       </div>
@@ -306,17 +361,17 @@ export default function AccountSetup({
       <div className="flex gap-2 pt-2">
         <button
           onClick={handleTestConnection}
-          disabled={testing || !email}
+          disabled={testing || !email || !password}
           className="bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {testing ? "Testing..." : "Test Connection"}
+          {testing ? "Testing..." : reconnectAccount ? "Test Updated Credentials" : "Test Connection"}
         </button>
         <button
           onClick={handleAddAccount}
           disabled={!email || !password}
           className="bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Add Account
+          {reconnectAccount ? "Update Credentials" : "Add Account"}
         </button>
         <button
           onClick={() => setMode("select")}

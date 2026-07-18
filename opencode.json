@@ -7,23 +7,6 @@
   },
   "permission": "allow",
   "mcp": {
-    // Thread retired — migrated to Docs RAG. Remove after verification.
-    "thread": {
-      "type": "local",
-      "command": [
-        "/home/brajam/.thread-bridge/.venv/bin/python",
-        "-m",
-        "thread_bridge.bridge"
-      ],
-      "cwd": "/home/brajam/.thread-bridge",
-      "enabled": false,
-      "environment": {
-        "THREAD_SERVER_URL": "http://localhost:5000",
-        "THREAD_DEFAULT_SESSION": "gh-llm-bootstrap",
-        "THREAD_REQUEST_TIMEOUT": "10",
-        "THREAD_API_TOKEN": "<YOUR_THREAD_API_TOKEN>"
-      }
-    },
     "ingenium": {
       "type": "local",
       "command": [

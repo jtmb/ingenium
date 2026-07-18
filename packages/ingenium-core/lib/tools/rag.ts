@@ -34,7 +34,7 @@ export interface Source {
 }
 
 export interface RagPage<T> { data: T[]; total: number; limit: number; offset: number; }
-export interface IngestSourceOptions { sourceType?: "file" | "text" | "thread_import" | "url"; sourcePath?: string; metadata?: Record<string, unknown>; priority?: number; tags?: string[]; }
+export interface IngestSourceOptions { sourceType?: "file" | "text" | "url"; sourcePath?: string; mimeType?: string; metadata?: Record<string, unknown>; priority?: number; tags?: string[]; }
 
 function sha256(content: string | Buffer): string { return createHash("sha256").update(content).digest("hex"); }
 function now(): string { return new Date().toISOString(); }
@@ -145,9 +145,9 @@ export function ingestCanonicalSource(projectId: string, title: string, content:
   const chunks = chunkText(content);
   execTransaction(() => {
     if (existing) {
-      db.prepare("UPDATE rag_sources SET title = ?, source_type = ?, metadata = ?, updated_at = ? WHERE id = ?").run(title, options.sourceType ?? "text", JSON.stringify(options.metadata ?? {}), now(), id);
+      db.prepare("UPDATE rag_sources SET title = ?, source_type = ?, mime_type = ?, metadata = ?, updated_at = ? WHERE id = ?").run(title, options.sourceType ?? "text", options.mimeType ?? null, JSON.stringify(options.metadata ?? {}), now(), id);
     } else {
-      db.prepare("INSERT INTO rag_sources (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, 'text/markdown', 0, ?, ?, ?)").run(id, projectId, title, options.sourceType ?? "text", sourcePath, JSON.stringify(options.metadata ?? {}), now(), now());
+      db.prepare("INSERT INTO rag_sources (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, 0, ?, ?, ?)").run(id, projectId, title, options.sourceType ?? "text", sourcePath, options.mimeType ?? null, JSON.stringify(options.metadata ?? {}), now(), now());
     }
     replaceSourceContentInTransaction(db, id, content, chunks, options);
   });

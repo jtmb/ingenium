@@ -1,7 +1,7 @@
 /**
  * MCP tool handlers for child MCP server management.
  * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
- * Supports listing, adding, removing, updating, and bulk-syncing child servers (Kaban, Thread, etc.).
+ * Supports listing, adding, removing, updating, and bulk-syncing child servers.
  */
 import { api } from "../client.js";
 /** List all registered child MCP servers for a project. */

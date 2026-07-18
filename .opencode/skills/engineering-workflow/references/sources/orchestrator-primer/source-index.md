@@ -27,7 +27,7 @@ When task B depends on task A:
 
 ### Research → Implementation
 1. `@ingenium-explore` finds the relevant file/pattern
-2. `@ingenium-scout` retrieves past decisions from Thread
+2. `@ingenium-scout` retrieves past decisions from Docs RAG
 3. `@ingenium-software-engineer` implements based on research
 4. `@ingenium-qa` reviews the implementation
 

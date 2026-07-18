@@ -109,6 +109,8 @@ interface AccountWorker {
   loopPromise: Promise<void> | null;
   /** AbortController for stopping the loop. */
   abortController: AbortController | null;
+  /** Keep a recoverable credential failure visible to the dashboard. */
+  needsCredentialUpdate: boolean;
 }
 
 const engineState: {
@@ -401,39 +403,34 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       return;
     }
 
-    const creds = getCredentials(worker.projectId, worker.accountId);
-    if (!creds) {
-      logger.warn("sync-engine", `Worker for ${worker.email}: no credentials, stopping`);
-      return;
+    let creds: ReturnType<typeof getCredentials>;
+    try {
+      creds = getCredentials(worker.projectId, worker.accountId);
+    } catch {
+      creds = undefined;
     }
-
-    const tokens = creds.tokens;
-    if (!tokens) {
-      // Check whether this is a decryption failure (OAuth expected) vs. no tokens at all
-      const accountHasOAuth = account.authType === "oauth2";
-      if (accountHasOAuth) {
-        logger.warn("sync-engine",
-          `Credentials unavailable for ${worker.email} — parking worker. Re-authentication required.`,
-        );
-        // Park the worker by marking all known folder states as errors
-        for (const folderName of worker.folderStates.keys()) {
-          setFolderState(worker, folderName, {
-            state: "error",
-            lastError: "Account needs re-authentication — credentials cannot be decrypted.",
-          });
-        }
-        // If no folders are known yet, mark INBOX so the dashboard shows the error
-        if (worker.folderStates.size === 0) {
-          setFolderState(worker, "INBOX", {
-            state: "error",
-            lastError: "Account needs re-authentication — credentials cannot be decrypted.",
-          });
-        }
-        return; // Worker exits — no further sync attempts until credentials change
+    const hasCredentials = account.authType === "oauth2"
+      ? Boolean(creds?.tokens)
+      : Boolean(creds?.password);
+    if (!hasCredentials) {
+      const recoveryAction = account.authType === "oauth2" ? "re-authentication" : "credential update";
+      logger.warn("sync-engine", `Credentials unavailable for ${worker.email} — ${recoveryAction} required.`);
+      worker.needsCredentialUpdate = true;
+      for (const folderName of worker.folderStates.keys()) {
+        setFolderState(worker, folderName, {
+          state: "error",
+          lastError: `Account needs ${recoveryAction} — credentials are unavailable or cannot be decrypted.`,
+        });
       }
-      logger.warn("sync-engine", `Worker for ${worker.email}: no OAuth tokens, stopping`);
+      if (worker.folderStates.size === 0) {
+        setFolderState(worker, "INBOX", {
+          state: "error",
+          lastError: `Account needs ${recoveryAction} — credentials are unavailable or cannot be decrypted.`,
+        });
+      }
       return;
     }
+    const tokens = creds!.tokens!;
 
     // Discover folders via provider (already assigned in spawnWorkers)
     let folders: string[] = [];
@@ -915,11 +912,15 @@ function sleep(ms: number): Promise<void> {
 /**
  * Start the background sync engine for a given project.
  * Launches one worker per connected email account.
- * Idempotent: calling startEngine on an already-running engine is a no-op.
+ * Safe to call repeatedly: an already-running engine reconciles workers for
+ * accounts that became available after startup.
  */
 export function startEngine(projectId: string): void {
   if (engineState.running) {
-    logger.info("sync-engine", "Engine already running, skipping startEngine");
+    spawnWorkers(projectId).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("sync-engine", `worker reconciliation failed: ${msg}`);
+    });
     return;
   }
 
@@ -961,13 +962,16 @@ async function spawnWorkers(projectId: string): Promise<void> {
       boostedBodyUids: new Map(),
       loopPromise: null,
       abortController: new AbortController(),
+      needsCredentialUpdate: false,
     };
 
     engineState.workers.set(acct.id, worker);
 
     // Fire and forget — worker runs in background
     worker.loopPromise = runAccountWorker(worker).finally(() => {
-      engineState.workers.delete(acct.id);
+      if (!worker.needsCredentialUpdate && engineState.workers.get(acct.id) === worker) {
+        engineState.workers.delete(acct.id);
+      }
     });
 
     logger.info("sync-engine", `Worker launched for ${acct.email}`);

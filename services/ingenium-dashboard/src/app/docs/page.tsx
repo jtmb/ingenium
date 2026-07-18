@@ -50,9 +50,11 @@ function IconAlert() {
 // Right sidebar tabs
 // ---------------------------------------------------------------------------
 
-type SidebarTab = "metadata" | "tags" | "backlinks" | "comments" | "history" | "projects" | "attachments" | "trash" | "ask";
+type SidebarTab = "metadata" | "tags" | "backlinks" | "comments" | "history" | "projects" | "attachments" | "trash" | "ask" | "sources";
 
 const SIDEBAR_TABS: { key: SidebarTab; label: string; pageScoped: boolean }[] = [
+  { key: "ask", label: "Ask Docs", pageScoped: false },
+  { key: "sources", label: "RAG Sources", pageScoped: false },
   { key: "metadata", label: "Info", pageScoped: true },
   { key: "tags", label: "Tags", pageScoped: true },
   { key: "projects", label: "Linked", pageScoped: true },
@@ -60,7 +62,6 @@ const SIDEBAR_TABS: { key: SidebarTab; label: string; pageScoped: boolean }[] = 
   { key: "backlinks", label: "Backlinks", pageScoped: true },
   { key: "comments", label: "Comments", pageScoped: true },
   { key: "history", label: "History", pageScoped: true },
-  { key: "ask", label: "Ask Docs", pageScoped: false },
   { key: "trash", label: "Trash", pageScoped: false },
 ];
 
@@ -118,6 +119,7 @@ function RightSidebar({
         {selectedTab === "projects" && page && <ProjectLinksTab pageId={page.id} />}
         {selectedTab === "attachments" && page && <AttachmentsTab pageId={page.id} />}
         {selectedTab === "ask" && <AskDocsPanel />}
+        {selectedTab === "sources" && <RagSourcesPanel />}
         {selectedTab === "trash" && selectedSpaceId && <TrashPanel spaceId={selectedSpaceId} />}
       </div>
     </div>
@@ -604,6 +606,62 @@ function AskDocsPanel() {
   );
 }
 
+type RagSourceRow = Awaited<ReturnType<typeof api.rag.sources.list>>["data"][number];
+
+function RagSourcesPanel() {
+  const [sources, setSources] = useState<RagSourceRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await api.rag.sources.list();
+      setSources(response.data);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load RAG sources");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <div className="p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Indexed sources</p>
+          <p className="mt-0.5 text-[11px] text-[var(--color-text-muted)]">{sources.length} source{sources.length === 1 ? "" : "s"}</p>
+        </div>
+        <button type="button" onClick={() => void load()} className="rounded border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer">Refresh</button>
+      </div>
+      {loading && <div className="py-8 text-center text-xs text-[var(--color-text-muted)] animate-pulse">Loading sources…</div>}
+      {error && <div className="rounded bg-red-50 p-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-400">{error}</div>}
+      {!loading && !error && sources.length === 0 && <div className="rounded border border-dashed border-[var(--color-border)] p-4 text-center text-xs text-[var(--color-text-muted)]">No RAG sources indexed.</div>}
+      <div className="space-y-2">
+        {sources.map((source) => {
+          let metadata: Record<string, unknown> = {};
+          try { metadata = JSON.parse(source.metadata); } catch { /* retain empty metadata */ }
+          const entryCount = typeof metadata.entryCount === "number" ? metadata.entryCount : null;
+          return (
+            <article key={source.id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
+              <div className="flex items-start justify-between gap-2">
+                <h4 className="min-w-0 truncate text-xs font-semibold text-[var(--color-text-primary)]" title={source.title}>{source.title}</h4>
+                <span className="shrink-0 rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-medium uppercase text-blue-600 dark:text-blue-400">{source.source_type}</span>
+              </div>
+              <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{source.chunk_count} chunks{entryCount !== null ? ` · ${entryCount} entries` : ""}</p>
+              {source.source_path && <p className="mt-1 break-all font-mono text-[10px] text-[var(--color-text-muted)]">{source.source_path}</p>}
+              {source.source_hash && <p className="mt-1 truncate font-mono text-[10px] text-[var(--color-text-muted)]" title={source.source_hash}>sha256:{source.source_hash}</p>}
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
@@ -847,7 +905,7 @@ function DocsContent() {
 
   // ---- UI state ----
   const [mode, setMode] = useState<"view" | "edit" | "source" | "split">("view");
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("metadata");
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("ask");
   const [sidebarVisible, setSidebarVisible] = useState(true);
 
   /** Incremented to force PageTree re-fetch after mutations. */

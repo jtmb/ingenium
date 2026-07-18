@@ -93,6 +93,7 @@ describe("Project Resolution", () => {
   afterEach(() => {
     // Restore env
     process.env = { ...origEnv };
+    vi.restoreAllMocks();
   });
 
   it("uses INGENIUM_PROJECT env var when set", async () => {
@@ -114,12 +115,22 @@ describe("Project Resolution", () => {
     resetProjectCache();
   });
 
-  it("falls back to worktree basename when env var is whitespace", async () => {
+  it("rejects a whitespace-only explicit project", async () => {
     process.env.INGENIUM_PROJECT = "   ";
     vi.resetModules();
     const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
-    const result = resolveProject("/home/user/repos/my-worktree");
-    expect(result).toBe("my-worktree");
+    expect(() => resolveProject("/home/user/repos/my-worktree")).toThrow(/safe project name/);
+    resetProjectCache();
+  });
+
+  it.each(["a/b", "a\\b", ".", "..", "bad\u0000name", "x".repeat(65)])("rejects every unsafe explicit project identifier: %j", async (project) => {
+    process.env.INGENIUM_PROJECT = project;
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.resetModules();
+    const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
+    expect(() => resolveProject("/home/user/repos/worktree")).toThrow(/safe project name/);
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("rejected project identity"));
+    expect(stderr.mock.calls.flat().join("")).not.toContain(project);
     resetProjectCache();
   });
 
@@ -138,7 +149,22 @@ describe("Project Resolution", () => {
     delete process.env.INGENIUM_PROJECT;
     vi.resetModules();
     const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
-    expect(() => resolveProject("/")).toThrow(/Could not resolve project name/);
+    expect(() => resolveProject("/")).toThrow(/safe project name/);
+    resetProjectCache();
+  });
+
+  it("rejects the container workspace basename without an explicit project", async () => {
+    delete process.env.INGENIUM_PROJECT;
+    vi.resetModules();
+    const { resolveProject } = await import("../packages/ingenium-extension/resource-sync.js");
+    expect(() => resolveProject("/workspace")).toThrow(/Cannot derive a project from \/workspace/);
+  });
+
+  it("allows the container workspace only with an explicit global project", async () => {
+    process.env.INGENIUM_PROJECT = "global-default";
+    vi.resetModules();
+    const { resolveProject, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
+    expect(resolveProject("/workspace")).toBe("global-default");
     resetProjectCache();
   });
 
@@ -151,6 +177,46 @@ describe("Project Resolution", () => {
     expect(first).toBe("cached-project");
     expect(second).toBe("cached-project");
     resetProjectCache();
+  });
+
+  it("deduplicates concurrent extension project provisioning and retries failures", async () => {
+    process.env.INGENIUM_PROJECT = "provisioned-project";
+    vi.resetModules();
+    const { ensureExtensionProject, resetEnsuredProjects } = await import("../packages/ingenium-extension/project-resolver.js");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 201 })
+      .mockResolvedValueOnce({ ok: false, status: 500 })
+      .mockResolvedValueOnce({ ok: true, status: 201 });
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+
+    await expect(Promise.all([
+      ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1/"),
+      ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1"),
+    ])).resolves.toEqual(["provisioned-project", "provisioned-project"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resetEnsuredProjects();
+    await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).rejects.toThrow("HTTP 500");
+    await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).resolves.toBe("provisioned-project");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    resetEnsuredProjects();
+  });
+
+  it("provisions the project when the resource-sync plugin loads", async () => {
+    process.env.INGENIUM_PROJECT = "startup-project";
+    vi.resetModules();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+    globalThis.fetch = fetchMock as typeof globalThis.fetch;
+    const { ResourceSyncPlugin } = await import("../packages/ingenium-extension/resource-sync.js");
+
+    await ResourceSyncPlugin({ worktree: "/worktrees/startup-project", client: {} });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/projects"),
+      expect.objectContaining({ method: "POST" }),
+    );
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toMatchObject({ name: "startup-project", is_global: false });
   });
 });
 
@@ -190,6 +256,7 @@ describe("Manifest", () => {
     const manifestData = {
       version: 1,
       project: "test-project",
+      projectId: "project-instance-1",
       lastFullSync: "2025-01-01T00:00:00.000Z",
       resources: {
         skills: { "my-skill": "abc123" },
@@ -206,6 +273,7 @@ describe("Manifest", () => {
     const { loadManifest, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
     const manifest = loadManifest(worktree, "test-project");
     expect(manifest.resources.skills["my-skill"]).toBe("abc123");
+    expect(manifest.projectId).toBe("project-instance-1");
     expect(manifest.resources.config.hash).toBe("def456");
     resetProjectCache();
   });
@@ -257,6 +325,56 @@ describe("Manifest", () => {
     const manifest = loadManifest(worktree, "test-project");
     expect(manifest.version).toBe(1);
     expect(manifest.resources.skills).toEqual({});
+  });
+});
+
+describe("API project recreation recovery", () => {
+  let worktree: string;
+
+  beforeEach(() => {
+    worktree = tmpDir();
+    process.env.INGENIUM_PROJECT = "test-project";
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    restoreFetch();
+    rmSync(worktree, { recursive: true, force: true });
+    vi.resetModules();
+  });
+
+  it("pushes local resources instead of deleting them when the API project ID changes", async () => {
+    const commandPath = resolve(worktree, ".opencode", "commands", "keep-me.md");
+    writeFile(commandPath, "# Keep me\n");
+    writeFile(resolve(worktree, ".opencode", ".ingenium-sync-state.json"), JSON.stringify({
+      version: 1,
+      project: "test-project",
+      projectId: "old-project-id",
+      lastFullSync: "2025-01-01T00:00:00.000Z",
+      resources: {
+        skills: {}, agents: {}, plugins: {}, commands: { "keep-me": "old-hash" }, config: {},
+      },
+    }));
+    mockFetch([
+      { pattern: "/projects", method: "POST", status: 409, body: {} },
+      { pattern: "/projects", method: "GET", status: 200, body: { data: [{ id: "new-project-id", name: "test-project" }] } },
+      { pattern: "/skills/locks/acquire", method: "POST", status: 200, body: { data: { ownerToken: "lock-token" } } },
+      { pattern: "/skills/locks/release", method: "POST", status: 200, body: { data: {} } },
+      { pattern: "/skills", method: "GET", status: 200, body: { data: [] } },
+      { pattern: "/agents", method: "GET", status: 200, body: { data: [] } },
+      { pattern: "/plugins", method: "GET", status: 200, body: { data: [] } },
+      { pattern: "/commands", method: "GET", status: 200, body: { data: [] } },
+      { pattern: "/commands", method: "POST", status: 201, body: { data: {} } },
+      { pattern: "/config", method: "GET", status: 200, body: { data: null } },
+    ]);
+    const { fullSync } = await import("../packages/ingenium-extension/resource-sync.js");
+
+    const result = await fullSync(worktree);
+
+    expect(existsSync(commandPath)).toBe(true);
+    expect(result.commands.pushed).toBe(1);
+    const manifest = JSON.parse(readFileSync(resolve(worktree, ".opencode", ".ingenium-sync-state.json"), "utf8"));
+    expect(manifest.projectId).toBe("new-project-id");
   });
 });
 
@@ -600,6 +718,32 @@ describe("Plugin opencode.json Merge", () => {
       const updated = JSON.parse(readFileSync(resolve(worktree, "opencode.json"), "utf-8"));
       // User plugin preserved
       expect(updated.plugin).toContain("./my-custom-plugin.ts");
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it("preserves core extension bootstrap plugins when the recreated API project is empty", async () => {
+    createOpenCodeConfig([
+      "packages/ingenium-extension/auto-observer.ts",
+      "packages/ingenium-extension/observer.ts",
+      "packages/ingenium-extension/resource-sync.ts",
+    ]);
+    mockFetch([
+      { pattern: "/plugins?project=test-project", status: 200, body: { data: [] } },
+    ]);
+
+    try {
+      vi.resetModules();
+      const { syncPlugins, loadManifest } = await import("../packages/ingenium-extension/resource-sync.js");
+      await syncPlugins(worktree, "test-project", loadManifest(worktree, "test-project"), { isInitialSync: true });
+
+      const updated = JSON.parse(readFileSync(resolve(worktree, "opencode.json"), "utf-8"));
+      expect(updated.plugin).toEqual([
+        "packages/ingenium-extension/auto-observer.ts",
+        "packages/ingenium-extension/observer.ts",
+        "packages/ingenium-extension/resource-sync.ts",
+      ]);
     } finally {
       restoreFetch();
     }

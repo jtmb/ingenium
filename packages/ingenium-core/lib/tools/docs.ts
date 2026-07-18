@@ -1,5 +1,6 @@
 import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from "../db.js";
 import { MAX_PAGE_CONTENT_LENGTH, MAX_COMMENT_LENGTH } from "../constants.js";
+import { indexPublishedDoc } from "./rag.js";
 
 // ── Error Types ───────────────────────────────────────────────────────────────
 
@@ -579,6 +580,7 @@ export function publishPage(pageId: number, expectedRevision?: number): PublishP
     } as PublishPageResult;
   });
   checkpointAfterWrite();
+  if (result?.page) indexPublishedDoc(result.page);
   return (result ?? { error: makeError("PAGE_NOT_FOUND", "Failed to publish page") }) as PublishPageResult;
 }
 
@@ -636,6 +638,7 @@ export function updatePage(
     return { page: db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(id) as DocPage } as UpdatePageResult;
   });
   checkpointAfterWrite();
+  if (result?.page?.status === "published") indexPublishedDoc(result.page);
   return (result ?? { error: makeError("PAGE_NOT_FOUND", "Failed to update page") }) as UpdatePageResult;
 }
 
@@ -644,6 +647,7 @@ export function updatePage(
  * Does nothing if already archived (idempotent guard in WHERE clause).
  */
 export function archivePage(id: number): boolean {
+  const page = getPage(id);
   const result = execTransaction(() => {
     const db = getDb(dbPath());
     return db.prepare(
@@ -651,6 +655,7 @@ export function archivePage(id: number): boolean {
     ).run(nowISO(), id).changes > 0;
   });
   checkpointAfterWrite();
+  if (result && page) indexPublishedDoc({ ...page, status: "archived" });
   return result;
 }
 
@@ -664,6 +669,7 @@ export function restorePage(id: number): DocPage | undefined {
     return db.prepare("SELECT * FROM docs_pages WHERE id = ?").get(id) as DocPage | undefined;
   });
   checkpointAfterWrite();
+  if (result) indexPublishedDoc(result);
   return result;
 }
 

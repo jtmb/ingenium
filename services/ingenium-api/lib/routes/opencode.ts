@@ -302,20 +302,6 @@ function sanitizeOptions(obj: unknown): unknown {
   return obj;
 }
 
-/** Redact sensitive fields from an individual auth provider entry. */
-function sanitizeAuthEntry(entry: any): any {
-  if (!entry || typeof entry !== "object") return entry;
-  const sanitized = { ...entry };
-  if (sanitized.type === "api" && "key" in sanitized) {
-    sanitized.key = "***REDACTED***";
-  }
-  if (sanitized.type === "oauth") {
-    if ("access" in sanitized) sanitized.access = "***REDACTED***";
-    if ("refresh" in sanitized) sanitized.refresh = "***REDACTED***";
-  }
-  return sanitized;
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    File upload endpoint — POST /upload (multipart)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -1190,17 +1176,6 @@ opencodeRouter.get("/auth/status", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const directory = req.query.directory as string | undefined;
   const result = await opencodeClient.getAuthStatus(directory);
-
-  // Sanitize sensitive fields from auth entries
-  if (!isOpenCodeError(result)) {
-    const sanitized: Record<string, unknown> = {};
-    for (const [providerID, entry] of Object.entries(result as Record<string, unknown>)) {
-      sanitized[providerID] = sanitizeAuthEntry(entry);
-    }
-    sendResult(req, res, sanitized);
-    return;
-  }
-
   sendResult(req, res, result);
 });
 

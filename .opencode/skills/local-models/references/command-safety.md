@@ -122,11 +122,11 @@ If the answer to "Will this command exit on its own?" is "I don't know," run it 
 **Mandatory pre-flight check before every MCP call:**
 
 ```bash
-# ✅ Good — always verify server is reachable first
-curl -s http://localhost:5000/api/v1/health || echo "Server not running, cannot proceed"
+# ✅ Good — verify the configured server is reachable first
+curl -s "$MCP_SERVER_HEALTH_URL" || echo "Server not running, cannot proceed"
 
 # ❌ Bad — no health check before calling MCP tools
-thread_thread_read_entries --limit 3  # This will fail silently or hang
+unconfigured_mcp_tool --limit 3  # This will fail silently or hang
 ```
 
 **Error handling patterns for MCP failures:**
@@ -134,7 +134,7 @@ thread_thread_read_entries --limit 3  # This will fail silently or hang
 | Error signature | Meaning | Fix |
 |-----------------|---------|-----|
 | `command not found` | MCP server binary not in PATH, wrong config path, or server crashed | Check MCP config file; restart the MCP server with health check |
-| `connection refused` | Server process died (OOM killed, crash loop) or firewall | Run `curl http://localhost:5000/api/v1/health`; restart server |
+| `connection refused` | Server process died (OOM killed, crash loop) or firewall | Check the configured health URL; restart server |
 | HTTP 401 unauthorized | Missing API token in MCP config | Source the MCP config environment file |
 | HTTP 503 Service Unavailable | Server running but model not loaded, GPU OOM | Check LM Studio UI, unload unused models |
 
@@ -142,13 +142,13 @@ thread_thread_read_entries --limit 3  # This will fail silently or hang
 
 ```bash
 # ❌ BAD - MCP server failed, but I claimed it worked anyway
-thread_thread_read_entries --limit 3
-/bin/bash: line 1: thread_thread_read_entries: command not found
-✅ Done! Documentation uploaded to Thread: ... [LIES HERE]
+unconfigured_mcp_tool --limit 3
+/bin/bash: line 1: unconfigured_mcp_tool: command not found
+✅ Done! The MCP operation completed. [LIES HERE]
 
 # ✅ GOOD - show actual error
-thread_thread_read_entries --limit 3
-/bin/bash: line 1: thread_thread_read_entries: command not found
+unconfigured_mcp_tool --limit 3
+/bin/bash: line 1: unconfigured_mcp_tool: command not found
 ```
 
 **The pattern:** Always check for errors BEFORE saying "success". If a bash command returns non-zero exit code, parse stderr/stdout and display the actual message to the user. Never assume "no output = success".

@@ -1287,22 +1287,22 @@ export const api = {
     sources: {
       /** GET /rag/sources */
       list: (project = DEFAULT_PROJECT) =>
-        request<{ data: Array<{ id: number; title: string; slug: string; pageId: number; chunkCount: number; indexedAt: string }>; total: number }>(
+        request<{ data: Array<{ id: string; project_id: string; title: string; source_type: "file" | "text" | "url"; source_path: string | null; source_hash: string | null; chunk_count: number; metadata: string; created_at: string; updated_at: string }>; total: number }>(
           `/rag/sources?project=${encodeURIComponent(project)}`,
         ),
 
       /** GET /rag/sources/:id */
-      get: (id: number, project = DEFAULT_PROJECT) =>
-        request<{ data: { id: number; title: string; slug: string; pageId: number; chunkCount: number; indexedAt: string } }>(
+      get: (id: string, project = DEFAULT_PROJECT) =>
+        request<{ data: { id: string; project_id: string; title: string; source_type: "file" | "text" | "url"; source_path: string | null; source_hash: string | null; chunk_count: number; metadata: string; created_at: string; updated_at: string } }>(
           `/rag/sources/${id}?project=${encodeURIComponent(project)}`,
         ),
 
       /** DELETE /rag/sources/:id */
-      delete: (id: number, project = DEFAULT_PROJECT) =>
+      delete: (id: string, project = DEFAULT_PROJECT) =>
         request(`/rag/sources/${id}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
 
       /** POST /rag/sources/:id/ingest — re-ingest a single source. */
-      ingest: (id: number, project = DEFAULT_PROJECT) =>
+      ingest: (id: string, project = DEFAULT_PROJECT) =>
         request<{ data: { ingested: boolean } }>(
           `/rag/sources/${id}/ingest?project=${encodeURIComponent(project)}`,
           { method: "POST" },

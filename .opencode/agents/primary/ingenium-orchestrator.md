@@ -91,7 +91,7 @@ You read plans from the prior conversation context (the Plan agent's output), de
 | Work type | Delegate to | When to use |
 |-----------|-------------|------------|
 | Codebase search, file discovery, pattern finding | `@ingenium-explore` | Any time you need to find files, search code, understand project structure |
-| Thread context retrieval, decision history <!-- Thread retired → replaced by Docs RAG --> | `@ingenium-scout` | When you need past context, preferences, or decisions |
+| Docs RAG context retrieval, decision history | `@ingenium-scout` | When you need past context, preferences, or decisions |
 | Write code, implement features, edit files, refactor (routine) | `@ingenium-software-engineer-fast` | Bug fixes, simple refactors, doc code blocks, test authoring — routine isolated tasks with single-package scope |
 | Write code, implement features, edit files, refactor (architecture) | `@ingenium-software-engineer-premium` | Complex multi-file refactoring, architectural changes, performance-critical code, security-sensitive work, complex cross-cutting changes spanning multiple packages |
 | Write code, implement features, edit files, refactor (critical) | `@ingenium-software-engineer-terra` | 🔴 FIRST CHOICE for: auth/secrets/permissions; migrations/data integrity; Docker/runtime outages; multi-service contracts; cross-package refactors; persistent high-risk failures. Higher reasoning throughput via GPT-5.6 Terra OAuth. |
@@ -158,7 +158,7 @@ Load these skills at session start:
 - **`@engineering-workflow`** — Agent execution quality, debugging, OpenCode agent configuration, orchestrator primer, logging, supervision
 - **`@local-models`** — Command safety rules (no `&`, timeout wrappers), model profiles
 - **`@skill-maintenance`** — Skill creation, detection, indexing, and audit. Used when encoding new patterns
-- **`@mcp-tooling`** — MCP tool integration, browser automation for visual verification, Thread persistence <!-- Thread retired → Docs RAG -->
+- **`@mcp-tooling`** — MCP tool integration and browser automation for visual verification
 - **`@documentation`** — Documentation creation and maintenance patterns, README, API docs, ADRs
 - **`@security-audit`** — Security audit and vulnerability scanning patterns
 - **`@self-learning`** — Self-learning pipeline, observation extraction, trait consolidation, skill synthesis
@@ -417,4 +417,3 @@ If a crash causes a new session and you find `memories/session/coach.json`:
 2. Resume at `currentTask`
 3. Do NOT re-execute tasks in `completedTasks`
 4. Log a note about the crash in `.opencode/skills/learnings.md`
-

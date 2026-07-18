@@ -571,9 +571,18 @@ export default function MailPage() {
   const selectedFolderStatus = syncStatus?.folders?.find((f: any) => f.folder === selectedFolder);
   const isColdFolder = !loading && emails.length === 0 && selectedFolderStatus?.cachedCount === 0 && selectedFolderStatus?.syncing === true;
 
-  // Detect auth errors from the engine's raw status
-  const engineFolders = syncStatus?.engine?.accounts?.[0]?.folders ?? [];
-  const hasAuthError = engineFolders.some((f: any) =>
+  // Detect auth errors from the selected account's raw engine status.
+  const selectedEngineAccount = syncStatus?.engine?.accounts?.find(
+    (account: any) => account.accountId === selectedAccount,
+  );
+  const engineFolders = selectedEngineAccount?.folders ?? [];
+  const selectedAccountDetails = accounts.find((account: any) => account.id === selectedAccount);
+  const hasUnavailableOAuthAccount =
+    selectedAccountDetails?.authType === "oauth2" &&
+    syncStatus !== null &&
+    syncStatus.totalFolders === 0 &&
+    !selectedEngineAccount;
+  const hasAuthError = hasUnavailableOAuthAccount || engineFolders.some((f: any) =>
     f.state === "error" && (
       typeof f.lastError === "string" &&
       /auth|re-authenticat|credential.*(decrypt|reconn)/i.test(f.lastError)
@@ -623,6 +632,8 @@ export default function MailPage() {
       <div className="space-y-4">
         <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Mail</h1>
         <AccountSetup
+          project={project}
+          reconnectAccount={hasAuthError ? selectedAccountDetails : undefined}
           onComplete={async () => {
             setShowAccountSetup(false);
             try {

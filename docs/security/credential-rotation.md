@@ -24,7 +24,6 @@ remain in historical commits and cannot be removed without coordinated history r
 
 | Secret | Type | Current Worktree Status | Risk |
 |--------|------|-------------------------|------|
-| **Thread API token** (`THREAD_API_TOKEN`) | MCP server auth token | Placeholder `<YOUR_THREAD_API_TOKEN>` in `opencode.json` | Anyone with repo access can read old commits |
 | **Legacy email encryption key** | AES-256-GCM encryption key | `INGENIUM_EMAIL_ENCRYPTION_KEY` — now **required** with 64-character hex or base64url validation; no hardcoded default | Rotated key in current config; old key in git history |
 | **Legacy OpenCode password** | Web server auth password | `OPENCODE_SERVER_PASSWORD` — now **required** with entrypoint guard; no hardcoded default | Rotated password in current config; old password in git history |
 
@@ -43,8 +42,7 @@ remain in historical commits and cannot be removed without coordinated history r
 
 Before rewriting history, ensure all currently active credentials are replaced with new values:
 
-1. **Generate a new Thread API token** via the Thread server admin panel
-2. **Generate a new INGENIUM_EMAIL_ENCRYPTION_KEY** (64 hex chars or 64-char base64url secret):
+1. **Generate a new INGENIUM_EMAIL_ENCRYPTION_KEY** (64 hex chars or 64-char base64url secret):
    ```bash
    # 64 hex characters (used directly as 32-byte AES-256 key)
    openssl rand -hex 32
@@ -53,12 +51,12 @@ Before rewriting history, ensure all currently active credentials are replaced w
    openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n' | head -c 64
    ```
    The hex format is used directly as the AES-256 key. The base64url format is **deterministically reduced** to 32 bytes via SHA-256 — either is accepted.
-3. **Set a new OPENCODE_SERVER_PASSWORD** (any strong password)
-4. **Re-authenticate email accounts** with the new encryption key (existing encrypted credentials become undecryptable)
+2. **Set a new OPENCODE_SERVER_PASSWORD** (any strong password)
+3. **Re-authenticate email accounts** with the new encryption key (existing encrypted credentials become undecryptable)
 
    > 🔴 After key rotation, the sync engine parks the affected workers immediately — no infinite retry loop or repeated warnings. Navigate to the Mail page in the Dashboard; a **Reconnect** button appears on the account, and the SyncProgress component prompts for re-authentication. Clicking Reconnect opens the account setup flow to enter the new credentials.
-5. **Re-login to OpenCode** with the new password
-6. **Update `.env` files, Docker Compose, and CI/CD** secrets with the new values
+4. **Re-login to OpenCode** with the new password
+5. **Update `.env` files, Docker Compose, and CI/CD** secrets with the new values
 
 ### Phase B — Coordinate Git History Purge
 
@@ -71,8 +69,8 @@ After all credentials are rotated:
    # Install git-filter-repo: https://github.com/newren/git-filter-repo
    
    # Strip secrets from all commits (replace placeholders with actual patterns)
-   git filter-repo \
-     --replace-text <(echo "THREAD_API_TOKEN") \
+    git filter-repo \
+     --replace-text <(echo "INGENIUM_EMAIL_ENCRYPTION_KEY") \
      --force
    ```
    
@@ -81,11 +79,11 @@ After all credentials are rotated:
    > the specific strings found in the commit history.
 
 4. **Verify the purge**:
-   ```bash
-   # Check no secrets remain in history
-   git log --all --pickaxe-all -S "THREAD_API_TOKEN" --oneline
-   # Should return empty
-   ```
+    ```bash
+    # Check no secrets remain in history
+    git log --all --pickaxe-all -S "INGENIUM_EMAIL_ENCRYPTION_KEY" --oneline
+    # Should return empty
+    ```
 
 5. **Force-push** to all remotes:
    ```bash
@@ -99,7 +97,6 @@ After all credentials are rotated:
 
 1. **Verify no secrets remain** in any branch or tag
 2. **Rotate credentials again** (belt-and-suspenders):
-   - Generate new Thread API token
    - Generate new encryption key
    - Set new OpenCode password
 3. **Update documentation** to remove any historical references to old credential values
@@ -109,7 +106,7 @@ After all credentials are rotated:
    #!/bin/sh
    while read oldrev newrev refname; do
      git rev-list $oldrev..$newrev | while read commit; do
-       if git show $commit | grep -qE 'THREAD_API_TOKEN|INGENIUM_EMAIL_ENCRYPTION_KEY'; then
+        if git show $commit | grep -qE 'INGENIUM_EMAIL_ENCRYPTION_KEY|OPENCODE_SERVER_PASSWORD'; then
          echo "ERROR: Commit $commit contains secrets. Rejected."
          exit 1
        fi
@@ -172,12 +169,11 @@ Secrets are supplied exclusively at runtime via Docker Compose `environment:` or
 
 ## 🔴 Hard Rules
 
-1. **Never commit `THREAD_API_TOKEN`** to source. Use `<YOUR_THREAD_API_TOKEN>` placeholder.
-2. **Never hardcode `INGENIUM_EMAIL_ENCRYPTION_KEY`** — always require it from the environment.
-3. **Never print full secret values** in documentation, issues, or transcripts.
-4. **Rotate before purge** — always invalidate old credentials before rewriting history.
-5. **Coordinate all clones** before `git filter-repo` — unfiltered clones will reintroduce secrets.
-6. **Add a pre-receive hook** to prevent future secret commits.
+1. **Never hardcode `INGENIUM_EMAIL_ENCRYPTION_KEY`** — always require it from the environment.
+2. **Never print full secret values** in documentation, issues, or transcripts.
+3. **Rotate before purge** — always invalidate old credentials before rewriting history.
+4. **Coordinate all clones** before `git filter-repo` — unfiltered clones will reintroduce secrets.
+5. **Add a pre-receive hook** to prevent future secret commits.
 
 ---
 

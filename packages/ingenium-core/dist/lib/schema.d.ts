@@ -595,25 +595,34 @@ export declare const ContextSchema: z.ZodObject<{
     project_id: z.ZodString;
     content: z.ZodString;
     priority: z.ZodDefault<z.ZodNumber>;
-    tags: z.ZodOptional<z.ZodString>;
-    session_id: z.ZodOptional<z.ZodString>;
+    tags: z.ZodDefault<z.ZodString>;
+    session_id: z.ZodNullable<z.ZodOptional<z.ZodString>>;
+    source: z.ZodDefault<z.ZodEnum<["manual", "agent", "import", "system"]>>;
+    metadata: z.ZodDefault<z.ZodString>;
     created_at: z.ZodString;
+    updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    source: "system" | "agent" | "manual" | "import";
+    updated_at: string;
     id: number;
     created_at: string;
     project_id: string;
     content: string;
+    tags: string;
     priority: number;
-    tags?: string | undefined;
-    session_id?: string | undefined;
+    metadata: string;
+    session_id?: string | null | undefined;
 }, {
+    updated_at: string;
     id: number;
     created_at: string;
     project_id: string;
     content: string;
+    source?: "system" | "agent" | "manual" | "import" | undefined;
     tags?: string | undefined;
     priority?: number | undefined;
-    session_id?: string | undefined;
+    session_id?: string | null | undefined;
+    metadata?: string | undefined;
 }>;
 export type ContextEntry = z.infer<typeof ContextSchema>;
 /** A registered child MCP server with its command, arguments, environment, and origin source tracking. */
@@ -666,7 +675,7 @@ export declare const ObservationSchema: z.ZodObject<{
     created_at: z.ZodString;
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    source: "auto-observer" | "agent" | "manual" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import";
+    source: "auto-observer" | "agent" | "manual" | "import" | "email" | "chat" | "document" | "calendar" | "synthesis";
     updated_at: string;
     id: number;
     created_at: string;
@@ -684,7 +693,7 @@ export declare const ObservationSchema: z.ZodObject<{
     project_id: string;
     content: string;
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
-    source?: "auto-observer" | "agent" | "manual" | "email" | "chat" | "document" | "calendar" | "synthesis" | "import" | undefined;
+    source?: "auto-observer" | "agent" | "manual" | "import" | "email" | "chat" | "document" | "calendar" | "synthesis" | undefined;
     status?: "pending" | "processed" | "failed" | "skipped" | undefined;
     session_id?: string | undefined;
     importance?: number | undefined;
@@ -716,10 +725,10 @@ export declare const PersonalityTraitSchema: z.ZodObject<{
     trait_value: string;
     confidence: number;
     is_active: boolean;
+    metadata?: string | undefined;
     display_label?: string | undefined;
     exemplar_observation_id?: number | undefined;
     exemplar_text?: string | undefined;
-    metadata?: string | undefined;
 }, {
     updated_at: string;
     id: number;
@@ -728,12 +737,12 @@ export declare const PersonalityTraitSchema: z.ZodObject<{
     trait_type: "terminology" | "communication_style" | "code_preference" | "workflow_pattern" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
     trait_value: string;
     source?: string | undefined;
+    metadata?: string | undefined;
     display_label?: string | undefined;
     confidence?: number | undefined;
     exemplar_observation_id?: number | undefined;
     exemplar_text?: string | undefined;
     is_active?: boolean | undefined;
-    metadata?: string | undefined;
 }>;
 export type PersonalityTrait = z.infer<typeof PersonalityTraitSchema>;
 /** An OpenCode plugin with file path and optional source content cache for disk-write operations. */
@@ -1125,7 +1134,7 @@ export declare const RagSourceSchema: z.ZodObject<{
     id: z.ZodString;
     project_id: z.ZodString;
     title: z.ZodString;
-    source_type: z.ZodEnum<["file", "thread_import", "text", "url"]>;
+    source_type: z.ZodEnum<["file", "text", "url"]>;
     source_path: z.ZodNullable<z.ZodString>;
     source_hash: z.ZodNullable<z.ZodString>;
     mime_type: z.ZodNullable<z.ZodString>;
@@ -1142,7 +1151,7 @@ export declare const RagSourceSchema: z.ZodObject<{
     source_hash: string | null;
     title: string;
     metadata: string;
-    source_type: "file" | "thread_import" | "text" | "url";
+    source_type: "file" | "text" | "url";
     source_path: string | null;
     mime_type: string | null;
     byte_size: number | null;
@@ -1154,7 +1163,7 @@ export declare const RagSourceSchema: z.ZodObject<{
     project_id: string;
     source_hash: string | null;
     title: string;
-    source_type: "file" | "thread_import" | "text" | "url";
+    source_type: "file" | "text" | "url";
     source_path: string | null;
     mime_type: string | null;
     byte_size: number | null;
@@ -1209,12 +1218,20 @@ export declare const RagSearchResultSchema: z.ZodObject<{
 } & {
     rank: z.ZodNumber;
     snippet: z.ZodString;
+    source_name: z.ZodString;
+    source_path: z.ZodNullable<z.ZodString>;
+    source_type: z.ZodString;
+    project_id: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     id: string;
     created_at: string;
+    project_id: string;
     content: string;
     tags: string;
+    source_name: string;
     priority: number;
+    source_type: string;
+    source_path: string | null;
     source_id: string;
     chunk_index: number;
     token_count: number;
@@ -1224,7 +1241,11 @@ export declare const RagSearchResultSchema: z.ZodObject<{
 }, {
     id: string;
     created_at: string;
+    project_id: string;
     content: string;
+    source_name: string;
+    source_type: string;
+    source_path: string | null;
     source_id: string;
     chunk_index: number;
     heading_path: string | null;

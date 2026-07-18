@@ -253,17 +253,15 @@ All routes prefixed with `/api/v1/rag`.
 | GET | `/search?q=` | BM25 FTS5 full-text search across RAG chunks with snippet generation |
 | POST | `/ask` | Natural-language Q&A with LLM-grounded answers and citations. Returns `{ answer, citations: [{ id, title, path, heading, snippet, kind, score }] }`. Broker-executed via `executeSynthesisBroker()`. |
 | GET | `/stats` | RAG index statistics (sources, chunks, embeddings, `vector_capability`) |
-| POST | `/import/thread` | Import Thread MCP server session entries into RAG (resumable via `rag_thread_imports` checkpoints) |
-| GET | `/import/thread/status` | Get Thread import job status |
-| POST | `/export` | Export all RAG sources + thread import checkpoints as JSON |
+| POST | `/export` | Export all RAG sources as JSON |
 
 **Indexing pipeline**: Two auto-indexing paths: (1) Canonical repo Markdown files via `POST /rag/ingest` walks `INGENIUM_DOCS_ROOT/docs/**/*.md` with symlink escape protection and SHA-256 hash idempotency. (2) Docs Workspace pages are indexed at lifecycle boundaries — publish, update (if published), archive, restore — as `docs-page:{id}` sources. Manual ingestion via `POST /rag/sources` and `POST /rag/sources/:id/ingest` is also available.
 
 **Search**: The `/search` and `/ask` routes use `searchChunks()` (BM25 FTS5 full-text search). The `hybridSearch()` function (70% BM25 + 30% n-gram cosine similarity) also exists in `rag.ts` but is not currently wired to API routes. The embedding is a deterministic FNV-1a character-trigram hash (`ingenium-ngram-v1`, 384-dim) — NOT a true semantic embedding. The stats endpoint reports `{ vector_capability: { available: true, provider: "deterministic-n-gram", semantic: false } }`.
 
-**Citations**: The `POST /ask` endpoint builds unique citations per source (deduplicated by source ID). Each citation includes `id`, `title`, `path` (source_path or docs-page slug), `heading`, `snippet` (BM25 snippet with `<mark>` highlights), `kind` (source_type: `file`, `text`, `thread_import`), and `score` (negative BM25 rank). The broker prompt includes `"Answer with citations like [1], [2]."` to encourage citation-grounded responses. The Docs workspace Dashboard renders `[N]` markers as superscript links with title tooltips and a Sources list below.
+**Citations**: The `POST /ask` endpoint builds unique citations per source (deduplicated by source ID). Each citation includes `id`, `title`, `path` (source_path or docs-page slug), `heading`, `snippet` (BM25 snippet with `<mark>` highlights), `kind` (source_type: `file`, `text`, `url`), and `score` (negative BM25 rank). The broker prompt includes `"Answer with citations like [1], [2]."` to encourage citation-grounded responses. The Docs workspace Dashboard renders `[N]` markers as superscript links with title tooltips and a Sources list below.
 
-Documentation on the chunker (`rag-chunker.ts`), RAG core (`rag.ts`), and the Thread import/resumable ingestion pipeline is in the source.
+Documentation on the chunker (`rag-chunker.ts`) and RAG core (`rag.ts`) is in the source.
 
 ### Services (Status Page)
 All routes prefixed with `/api/v1/services`. Two distinct card types rendered on the `/status` page:

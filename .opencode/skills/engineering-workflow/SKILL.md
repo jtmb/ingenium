@@ -94,6 +94,6 @@ Always respect the current project scope. Don't cross-contaminate projects. Use 
 
 - **`@development-conventions`** — Code conventions, API design, Next.js, Python
 - **`@devops-conventions`** — Docker, K8s, CLI toolkit, shell scripts
-- **`@mcp-tooling`** — Browser automation, Docs RAG persistence (replacing Thread), email tools
+- **`@mcp-tooling`** — Browser automation, Docs RAG persistence, email tools
 - **`@local-models`** — Command safety rules, model profiles
 - **`@self-learning`** — Observation pipeline, personality traits

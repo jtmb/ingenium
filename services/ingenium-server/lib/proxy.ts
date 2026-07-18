@@ -1,5 +1,5 @@
 /**
- * Child MCP server manager — spawns and manages sub-processes such as Kaban, Thread, etc.
+ * Child MCP server manager — spawns and manages registered sub-processes.
  * Supports registering, starting, stopping, and shutting down all managed servers.
  */
 import { spawn, ChildProcess } from "node:child_process";

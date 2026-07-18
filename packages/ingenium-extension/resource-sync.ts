@@ -83,6 +83,8 @@ export interface ResourceHashes {
 export interface SyncManifest {
   version: 1;
   project: string;
+  /** Immutable API project ID. A changed ID means the API database was recreated. */
+  projectId?: string;
   lastFullSync: string;
   resources: {
     skills: ResourceHashes;
@@ -576,13 +578,15 @@ function mergePluginsIntoConfig(
     // Build set of enabled API plugin file paths
     const apiPaths = new Set(apiPlugins.filter((p) => p.enabled !== false).map((p) => p.file_path));
 
-    // Identify non-ingenium plugins (those NOT from the extension package).
-    // We preserve user-added plugins to avoid overwriting custom tooling.
+    // Preserve user plugins plus the three bootstrap plugins that make project
+    // provisioning and sync possible. Those bootstrap entries must survive an
+    // API database reset even though the recreated project has no plugin rows yet.
     const isIngenium = (p: string) => p.includes("ingenium-extension");
-    const userPlugins = existing.filter((p) => !isIngenium(p));
+    const isBootstrapPlugin = (p: string) => /(?:^|\/)(?:auto-observer|observer|resource-sync)(?:\.ts|\.js)?$/.test(p);
+    const userPlugins = existing.filter((p) => !isIngenium(p) || isBootstrapPlugin(p));
 
     // Build new plugin array: user plugins + API-managed plugins
-    const newPlugins = [...userPlugins, ...Array.from(apiPaths)];
+    const newPlugins = [...new Set([...userPlugins, ...Array.from(apiPaths)])];
     const changed = JSON.stringify(newPlugins.sort()) !== JSON.stringify(existing.sort());
 
     if (changed) {
@@ -1398,7 +1402,13 @@ export async function fullSync(worktree: string): Promise<FullSyncResult & { res
   const project = await ensureExtensionProject(worktree, API_BASE);
   _projectCache = project;
   _projectResolved = true;
-  const manifest = loadManifest(worktree, project);
+  const projectsResponse = await apiGet<{ data: Array<{ id: string; name: string }> }>("/projects");
+  const projectId = projectsResponse?.data.find((candidate) => candidate.name === project)?.id;
+  const storedManifest = loadManifest(worktree, project);
+  const manifest = projectId && storedManifest.projectId !== projectId
+    ? emptyManifest(project)
+    : storedManifest;
+  if (projectId) manifest.projectId = projectId;
   const isInitialSync = Object.keys(manifest.resources.skills).length === 0 &&
     Object.keys(manifest.resources.agents).length === 0 &&
     Object.keys(manifest.resources.plugins).length === 0 &&
@@ -1468,6 +1478,14 @@ function resultSummary(label: string, r: SyncResult): string {
  */
 export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
+
+  // Provision at plugin load so a database/API restart cannot leave this
+  // worktree missing until a later session lifecycle event happens to fire.
+  try {
+    await ensureExtensionProject(worktree, API_BASE);
+  } catch {
+    process.stderr.write(`${JSON.stringify({ event: "extension_project_init_failed", reason: "request_failed" })}\n`);
+  }
 
   return {
     event: async ({ event }: { event: any }) => {

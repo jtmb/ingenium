@@ -61,4 +61,11 @@ export declare function projectDetail(name: string): Promise<{
         text: string;
     }[];
 }>;
+/** Run the DB-only historical /workspace migration. */
+export declare function projectMigrateWorkspace(dryRun?: boolean): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=projects.d.ts.map

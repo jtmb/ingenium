@@ -96,6 +96,21 @@ describe("accounts", () => {
     expect(creds!.password).toBe("my-app-password");
   });
 
+  it("replaces credentials in place and resets the account auth circuit", async () => {
+    const { addAccount, storeCredentials, getCredentials, listAccounts } = await import("../lib/accounts.js");
+    const { authErrorCount } = await import("../lib/circuit-breaker.js");
+    const account = addAccount("test-project", {
+      email: "recover@test.com", name: "Recover", provider: "custom", authType: "app_password",
+    });
+    authErrorCount.set(`${account.email}:INBOX`, 3);
+
+    storeCredentials("test-project", account.id, { imapPass: "updated-app-password", smtpPass: "updated-app-password" });
+
+    expect(getCredentials("test-project", account.id)?.password).toBe("updated-app-password");
+    expect(listAccounts("test-project").filter(a => a.id === account.id)).toHaveLength(1);
+    expect(authErrorCount.has(`${account.email}:INBOX`)).toBe(false);
+  });
+
   it("should throw on storeCredentials for nonexistent account", async () => {
     const { storeCredentials } = await import("../lib/accounts.js");
     expect(() => storeCredentials("test-project", "no-such-account", { imapPass: "x" })).toThrow();
