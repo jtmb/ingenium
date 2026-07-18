@@ -405,7 +405,6 @@ export interface ChatConfigResponse {
   primary: ChatConfigProviderInfo | null;
   backup: ChatConfigProviderInfo | null;
   agents: Array<{ name: string; label: string }>;
-  restartRequired: boolean;
   providers: ChatProviderInfo[];
   defaultSelection: { providerId: string; modelId: string } | null;
 }
@@ -450,6 +449,7 @@ export interface ManagedProviderConfig {
   defaultModel: string;
   roles: ProviderRole[];
   enabled: boolean;
+  allowPrivateNetwork?: boolean;
   apiKeySet: boolean;
   apiKey?: string;
 }
@@ -863,7 +863,7 @@ export const api = {
      * synthetic OpenCode providers.
      */
     saveLlmConfig: (config: LlmConfigBody, project = DEFAULT_PROJECT) =>
-      request<{ data: { saved: boolean; restartRequired: boolean } }>(
+      request<{ data: { saved: boolean } }>(
         `/settings/llm-config?project=${project}`,
         { method: "POST", body: JSON.stringify(config) },
       ),
@@ -876,7 +876,7 @@ export const api = {
       request<{ data: { providers: ManagedProviderConfig[] } }>(`/settings/provider-configs?project=${project}`),
 
     saveProviderConfigs: (providers: ManagedProviderConfig[], project = DEFAULT_PROJECT) =>
-      request<{ data: { saved: boolean; restartRequired: boolean; warnings: string[] } }>(
+      request<{ data: { saved: boolean; warnings: string[] } }>(
         `/settings/provider-configs?project=${project}`,
         { method: "PUT", body: JSON.stringify({ providers }) },
       ),

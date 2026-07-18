@@ -270,7 +270,6 @@ function saveLlmConfig(
     ["synthesis_backup_model", backup?.model ?? ""],
     ["synthesis_backup_endpoint", backup?.endpoint ?? ""],
     ["synthesis_backup_allow_private_network", String(backup?.allowPrivateNetwork === true)],
-    ["synthesis_restart_pending", "true"],
   ];
 
   // An omitted key means "keep the saved credential". The Settings UI only
@@ -295,7 +294,7 @@ function projectToOpenCodeConfig(
   globalProjectId: string,
   primary: { provider?: string; model?: string; endpoint?: string },
   backup: { provider?: string; model?: string; endpoint?: string } | undefined,
-): void {
+): string {
   // Read existing global config
   const existingConfig = configs.getConfig(globalProjectId, "global");
   let config: Record<string, unknown> = {};
@@ -330,8 +329,10 @@ function projectToOpenCodeConfig(
     delete providerSection["ingenium-backup"];
   }
 
-  configs.saveConfig(globalProjectId, "global", JSON.stringify(config, null, 2));
+  const projectedConfig = JSON.stringify(config, null, 2);
+  configs.saveConfig(globalProjectId, "global", projectedConfig);
   logger.info("settings", "Projected LLM config into OpenCode global config (ingenium-primary / ingenium-backup)");
+  return projectedConfig;
 }
 
 /** Build a single synthetic provider entry for the OpenCode config. */
@@ -546,7 +547,6 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     ["synthesis_backup_endpoint", backup?.baseURL ?? ""],
     ["synthesis_backup_allow_private_network", String(backup?.allowPrivateNetwork === true)],
     ["synthesis_backup_api_key", backup ? resolvedKeys[backup.id] ?? "" : ""],
-    ["synthesis_restart_pending", "true"],
   ];
   execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -575,6 +575,12 @@ settingsRouter.put("/provider-configs", async (req, res) => {
   }
 
   const authWarnings: string[] = [];
+  if (projectedConfig) {
+    const result = await opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>);
+    if (isOpenCodeError(result)) {
+      authWarnings.push("OpenCode could not reload the provider configuration automatically");
+    }
+  }
   for (const provider of metadata) {
     const key = resolvedKeys[provider.id];
     if (clearedKeyIds.has(provider.id)) {
@@ -584,14 +590,14 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     }
     if (!provider.enabled || !key) continue;
     const result = await opencodeClient.addAuth(provider.id, { type: "api", key }, "/workspace");
-    if (isOpenCodeError(result)) authWarnings.push(`Authentication for ${provider.name} will require reconnecting after restart`);
+    if (isOpenCodeError(result)) authWarnings.push(`Authentication for ${provider.name} could not be updated`);
   }
   for (const removedId of previousIds.filter((id) => !metadata.some((provider) => provider.id === id))) {
     const result = await opencodeClient.deleteAuth(removedId, "/workspace");
     if (isOpenCodeError(result)) authWarnings.push(`Authentication cleanup for removed provider ${removedId} could not be completed`);
   }
 
-  res.json({ data: { saved: true, restartRequired: true, warnings: authWarnings } });
+  res.json({ data: { saved: true, warnings: authWarnings } });
 });
 
 settingsRouter.get("/llm-config", (req, res) => {
@@ -669,7 +675,11 @@ settingsRouter.post("/llm-config", async (req, res) => {
   const globalProject = projects.getGlobalProject();
   if (globalProject) {
     try {
-      projectToOpenCodeConfig(globalProject.id, primary, backup?.provider ? backup : undefined);
+      const projectedConfig = projectToOpenCodeConfig(globalProject.id, primary, backup?.provider ? backup : undefined);
+      const result = await opencodeClient.updateGlobalConfig(JSON.parse(projectedConfig) as Record<string, unknown>);
+      if (isOpenCodeError(result)) {
+        logger.warn("settings", `OpenCode could not reload the LLM configuration automatically: ${result.error.code}`);
+      }
     } catch (err) {
       logger.warn("settings", `OpenCode config projection failed: ${err instanceof Error ? err.message : String(err)}`);
       res.status(409).json({
@@ -698,7 +708,7 @@ settingsRouter.post("/llm-config", async (req, res) => {
     // Projection was completed during preflight, before settings were saved.
   }
 
-  res.json({ data: { saved: true, restartRequired: true } });
+  res.json({ data: { saved: true } });
 });
 settingsRouter.post("/test-llm", async (req, res) => {
   const projectId = requireProject(req, res);

@@ -253,6 +253,42 @@ export interface AuthProviderEntry {
 
 export type AuthStatusResponse = Record<string, AuthProviderEntry>;
 
+export interface IntegrationPrompt {
+  type: "text" | "select";
+  key: string;
+  message: string;
+  placeholder?: string;
+  options?: Array<{ label: string; value: string; hint?: string }>;
+}
+
+export interface IntegrationMethod {
+  id?: string;
+  type: "key" | "env" | "oauth";
+  label?: string;
+  names?: string[];
+  prompts?: IntegrationPrompt[];
+}
+
+export interface IntegrationInfo {
+  id: string;
+  name: string;
+  methods: IntegrationMethod[];
+  connections: Array<{ type: string; id?: string; label?: string; name?: string }>;
+}
+
+export interface IntegrationAttempt {
+  attemptID: string;
+  url: string;
+  instructions: string;
+  mode: "auto" | "code";
+  time: { created: number; expires: number };
+}
+
+interface V2Response<T> {
+  location: Record<string, unknown>;
+  data: T;
+}
+
 /* ── Agent shape (v1.18.3 contract) ── */
 
 export interface AgentInfo {
@@ -541,6 +577,13 @@ export const opencodeClient = {
   health: (): Promise<OpenCodeResult<OpenCodeHealth>> =>
     request<OpenCodeHealth>("/global/health"),
 
+  /** Apply a partial global config without interrupting active sessions. */
+  updateGlobalConfig: (config: Record<string, unknown>): Promise<OpenCodeResult<Record<string, unknown>>> =>
+    request<Record<string, unknown>>("/global/config", {
+      method: "PATCH",
+      body: { config },
+    }),
+
   /* ── Sessions ── */
 
   listSessions: (directory?: string): Promise<OpenCodeResult<SessionInfo[]>> =>
@@ -743,6 +786,39 @@ export const opencodeClient = {
 
   listProviders: (directory?: string): Promise<OpenCodeResult<ProvidersResponse>> =>
     request<ProvidersResponse>("/provider", { query: { directory } }),
+
+  listIntegrations: (directory?: string): Promise<OpenCodeResult<V2Response<IntegrationInfo[]>>> =>
+    request<V2Response<IntegrationInfo[]>>("/api/integration", {
+      query: { "location.directory": directory },
+    }),
+
+  connectIntegrationKey: (integrationID: string, key: string): Promise<OpenCodeResult<string>> =>
+    request<string>(`/api/integration/${encodeURIComponent(integrationID)}/connect/key`, {
+      method: "POST",
+      body: { key },
+    }),
+
+  beginIntegrationOAuth: (
+    integrationID: string,
+    methodID: string,
+    inputs: Record<string, string>,
+  ): Promise<OpenCodeResult<V2Response<IntegrationAttempt>>> =>
+    request<V2Response<IntegrationAttempt>>(`/api/integration/${encodeURIComponent(integrationID)}/connect/oauth`, {
+      method: "POST",
+      body: { methodID, inputs },
+    }),
+
+  getIntegrationAttempt: (attemptID: string): Promise<OpenCodeResult<V2Response<{ status: string; message?: string }>>> =>
+    request<V2Response<{ status: string; message?: string }>>(`/api/integration/attempt/${encodeURIComponent(attemptID)}`),
+
+  completeIntegrationAttempt: (attemptID: string, code?: string): Promise<OpenCodeResult<string>> =>
+    request<string>(`/api/integration/attempt/${encodeURIComponent(attemptID)}/complete`, {
+      method: "POST",
+      body: code ? { code } : {},
+    }),
+
+  cancelIntegrationAttempt: (attemptID: string): Promise<OpenCodeResult<string>> =>
+    request<string>(`/api/integration/attempt/${encodeURIComponent(attemptID)}`, { method: "DELETE" }),
 
   /* ── Auth ── */
 

@@ -1,10 +1,11 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { logger, settings } from "ingenium-core";
+import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   opencodeClient,
   isOpenCodeError,
@@ -84,6 +85,132 @@ export const opencodeRouter = Router();
 /* ── Utility ── */
 
 const SOURCE = "opencode-routes";
+const OAUTH_ATTEMPT_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_OAUTH_ATTEMPTS = 100;
+const DEFAULT_OAUTH_CALLBACK_FORWARD_URL = "http://localhost:1455/auth/callback";
+const pendingOAuthAttempts = new Map<string, { attemptID: string; mode: "auto" | "code"; expiresAt: number }>();
+
+/**
+ * The callback is intentionally unauthenticated because OAuth providers redirect
+ * browsers here. Keep its limiter independent from the authenticated API budget.
+ */
+export function createOAuthCallbackRateLimiter(maxRequests = 20, windowMs = 60_000) {
+  return createRateLimiter(maxRequests, windowMs);
+}
+
+function pruneOAuthAttempts(): void {
+  const now = Date.now();
+  for (const [state, attempt] of pendingOAuthAttempts) {
+    if (attempt.expiresAt <= now) pendingOAuthAttempts.delete(state);
+  }
+}
+
+function oauthCallbackPage(res: Response, status: number, title: string, message: string): void {
+  const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character]!);
+  res.set({
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+  });
+  res.status(status).type("html").send(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title></head><body><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p><script>window.close()</script></body></html>`);
+}
+
+/**
+ * OPENCODE_OAUTH_CALLBACK_FORWARD_URL overrides the local OpenCode listener.
+ * The default works when API and OpenCode run on the host or in the same Docker
+ * container. Only loopback HTTP callback URLs are accepted to prevent SSRF.
+ */
+function getOAuthCallbackForwardUrl(): URL | null {
+  const configuredUrl = process.env.OPENCODE_OAUTH_CALLBACK_FORWARD_URL
+    || DEFAULT_OAUTH_CALLBACK_FORWARD_URL;
+  try {
+    const url = new URL(configuredUrl);
+    const isLoopback = url.hostname === "localhost"
+      || url.hostname === "127.0.0.1"
+      || url.hostname === "[::1]";
+    if (url.protocol !== "http:" || !isLoopback || url.pathname !== "/auth/callback"
+      || url.username || url.password || url.search || url.hash) {
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function forwardAutoOAuthCallback(params: URLSearchParams, event: string): void {
+  const callbackUrl = getOAuthCallbackForwardUrl();
+  if (!callbackUrl) {
+    logger.warn(SOURCE, "Auto OAuth callback forward blocked by invalid OPENCODE_OAUTH_CALLBACK_FORWARD_URL");
+    return;
+  }
+  callbackUrl.search = params.toString();
+  fetch(callbackUrl.toString()).catch((error) => {
+    logger.warn(SOURCE, event, { error: error instanceof Error ? error.name : "unknown" });
+  });
+}
+
+/**
+ * Complete browser OAuth redirects that OpenAI sends to localhost:1455.
+ * The state value is issued by OpenCode and lets this public endpoint locate
+ * the corresponding short-lived integration attempt without exposing an API token.
+ */
+export async function handleOAuthCallback(req: Request, res: Response): Promise<void> {
+  const state = typeof req.query.state === "string" ? req.query.state : "";
+  const code = typeof req.query.code === "string" ? req.query.code : "";
+  const providerError = typeof req.query.error === "string" ? req.query.error : "";
+
+  pruneOAuthAttempts();
+  if (state.length > 1024 || /[\r\n\0]/.test(state)) {
+    oauthCallbackPage(res, 400, "Authorization could not be completed", "This authorization request is invalid or has expired. Return to Ingenium and start again.");
+    return;
+  }
+  const attempt = pendingOAuthAttempts.get(state);
+  if (!attempt) {
+    oauthCallbackPage(res, 400, "Authorization could not be completed", "This authorization request is invalid or has expired. Return to Ingenium and start again.");
+    return;
+  }
+
+  // Consume the state before forwarding or exchanging the code so the redirect cannot be replayed.
+  pendingOAuthAttempts.delete(state);
+  if (providerError || !code || code.length > 4096 || /[\r\n\0]/.test(code)) {
+    if (attempt.mode === "auto") {
+      const params = new URLSearchParams({ state, ...(providerError ? { error: providerError } : {}) });
+      forwardAutoOAuthCallback(params, "Auto OAuth cancellation forward failed");
+    } else {
+      await opencodeClient.cancelIntegrationAttempt(attempt.attemptID);
+    }
+    oauthCallbackPage(res, 400, "Authorization was cancelled", "Return to Ingenium to try again.");
+    return;
+  }
+
+  if (attempt.mode === "auto") {
+    // OpenCode owns the PKCE verifier for auto flows. Its listener may close the
+    // connection without a response after resolving the callback, which is expected.
+    const params = new URLSearchParams({ code, state });
+    forwardAutoOAuthCallback(params, "Auto OAuth callback forward failed");
+    oauthCallbackPage(res, 200, "Authorization received", "You can close this window and return to Ingenium while the connection completes.");
+    return;
+  }
+
+  try {
+    const result = await opencodeClient.completeIntegrationAttempt(attempt.attemptID, code);
+    if (isOpenCodeError(result)) {
+      logger.warn(SOURCE, `OAuth callback completion failed: ${result.error.code}`);
+      oauthCallbackPage(res, 502, "Authorization could not be completed", "Return to Ingenium and try again.");
+      return;
+    }
+
+    oauthCallbackPage(res, 200, "Authorization complete", "You can close this window and return to Ingenium.");
+  } catch (error) {
+    logger.warn(SOURCE, "OAuth callback completion threw unexpectedly", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    oauthCallbackPage(res, 502, "Authorization could not be completed", "Return to Ingenium and try again.");
+  }
+}
 
 /**
  * Guard: all proxy routes require OPENCODE_SERVER_PASSWORD to be configured.
@@ -111,6 +238,21 @@ function guardPassword(req: any, res: any): boolean {
  * If the result has an `error` property, sends the error with the appropriate
  * status code (derived from the error code). Otherwise sends 200 with the data.
  */
+function sendOpenCodeError(req: any, res: any, result: any, status: number): void {
+  const code = result.error.code;
+  logger.warn(
+    SOURCE,
+    `Proxy error: ${result.error.code}`,
+    { method: req.method, path: req.originalUrl, code: result.error.code },
+  );
+  res.status(status).json({
+    error: {
+      code: /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(code) ? code : "UPSTREAM_ERROR",
+      message: "OpenCode request failed.",
+    },
+  });
+}
+
 function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): void {
   if (isOpenCodeError(result)) {
     const code = result.error.code;
@@ -127,12 +269,7 @@ function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): voi
     } else {
       status = 502; // Default upstream error
     }
-    logger.warn(
-      SOURCE,
-      `Proxy error: ${result.error.code} — ${result.error.message.slice(0, 120)}`,
-      { method: req.method, path: req.originalUrl, code: result.error.code },
-    );
-    res.status(status).json(result);
+    sendOpenCodeError(req, res, result, status);
     return;
   }
 
@@ -323,7 +460,6 @@ interface ChatConfigResponse {
   backup: ChatProviderInfo | null;
   providers: ExpandedChatProviderInfo[];
   agents: Array<{ name: string; label: string }>;
-  restartRequired: boolean;
   defaultSelection: { providerId: string; modelId: string } | null;
 }
 
@@ -469,8 +605,6 @@ opencodeRouter.get("/chat-config", async (req, res) => {
         }
       : null;
 
-  // Read restart-pending flag set by POST /settings/llm-config
-  const restartPending = settings.getSetting(projectId, "synthesis_restart_pending") === "true";
   const managedProviders = getManagedChatProviders(projectId);
   const builtinProvider = getBuiltinChatProvider(await opencodeClient.listProviders());
   const providers = builtinProvider ? [...managedProviders, builtinProvider] : managedProviders;
@@ -493,16 +627,10 @@ opencodeRouter.get("/chat-config", async (req, res) => {
     backup,
     providers,
     agents: [{ name: "ingenium-chat", label: "Ingenium Chat" }],
-    restartRequired: restartPending,
     defaultSelection: defaultProvider
       ? { providerId: defaultProvider.providerId, modelId: defaultProvider.defaultModel }
       : null,
   };
-
-  // Reset the flag — it was delivered to the client and the restart banner will show
-  if (restartPending) {
-    settings.setSetting(projectId, "synthesis_restart_pending", "false");
-  }
 
   res.json({ data: response });
 });
@@ -648,10 +776,7 @@ opencodeRouter.post("/sessions/:id/share", async (req, res) => {
     const code = result.error.code;
     const httpMatch = /^HTTP_(\d+)$/.exec(code);
     const status = httpMatch ? parseInt(httpMatch[1]!, 10) : 502;
-    logger.warn(SOURCE, `Share error for session ${req.params.id!}: ${code} — ${result.error.message.slice(0, 120)}`, {
-      method: req.method, path: req.originalUrl, code, mappedStatus: status,
-    });
-    res.status(status).json(result);
+    sendOpenCodeError(req, res, result, status);
     return;
   }
   res.json({ data: result });
@@ -910,6 +1035,122 @@ opencodeRouter.get("/builtin-providers", async (req, res) => {
       source: "runtime",
     },
   });
+});
+
+opencodeRouter.get("/integrations", async (req, res) => {
+  if (!guardPassword(req, res)) return;
+  const result = await opencodeClient.listIntegrations(req.query.directory as string | undefined);
+  sendResult(req, res, result);
+});
+
+function isSafeIdentifier(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value);
+}
+
+function validateOAuthInputs(value: unknown): Record<string, string> | null {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > 12) return null;
+  const inputs: Record<string, string> = {};
+  for (const [key, input] of entries) {
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(key) || typeof input !== "string" || input.length > 1024 || /[\r\n\0]/.test(input)) {
+      return null;
+    }
+    inputs[key] = input;
+  }
+  return inputs;
+}
+
+function isSafeOAuthUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || (url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]"));
+  } catch {
+    return false;
+  }
+}
+
+opencodeRouter.post("/integrations/:integrationID/connect/key", async (req, res) => {
+  if (!guardPassword(req, res)) return;
+  if (!isSafeIdentifier(req.params.integrationID) || typeof req.body?.key !== "string" || !req.body.key.trim() || req.body.key.length > 8192) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "API key is required" } });
+    return;
+  }
+  const result = await opencodeClient.connectIntegrationKey(req.params.integrationID!, req.body.key);
+  if (isOpenCodeError(result)) {
+    logger.warn(SOURCE, `Native provider key connection failed: ${result.error.code}`);
+    res.status(502).json({ error: { code: "PROVIDER_CONNECTION_FAILED", message: "Provider connection failed" } });
+    return;
+  }
+  sendResult(req, res, result);
+});
+
+opencodeRouter.post("/integrations/:integrationID/connect/oauth", async (req, res) => {
+  if (!guardPassword(req, res)) return;
+  const inputs = validateOAuthInputs(req.body?.inputs);
+  if (!isSafeIdentifier(req.params.integrationID) || !isSafeIdentifier(req.body?.methodID) || !inputs) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "OAuth methodID is required" } });
+    return;
+  }
+  const result = await opencodeClient.beginIntegrationOAuth(req.params.integrationID!, req.body.methodID, inputs);
+  if (!isOpenCodeError(result) && !isSafeOAuthUrl(result.data.url)) {
+    await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+    res.status(502).json({ error: { code: "UNSAFE_OAUTH_URL", message: "Provider returned an unsafe authorization URL" } });
+    return;
+  }
+  if (!isOpenCodeError(result)) {
+    const callbackUrl = new URL(result.data.url);
+    const state = callbackUrl.searchParams.get("state");
+    if (!state || state.length > 1024 || /[\r\n\0]/.test(state)) {
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+      res.status(502).json({ error: { code: "INVALID_OAUTH_STATE", message: "Provider returned an invalid authorization request" } });
+      return;
+    }
+    pruneOAuthAttempts();
+    if (pendingOAuthAttempts.size >= MAX_PENDING_OAUTH_ATTEMPTS) {
+      await opencodeClient.cancelIntegrationAttempt(result.data.attemptID);
+      res.status(503).json({ error: { code: "OAUTH_CAPACITY_REACHED", message: "Too many pending authorization requests. Try again shortly." } });
+      return;
+    }
+    pendingOAuthAttempts.set(state, {
+      attemptID: result.data.attemptID,
+      mode: result.data.mode,
+      expiresAt: Math.min(Date.now() + OAUTH_ATTEMPT_TTL_MS, result.data.time.expires),
+    });
+  }
+  sendResult(req, res, result);
+});
+
+opencodeRouter.get("/integration-attempts/:attemptID", async (req, res) => {
+  if (!guardPassword(req, res)) return;
+  if (!isSafeIdentifier(req.params.attemptID)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth attempt ID" } });
+    return;
+  }
+  const result = await opencodeClient.getIntegrationAttempt(req.params.attemptID!);
+  sendResult(req, res, result);
+});
+
+opencodeRouter.post("/integration-attempts/:attemptID/complete", async (req, res) => {
+  if (!guardPassword(req, res)) return;
+  const code = typeof req.body?.code === "string" ? req.body.code : undefined;
+  if (!isSafeIdentifier(req.params.attemptID) || (code !== undefined && (code.length > 4096 || /[\r\n\0]/.test(code)))) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth completion request" } });
+    return;
+  }
+  const result = await opencodeClient.completeIntegrationAttempt(req.params.attemptID!, code);
+  sendResult(req, res, result);
+});
+
+opencodeRouter.delete("/integration-attempts/:attemptID", async (req, res) => {
+  if (!guardPassword(req, res)) return;
+  if (!isSafeIdentifier(req.params.attemptID)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid OAuth attempt ID" } });
+    return;
+  }
+  const result = await opencodeClient.cancelIntegrationAttempt(req.params.attemptID!);
+  sendResult(req, res, result);
 });
 
 /* ── Auth ── */

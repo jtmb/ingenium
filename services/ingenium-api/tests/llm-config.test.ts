@@ -381,7 +381,7 @@ describe("POST /settings/llm-config → GET /settings/llm-config round-trip", ()
     const postBody = await postRes.json();
     expect(postBody.data).toBeDefined();
     expect(postBody.data.saved).toBe(true);
-    expect(postBody.data.restartRequired).toBe(true);
+    expect(postBody.data).not.toHaveProperty("restartRequired");
 
     // GET should retrieve the saved values
     const { body } = await getLlmConfig();
@@ -695,8 +695,7 @@ describe("GET /opencode/chat-config — configured state", () => {
     expect(mainAgent).toBeDefined();
     expect(mainAgent.label).toBe("Ingenium Chat");
 
-    // restartRequired is a boolean
-    expect(typeof body.data.restartRequired).toBe("boolean");
+    expect(body.data).not.toHaveProperty("restartRequired");
   });
 
   it("includes backup info when backup is configured", async () => {
@@ -729,7 +728,7 @@ describe("GET /opencode/chat-config — configured state", () => {
     expect(json).not.toContain("sk-backup");
   });
 
-  it("delivers the restart-required flag once, then clears it", async () => {
+  it("does not require a restart after saving provider configuration", async () => {
     const postRes = await postLlmConfig({
       primary: {
         provider: "openai",
@@ -739,10 +738,8 @@ describe("GET /opencode/chat-config — configured state", () => {
     });
     expect(postRes.status).toBe(200);
 
-    const first = await getChatConfig();
-    expect(first.body.data.restartRequired).toBe(true);
-    const second = await getChatConfig();
-    expect(second.body.data.restartRequired).toBe(false);
+    const { body } = await getChatConfig();
+    expect(body.data).not.toHaveProperty("restartRequired");
   });
 
   it("handles __custom__ provider correctly", async () => {

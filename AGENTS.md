@@ -139,6 +139,15 @@ All Ingenium MCP tools use a **single `ingenium_` prefix**:
 
 The full pattern is `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `ingenium_task_create`). The prefix appears exactly once — never `ingenium_ingenium_`. See [docs/reference/mcp-tools.md](docs/reference/mcp-tools.md) for the complete catalog.
 
+### OAuth Callback Semantics
+
+Native OpenCode provider integrations use two OAuth modes:
+
+- **Auto mode (default)**: OpenCode opens a local HTTP listener on `localhost:1455`. The API registers `GET /auth/callback` as a public endpoint (before auth middleware). The Docker Compose file maps `127.0.0.1:1455` to container port `4097` (the API). When OpenCode issues a redirect to `http://localhost:1455/auth/callback`, it reaches the API, which validates the state, forward-forwards the callback to OpenCode's internal listener, and renders an "Authorization received" page. State is consumed on first use to prevent replay.
+- **Code mode**: The API receives the OAuth code, completes the attempt via the OpenCode client, and renders an "Authorization complete" page.
+
+> 🔴 Both modes consume the state parameter (`pendingOAuthAttempts` Map) before forwarding or exchanging, preventing redirect replay. Malformed states (too long, containing control characters) are rejected with 400.
+
 ### Dashboard Pages
 
 The Ingenium Dashboard (http://localhost:3000) provides 20 primary routes plus the Settings overlay (21 user-facing views):
@@ -165,7 +174,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 20 primary routes plus t
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
-| Settings (overlay) | Full-screen overlay via gear icon. 4 functional tabs (General, Mail, Providers, Config), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. |
+| Settings (overlay) | Full-screen overlay via gear icon. 6 functional tabs (General, Projects, Skills, Tasks, Jobs, Plugins, Mail, Agents, MCP, Config, Observations, Personality, Providers, Logs), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. The **Providers** tab (aliased to PipelinePanel) features native-provider cards with Connect/Disconnect, an OAuth connect dialog with auto/code modes, and separate Primary/Secondary synthesis provider selectors. |
 
 > **Nav bar layout**: Settings gear far-right. **ProjectDropdown** (folder icon) to its left for project switching — disabled on `/mail` and `/opencode`. Chat link added to the Workspace group alongside OpenCode. The dashboard talks to the API layer only — zero direct DB access.
 
@@ -296,8 +305,9 @@ docker compose exec ingenium npm run test   # Execute inside container
 | `4097` | API | Express REST gateway (sole DB authority) |
 | `127.0.0.1:4098` | OpenCode Web | OpenCode web server (host loopback only) |
 | `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
+| `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → container `:4097` (API). OpenCode redirects OAuth here; API validates and forwards callback |
 
-> 🔴 Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099.
+> 🔴 Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099, 1455.
 
 ### Key Docker Notes
 

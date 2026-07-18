@@ -182,6 +182,37 @@ export interface OpenCodeAgent {
   permission?: Array<{ permission: string; pattern: string; action: string }>;
 }
 
+export interface OpenCodeIntegrationPrompt {
+  type: "text" | "select";
+  key: string;
+  message: string;
+  placeholder?: string;
+  options?: Array<{ label: string; value: string; hint?: string }>;
+}
+
+export interface OpenCodeIntegrationMethod {
+  id?: string;
+  type: "key" | "env" | "oauth";
+  label?: string;
+  names?: string[];
+  prompts?: OpenCodeIntegrationPrompt[];
+}
+
+export interface OpenCodeIntegration {
+  id: string;
+  name: string;
+  methods: OpenCodeIntegrationMethod[];
+  connections: Array<{ type: string; id?: string; label?: string; name?: string }>;
+}
+
+export interface OpenCodeIntegrationAttempt {
+  attemptID: string;
+  url: string;
+  instructions: string;
+  mode: "auto" | "code";
+  time: { created: number; expires: number };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Prompt body types                                                 */
 /* ------------------------------------------------------------------ */
@@ -349,6 +380,44 @@ export const opencode = {
       }>(
         `/opencode/providers${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
       ),
+  },
+
+  integrations: {
+    list: (directory = "/workspace") =>
+      oc<{ location: Record<string, unknown>; data: OpenCodeIntegration[] }>(
+        `/opencode/integrations?directory=${encodeURIComponent(directory)}`,
+      ),
+
+    connectKey: (integrationID: string, key: string) =>
+      oc<unknown>(`/opencode/integrations/${encodeURIComponent(integrationID)}/connect/key`, {
+        method: "POST",
+        body: JSON.stringify({ key }),
+      }),
+
+    beginOAuth: (integrationID: string, methodID: string, inputs: Record<string, string>) =>
+      oc<{ location: Record<string, unknown>; data: OpenCodeIntegrationAttempt }>(
+        `/opencode/integrations/${encodeURIComponent(integrationID)}/connect/oauth`,
+        { method: "POST", body: JSON.stringify({ methodID, inputs }) },
+      ),
+
+    attemptStatus: (attemptID: string) =>
+      oc<{ location: Record<string, unknown>; data: { status: string; message?: string } }>(
+        `/opencode/integration-attempts/${encodeURIComponent(attemptID)}`,
+      ),
+
+    completeAttempt: (attemptID: string, code?: string) =>
+      oc<unknown>(`/opencode/integration-attempts/${encodeURIComponent(attemptID)}/complete`, {
+        method: "POST",
+        body: JSON.stringify(code ? { code } : {}),
+      }),
+
+    cancelAttempt: (attemptID: string) =>
+      oc<unknown>(`/opencode/integration-attempts/${encodeURIComponent(attemptID)}`, { method: "DELETE" }),
+  },
+
+  auth: {
+    disconnect: (providerID: string) =>
+      oc<unknown>(`/opencode/auth/${encodeURIComponent(providerID)}`, { method: "DELETE" }),
   },
 
   agents: {

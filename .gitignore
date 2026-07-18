@@ -35,6 +35,7 @@ playwright/.cache/
 .next/
 dist/
 build/
+*.tsbuildinfo
 
 # ── Learnings — DB-managed only, not on disk ──────────────
 .agents/skills/learnings.md
@@ -50,11 +51,15 @@ temp
 
 # ── SQLite runtime files ──────────────────────────────────
 /data*
+*.db
 *.db-shm
 *.db-wal
 
 # ── Migration files are tracked — counteracts /data* ─────
 !/packages/ingenium-core/data/migrations/
+
+# ── Personal backup files ─────────────────────────────────
+personal-space-backup.json
 
 # ── OpenCode session logs ─────────────────────────────────
 session-*.md

@@ -7,7 +7,15 @@ description: REST API design reference for the Ingenium system — endpoint cata
 
 ## Overview
 
-The Ingenium REST API runs on port 4097 and is the sole database authority. All data flows through HTTP to this API.
+The Ingenium REST API runs on port 4097 and is the sole database authority. All data flows through HTTP to this API. Port 1455 is mapped from host loopback (`127.0.0.1:1455`) to the API's port 4097 inside the container, serving as the OAuth callback proxy for native OpenCode provider integrations.
+
+## Public Endpoints (Before Auth Middleware)
+
+The following endpoint is registered **before** the auth middleware and rate limiter, allowing it to receive browser redirects without authentication:
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/auth/callback` | OAuth callback receiver for native OpenCode provider integrations. Validates state/code from `pendingOAuthAttempts` Map (10-min TTL). Supports both **auto mode** (forwards to OpenCode's internal `localhost:1455/auth/callback` listener) and **code mode** (completes via OpenCodeClient). State is consumed on first use to prevent redirect replay. Malformed states (>1024 chars or containing control chars) rejected with 400. |
 
 ## Startup Behavior
 
@@ -243,6 +251,22 @@ All routes prefixed with `/api/v1/services`. Two distinct card types rendered on
 | `docs-workspace` | `name`, `state`, `description`, `detail`, `stats` | `docs.getDocStats()` |
 | `tasks-board` | `name`, `state`, `description`, `detail`, `stats` (total tasks, byColumn breakdown) | `tasks.listTasks()` |
 
+### OpenCode Integration Routes
+
+Provider integration routes prefixed with `/api/v1/opencode`. The `GET /auth/callback` endpoint is a public route (before auth middleware) — see [Public Endpoints](#public-endpoints-before-auth-middleware).
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/integrations` | List all native OpenCode integrations (provider auth metadata, connection methods) |
+| GET | `/integrations/:id` | Get a single native integration by ID |
+| POST | `/integrations/:id/connect/oauth` | Begin an OAuth integration attempt. Returns `{ attemptID, url, mode: "auto"\|"code", instructions }`. State stored in `pendingOAuthAttempts` with 10-min TTL. The returned URL is validated for SSRF safety before being returned. |
+| POST | `/integrations/:id/connect/key` | Connect via API key. Accepts `{ key }` in body. |
+| POST | `/integrations/complete` | Complete an OAuth code-mode attempt. Accepts `{ attemptID, code }`. |
+| POST | `/integrations/attempts/:id/cancel` | Cancel a pending OAuth attempt. |
+| GET | `/integrations/attempts/:id` | Poll OAuth attempt status. Returns `{ status: "pending"\|"complete"\|"failed"\|"expired", message? }`. |
+| GET | `/builtin-providers` | Runtime OpenCode Zen free model discovery — queries OpenCode runtime provider catalog, filters to only free models. |
+| GET | `/chat-config` | Sanitized merged provider catalog for the Chat page (managed + builtin). |
+
 ## OpenCode Proxy Routes
 
 The API proxies requests to the OpenCode server at :4098. HTTP Basic Auth credentials are injected server-side (never exposed to the browser). All proxy routes require `OPENCODE_SERVER_PASSWORD` to be set (returns 503 otherwise). SSE routes stream `text/event-stream` with proper caching and buffering headers.
@@ -273,7 +297,7 @@ The API proxies requests to the OpenCode server at :4098. HTTP Basic Auth creden
 | POST | `/api/v1/opencode/sessions/:id/init` | Initialize a session |
 | GET | `/api/v1/opencode/sessions/:id/events` | SSE event stream (per-session) |
 | GET | `/api/v1/opencode/events` | Global SSE event stream (no session filter) |
-| GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, restartRequired, defaultSelection }`. The `providers[]` array merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). `defaultSelection` picks the managed primary provider first, falls back to the OpenCode Zen runtime default, then the first provider. No API keys are exposed. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. |
+| GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, defaultSelection }`. The `providers[]` array merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). `defaultSelection` picks the managed primary provider first, falls back to the OpenCode Zen runtime default, then the first provider. No API keys are exposed. OpenCode live-reloads provider config changes — no restart required. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. |
 | GET | `/api/v1/opencode/builtin-providers` | **Runtime OpenCode Zen free model discovery** — queries the OpenCode runtime provider catalog, filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. Response: `{ data: { providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" } }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`. Sanitized — no `apiKey`, `options`, or `env` fields leak through. |
 | GET | `/api/v1/opencode/providers` | List providers + models |
 | GET | `/api/v1/opencode/agents` | List agents |
