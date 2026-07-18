@@ -23,12 +23,12 @@ export GOOGLE_OAUTH_CLIENT_ID=your-google-oauth-client-id
 export GOOGLE_OAUTH_CLIENT_SECRET=your-google-oauth-secret
 export MS_OAUTH_CLIENT_ID=your-azure-ad-app-id  
 export MS_OAUTH_CLIENT_SECRET=your-azure-ad-app-secret
-export INGENIUM_EMAIL_ENCRYPTION_KEY=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0
+export INGENIUM_EMAIL_ENCRYPTION_KEY=a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2
 export OAUTH_REDIRECT_URI=http://localhost:3000/mail/oauth/callback
 ```
 These are passed through to `docker compose` via the `${VAR:-}` expansion in `docker-compose.yml`.
 
-> 🔴 **Security**: Never commit these values. The encryption key must be exactly 32 bytes (64 hex chars). Generate a unique key per project — do not reuse across deployments.
+> 🔴 **Security**: Never commit these values. The encryption key must be 64 hex characters (32 bytes) or a 64-character base64url secret; the latter is deterministically reduced to an AES-256 key. Generate a unique key per project — do not reuse across deployments.
 
 ## OAuth2 Credential Setup
 

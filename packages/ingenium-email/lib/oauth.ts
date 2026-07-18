@@ -46,19 +46,22 @@ function getOAuthCreds(
 
 /**
  * Retrieve the AES-256 encryption key from environment.
- * Key must be exactly 32 bytes (64 hex chars).
+ * A 64-character hex key is used directly. A 64-character base64url secret
+ * is deterministically reduced to 32 bytes for AES-256 compatibility.
  * SECURITY: Key is never stored in DB — only referenced from the env var at runtime.
  */
 function getEncryptionKey(): Buffer {
-  const hex = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
-  if (!hex) {
+  const value = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
+  if (!value) {
     throw new Error("INGENIUM_EMAIL_ENCRYPTION_KEY environment variable not set (32-byte hex)");
   }
-  const key = Buffer.from(hex, "hex");
-  if (key.length !== 32) {
-    throw new Error(`INGENIUM_EMAIL_ENCRYPTION_KEY must be 32 bytes (64 hex chars), got ${key.length} bytes`);
+  if (/^[0-9a-fA-F]{64}$/.test(value)) {
+    return Buffer.from(value, "hex");
   }
-  return key;
+  if (/^[A-Za-z0-9_-]{64}$/.test(value)) {
+    return crypto.createHash("sha256").update(value, "utf8").digest();
+  }
+  throw new Error("INGENIUM_EMAIL_ENCRYPTION_KEY must be 32 bytes (64 hex chars) or a 64-character base64url secret");
 }
 
 /**

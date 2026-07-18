@@ -24,7 +24,7 @@ description: Canonical reference for all environment variables used across the I
 | `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | ingenium-api | Backup snapshot storage directory |
 | `INGENIUM_CORE_DB_PATH` | `./.ingenium/data.db` (host) / `/app/.ingenium/data` (container) | core + API | SQLite database file path |
 | `INGENIUM_DOCS_ROOT` | _(none — required for repo indexing)_ | ingenium-core | Repository root directory for canonical docs indexing. `indexConfiguredDocs()` walks `{root}/docs/**/*.md`, skips symlinks, and rejects paths escaping the root. Used by `POST /api/v1/rag/ingest`. |
-| `INGENIUM_EMAIL_ENCRYPTION_KEY` | _(required, no default)_ | ingenium-email, docker-entrypoint.sh | **64 hex characters** (32 bytes) for AES-256-GCM credential encryption |
+| `INGENIUM_EMAIL_ENCRYPTION_KEY` | _(required, no default)_ | ingenium-email, docker-entrypoint.sh | **64 hex characters** (32 bytes) or a **64-character base64url secret** deterministically reduced to an AES-256 key for credential encryption |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | ingenium-core | Global config path for skills/plugins/commands |
 | `INGENIUM_HOME` | `~/.ingenium` | core, supervisord | Ingenium data home directory |
 | `INGENIUM_OPENCODE_DB_PATH` | `/var/opencode/opencode.db` | ingenium-api | OpenCode SQLite DB path for extraction engine |
