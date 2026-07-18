@@ -563,6 +563,176 @@ The function creates an ephemeral OpenCode session, sends the prompt, and polls 
 
 `executeSynthesisBroker()` iterates through deduplicated `(providerID, modelID)` choices in order: primary first, then secondary. If a provider returns `{ ok: false }`, the next choice is tried. If all configured choices fail, it returns `{ ok: false, error: "all configured synthesis providers failed" }` with no further retry.
 
+## Context Memory Architecture (Phase 3)
+
+The context memory system provides canonical agent memory that persists working context across sessions. It supersedes the legacy `plan_*` tools with a full CRUD surface while maintaining backward compatibility.
+
+### Data Flow
+
+```
+Agent (MCP tool) ──▶ ingenium_context_get / ingenium_context_update
+                             │
+                    HTTP to /api/v1/context/*
+                             │
+                    context.createContext() / context.searchContext()
+                             │
+                    context_entries table (FTS5-indexed)
+```
+
+### Core Model
+
+- **Table**: `context_entries` — project-scoped, FTS5 virtual table (`context_fts`) for full-text search
+- **Entry fields**: `id`, `project_id`, `content`, `tags` (JSON string array), `priority` (integer 0–10, default 5), `session_id`, `source` (manual/agent/import/system), `metadata` (JSON object), `created_at`, `updated_at`
+- **Validation**: content required and trimmed; priority validated as integer 0–10 (default 5); tags deduplicated, sorted, max 64 chars per tag; `source` must be one of `manual`, `agent`, `import`, `system`; `sessionId` optional, max 128 chars
+
+### API Endpoints
+
+| Method | `/api/v1/context/...` | Purpose |
+|--------|----------------------|---------|
+| GET | `/` | List recent entries (paginated, default 20) |
+| GET | `/search?q=` | FTS5 search, BM25-ranked, limit-clamped (max 100) |
+| POST | `/` | Create entry (201) |
+| POST | `/batch` | Retrieve multiple by ID (max 100) |
+| GET | `/:id` | Get single entry (404 if not found) |
+| PATCH | `/:id` | Partial update |
+| DELETE | `/:id` | Delete (204) |
+
+### MCP Tools
+
+| Tool | Transport Name | Description |
+|------|---------------|-------------|
+| `ingenium_plan_save` | `plan_save` | Legacy — saves context (delegates to `createContext`) |
+| `ingenium_plan_search` | `plan_search` | Legacy — FTS5 search |
+| `ingenium_plan_list` | `plan_list` | Legacy — list recent entries |
+| `ingenium_context_get` | `context_get` | Canonical — get single entry by ID |
+| `ingenium_context_update` | `context_update` | Canonical — partial update |
+| `ingenium_context_delete` | `context_delete` | Canonical — delete entry |
+| `ingenium_context_batch_get` | `context_batch_get` | Canonical — batch retrieve |
+
+The `plan_*` tools remain supported for backward compatibility. The `context_*` tools provide the canonical CRUD surface. Both read/write the same `context_entries` table.
+
+### WAL Safety
+
+All context operations follow the HARD RULE `checkpointAfterWrite()` must be called OUTSIDE `execTransaction()`. Calling checkpoint inside a transaction causes `SQLITE_LOCKED`.
+
+## RAG Indexing Architecture (Phase 3)
+
+The RAG (Retrieval-Augmented Generation) system provides two indexing paths feeding a unified search index.
+
+### Two Indexing Paths
+
+**Path 1 — Canonical Repo Files:**
+```
+POST /api/v1/rag/ingest
+       │
+  indexConfiguredDocs(globalProjectId, INGENIUM_DOCS_ROOT)
+       │
+  Walks {root}/docs/**/*.md (skips symlinks, realpath containment check)
+       │
+  ingestCanonicalSource() — SHA-256 hash-idempotent (unchanged files skipped)
+       │
+  replaceSourceContent() — atomically replaces chunks (ingestion_state tracking)
+       │
+  Sources with source_type='file', source_path='docs/relative/path.md'
+```
+
+| Guard | Behavior |
+|-------|----------|
+| Symlink skip | `lstatSync().isSymbolicLink()` — symlinks never followed |
+| Root escape prevention | Realpath containment: `docsRoot` must start with `{rootReal}/` |
+| Hash idempotency | Same hash → `unchanged++`, no DB write |
+| Stale removal | Sources with `source_type='file'` and path `docs/%` not in current file set are deleted |
+
+**Path 2 — Docs Workspace Pages (lifecycle-bound):**
+```
+publishPage() ──▶ indexPublishedDoc(page) ──▶ source_path = "docs-page:{id}"
+updatePage()  ──▶ indexPublishedDoc(page)    (only if status === "published")
+archivePage() ──▶ indexPublishedDoc({status:"archived"})  ──▶ source deletion
+restorePage() ──▶ indexPublishedDoc(page)    ──▶ source creation
+```
+
+- Pages are indexed as `source_type='text'` with metadata `{ kind: "docs_page", pageId, slug, provenance: "docs-workspace" }`
+- Archive triggers source deletion from RAG (cascade cleanup)
+- No duplicated editable docs pages — canonical `docs/**/*.md` files are indexed directly
+
+**Path 3 — Manual/Automated:**
+- `POST /rag/sources` + `POST /rag/sources/:id/ingest` for arbitrary text
+- `POST /rag/import/thread` for Thread MCP session migration (resumable via `rag_thread_imports` checkpoints)
+
+### Atomic Canonical Ingestion
+
+Every canonical ingestion (`ingestCanonicalSource()`) is fully atomic within a single `execTransaction()`:
+
+1. **Idempotency gate** — SHA-256 hash of the incoming content is compared against the stored `source_hash`. If unchanged, the function returns the existing source without any DB writes.
+2. **Path uniqueness** — A `UNIQUE INDEX` on `rag_sources(project_id, source_path) WHERE source_path IS NOT NULL` (migration 050) guarantees at most one source per canonical path per project. Re-ingesting the same path replaces the existing source.
+3. **Lifecycle state tracking** — The `rag_ingestion_state` table records the transition `in_progress → completed` within the same transaction. Partial state is never visible to readers: if the transaction fails (insert, chunk, or embedding write), all changes roll back and the state remains at its previous value.
+4. **Content replacement** — Existing chunks and embeddings are deleted before new ones are inserted, all in the same transaction. The source's `chunk_count`, `source_hash`, and `byte_size` are updated atomically.
+
+This guarantees that querying the index during an ingest operation sees either the complete previous version or the complete new version — never a partially-indexed source.
+
+### Environment Variable
+
+`INGENIUM_DOCS_ROOT` — Required for canonical repo indexing. Must point to the repository root (the parent of the `docs/` directory). `indexConfiguredDocs()` throws if unset. Verified by `context-rag-phase3.test.ts`.
+
+### Embedding Strategy
+
+| Property | Value |
+|----------|-------|
+| Model ID | `ingenium-ngram-v1` |
+| Dimensions | 384 |
+| Algorithm | FNV-1a character-trigram hash |
+| Semantic | ❌ No — deterministic bag-of-trigrams |
+| Storage | `rag_embeddings` table, `ON CONFLICT(chunk_id) DO UPDATE` |
+
+The embedding is a deterministic non-learned hash: each 3-character sliding window updates a 384-dim accumulator with FNV-1a hashing (alternating +1/-1 per LSB), then L2-normalized. This enables cosine similarity for retrieval without an external embedding model or API cost.
+
+### Chunker
+
+`rag-chunker.ts` auto-detects format and applies the appropriate chunking strategy:
+
+| Format | Strategy | Max Tokens |
+|--------|----------|------------|
+| Markdown (`##`) | Split by `##` headings, heading-context preserved | 2000 |
+| Plain text | Double-newline paragraphs, short para merging | 2000 |
+| JSON (`{entries:[]}`) | One chunk per entry | content-length |
+| JSONL | One chunk per line (Copilot transcript format) | content-length |
+
+### Search
+
+Two functions in `rag.ts`:
+
+| Function | Algorithm | Use Case |
+|----------|-----------|----------|
+| `searchChunks()` | BM25 FTS5 only, snippet-generation, cross-project (include global) | `/search` route, `/ask` route, MCP search |
+| `hybridSearch()` | 70% BM25 + 30% n-gram cosine similarity, filters at vector_score ≥ 0.08 | Available but not currently wired to API routes |
+
+Both cap at 20 results by default. `searchChunks()` accepts `limit` (max configurable via API query param up to 100).
+
+### Citations
+
+The `POST /api/v1/rag/ask` endpoint returns:
+
+```typescript
+{
+  answer: string;              // LLM-grounded answer with [1], [2] markers
+  citations: Array<{
+    id: string;                // Source UUID
+    title: string;             // Source name
+    path: string | null;       // Source file path or docs-page slug
+    heading: string | null;    // Section heading from chunk
+    snippet: string;           // BM25 snippet with <mark> highlights
+    kind: string;              // Source type: "file" | "text" | "thread_import"
+    score: number;             // Negative BM25 rank
+  }>;
+}
+```
+
+Citations are deduplicated by source ID. The LLM prompt includes `"Answer with citations like [1], [2]."` The Dashboard AskDocsPanel renders `[N]` as superscript links with title tooltip and a source list.
+
+### Thread MCP Import (Retired)
+
+The Thread MCP server's doc-upload workflow is **RETIRED** (marked in `references/thread/doc-upload.md`). All documentation upload and indexing should use `ingenium_docs_*` tools. Thread session data can be migrated into RAG via `POST /api/v1/rag/import/thread` with resumable checkpoint support (`rag_thread_imports` table).
+
 ## Dataset Reference
 
 | Package | Description | DB Access |

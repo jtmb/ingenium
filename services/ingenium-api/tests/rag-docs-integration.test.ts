@@ -17,6 +17,7 @@ const projectName = "rag-docs-integration";
 
 beforeAll(async () => {
   projects.createProject(projectName);
+  projects.createProject("global-default", true);
   const space = docs.createSpace("RAG Docs", "rag-docs");
   const page = docs.createPage(space.id, "Indexed Page", "indexed-page", "The lighthouse verification color is amber.");
   if (!page.page) throw new Error("Failed to create Docs test page");
@@ -41,14 +42,14 @@ afterAll(async () => {
 });
 
 describe("Docs RAG integration", () => {
-  it("indexes published Docs pages without manual source creation", async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/ingest?project=${projectName}`, { method: "POST" });
+  it("indexes published Docs pages at publication time", async () => {
+    const response = await fetch(`${baseUrl}/api/v1/rag/search?project=${projectName}&q=lighthouse`);
     expect(response.status).toBe(200);
-    expect((await response.json()).data).toEqual({ ingested: 1, failed: 0 });
+    expect((await response.json()).data[0]).toEqual(expect.objectContaining({ source_title: "Indexed Page", source_path: "docs-page:1" }));
   });
 
   it("returns the indexed Docs page through hybrid search", async () => {
-    const response = await fetch(`${baseUrl}/api/v1/rag/search?project=${projectName}&q=lighthouse%20amber`);
+    const response = await fetch(`${baseUrl}/api/v1/rag/search?project=${projectName}&q=lighthouse`);
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.data[0]).toEqual(expect.objectContaining({ source_title: "Indexed Page" }));

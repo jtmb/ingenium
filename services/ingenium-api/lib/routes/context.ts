@@ -14,9 +14,8 @@ export const contextRouter = Router();
 contextRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const limit = parseInt(req.query.limit as string) || 20;
-  const entries = context.recentContext(projectId, limit);
-  res.json({ data: entries });
+  const page = context.listContext(projectId, Number(req.query.limit) || 20, Number(req.query.offset) || 0);
+  res.json(page);
 });
 
 // 422 (not 400) used deliberately — the request IS well-formed, the resource just needs a query param
@@ -28,15 +27,49 @@ contextRouter.get("/search", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "query (q) is required" } });
     return;
   }
-  const results = context.searchContext(projectId, query);
-  res.json({ data: results });
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+  const results = context.searchContext(projectId, query, limit);
+  res.json({ data: results, total: results.length });
 });
 
 // tags can be a comma-separated string or array; priority defaults to 5 (medium) in the core layer
 contextRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const { content, tags, priority } = req.body;
-  const entry = context.saveContext(projectId, content, tags, priority);
-  res.status(201).json({ data: entry });
+  try {
+    const { content, tags, priority, sessionId, source, metadata } = req.body ?? {};
+    const entry = context.createContext(projectId, { content, tags, priority, sessionId, source, metadata });
+    res.status(201).json({ data: entry });
+  } catch (error) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: error instanceof Error ? error.message : "Invalid context entry" } });
+  }
+});
+
+contextRouter.post("/batch", (req, res) => {
+  const projectId = requireProject(req, res); if (!projectId) return;
+  const ids = req.body?.ids;
+  if (!Array.isArray(ids)) { res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "ids must be an array" } }); return; }
+  res.json({ data: context.getContextBatch(projectId, ids) });
+});
+
+contextRouter.get("/:id", (req, res) => {
+  const projectId = requireProject(req, res); if (!projectId) return;
+  const entry = context.getContext(projectId, Number(req.params.id));
+  if (!entry) { res.status(404).json({ error: { code: "NOT_FOUND", message: "Context entry not found" } }); return; }
+  res.json({ data: entry });
+});
+
+contextRouter.patch("/:id", (req, res) => {
+  const projectId = requireProject(req, res); if (!projectId) return;
+  try {
+    const entry = context.updateContext(projectId, Number(req.params.id), req.body ?? {});
+    if (!entry) { res.status(404).json({ error: { code: "NOT_FOUND", message: "Context entry not found" } }); return; }
+    res.json({ data: entry });
+  } catch (error) { res.status(422).json({ error: { code: "VALIDATION_ERROR", message: error instanceof Error ? error.message : "Invalid context entry" } }); }
+});
+
+contextRouter.delete("/:id", (req, res) => {
+  const projectId = requireProject(req, res); if (!projectId) return;
+  if (!context.deleteContext(projectId, Number(req.params.id))) { res.status(404).json({ error: { code: "NOT_FOUND", message: "Context entry not found" } }); return; }
+  res.status(204).send();
 });

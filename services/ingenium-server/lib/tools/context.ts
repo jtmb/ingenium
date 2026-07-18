@@ -22,3 +22,8 @@ export async function planList(project: string) {
   const res = await api.get(`/context?project=${project}`);
   return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] };
 }
+
+export async function contextGet(project: string, id: number) { const res = await api.get(`/context/${id}`, { project }); return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] }; }
+export async function contextUpdate(project: string, id: number, fields: Record<string, unknown>) { const res = await api.patch(`/context/${id}`, fields, { project }); return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] }; }
+export async function contextDelete(project: string, id: number) { const res = await api.del(`/context/${id}`, { project }); return { content: [{ type: "text" as const, text: res.status === 204 ? "Context entry deleted" : JSON.stringify(res.data) }] }; }
+export async function contextBatch(project: string, ids: number[]) { const res = await api.post("/context/batch", { ids }, { project }); return { content: [{ type: "text" as const, text: JSON.stringify(res.data) }] }; }

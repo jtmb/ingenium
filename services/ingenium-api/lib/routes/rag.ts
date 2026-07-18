@@ -48,102 +48,18 @@ function normalizeSourceType(format?: string): "text" | "file" | "thread_import"
  * and re-inserts. Returns the new chunk count.
  */
 function reingestSource(sourceId: string, content: string): number {
-  const db = getDb(dbPath());
-  const chunks = ragChunker.chunkText(content, { source: sourceId });
-
-  execTransaction(() => {
-    db.prepare("DELETE FROM rag_chunks WHERE source_id = ?").run(sourceId);
-    const insert = db.prepare(
-      `INSERT INTO rag_chunks (id, source_id, chunk_index, content, token_count, heading_path)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    );
-    const insertEmbedding = db.prepare(
-      `INSERT INTO rag_embeddings (chunk_id, embedding, model_id, dimensions, created_at)
-       VALUES (?, ?, 'ingenium-ngram-v1', 384, datetime('now'))
-       ON CONFLICT(chunk_id) DO UPDATE SET
-         embedding = excluded.embedding,
-         model_id = excluded.model_id,
-         dimensions = excluded.dimensions,
-         created_at = excluded.created_at`,
-    );
-    for (const chunk of chunks) {
-      const chunkId = randomUUID();
-      insert.run(chunkId, sourceId, chunk.id, chunk.content, chunk.tokens, chunk.heading ?? null);
-      insertEmbedding.run(chunkId, Buffer.from(new Float32Array(rag.generateEmbedding(chunk.content)).buffer));
-    }
-    db.prepare(
-      `UPDATE rag_sources
-       SET chunk_count = (SELECT count(*) FROM rag_chunks WHERE source_id = ?),
-           byte_size = COALESCE(?, byte_size),
-           updated_at = datetime('now')
-       WHERE id = ?`,
-    ).run(sourceId, content.length, sourceId);
-  });
-  checkpointAfterWrite();
-
-  return chunks.length;
-}
-
-function syncPublishedDocs(projectId: string): { ingested: number; failed: number } {
-  const db = getDb(dbPath());
-  const pages = db.prepare(
-    "SELECT id, title, slug, content FROM docs_pages WHERE status = 'published' ORDER BY id",
-  ).all() as Array<{ id: number; title: string; slug: string; content: string }>;
-  let ingested = 0;
-  let failed = 0;
-  const activePaths = new Set<string>();
-
-  for (const page of pages) {
-    const sourcePath = `docs-page:${page.id}`;
-    activePaths.add(sourcePath);
-    try {
-      let source = db.prepare(
-        "SELECT id FROM rag_sources WHERE project_id = ? AND source_path = ?",
-      ).get(projectId, sourcePath) as { id: string } | undefined;
-      if (!source) {
-        const id = randomUUID();
-        execTransaction(() => {
-          db.prepare(
-            `INSERT INTO rag_sources
-             (id, project_id, title, source_type, source_path, byte_size, metadata, created_at, updated_at)
-             VALUES (?, ?, ?, 'text', ?, ?, ?, datetime('now'), datetime('now'))`,
-          ).run(id, projectId, page.title, sourcePath, page.content.length, JSON.stringify({ pageId: page.id, slug: page.slug }));
-        });
-        checkpointAfterWrite();
-        source = { id };
-      } else {
-        execTransaction(() => {
-          db.prepare(
-            "UPDATE rag_sources SET title = ?, byte_size = ?, metadata = ?, updated_at = datetime('now') WHERE id = ?",
-          ).run(page.title, page.content.length, JSON.stringify({ pageId: page.id, slug: page.slug }), source!.id);
-        });
-        checkpointAfterWrite();
-      }
-      reingestSource(source.id, page.content);
-      ingested++;
-    } catch (error) {
-      failed++;
-      logger.warn(SOURCE, "Failed to index Docs page", {
-        pageId: page.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  const staleSources = db.prepare(
-    "SELECT id, source_path FROM rag_sources WHERE project_id = ? AND source_path LIKE 'docs-page:%'",
-  ).all(projectId) as Array<{ id: string; source_path: string }>;
-  for (const source of staleSources) {
-    if (!activePaths.has(source.source_path)) rag.deleteSource(source.id);
-  }
-  return { ingested, failed };
+  return rag.replaceSourceContent(sourceId, content);
 }
 
 ragRouter.post("/ingest", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const result = syncPublishedDocs(projectId);
-  res.json({ data: result });
+  try {
+    const global = getDb(dbPath()).prepare("SELECT id FROM projects WHERE is_global = 1 LIMIT 1").get() as { id: string } | undefined;
+    if (!global) { res.status(409).json({ error: { code: "GLOBAL_PROJECT_MISSING", message: "A global-default project is required for repository documentation indexing" } }); return; }
+    res.json({ data: rag.indexConfiguredDocs(global.id) });
+  }
+  catch (error) { res.status(422).json({ error: { code: "INDEX_CONFIGURATION_ERROR", message: error instanceof Error ? error.message : "Unable to index configured docs" } }); }
 });
 
 // ---------------------------------------------------------------------------
@@ -209,18 +125,20 @@ ragRouter.get("/sources", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const sources = rag.listSources(projectId);
+  const sources = rag.listSources(projectId, Number(req.query.limit) || 50, Number(req.query.offset) || 0);
   res.json({
-    data: sources.map((s) => ({
+    data: sources.data.map((s) => ({
       id: s.id,
       project_id: s.project_id,
       title: s.title,
       source_type: s.source_type,
+      source_path: s.source_path,
+      source_hash: s.source_hash,
       chunk_count: s.chunk_count,
       metadata: s.metadata,
       created_at: s.created_at,
       updated_at: s.updated_at,
-    })),
+    })), total: sources.total, limit: sources.limit, offset: sources.offset,
   });
 });
 
@@ -249,7 +167,7 @@ ragRouter.get("/sources/:id", (req, res) => {
       title: source.title,
       source_type: source.source_type,
       chunk_count: source.chunk_count,
-      byte_size: source.byte_size,
+       source_path: source.source_path, source_hash: source.source_hash, byte_size: source.byte_size,
       metadata: source.metadata,
       created_at: source.created_at,
       updated_at: source.updated_at,
@@ -353,21 +271,21 @@ ragRouter.get("/search", (req, res) => {
   const limit = Math.min(Math.max(parseInt(req.query.limit as string ?? "20", 10) || 20, 1), 100);
 
   try {
-    const results = rag.hybridSearch(projectId, q).slice(0, limit);
+    const results = rag.searchChunks(projectId, q, limit, true);
 
     res.json({
       data: results.map((r, i) => ({
-        index: i + 1,
-        chunk_id: r.chunk_id,
+        index: i + 1, id: r.id,
+        chunk_id: r.id,
         source_id: r.source_id,
-        source_title: r.source_name,
-        chunk_index: r.chunk_id,
+        source_title: r.source_name, source_path: r.source_path, source_type: r.source_type,
+        chunk_index: r.chunk_index,
         content: r.content,
-        heading_path: r.heading,
-        snippet: r.content.slice(0, 240),
+        heading_path: r.heading_path,
+        snippet: r.snippet,
         rank: r.rank,
-        score: r.combined_score,
-      })),
+        score: -r.rank,
+      })), total: results.length,
     });
   } catch (err: any) {
     logger.error(SOURCE, `Search failed: ${err.message}`, { projectId, query: q.slice(0, 80) });
@@ -390,7 +308,7 @@ ragRouter.post("/ask", async (req, res) => {
   }
 
   // Step 1: Search for relevant chunks
-  const results = rag.hybridSearch(projectId, question).slice(0, 10);
+  const results = rag.searchChunks(projectId, question, 10, true);
 
   if (results.length === 0) {
     res.json({
@@ -406,7 +324,7 @@ ragRouter.post("/ask", async (req, res) => {
   const chunksText = results
     .map((r, i) => {
       const srcTitle = r.source_name || `Source ${r.source_id.slice(0, 8)}`;
-      const heading = r.heading ? ` [Section: ${r.heading}]` : "";
+       const heading = r.heading_path ? ` [Section: ${r.heading_path}]` : "";
       return `[${i + 1}] (${srcTitle}${heading}): ${r.content}`;
     })
     .join("\n\n");
@@ -432,14 +350,14 @@ ragRouter.post("/ask", async (req, res) => {
 
     // Build unique source list
     const seenSources = new Set<string>();
-    const citations: Array<{ id: string; title: string; score: number }> = [];
+     const citations: Array<{ id: string; title: string; path: string | null; heading: string | null; snippet: string; kind: string; score: number }> = [];
 
     for (const r of results) {
       const srcId = r.source_id;
       const srcTitle = r.source_name;
       if (!seenSources.has(srcId)) {
         seenSources.add(srcId);
-        citations.push({ id: srcId, title: srcTitle, score: r.combined_score });
+        citations.push({ id: srcId, title: srcTitle, path: r.source_path, heading: r.heading_path, snippet: r.snippet, kind: r.source_type, score: -r.rank });
       }
     }
 
@@ -492,6 +410,7 @@ ragRouter.get("/stats", (req, res) => {
       total_sources: sourceCount,
       total_chunks: chunkCount,
       total_embeddings: embeddingCount,
+      vector_capability: { available: true, provider: "deterministic-n-gram", semantic: false },
     },
   });
 });

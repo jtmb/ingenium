@@ -859,6 +859,12 @@ server.registerTool(
   wrapHandler(C("plan_list"), async ({ project }) => contextTools.planList(project)),
 );
 
+// Explicit canonical context memory surface. plan_* remains supported above.
+server.registerTool("context_get", { description: "Get a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive() } }, wrapHandler(C("context_get"), async ({ project, id }) => contextTools.contextGet(project, id)));
+server.registerTool("context_update", { description: "Update a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive(), fields: z.record(z.unknown()) } }, wrapHandler(C("context_update"), async ({ project, id, fields }) => contextTools.contextUpdate(project, id, fields)));
+server.registerTool("context_delete", { description: "Delete a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive() } }, wrapHandler(C("context_delete"), async ({ project, id }) => contextTools.contextDelete(project, id)));
+server.registerTool("context_batch_get", { description: "Retrieve a batch of canonical context entries.", inputSchema: { project: projectParam, ids: z.array(z.number().int().positive()).max(100) } }, wrapHandler(C("context_batch_get"), async ({ project, ids }) => contextTools.contextBatch(project, ids)));
+
 // ── Projects ────────────────────────────────────────────
 
 server.registerTool(

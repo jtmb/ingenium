@@ -94,9 +94,20 @@ OpenCode applies the server key (`ingenium`) as a prefix. Transport names are un
 
 24 tools: create, list, move, complete, next, update, delete, search, comment, activity, link, board_config_get, board_config_set, subtask_create, notifications, get, comments_list, comment_edit, comment_react, links_list, link_delete, tree, notification_read, bulk_update.
 
-## PLANS — Saved notes & context
+## PLANS — Saved notes & context (legacy)
 
 `ingenium_plan_save`, `ingenium_plan_search`, `ingenium_plan_list`.
+
+## CONTEXT — Canonical agent memory (4 tools, Phase 3)
+
+| Tool | What it does |
+|------|-------------|
+| `ingenium_context_get` | Get a single canonical agent memory entry by ID |
+| `ingenium_context_update` | Update an existing context entry (content, tags, priority, source, metadata) |
+| `ingenium_context_delete` | Delete a context entry |
+| `ingenium_context_batch_get` | Batch retrieve multiple context entries by ID (max 100) |
+
+Context entries are project-isolated, taggable, priority-ranked (0–10), and FTS5-searchable. They persist working context across sessions — the task management and plan surface reads from the same `context_entries` table. The `plan_*` tools remain supported for backward compatibility; `context_*` tools provide the canonical CRUD surface. See `services/ingenium-api/lib/routes/context.ts` and `packages/ingenium-core/lib/tools/context.ts`.
 
 ## PLUGINS — Add-ons
 
@@ -157,14 +168,18 @@ OpenCode applies the server key (`ingenium`) as a prefix. Transport names are un
 
 | Tool | What it does |
 |------|-------------|
-| `ingenium_docs_search_semantic` | Semantic search across the RAG document index |
-| `ingenium_docs_ask` | Ask a question against the RAG index, receives LLM-grounded answer with citations |
+| `ingenium_docs_search_semantic` | BM25 FTS5 full-text search across the RAG document index with snippet generation (uses `searchChunks()`). |
+| `ingenium_docs_ask` | Ask a question against the RAG index. Returns LLM-grounded `answer` with `citations[]` (source title, path, heading, snippet, source kind, relevance score). Citations rendered as `[N]` superscript links in the Dashboard AskDocs panel. |
 | `ingenium_docs_ingest` | Create a new source and ingest a document into the RAG index |
 | `ingenium_docs_rag_sources_list` | List all RAG document sources |
 | `ingenium_docs_rag_source_get` | Get a single RAG source by ID |
-| `ingenium_docs_rag_source_delete` | Delete a RAG source by ID |
+| `ingenium_docs_rag_source_delete` | Delete a RAG source by ID and cascade its chunks |
 | `ingenium_docs_rag_reingest` | Re-ingest an existing RAG source with new text |
-| `ingenium_docs_rag_stats` | Get RAG index statistics (document count, chunk count, etc.) |
+| `ingenium_docs_rag_stats` | Get RAG index statistics (document count, chunk count, etc.) and vector capability `{ available, provider: "deterministic-n-gram", semantic: false }` |
+
+**Indexing sources**: (1) Canonical repo Markdown files via `POST /rag/ingest` using `INGENIUM_DOCS_ROOT` — walked from `{root}/docs/`, symlink-protected, hash-idempotent. (2) Docs Workspace pages at lifecycle boundaries (publish, update, archive, restore) — auto-indexed as `docs-page:{id}`. (3) Manual ingestion via `ingenium_docs_ingest`. (4) Thread MCP session imports via `POST /rag/import/thread` with resume checkpoints.
+
+**Embedding strategy**: Deterministic 384-dim FNV-1a character-trigram hash (`ingenium-ngram-v1`) — NOT semantic. The `hybridSearch()` function exists (70% BM25 + 30% n-gram cosine similarity) but is not currently wired to API routes — the `/search` and `/ask` routes use BM25 FTS5 via `searchChunks()`. See `packages/ingenium-core/lib/tools/rag.ts`.
 
 ## SERVERS — Child MCP servers
 
