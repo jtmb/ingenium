@@ -12,11 +12,11 @@
  * general resource like skills/agents/plugins.
  */
 import { pushDiskToApi } from "./resource-sync.js";
+import { ensureExtensionProject } from "./project-resolver.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
-const DEFAULT_PROJECT = process.env.INGENIUM_PROJECT || "global-default";
 
 type UpsertResult = { created: number; skipped: number; errors: number };
 
@@ -32,7 +32,7 @@ function logResult(service: string, result: UpsertResult): string {
  * HACK: JSONC-style comments are stripped before parsing because opencode.json
  * is technically JSONC, not strict JSON.
  */
-async function syncServers(worktree: string): Promise<UpsertResult> {
+async function syncServers(worktree: string, project: string): Promise<UpsertResult> {
   const result: UpsertResult = { created: 0, skipped: 0, errors: 0 };
   try {
     const opencodePath = resolve(worktree, "opencode.json");
@@ -45,7 +45,7 @@ async function syncServers(worktree: string): Promise<UpsertResult> {
     if (!mcpBlock || typeof mcpBlock !== "object") return result;
 
     // Fetch existing servers to distinguish created vs skipped
-    const listRes = await fetch(`${API_BASE}/servers?project=${encodeURIComponent(DEFAULT_PROJECT)}`);
+    const listRes = await fetch(`${API_BASE}/servers?project=${encodeURIComponent(project)}`);
     const existing = new Set<string>();
     if (listRes.ok) {
       const listData = await listRes.json() as { data: Array<{ name: string }> };
@@ -65,7 +65,7 @@ async function syncServers(worktree: string): Promise<UpsertResult> {
     });
 
     // Upsert all servers in a single API call
-    const syncRes = await fetch(`${API_BASE}/servers/sync-all?project=${encodeURIComponent(DEFAULT_PROJECT)}`, {
+    const syncRes = await fetch(`${API_BASE}/servers/sync-all?project=${encodeURIComponent(project)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ servers: serverPayloads }),
@@ -89,11 +89,12 @@ export const OnboardingSyncPlugin = async (ctx: { worktree: string; client: any 
     event: async ({ event }: { event: any }) => {
       if (event.type !== "session.created") return;
 
+      const project = await ensureExtensionProject(worktree, API_BASE);
       const pushResult = await pushDiskToApi(worktree);
 
       // Server sync is handled inline (not in resource-sync.ts) because MCP server
       // definitions are OpenCode-specific config, not general resources
-      const srvR = await syncServers(worktree);
+      const srvR = await syncServers(worktree, project);
 
       const parts: string[] = [];
       const plugR = pushResult.plugins;

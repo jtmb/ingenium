@@ -72,6 +72,7 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 | POST | `/api/v1/projects/:name/restore` | Restore an archived project |
 | GET | `/api/v1/projects/archive` | List archived projects |
 | POST | `/api/v1/projects/purge` | Purge expired projects |
+| POST | `/api/v1/projects/migrate-workspace` | DB-only migration of historical invalid `/workspace` project into `global-default`. Optional `dry_run: true` for pre-flight validation. Returns `WorkspaceMigrationResult`. Never touches filesystem. |
 
 ### Skills
 | Method | Endpoint | Purpose |

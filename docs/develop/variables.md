@@ -18,7 +18,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `LOG_LEVEL` | `info` | `logger.ts` | Pino log level (`debug`, `info`, `warn`, `error`) |
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | `tools/paths.ts` | Global config path for skills/plugins/commands |
-| `INGENIUM_PROJECT` | `global-default` | extension plugins | Project name for extension plugins to write to |
+| `INGENIUM_PROJECT` | _(none — required to override worktree)_ | extension plugins | **Extension session override.** When set, takes priority over worktree-derived project name. Required when the worktree path is `/workspace` (container mount) — see architecture docs. Never defaults to `global-default` in code; the Docker entrypoint sets this explicitly. |
 
 ## API (`services/ingenium-api`)
 

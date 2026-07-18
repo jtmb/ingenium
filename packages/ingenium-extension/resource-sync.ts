@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, lstatSync, unlinkSync, rmdirSync, realpathSync } from "node:fs";
 import { resolve, basename, dirname, isAbsolute, sep } from "node:path";
 import { createHash } from "node:crypto";
+import { ensureExtensionProject, resolveExtensionProject } from "./project-resolver.js";
 
 const API_BASE =
   (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ??
@@ -38,24 +39,9 @@ let _projectResolved = false;
  */
 export function resolveProject(worktree: string): string {
   if (_projectResolved) return _projectCache!;
-
-  const envProject = process.env.INGENIUM_PROJECT?.trim();
-  if (envProject && envProject.length > 0) {
-    _projectCache = envProject;
-    _projectResolved = true;
-    return _projectCache;
-  }
-
-  const worktreeName = basename(worktree);
-  if (worktreeName && worktreeName.length > 0 && worktreeName !== "." && worktreeName !== "/") {
-    _projectCache = worktreeName;
-    _projectResolved = true;
-    return _projectCache;
-  }
-
-  throw new Error(
-    "resource-sync: Could not resolve project name. Set INGENIUM_PROJECT env var or ensure worktree has a meaningful directory name."
-  );
+  _projectCache = resolveExtensionProject(worktree);
+  _projectResolved = true;
+  return _projectCache;
 }
 
 /** For testing — reset the cached project resolution. */
@@ -1409,7 +1395,9 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
  * resource types affect the OpenCode runtime and require a restart.
  */
 export async function fullSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean }> {
-  const project = resolveProject(worktree);
+  const project = await ensureExtensionProject(worktree, API_BASE);
+  _projectCache = project;
+  _projectResolved = true;
   const manifest = loadManifest(worktree, project);
   const isInitialSync = Object.keys(manifest.resources.skills).length === 0 &&
     Object.keys(manifest.resources.agents).length === 0 &&
@@ -1545,7 +1533,7 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
  * Performs a skills-only sync on session.created.
  */
 export async function skillsOnlySync(worktree: string): Promise<{ synced: number; skipped: number }> {
-  const project = resolveProject(worktree);
+  const project = await ensureExtensionProject(worktree, API_BASE);
   const manifest = loadManifest(worktree, project);
   const isInitialSync = Object.keys(manifest.resources.skills).length === 0;
 
@@ -1568,7 +1556,7 @@ export async function pushDiskToApi(worktree: string): Promise<{
   skills: { created: number; skipped: number; errors: number };
   servers: { created: number; skipped: number; errors: number };
 }> {
-  const project = resolveProject(worktree);
+  const project = await ensureExtensionProject(worktree, API_BASE);
   const manifest = loadManifest(worktree, project);
 
   const results = await Promise.all([

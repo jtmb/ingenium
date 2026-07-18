@@ -4,13 +4,13 @@
  * On session start: imports locally-saved observations (API-down fallback) into the DB.
  * On session idle: triggers synthesis if the check-interval timer has elapsed.
  *
- * NOTE: DEFAULT_PROJECT falls back to "global-default" here (unlike resource-sync.ts which
- * never falls back) because this runs in the extension context where the user always has
- * a default global project. Resource-sync runs in server context where project isolation is critical.
+ * Extension events always resolve an explicit worktree-derived project. They never fall
+ * back to global-default, which is reserved for the container's own session.
  */
 
+import { ensureExtensionProject } from "./project-resolver.js";
+
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
-const DEFAULT_PROJECT = process.env.INGENIUM_PROJECT || "global-default";
 
 async function apiFetch(path: string, options?: RequestInit): Promise<any> {
   const url = `${API_BASE}${path}`;
@@ -33,12 +33,14 @@ export async function logPipelineEvent(
   eventType: string,
   eventSource: string,
   title: string,
+  worktree: string,
   description?: string,
   data?: any,
   sessionId?: string,
 ): Promise<void> {
   try {
-    await apiFetch(`/pipeline/events?project=${DEFAULT_PROJECT}`, {
+    const project = await ensureExtensionProject(worktree, API_BASE);
+    await apiFetch(`/pipeline/events?project=${encodeURIComponent(project)}`, {
       method: "POST",
       body: JSON.stringify({
         event_type: eventType,
@@ -50,8 +52,10 @@ export async function logPipelineEvent(
         importance: 5,
       }),
     });
-  } catch {
-    // Non-fatal — observability should never block pipeline
+  } catch (error) {
+    // Non-fatal — observability should never block pipeline, but never drop it silently.
+    // Do not include API response text here: it can contain upstream diagnostics or credentials.
+    process.stderr.write(`${JSON.stringify({ event: "pipeline_event_rejected", reason: "request_failed", eventType, eventSource })}\n`);
   }
 }
 
@@ -63,6 +67,7 @@ export async function logPipelineEvent(
  * The file format: YYYY-MM-DD | type | content | importance | source
  */
 export async function importObservationsFromFile(worktree: string): Promise<{ imported: number; skipped: number }> {
+  const project = await ensureExtensionProject(worktree, API_BASE);
   const pathModule = require("path");
   const fs = require("fs");
 
@@ -95,7 +100,7 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
       const obsContent = parts[2]?.trim() || entry;
       const importance = parseInt(parts[3]?.trim() || "5");
       
-      await apiFetch(`/observations?project=${DEFAULT_PROJECT}`, {
+        await apiFetch(`/observations?project=${encodeURIComponent(project)}`, {
         method: "POST",
         body: JSON.stringify({
           observation_type: obsType,
@@ -125,6 +130,7 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
       "observation_imported",
       "plugin",
       `Imported ${imported} observation(s) from file fallback`,
+      worktree,
       `${skipped} skipped`,
       { imported, skipped },
     );
@@ -139,15 +145,17 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
  */
 export async function triggerSynthesis(worktree: string, sessionId?: string): Promise<{ triggered: boolean; message: string }> {
   try {
+    const project = await ensureExtensionProject(worktree, API_BASE);
     await logPipelineEvent(
       "synthesis_triggered",
       "plugin",
       "Synthesis pipeline triggered",
+      worktree,
       "",
       {},
     );
 
-    const params = new URLSearchParams({ project: DEFAULT_PROJECT });
+    const params = new URLSearchParams({ project });
     if (sessionId) params.set("session_id", sessionId);
     const result = await apiFetch(`/synthesis/run?${params}`, {
       method: "POST",

@@ -146,6 +146,9 @@ User interacts with OpenCode (:4098)
   │   → imports local file fallbacks if API was down
   │   → triggers POST /api/v1/synthesis/run
   │   → fires pipeline events for dashboard observability
+  │   → 🔴 non-fatal: dropped pipeline events (API unavailable) are
+  │     logged to stderr instead of silently swallowed; the
+  │     scheduled 15min maintenance cycle provides coverage
   │
   ├─ Skill Sync Plugin (skill-sync.ts, session.created / session.idle)
   │   → fetches skills from API

@@ -7,9 +7,15 @@
   "bin": {
     "@ingenium/extension": "dist/scripts/mcp-server.js"
   },
-  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js", "auto-observer.js", "onboarding-sync.js", "resource-sync.js", "dist/"],
+  "files": ["index.js", "observer.js", "observer-core.js", "skill-sync.js", "auto-observer.js", "onboarding-sync.js", "resource-sync.js", "project-resolver.js", "dist/"],
   "scripts": {
-    "build": "rm -rf dist && cp -r ../../services/ingenium-server/dist dist"
+    "build": "rm -rf dist && cp -r ../../services/ingenium-server/dist dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.0.0"
   },
   "dependencies": {
     "@opencode-ai/plugin": "*"

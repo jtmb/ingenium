@@ -32,6 +32,9 @@ OpenCode applies the server key (`ingenium`) as a prefix. Transport names are un
 | `ingenium_project_list_archived` | Shows deleted/archived projects. |
 | `ingenium_project_purge` | Permanently wipes old projects. |
 | `ingenium_project_set_global` | Makes a project shared across everything. |
+| `ingenium_project_detail` | Gets detailed info about one project. **No project param needed.** |
+| `ingenium_project_rename` | Renames an existing project. |
+| `ingenium_project_migrate_workspace` | DB-only migration — moves the historical `/workspace` project into `global-default`. Never touches filesystem. Use `dryRun: true` first. |
 
 ## SKILLS — Guides the AI uses to work (25 tools = 11 core + 14 governance)
 

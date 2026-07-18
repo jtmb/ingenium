@@ -1,6 +1,14 @@
 import { Router } from "express";
 import { projects } from "ingenium-core";
 
+function requireSafeProjectName(value: unknown, res: import("express").Response): value is string {
+  if (!projects.isValidProjectName(value)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Project name must be a non-empty identifier (max 64 chars, no whitespace, separators, dot segments, or control characters)" } });
+    return false;
+  }
+  return true;
+}
+
 /** Handles /api/v1/projects — project CRUD, archive/restore, and global project designation. */
 export const projectsRouter = Router();
 
@@ -14,8 +22,9 @@ projectsRouter.get("/", (_req, res) => {
 
 projectsRouter.post("/", (req, res) => {
   const { name, is_global } = req.body;
-  if (!name || typeof name !== "string") {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "name is required" } });
+  if (!requireSafeProjectName(name, res)) return;
+  if (projects.getProject(name)) {
+    res.status(409).json({ error: { code: "CONFLICT", message: `Project '${name}' already exists` } });
     return;
   }
   const project = projects.createProject(name, !!is_global);
@@ -24,10 +33,7 @@ projectsRouter.post("/", (req, res) => {
 
 projectsRouter.patch("/:name", (req, res) => {
   const { name: newName } = req.body;
-  if (!newName || typeof newName !== "string") {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "name is required in body" } });
-    return;
-  }
+  if (!requireSafeProjectName(req.params.name, res) || !requireSafeProjectName(newName, res)) return;
   const updated = projects.updateProject(req.params.name!, newName);
   if (!updated) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${req.params.name}' not found` } });
@@ -42,6 +48,7 @@ projectsRouter.get("/archive", (_req, res) => {
 });
 
 projectsRouter.delete("/:name", (req, res) => {
+  if (!requireSafeProjectName(req.params.name, res)) return;
   const archived = projects.archiveProject(req.params.name!);
   if (!archived) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Project '${req.params.name}' not found or already archived` } });
@@ -52,9 +59,14 @@ projectsRouter.delete("/:name", (req, res) => {
 
 // Permanently deletes all project data — distinct from archive which is reversible
 projectsRouter.delete("/:name/purge", (req, res) => {
+  if (!requireSafeProjectName(req.params.name, res)) return;
   const result = projects.deleteProject(req.params.name!);
-  if (!result) {
+  if (result.status === "not_found") {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
+    return;
+  }
+  if (result.status === "has_children") {
+    res.status(409).json({ error: { code: "PROJECT_HAS_CHILDREN", message: "Project has referenced data and cannot be permanently deleted", details: { child_tables: result.childTables } } });
     return;
   }
   res.status(204).send();
@@ -62,6 +74,7 @@ projectsRouter.delete("/:name/purge", (req, res) => {
 
 // Reverses an archive — only works for projects in archived state
 projectsRouter.post("/:name/restore", (req, res) => {
+  if (!requireSafeProjectName(req.params.name, res)) return;
   const restored = projects.unarchiveProject(req.params.name!);
   if (!restored) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: `Archived project '${req.params.name}' not found` } });
@@ -78,6 +91,7 @@ projectsRouter.post("/purge", (req, res) => {
 });
 
 projectsRouter.get("/:name/detail", (req, res) => {
+  if (!requireSafeProjectName(req.params.name, res)) return;
   const detail = projects.getProjectDetail(req.params.name!);
   if (!detail) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Project not found" } });
@@ -87,6 +101,7 @@ projectsRouter.get("/:name/detail", (req, res) => {
 });
 
 projectsRouter.patch("/:name/global", (req, res) => {
+  if (!requireSafeProjectName(req.params.name, res)) return;
   const { is_global } = req.body;
   if (is_global === undefined || typeof is_global !== "boolean") {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "is_global (boolean) is required" } });
@@ -98,4 +113,14 @@ projectsRouter.patch("/:name/global", (req, res) => {
     return;
   }
   res.json({ data: { name: req.params.name, is_global } });
+});
+
+/** DB-only repair for the historical invalid project. Never touches filesystem /workspace. */
+projectsRouter.post("/migrate-workspace", (req, res) => {
+  try {
+    const result = projects.migrateWorkspaceProject(req.body?.dry_run === true);
+    res.json({ data: result });
+  } catch (error) {
+    res.status(409).json({ error: { code: "MIGRATION_REFUSED", message: error instanceof Error ? error.message : String(error) } });
+  }
 });

@@ -26,7 +26,7 @@ export function resolveProjectId(name: string): string | null {
  */
 export function requireProject(req: Request, res: Response): string | null {
   const name = req.query.project as string | undefined;
-  if (!name) {
+  if (!projects.isValidProjectName(name)) {
     res.status(400).json({ error: { code: "BAD_REQUEST", message: "project query parameter is required. Create a project first." } });
     return null;
   }

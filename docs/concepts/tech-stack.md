@@ -27,11 +27,12 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 
 ## Database Migrations
 
-Ingenium currently has 48 numbered migrations (`001`–`048`):
+Ingenium currently has 49 numbered migrations (`001`–`049`):
 
 - `001`–`028`: platform, self-learning, tasks/jobs, skill project isolation, and email persistence
 - `029`–`040`: documentation workspace schema and integrity repair
 - `041`–`045`: skill maintenance locks, immutable versions, lineage, governance proposals, and pipeline event types
 - `046`–`048`: encrypted vault, database backups, and Docs RAG
+- `049`: workspace project migration — `project_migration_manifests` table for the DB-only `/workspace` → `global-default` migration audit trail
 
 The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.
