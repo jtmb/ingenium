@@ -27,10 +27,12 @@ RUN npm prune --omit=dev
 FROM node:22-slim AS runtime
 
 ARG OPENCODE_VERSION=1.18.3
+ARG OPENCODE_SHA256=60f27b2679f00a511b6539f97e02448afaf58d9c66e2448285ea0c517ca84583
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor curl ca-certificates tzdata python3 make g++ git sudo && \
     rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
+    echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin/ opencode && \
     chmod +x /usr/local/bin/opencode && \
     rm /tmp/opencode.tar.gz
@@ -81,7 +83,7 @@ RUN mkdir -p /app/config /app/.ingenium/logs /app/.opencode/skills /workspace &&
 # Pre-create appuser home for OpenCode config persistence
 RUN mkdir -p /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log && chown -R appuser:appuser /home/appuser
 # Pre-create both the container default and the fallback opencode.json
-RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@latest","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data"}}},"plugin":[]}' > /app/config/opencode.container.json && \
+ RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@latest","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":[]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 

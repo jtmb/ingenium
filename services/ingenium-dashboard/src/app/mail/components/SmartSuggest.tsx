@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useProject } from "../../../lib/ProjectContext";
+import { getApiBase } from "@/lib/api";
 
 // ── Module-level components ──────────────────────────────────────────────────
 
@@ -257,7 +258,7 @@ export default function SmartSuggest({
       setLoading(true);
       setError(null);
 
-      const base = apiUrl || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+      const base = apiUrl || getApiBase();
       fetch(`${base}/emails/suggest/${emailUid}?project=${project}&account=${accountId}&folder=${encodeURIComponent(folder ?? "")}`)
         .then((res) => {
           if (!res.ok) throw new Error("Failed to fetch suggestion");

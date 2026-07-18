@@ -3,8 +3,9 @@
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { getApiBase } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+const API_BASE = getApiBase();
 const PROJECT = "gh-llm-bootstrap";
 
 /**

@@ -10,6 +10,7 @@ import EditorToolbar, { type EditorMode } from "./EditorToolbar";
 import AIActions from "./AIActions";
 import DictationButton from "./DictationButton";
 import type { DocPage, DocDraft } from "@/lib/docs-types";
+import { getApiBase } from "@/lib/api";
 
 interface DocsEditorProps {
   page: DocPage;
@@ -20,7 +21,7 @@ interface DocsEditorProps {
   onModeChange?: (mode: EditorMode) => void;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+const API_BASE = getApiBase();
 /** PERF: 5s interval balances responsiveness vs write pressure on SQLite WAL. */
 const AUTOSAVE_INTERVAL = 5000;
 /** PREVIEW_DEBOUNCE: shorter than autosave — only drives the live preview panel, not persistence. */

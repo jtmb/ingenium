@@ -9,8 +9,9 @@ import AccountSetup from "./components/AccountSetup";
 import SyncProgress from "./components/SyncProgress";
 import Overlay from "../components/Overlay";
 import EmailComposer from "./components/EmailComposer";
+import { getApiBase } from "@/lib/api";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+const API_BASE = getApiBase();
 
 /**
  * 🔴 Mail is always global — resolve the global project for all API calls.
@@ -22,8 +23,7 @@ function useMailProject(): string {
   const [project, setProject] = useState("global-default");
 
   useEffect(() => {
-    const API_URL = "http://localhost:4097/api/v1";
-    fetch(`${API_URL}/projects`)
+    fetch(`${getApiBase()}/projects`)
       .then(r => r.json())
       .then(data => {
         const global = data?.data?.find((p: any) => p.is_global);

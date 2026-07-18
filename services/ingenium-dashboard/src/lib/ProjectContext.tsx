@@ -2,10 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
+import { getApiBase } from "./api";
 
 const STORAGE_KEY = "ingenium_active_project";
 const GLOBAL_CACHE_KEY = "ingenium_global_project";
-const API_URL = "http://localhost:4097/api/v1";
 
 /**
  * Module-level cache for the global project name.
@@ -25,7 +25,7 @@ async function fetchProjects(): Promise<Array<{ name: string; is_global?: boolea
   if (fetchPromise) return fetchPromise;
 
   fetchPromise = (async () => {
-    const res = await fetch(`${API_URL}/projects`);
+    const res = await fetch(`${getApiBase()}/projects`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     return Array.isArray(data.data) ? data.data : [];

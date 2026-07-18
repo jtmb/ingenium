@@ -4,10 +4,10 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
-import { api, Job, JobRun, JobRunLog, Agent } from "../../lib/api";
+import { api, Job, JobRun, JobRunLog, Agent, getApiBase } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+const API_BASE = getApiBase();
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */

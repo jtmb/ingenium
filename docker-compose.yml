@@ -3,9 +3,9 @@ services:
     build: .
     ports:
       - "3000:3000"   # Dashboard
-      - "4097:4097"   # API
+      - "127.0.0.1:4097:4097"   # API (host loopback only — dashboard uses same-origin proxy)
       - "127.0.0.1:4098:4098"   # OpenCode Web (host loopback only)
-      - "127.0.0.1:4099:4099"   # ttyd OpenCode CLI
+      - "127.0.0.1:4099:4099"   # ttyd OpenCode CLI (host loopback only)
       - "127.0.0.1:1455:4097"   # OAuth callback proxy to the API
     environment:
       - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?OPENCODE_SERVER_PASSWORD is required}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { getApiBase } from "@/lib/api";
 
 export type AIAction =
   | "outline"
@@ -40,7 +41,7 @@ const ACTIONS: AIActionDef[] = [
   { action: "tone_technical", label: "Technical", description: "Rewrite with technical tone" },
 ];
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4097/api/v1";
+const API_BASE = getApiBase();
 
 interface AIResponse {
   data: { result: string };
