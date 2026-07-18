@@ -76,16 +76,17 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 
 ---
 
-### Feature Migrations (045–050)
+### Feature Migrations (045–051)
 
 | # | File | Purpose |
 |---|------|---------|
 | 045 | `045_pipeline_event_types.sql` | Adds `skill_created`, `skill_updated`, and proposal event types to `pipeline_events` CHECK constraint |
 | 046 | `046_vault.sql` | Creates `vault_config`, `vault_folders`, `vault_items`, and `vault_audit_log` — encrypted secrets vault with scrypt key derivation, AES-256-GCM envelope encryption, and full audit trail |
 | 047 | `047_backups.sql` | Creates `backup_records` and `backup_restore_jobs` — dual-snapshot (Ingenium + OpenCode DB) backup/restore with SHA-256 manifest validation and migration-compatibility checks |
-| 048 | `048_docs_rag.sql` | Creates `rag_sources`, `rag_chunks`, `rag_chunks_fts` (FTS5), `rag_embeddings`, `rag_ingestion_state`, and `rag_thread_imports` — RAG pipeline with token-aware chunking, embedding storage, and resumable Thread imports |
+| 048 | `048_docs_rag.sql` | Creates the original RAG tables, FTS5 index, embeddings, ingestion state, and a legacy import checkpoint table |
 | 049 | `049_workspace_project_migration.sql` | Creates `project_migration_manifests` audit table — transactional DB-only migration of historical `/workspace` project into `global-default` with hash verification, child row protection, and rollback safety |
 | 050 | `050_context_rag_phase3.sql` | Adds `source`, `metadata`, `updated_at` to `context_entries` with source CHECK constraint and index; adds unique index `idx_rag_sources_project_path` for canonical path-based idempotency in `rag_sources` — Phase 3 context/RAG ingestion and validation |
+| 051 | `051_thread_retirement.sql` | Removes the verified-empty legacy checkpoint table and rebuilds `rag_sources` without the retired source type; the runner refuses non-zero legacy data before schema changes |
 
 *See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
 
