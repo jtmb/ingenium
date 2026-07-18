@@ -655,9 +655,8 @@ restorePage() ──▶ indexPublishedDoc(page)    ──▶ source creation
 - Archive triggers source deletion from RAG (cascade cleanup)
 - No duplicated editable docs pages — canonical `docs/**/*.md` files are indexed directly
 
-**Path 3 — Manual/Automated:**
+**Path 3 — Manual:**
 - `POST /rag/sources` + `POST /rag/sources/:id/ingest` for arbitrary text
-- `POST /rag/import/thread` for Thread MCP session migration (resumable via `rag_thread_imports` checkpoints)
 
 ### Atomic Canonical Ingestion
 
@@ -721,17 +720,13 @@ The `POST /api/v1/rag/ask` endpoint returns:
     path: string | null;       // Source file path or docs-page slug
     heading: string | null;    // Section heading from chunk
     snippet: string;           // BM25 snippet with <mark> highlights
-    kind: string;              // Source type: "file" | "text" | "thread_import"
+    kind: string;              // Source type: "file" | "text" | "url"
     score: number;             // Negative BM25 rank
   }>;
 }
 ```
 
 Citations are deduplicated by source ID. The LLM prompt includes `"Answer with citations like [1], [2]."` The Dashboard AskDocsPanel renders `[N]` as superscript links with title tooltip and a source list.
-
-### Thread MCP Import (Retired)
-
-The Thread MCP server's doc-upload workflow is **RETIRED** (marked in `references/thread/doc-upload.md`). All documentation upload and indexing should use `ingenium_docs_*` tools. Thread session data can be migrated into RAG via `POST /api/v1/rag/import/thread` with resumable checkpoint support (`rag_thread_imports` table).
 
 ## Dataset Reference
 

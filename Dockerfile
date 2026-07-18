@@ -8,6 +8,7 @@ COPY package.json package-lock.json ./
 # Copy workspace package.json files for dependency install
 COPY packages/ingenium-core/package.json ./packages/ingenium-core/
 COPY packages/ingenium-email/package.json ./packages/ingenium-email/
+COPY packages/ingenium-extension/package.json ./packages/ingenium-extension/
 COPY services/ingenium-api/package.json ./services/ingenium-api/
 COPY services/ingenium-server/package.json ./services/ingenium-server/
 COPY services/ingenium-dashboard/package.json ./services/ingenium-dashboard/

@@ -662,35 +662,25 @@ describe("Provider status", () => {
     vi.stubEnv("OPENCODE_URL", "http://localhost:4098");
 
     const mockStatus = {
-      providers: [
-        {
-          providerId: "openai",
-          connected: true,
-          keyPrefix: "sk-...",
-          keySet: true,
-        },
-        {
-          providerId: "anthropic",
-          connected: true,
-          keyPrefix: "sk-ant-...",
-          keySet: true,
-        },
-        {
-          providerId: "lmstudio",
-          connected: false,
-          keyPrefix: null,
-          keySet: false,
-        },
+      location: {},
+      data: [
+        { id: "openai", name: "OpenAI", methods: [{ type: "key" }], connections: [{ type: "credential", id: "cred-openai" }] },
+        { id: "anthropic", name: "Anthropic", methods: [{ type: "key" }], connections: [{ type: "credential", id: "cred-anthropic" }] },
+        { id: "lmstudio", name: "LM Studio", methods: [{ type: "env" }], connections: [] },
       ],
     };
 
+    const originalFetch = globalThis.fetch;
     const fetchSpy = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, mockStatus));
 
     vi.stubGlobal("fetch", fetchSpy);
-
-    const result: any = await request("/auth/status");
+    const normalized = await opencodeClient.getAuthStatus("/workspace");
+    vi.unstubAllGlobals();
+    vi.spyOn(opencodeClient, "getAuthStatus").mockResolvedValue(normalized);
+    const response = await originalFetch(`${apiUrl}/auth/status?directory=/workspace`);
+    const result: any = (await response.json()).data;
 
     expect(result).not.toHaveProperty("error");
     expect(result.providers).toBeDefined();
@@ -707,7 +697,8 @@ describe("Provider status", () => {
     const responseStr = JSON.stringify(result);
     expect(responseStr).not.toMatch(/sk-\w{10,}/);
     expect(responseStr).not.toMatch(/sk-ant\w{10,}/);
-    // Prefixes like "sk-..." are acceptable metadata
+    expect(fetchSpy.mock.calls[0]?.[0]).toContain("/api/integration");
+    expect(fetchSpy.mock.calls[0]?.[0]).not.toContain("/auth");
   });
 
   it("shows all providers as disconnected when no credentials are configured", async () => {
@@ -715,19 +706,23 @@ describe("Provider status", () => {
     vi.stubEnv("OPENCODE_URL", "http://localhost:4098");
 
     const emptyStatus = {
-      providers: [
-        { providerId: "openai", connected: false, keyPrefix: null, keySet: false },
-        { providerId: "anthropic", connected: false, keyPrefix: null, keySet: false },
+      location: {},
+      data: [
+        { id: "openai", name: "OpenAI", methods: [{ type: "key" }], connections: [] },
+        { id: "anthropic", name: "Anthropic", methods: [{ type: "key" }], connections: [] },
       ],
     };
 
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValueOnce(mockResponse(200, emptyStatus));
-
-    vi.stubGlobal("fetch", fetchSpy);
-
-    const result: any = await request("/auth/status");
+    vi.spyOn(opencodeClient, "getAuthStatus").mockResolvedValue({
+      providers: emptyStatus.data.map((integration) => ({
+        providerId: integration.id,
+        name: integration.name,
+        connected: false,
+        keySet: false,
+      })),
+    });
+    const response = await fetch(`${apiUrl}/auth/status`);
+    const result: any = (await response.json()).data;
 
     expect(result.providers.every((p: any) => p.connected === false)).toBe(true);
     expect(result.providers.every((p: any) => p.keySet === false)).toBe(true);
@@ -737,13 +732,9 @@ describe("Provider status", () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
     vi.stubEnv("OPENCODE_URL", "http://localhost:4098");
 
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValueOnce(mockResponse(200, { providers: [] }));
-
-    vi.stubGlobal("fetch", fetchSpy);
-
-    const result: any = await request("/auth/status");
+    vi.spyOn(opencodeClient, "getAuthStatus").mockResolvedValue({ providers: [] });
+    const response = await fetch(`${apiUrl}/auth/status`);
+    const result: any = (await response.json()).data;
     expect(result.providers).toEqual([]);
   });
 });
@@ -885,23 +876,22 @@ describe("Secret leak check", () => {
     vi.stubEnv("OPENCODE_URL", "http://localhost:4098");
 
     const mockStatus = {
-      providers: [
-        {
-          providerId: "openai",
-          connected: true,
-          keyPrefix: "sk-...",
-          keySet: true,
-        },
+      location: {},
+      data: [
+        { id: "openai", name: "OpenAI", methods: [{ type: "key" }], connections: [{ type: "credential", id: "cred-openai" }] },
       ],
     };
 
-    const fetchSpy = vi
-      .fn()
-      .mockResolvedValueOnce(mockResponse(200, mockStatus));
-
-    vi.stubGlobal("fetch", fetchSpy);
-
-    const result: any = await request("/auth/status");
+    vi.spyOn(opencodeClient, "getAuthStatus").mockResolvedValue({
+      providers: mockStatus.data.map((integration) => ({
+        providerId: integration.id,
+        name: integration.name,
+        connected: true,
+        keySet: true,
+      })),
+    });
+    const response = await fetch(`${apiUrl}/auth/status`);
+    const result: any = (await response.json()).data;
     const responseStr = JSON.stringify(result);
 
     // Should not contain full key values

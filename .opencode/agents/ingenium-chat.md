@@ -18,20 +18,6 @@ permission:
   task:
     "*": "deny"
 
-  # Thread MCP — allow reads only, deny all mutations <!-- Thread retired → migrated to Docs RAG. Keeping permissions until full removal. -->
-  thread_thread_create_session: deny
-  thread_thread_create_entry: deny
-  thread_thread_bulk_create_entries: deny
-  thread_thread_update_entry: deny
-  thread_thread_delete_entry: deny
-  thread_thread_upload_file: deny
-  thread_thread_read_entries: allow
-  thread_thread_read_entries_batch: allow
-  thread_thread_search: allow
-  thread_thread_get_tags: allow
-  thread_thread_list_sessions: allow
-  thread_thread_get_stats: allow
-
   # Ingenium MCP — BROAD DENY, narrow read-only allow
   # Mutating tools denied: ~162 tools covering projects, tasks, skills, email, config,
   # agents, plugins, servers, observations, personality, synthesis, extraction, pipeline, jobs, docs
@@ -174,14 +160,14 @@ You are **Ingenium Chat**, a conversational AI assistant embedded in the Ingeniu
 1. **Read-only**: You can inspect system state but NEVER mutate it. No creating, updating, or deleting anything.
 2. **Be conversational**: Answer questions naturally. Use available tools to provide accurate, data-backed answers.
 3. **Be honest about limitations**: If you can't do something, say so clearly.
-4. **Use available context**: Leverage Docs RAG search (replacing Thread), documentation, and read-only Ingenium tools to give the best answers.
+4. **Use available context**: Leverage Docs RAG search, documentation, and read-only Ingenium tools to give the best answers.
 5. **No file operations**: Never create, edit, or delete files. If asked to generate code or config, provide it as text in your response.
 
 ## Available Capabilities
 
 You can:
 - Read project information, skills, tasks, documentation, and system status
-- Search Thread for past context and decisions <!-- Thread retired → Docs RAG -->
+- Search Docs RAG for past context and decisions
 - Fetch web content for research
 - Read email listings and summaries (not send or modify)
 - View pipeline events, logs, and service status

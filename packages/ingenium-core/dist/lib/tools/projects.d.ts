@@ -6,11 +6,13 @@
  * tied to external worktree sessions. Skills auto-cascade from global → new projects.
  *
  * 🔴 All mutations use execTransaction() with checkpointAfterWrite() outside the txn.
- * WARNING: deleteProject() does NOT wrap in execTransaction — unlike the others.
  */
 import { Project } from "../schema.js";
 /** List all projects, newest first. */
 export declare function listProjects(): Project[];
+export declare const MAX_PROJECT_NAME_LENGTH = 64;
+/** Names are identifiers, never paths. Keep this contract aligned with the extension resolver. */
+export declare function isValidProjectName(value: unknown): value is string;
 export declare function createProject(name: string, isGlobal?: boolean): Project;
 /**
  * Soft-delete a project by setting archived_at.
@@ -29,11 +31,19 @@ export declare function listArchivedProjects(): Project[];
  */
 export declare function purgeExpiredProjects(retentionDays: number): number;
 /**
- * Hard-delete a project by name. Does NOT wrap in execTransaction — unlike other
- * write operations here — because this function only does a single DELETE and a
- * checkpoint, so there's no atomicity benefit from a transaction.
+ * Hard-delete a project by name without touching its filesystem directory.
+ * Referenced projects return a typed result rather than leaking a SQLite constraint
+ * exception through the API.
  */
-export declare function deleteProject(name: string): boolean;
+export type ProjectDeletionResult = {
+    status: "deleted";
+} | {
+    status: "not_found";
+} | {
+    status: "has_children";
+    childTables: string[];
+};
+export declare function deleteProject(name: string): ProjectDeletionResult;
 /** Look up a project by name (case-sensitive). Returns undefined if not found. */
 export declare function getProject(name: string): Project | undefined;
 /** Rename a project. Returns the updated project, or undefined if not found. */
@@ -46,6 +56,27 @@ export declare function updateProject(currentName: string, newName: string): Pro
 export declare function setProjectGlobal(name: string, isGlobal: boolean): boolean;
 /** Get the single global project (is_global=1, not archived). There should be at most one. */
 export declare function getGlobalProject(): Project | undefined;
+export interface WorkspaceMigrationResult {
+    migrated: boolean;
+    dryRun: boolean;
+    manifestId?: string;
+    sourceSkillCount: number;
+    sourceHashes: Array<{
+        name: string;
+        sha256: string;
+    }>;
+    movedChildRows: Record<string, number>;
+    collisions: Array<{
+        name: string;
+        destinationName: string;
+        sha256: string;
+    }>;
+}
+/**
+ * Move the historical DB-only /workspace project into global-default.
+ * This intentionally never reads, renames, or deletes the /workspace filesystem path.
+ */
+export declare function migrateWorkspaceProject(dryRun?: boolean): WorkspaceMigrationResult;
 export interface ProjectDetail {
     project: Project;
     skills_count: number;

@@ -117,5 +117,4 @@ following that are applicable:
 - No diagnosis or troubleshooting reasoning
 - No code changes or suggestions
 - No glob/grep searches
-- No Thread context operations (leave that to @ingenium-scout) <!-- Thread retired → Docs RAG -->
 - No web research — your scope is the screenshot in front of you

@@ -19,4 +19,28 @@ export declare function planList(project: string): Promise<{
         text: string;
     }[];
 }>;
+export declare function contextGet(project: string, id: number): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+export declare function contextUpdate(project: string, id: number, fields: Record<string, unknown>): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+export declare function contextDelete(project: string, id: number): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
+export declare function contextBatch(project: string, ids: number[]): Promise<{
+    content: {
+        type: "text";
+        text: string;
+    }[];
+}>;
 //# sourceMappingURL=context.d.ts.map

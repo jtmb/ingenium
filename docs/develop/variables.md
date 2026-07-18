@@ -73,7 +73,6 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
 | `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | `backup-scheduler.ts`, `routes/backups.ts` | Directory for backup snapshot files (Ingenium + OpenCode DB pairs) |
-| `THREAD_API_TOKEN` | _(none)_ | OpenCode config | API token for Thread MCP server. 🔴 **Never commit to source.** |
 
 ---
 

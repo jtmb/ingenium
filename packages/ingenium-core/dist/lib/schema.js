@@ -224,9 +224,12 @@ export const ContextSchema = z.object({
     project_id: z.string(),
     content: z.string().min(1),
     priority: z.number().min(0).max(10).default(5),
-    tags: z.string().optional(),
-    session_id: z.string().optional(),
+    tags: z.string().default("[]"),
+    session_id: z.string().optional().nullable(),
+    source: z.enum(["manual", "agent", "import", "system"]).default("manual"),
+    metadata: z.string().default("{}"),
     created_at: z.string().datetime(),
+    updated_at: z.string().datetime(),
 });
 /** A registered child MCP server with its command, arguments, environment, and origin source tracking. */
 export const ServerSchema = z.object({
@@ -430,7 +433,7 @@ export const BackupRestoreJobSchema = z.object({
 /** An ingestion source for RAG-backed documentation search. */
 export const RagSourceSchema = z.object({
     id: z.string().uuid(), project_id: z.string(), title: z.string().min(1),
-    source_type: z.enum(["file", "thread_import", "text", "url"]),
+    source_type: z.enum(["file", "text", "url"]),
     source_path: z.string().nullable(), source_hash: z.string().nullable(), mime_type: z.string().nullable(),
     byte_size: z.coerce.number().int().nullable(), chunk_count: z.coerce.number().int().nonnegative().default(0),
     metadata: z.string().default("{}"), created_at: z.string(), updated_at: z.string(),
@@ -442,4 +445,7 @@ export const RagChunkSchema = z.object({
     priority: z.coerce.number().int().min(0).max(10).default(5), tags: z.string().default("[]"), created_at: z.string(),
 });
 /** A RAG chunk enriched with FTS relevance rank and highlighted excerpt. */
-export const RagSearchResultSchema = RagChunkSchema.extend({ rank: z.coerce.number(), snippet: z.string() });
+export const RagSearchResultSchema = RagChunkSchema.extend({
+    rank: z.coerce.number(), snippet: z.string(), source_name: z.string(),
+    source_path: z.string().nullable(), source_type: z.string(), project_id: z.string(),
+});

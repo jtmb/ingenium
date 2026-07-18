@@ -38,7 +38,6 @@ description: Canonical reference for all environment variables used across the I
 | `OBSERVER_CHECK_INTERVAL` | `0` | observer plugin | Session idle check interval, 0 = disabled |
 | `OPENCODE_SERVER_PASSWORD` | _(none, required, no default)_ | API proxy, docker-entrypoint.sh | **Required.** Server-side OpenCode proxy guard credential; not used by the loopback-only browser iframe process. |
 | `SYNTHESIS_INTERVAL_MS` | `900000` | ingenium-api | Scheduled synthesis interval (15 min), 0 = disabled |
-| `THREAD_API_TOKEN` | _(none)_ | OpenCode config | API token for Thread MCP server. 🔴 **Never commit to source.** |
 
 ---
 

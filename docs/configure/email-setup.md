@@ -124,11 +124,28 @@ If you want to keep an account configured but remove it from the sidebar, use **
 
 ## Re-Authentication After Key Rotation
 
-If `INGENIUM_EMAIL_ENCRYPTION_KEY` is rotated, all stored OAuth2 tokens become undecryptable. The sync engine parks the affected workers (no infinite retry loop) and the dashboard shows a **Reconnect** button for each affected account.
+If `INGENIUM_EMAIL_ENCRYPTION_KEY` is rotated, all stored credentials become undecryptable — both OAuth2 tokens and app-password credentials. The sync engine parks the affected workers (no infinite retry loop) and the dashboard shows a **Reconnect** button for each affected account.
+
+Recovery path depends on the account's `authType`:
+
+- **OAuth2 accounts** (Gmail, Outlook) — Must re-authorize through the full OAuth consent flow. The reconnect button opens the provider's consent screen.
+- **App-password accounts** (Yahoo, Custom) — Can recover by providing a new app password through the in-place PATCH credential update. The reconnect button opens the manual credential form pre-filled with existing host/port settings.
 
 See [Credential Rotation](../security/credential-rotation.md) for the full rotation procedure.
 
+## Recovery Behavior
+
+After a restart, late account discovery, or authentication failure, the sync engine and dashboard handle recovery automatically:
+
+- **Worker reconciliation** — Idempotent `startEngine()` reconciles workers for accounts discovered after engine startup without disrupting existing syncs.
+- **Zero-worker accounts** — An OAuth2 account with no sync worker and no cached folders shows **Reconnect** instead of a stuck "Setting up your mailbox" state.
+- **Interactive consent** — Google OAuth re-authorization always requires interactive consent (`prompt=consent`), guaranteeing a refresh token on every flow. (OAuth accounts only — app-password accounts use the PATCH credential update.)
+- **Server-only tokens** — OAuth tokens are exchanged, stored, encrypted, and refreshed entirely server-side; the frontend never sees them.
+- **App-password credential recovery** — Manual (app-password) accounts use `PATCH /emails/accounts/:id/credentials` to replace the encrypted password in place. The engine restarts automatically after the update. See [App-Password Credential Recovery via PATCH](../usage/mail.md#app-password-credential-recovery-via-patch).
+
+See [Mail Usage: Recovery Behavior](../usage/mail.md#recovery-behavior) for the full technical details.
+
 ## Related Docs
-- [Mail Usage](../usage/mail.md) — Using the email client
+- [Mail Usage](../usage/mail.md) — Using the email client, recovery behavior
 - [Variables](../develop/variables.md) — Email environment variables
 - [Credential Rotation](../security/credential-rotation.md) — Encryption key rotation and re-authentication

@@ -14,6 +14,7 @@ import { settings, getDb } from "ingenium-core";
 import type { EmailAccount, OAuthToken, EmailFolder } from "./types.js";
 import { connectAccount, listFolders } from "./imap.js";
 import { encryptCredentials, decryptCredentials } from "./oauth.js";
+import { resetAuthCircuit } from "./circuit-breaker.js";
 
 const SETTINGS_PREFIX = "email_account_";
 
@@ -167,6 +168,7 @@ export function storeCredentials(
   }
 
   settings.setSetting(projectId, settingsKey(accountId), JSON.stringify(stored));
+  resetAuthCircuit(stored.email);
 }
 
 /**
@@ -195,7 +197,13 @@ export function getCredentials(
   if (raw) {
     const stored = JSON.parse(raw) as StoredAccount;
     if (stored.imapPass) {
-      password = encKey ? decryptCredentials(stored.imapPass) : stored.imapPass;
+      try {
+        password = encKey ? decryptCredentials(stored.imapPass) : stored.imapPass;
+      } catch {
+        // A rotated key or corrupted ciphertext is recoverable through the
+        // credential-update flow. Do not let ciphertext reach an IMAP client.
+        password = undefined;
+      }
     }
     if (stored.tokens) {
       try {

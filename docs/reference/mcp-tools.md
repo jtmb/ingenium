@@ -177,7 +177,7 @@ Context entries are project-isolated, taggable, priority-ranked (0–10), and FT
 | `ingenium_docs_rag_reingest` | Re-ingest an existing RAG source with new text |
 | `ingenium_docs_rag_stats` | Get RAG index statistics (document count, chunk count, etc.) and vector capability `{ available, provider: "deterministic-n-gram", semantic: false }` |
 
-**Indexing sources**: (1) Canonical repo Markdown files via `POST /rag/ingest` using `INGENIUM_DOCS_ROOT` — walked from `{root}/docs/`, symlink-protected, hash-idempotent. (2) Docs Workspace pages at lifecycle boundaries (publish, update, archive, restore) — auto-indexed as `docs-page:{id}`. (3) Manual ingestion via `ingenium_docs_ingest`. (4) Thread MCP session imports via `POST /rag/import/thread` with resume checkpoints.
+**Indexing sources**: (1) Canonical repo Markdown files via `POST /rag/ingest` using `INGENIUM_DOCS_ROOT` — walked from `{root}/docs/`, symlink-protected, hash-idempotent. (2) Docs Workspace pages at lifecycle boundaries (publish, update, archive, restore) — auto-indexed as `docs-page:{id}`. (3) Manual ingestion via `ingenium_docs_ingest`.
 
 **Embedding strategy**: Deterministic 384-dim FNV-1a character-trigram hash (`ingenium-ngram-v1`) — NOT semantic. The `hybridSearch()` function exists (70% BM25 + 30% n-gram cosine similarity) but is not currently wired to API routes — the `/search` and `/ask` routes use BM25 FTS5 via `searchChunks()`. See `packages/ingenium-core/lib/tools/rag.ts`.
 

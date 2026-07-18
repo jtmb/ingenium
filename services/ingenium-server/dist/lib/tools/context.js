@@ -1,5 +1,5 @@
 /**
- * MCP tool handlers for persistent context storage (Thread-like).
+ * MCP tool handlers for persistent context storage.
  * 🔴 DB ISOLATION: MCP tool wrapper — proxies to API via HTTP, no direct DB access.
  * Supports saving context entries with tags/priority and full-text search.
  */
@@ -19,3 +19,7 @@ export async function planList(project) {
     const res = await api.get(`/context?project=${project}`);
     return { content: [{ type: "text", text: JSON.stringify(res.data) }] };
 }
+export async function contextGet(project, id) { const res = await api.get(`/context/${id}`, { project }); return { content: [{ type: "text", text: JSON.stringify(res.data) }] }; }
+export async function contextUpdate(project, id, fields) { const res = await api.patch(`/context/${id}`, fields, { project }); return { content: [{ type: "text", text: JSON.stringify(res.data) }] }; }
+export async function contextDelete(project, id) { const res = await api.del(`/context/${id}`, { project }); return { content: [{ type: "text", text: res.status === 204 ? "Context entry deleted" : JSON.stringify(res.data) }] }; }
+export async function contextBatch(project, ids) { const res = await api.post("/context/batch", { ids }, { project }); return { content: [{ type: "text", text: JSON.stringify(res.data) }] }; }

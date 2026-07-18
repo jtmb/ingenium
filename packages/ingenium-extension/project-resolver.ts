@@ -3,6 +3,11 @@ import { basename } from "node:path";
 const MAX_PROJECT_NAME_LENGTH = 64;
 const ensuredProjects = new Map<string, Promise<string>>();
 
+function apiTimeoutMs(): number {
+  const configured = Number(process.env.INGENIUM_API_TIMEOUT ?? "10000");
+  return Number.isFinite(configured) && configured > 0 ? configured : 10000;
+}
+
 export function isValidProjectName(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_PROJECT_NAME_LENGTH &&
     value.trim().length > 0 && value === value.trim() && value !== "." && value !== ".." &&
@@ -42,6 +47,7 @@ export async function ensureExtensionProject(worktree: string, apiBase: string):
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: project, is_global: project === "global-default" }),
+      signal: AbortSignal.timeout(apiTimeoutMs()),
     });
     if (!response.ok && response.status !== 409) throw new Error(`Unable to ensure project '${project}' (HTTP ${response.status})`);
     return project;

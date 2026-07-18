@@ -25,12 +25,7 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 
 ### THE REQUESTS:
 
-SETTINGS:
-1. when adding a provider the provider ID field only allows you to type one character beffore it deselects the text input box and forces you to type the next letter...one at a time. 
-2. Providers shoudl be allowed multiple roles. (but not primary and backup at the same time)
-3. When i try to save using my lmstudio base url http://192.168.0.13:1234/v1 i get: "providers[0].baseURL: endpoint points to an internal/private network address"
-4. If you are filling out the providers tab (adding a provider) and you exit to another settings tab and then return to the providers tab all your progress is gone.
-5. Please see picture: Even without an api key available opencode provides free models: Please can we have this automatically set in providers and in the Chat window for use.
+
 
 /SECRETS:
 1. It says to Unseal Vault, where is the Key? What is the Process on init? It should not be obscured from the user in the UI. The vault Passprase should be setup in the UI if one has not been set already.

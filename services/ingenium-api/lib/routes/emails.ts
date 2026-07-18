@@ -206,6 +206,9 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
 
     // Store tokens server-side — never return them to the client
     storeTokens(projectId, acctId, tokens);
+    // Replace a parked credential-error worker so OAuth reconnect resumes sync.
+    stopAccountWorker(acctId);
+    startEngine(projectId);
     res.json({ data: { success: true, accountId: acctId } });
   } catch (err: any) {
     logger.error("email", "OAuth code exchange failed", { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
@@ -257,6 +260,7 @@ emailsRouter.post("/accounts", (req, res) => {
     });
   }
 
+  startEngine(projectId);
   res.status(201).json({ data: account });
 });
 
@@ -300,6 +304,37 @@ emailsRouter.patch("/accounts/:id", (req, res) => {
 
   storeAccount(projectId, account);
   res.json({ data: account });
+});
+
+/** PATCH /accounts/:id/credentials — Replace app-password credentials in place. */
+emailsRouter.patch("/accounts/:id/credentials", async (req, res) => {
+  const projectId = resolveEmailProject();
+  const accountId = req.params.id!;
+  const account = getAccount(projectId, accountId);
+  if (!account) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: `Email account '${accountId}' not found` } });
+    return;
+  }
+  if (account.authType !== "app_password") {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "OAuth accounts must be reconnected through the OAuth flow" } });
+    return;
+  }
+  const { appPassword } = req.body;
+  if (typeof appPassword !== "string" || !appPassword.trim()) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "appPassword is required" } });
+    return;
+  }
+
+  try {
+    storeCredentials(projectId, accountId, { imapPass: appPassword, smtpPass: appPassword });
+    stopAccountWorker(accountId);
+    startEngine(projectId);
+    // Never return the submitted credential or stored encrypted material.
+    res.json({ data: { success: true, accountId } });
+  } catch (err: unknown) {
+    logger.warn("email", `Credential update failed for account ${accountId}: ${err instanceof Error ? err.message : String(err)}`);
+    res.status(409).json({ error: { code: "CREDENTIAL_UPDATE_FAILED", message: "Could not update email credentials. Verify the encryption configuration and try again." } });
+  }
 });
 
 /** POST /accounts/:id/test?project= — Test IMAP connection for an account. */

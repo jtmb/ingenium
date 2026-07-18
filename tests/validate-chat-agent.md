@@ -31,12 +31,10 @@ The chat agent is automatically discovered (as a new `.md` file under
 | 11 | `webfetch: allow` — can fetch web content | ✅ |
 | 12 | `playwright_*: deny` — no browser automation | ✅ |
 | 13 | `task: {"*": "deny"}` — no subagent spawning | ✅ |
-| 14 | Thread mutations all `deny` (create_session, create_entry, bulk_create_entries, update_entry, delete_entry, upload_file) | ✅ |
-| 15 | Thread reads all `allow` (read_entries, read_entries_batch, search, get_tags, list_sessions, get_stats) | ✅ |
-| 16 | `skill: {"*": "deny"}` — no skill access | ✅ |
-| 17 | All Ingenium MCP tool names use single `ingenium_` prefix (no double `ingenium_ingenium_`) | ✅ |
-| 18 | No mutating Ingenium tools are allowed (no project/task/skill/email/agent/plugin/config/server mutation tools) | ✅ |
-| 19 | Read-only Ingenium tools are allowlisted (~89 tools across health, logs, projects, observations, personality, skills, tasks, plans, plugins, servers, agents, commands, config, email, pipeline, jobs, docs, settings, opencode messages, synthesis status) | ✅ |
+| 14 | `skill: {"*": "deny"}` — no skill access | ✅ |
+| 15 | All Ingenium MCP tool names use single `ingenium_` prefix (no double `ingenium_ingenium_`) | ✅ |
+| 16 | No mutating Ingenium tools are allowed (no project/task/skill/email/agent/plugin/config/server mutation tools) | ✅ |
+| 17 | Read-only Ingenium tools are allowlisted (~89 tools across health, logs, projects, observations, personality, skills, tasks, plans, plugins, servers, agents, commands, config, email, pipeline, jobs, docs, settings, opencode messages, synthesis status) | ✅ |
 
 ## Allowed Ingenium MCP Tool Categories
 
@@ -89,23 +87,6 @@ denied by the OpenCode permission model):
 | Observe | `ingenium_observe` |
 | Settings mutations | `ingenium_setting_set`, `ingenium_setting_test_llm` |
 | Project init | `ingenium_project_init` |
-
-## Thread MCP Permission Matrix
-
-| Tool | Permission |
-|------|-----------|
-| `thread_thread_create_session` | ❌ Deny |
-| `thread_thread_create_entry` | ❌ Deny |
-| `thread_thread_bulk_create_entries` | ❌ Deny |
-| `thread_thread_update_entry` | ❌ Deny |
-| `thread_thread_delete_entry` | ❌ Deny |
-| `thread_thread_upload_file` | ❌ Deny |
-| `thread_thread_read_entries` | ✅ Allow |
-| `thread_thread_read_entries_batch` | ✅ Allow |
-| `thread_thread_search` | ✅ Allow |
-| `thread_thread_get_tags` | ✅ Allow |
-| `thread_thread_list_sessions` | ✅ Allow |
-| `thread_thread_get_stats` | ✅ Allow |
 
 ## Key Security Properties
 

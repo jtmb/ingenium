@@ -2356,7 +2356,7 @@ main().catch((err) => {
 });
 
 // Graceful shutdown: SIGTERM is sent by the parent process (or Docker) during
-// container stop. We must stop child MCP servers (e.g. Thread, Kaban) before
+// container stop. We must stop child MCP servers before
 // exiting to avoid orphaned processes.
 process.on("SIGTERM", () => {
   logger.info("SIGTERM received, shutting down");

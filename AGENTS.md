@@ -449,7 +449,7 @@ For quick reference, here are the non-negotiable rules from above:
 | 5 | Only `core` and `api` packages may import SQL libraries | [Database Isolation](#-mandatory--database-isolation) |
 | 6 | `checkpointAfterWrite()` must be OUTSIDE `execTransaction()` | [WAL Safety](#-wal-safety--checkpointafterwrite-outside-transaction) |
 | 7 | Parent-existence check before FK-constrained child table upserts | [Email FK Pattern](#-email-fk-defensive-pattern--parent-existence-check) |
-| 8 | Thread `folder` value unchanged through call chain | [Email HARD RULEs](#-email--data-integrity-hard-rules) |
+| 8 | Email `folder` value unchanged through call chain | [Email HARD RULEs](#-email--data-integrity-hard-rules) |
 | 9 | Noreply-sender gate before cache lookup/generation | [Email HARD RULEs](#-email--data-integrity-hard-rules) |
 | 10 | Never fall back to `reasoning_content`; use `max_tokens: 8192` | [Email HARD RULEs](#-email--data-integrity-hard-rules) |
 | 11 | `ON CONFLICT DO UPDATE`, never `INSERT OR REPLACE` | [Email HARD RULEs](#-email--data-integrity-hard-rules) |

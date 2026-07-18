@@ -12,7 +12,7 @@
 | 2 | `devops-conventions` | 4 | CLI toolkit, Docker, Kubernetes, shell scripts, git hygiene, GitHub CLI |
 | 3 | `database-conventions` | 3 | SQL/PostgreSQL, SQLite WAL safety, migration management, FTS5 integrity |
 | 4 | `engineering-workflow` | 9 | Agent execution quality, debugging, agent configuration, orchestrator, logging, supervision |
-| 5 | `mcp-tooling` | 2 | Playwright browser automation, Thread persistence, email tools, MCP integration |
+| 5 | `mcp-tooling` | 2 | Playwright browser automation, Docs RAG persistence, email tools, MCP integration |
 | 6 | `local-models` | 0 | Local model profiles, command safety, cross-model strategy |
 | 7 | `security-audit` | 1 | Surface scan, git-history leak scan, credential rotation, remediation |
 | 8 | `documentation` | 3 | Docs workspace, architecture conventions, audit workflow |

@@ -6,7 +6,6 @@ import Link from "next/link";
 import { getApiBase } from "@/lib/api";
 
 const API_BASE = getApiBase();
-const PROJECT = "gh-llm-bootstrap";
 
 /**
  * OAuth callback handler — exchanges the `?code=` and `?state=` with the backend.
@@ -39,21 +38,27 @@ function OAuthCallbackInner() {
 
     // Determine provider from localStorage (set before OAuth redirect)
     const provider = localStorage.getItem("oauth_provider") || "gmail";
+    const project = localStorage.getItem("oauth_project") || "global-default";
+    const accountId = localStorage.getItem("oauth_account_id") || undefined;
 
     const exchangeCode = async () => {
       try {
-        const res = await fetch(`${API_BASE}/emails/accounts/oauth?project=${PROJECT}`, {
+        const res = await fetch(`${API_BASE}/emails/accounts/oauth?project=${encodeURIComponent(project)}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             provider,
             code,
             state,
+            accountId,
             redirectUri: window.location.origin + "/mail/oauth/callback",
           }),
         });
 
         if (res.ok) {
+          localStorage.removeItem("oauth_provider");
+          localStorage.removeItem("oauth_project");
+          localStorage.removeItem("oauth_account_id");
           setStatus("success");
         } else {
           const data = await res.json().catch(() => ({ error: { message: "OAuth exchange failed" } }));

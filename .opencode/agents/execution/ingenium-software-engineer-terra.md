@@ -109,7 +109,7 @@ You write code using these principles:
 
 For work outside your scope:
 
-- `@ingenium-scout` — Retrieve past decisions, preferences, or patterns from Thread <!-- Thread retired → Docs RAG -->
+- `@ingenium-scout` — Retrieve past decisions, preferences, or patterns from Docs RAG
 - `@ingenium-explore` — Search codebase for existing patterns to follow
 - `@ingenium-docs` (via Task tool) — Update documentation after implementation
 

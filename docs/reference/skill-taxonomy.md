@@ -19,7 +19,7 @@ The Phase 3 taxonomy consolidation reduced **36 legacy skills → 10 canonical s
 | 2 | `devops-conventions` | 4 (git-history-hygiene, github-cli, onboard-existing-repo, parallel-session-hygiene) | Docker, Kubernetes, git, CLI toolkit |
 | 3 | `database-conventions` | 3 (database-migration-management, sqlite-migration-patterns, sqlite-wal-safety) | SQLite WAL, FTS5, migration management |
 | 4 | `engineering-workflow` | 9 (agent-execution-quality, agent-workflow-patterns, debugging-patterns, configuring-opencode, logging-visibility, orchestrator-primer, per-project-scoping, supervision-logging, uncensored-direct-response) | Agent pipeline, debugging, orchestrator, logging |
-| 5 | `mcp-tooling` | 2 (browsing-the-web, dashboard-screenshots) | MCP integration, browser automation, Thread |
+| 5 | `mcp-tooling` | 2 (browsing-the-web, dashboard-screenshots) | MCP integration, browser automation, Docs RAG |
 | 6 | `local-models` | 0 | Local model profiles, command safety |
 | 7 | `security-audit` | 1 (security-audit-workflow) | Surface scan, git-history leak scan, remediation |
 | 8 | `documentation` | 3 (docs-workspace, documentation-architecture, documentation-audit-workflow) | Docs workspace, architecture conventions, audit |

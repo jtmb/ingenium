@@ -111,7 +111,6 @@ export default function SyncProgress({
   const complete = activeFolders.filter((f) => f.cachedCount > 0).length;
   const total = activeFolders.length;
   const pct = total > 0 ? Math.round((complete / total) * 100) : 100;
-  const errorFolders = folders.filter((f) => f.state === "error");
 
   return (
     <div className="max-w-2xl mx-auto py-12 px-4">
@@ -253,7 +252,7 @@ export default function SyncProgress({
       </p>
 
       {/* ── Auth error reconnect banner ─────────────────────────────── */}
-      {errorFolders.length > 0 && (
+      {hasAuthError && (
         <div className="mt-8 p-4 border border-amber-300 bg-amber-50 rounded-lg text-center">
           <p className="text-sm text-amber-800 font-medium mb-3">
             Your email account needs to be reconnected.

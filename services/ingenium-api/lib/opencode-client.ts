@@ -243,15 +243,14 @@ export interface AuthRequestBody {
   metadata?: Record<string, unknown>;
 }
 
-export interface AuthProviderEntry {
-  type: string;
-  key?: string;
-  access?: string;
-  refresh?: string;
-  metadata?: Record<string, unknown>;
+export interface AuthStatusResponse {
+  providers: Array<{
+    providerId: string;
+    name: string;
+    connected: boolean;
+    keySet: boolean;
+  }>;
 }
-
-export type AuthStatusResponse = Record<string, AuthProviderEntry>;
 
 export interface IntegrationPrompt {
   type: "text" | "select";
@@ -842,8 +841,20 @@ export const opencodeClient = {
       query: { directory },
     }),
 
-  getAuthStatus: (directory?: string): Promise<OpenCodeResult<AuthStatusResponse>> =>
-    request<AuthStatusResponse>("/auth", { query: { directory } }),
+  getAuthStatus: async (directory?: string): Promise<OpenCodeResult<AuthStatusResponse>> => {
+    const result = await request<V2Response<IntegrationInfo[]>>("/api/integration", {
+      query: { "location.directory": directory },
+    });
+    if (isOpenCodeError(result)) return result;
+    return {
+      providers: result.data.map((integration) => ({
+        providerId: integration.id,
+        name: integration.name,
+        connected: integration.connections.length > 0,
+        keySet: integration.connections.some((connection) => connection.type === "credential"),
+      })),
+    };
+  },
 
   /* ── Agents ── */
 
