@@ -18,11 +18,13 @@ To enable Phase 2 (LLM-driven skill synthesis):
 3. Set the OpenCode provider ID, display name, approved provider package, and optional base URL. Use **OpenAI compatible** for services without a dedicated package.
 4. Add one or more model IDs and select the default model with its radio button.
 5. Enter the API key and choose whether the block is available only, primary for Ingenium, or the Ingenium backup.
-6. Click **Save providers**, then restart OpenCode to load catalog changes.
+6. Click **Save providers**. OpenCode live-reloads the config in-process — no restart required.
 
 > **Credential security**: API keys are **never returned** by the API or written into OpenCode configuration files. The settings endpoint returns only `apiKeySet: boolean`; an empty field preserves the saved credential.
 
 > **Fresh store / new Docker volume**: If the Docker volume (`ingenium-data`) is new or empty, no saved settings exist. The field placeholder will show "API key" — you must re-enter the API key. Without a saved API key, the synthesis pipeline logs `Synthesis LLM not configured` and skips LLM-dependent phases.
+
+> **Vault-backed credential storage**: API keys are stored in the encrypted vault (`vault_items` table with AES-256-GCM), never in the plaintext settings table. On `GET` responses, only `apiKeySet: boolean` is returned — the actual key is never exposed. Empty or omitted `apiKey` fields preserve the saved credential. Legacy `synthesis_api_key` / `synthesis_backup_api_key` settings are migrated into the vault on first read and then deleted from settings.
 
 ## Provider Roles
 
@@ -39,6 +41,12 @@ Each managed provider block has a **roles array** (`"available" | "primary" | "b
 - Any number of blocks may have `["available"]`
 - A block can hold both primary and backup roles, though this defeats the purpose of redundancy
 
+### Same-Provider Different-Model Policy
+
+The system permits primary and backup to use the **same provider** with **different models**. For example, `["custom", "model-a"]` as primary and `["custom", "model-b"]` as backup is valid — the broker deduplicates by `(providerID, modelID)` pair, so identical pairs are suppressed (only one call is made). Only when both `providerID` AND `modelID` are identical does the system reject the configuration as redundant.
+
+This allows users to configure primary/backup failover from the same local inference server (e.g., Ollama, LM Studio) using different model sizes (e.g., a fast small model as primary, a slower thorough model as backup).
+
 ### Backwards Compatibility
 
 Legacy clients using a single `role` field (`"available"`, `"primary"`, or `"backup"`) are supported. The API normalizes scalar roles into the corresponding array:
@@ -52,6 +60,19 @@ When both `roles` and `role` are present, `roles` takes precedence.
 ### Primary/Backup Fallback
 
 If the primary LLM fails during synthesis, the pipeline automatically falls back to the backup provider. If no backup is configured, the pipeline degrades by skipping the LLM-dependent phases.
+
+### Broker Fallback and 30-Second Timeout Cap
+
+Interactive AI features (Docs AI, RAG Ask, Job Suggestions) that consume the synthesis LLM use the **synthesis broker** (`executeSynthesisBroker` in `opencode-client.ts`). The broker:
+
+1. Reads `synthesis_provider` + `synthesis_model` (primary) and `synthesis_backup_provider` + `synthesis_backup_model` (secondary) from the global project's settings
+2. Deduplicates identical `(providerID, modelID)` pairs — if primary and secondary are the same provider+model, only one call is made
+3. Tries the primary first; if it fails (non-ok response), immediately falls back to the secondary
+4. Caps **every** call at **30 seconds** (`Math.min(Math.max(timeoutMs, 0), 30_000)` — the passed timeout is clamped between 0 and 30s)
+5. Creates an ephemeral OpenCode session (no agent, empty tools list), sends the prompt via OpenCode's model routing, and polls for the response with exponential backoff (500ms → 30s max)
+6. If all configured providers fail, returns `{ ok: false, error: "all configured synthesis providers failed" }`
+
+This is separate from the core synthesis pipeline (`callSynthesisLLM` in `synthesis-llm.ts`), which makes direct HTTP calls to the LLM endpoint with a 60-second timeout. The broker exists for interactive features that need OpenCode's provider routing infrastructure.
 
 ### Local / Private Endpoint Opt-In
 
@@ -154,8 +175,17 @@ The same Synthesis LLM configuration powers several features beyond the pipeline
 - **Email suggestions** — `POST /api/v1/emails/:id/suggest` generates reply suggestions
 - **Email summaries** — `GET /api/v1/emails/summarize/:uid` generates email summaries
 - **Job config generation** — `POST /api/v1/jobs/suggest` derives prompt templates, cron schedules, and trigger events from a free-text job description (magic-wand feature on the Jobs page)
+- **Docs AI** — `POST /api/v1/docs/ai` provides AI-powered documentation actions (outline, continue, rewrite, summarize, fix grammar, tone adjustments)
+- **RAG Ask** — `POST /api/v1/rag/ask` provides natural-language Q&A with LLM-grounded answers
 
-All three call `synthesisLlm.resolveLLMConfig()` to load the same model, endpoint, and API key configured in **Settings → Providers**.
+**Two dispatch modes:**
+
+| Mode | Used By | Mechanism | Timeout |
+|------|---------|-----------|---------|
+| **Broker** (via `executeSynthesisBroker`) | Docs AI, RAG Ask, Job Suggestions | Creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure, polls for response | 30s cap (hard-clamped) |
+| **Direct** (via `synthesisLlm.resolveLLMConfig()` + `safeLlmFetch`) | Email suggestions, Email summaries, self-learning pipeline | Calls the LLM endpoint directly via HTTP | 60s (configurable) |
+
+The broker mode uses OpenCode's model routing (supports `(providerID, modelID)` pairs plus the fallback chain). The direct mode uses the resolved provider, model, endpoint, and API key from settings or env vars.
 
 ## Related Docs
 - [Self-Learning Pipeline](../concepts/self-learning.md) — Full pipeline reference (Phase 1, Phase 2, architecture, DB schema)

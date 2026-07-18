@@ -873,12 +873,12 @@ export const api = {
       request<{ data: LlmConfigResponse }>(`/settings/llm-config?project=${project}`),
 
     getProviderConfigs: (project = DEFAULT_PROJECT) =>
-      request<{ data: { providers: ManagedProviderConfig[] } }>(`/settings/provider-configs?project=${project}`),
+      request<{ data: { providers: ManagedProviderConfig[]; synthesis: { primary: { providerId: string; modelId: string }; secondary: { providerId: string; modelId: string } } } }>(`/settings/provider-configs?project=${project}`),
 
-    saveProviderConfigs: (providers: ManagedProviderConfig[], project = DEFAULT_PROJECT) =>
+    saveProviderConfigs: (providers: ManagedProviderConfig[], project = DEFAULT_PROJECT, synthesis?: { primary: { providerId: string; modelId: string }; secondary: { providerId: string; modelId: string } }) =>
       request<{ data: { saved: boolean; warnings: string[] } }>(
         `/settings/provider-configs?project=${project}`,
-        { method: "PUT", body: JSON.stringify({ providers }) },
+        { method: "PUT", body: JSON.stringify({ providers, synthesis }) },
       ),
 
     /** Sanitized Chat config — returns the configured providers/agents for the Chat page without exposing API keys. */

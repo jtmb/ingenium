@@ -42,8 +42,18 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 
 - **Port**: 4097 (configurable via `INGENIUM_API_PORT`)
 - **Body limit**: `express.json({ limit: "2mb" })` for large skill/plugin uploads
-- **Security**: helmet for security headers, CORS (configurable via `CORS_ORIGIN`), optional bearer token auth
-- **Rate limit**: 100 req/min per IP (configurable via `INGENIUM_API_RATE_LIMIT`)
+- **Security**: helmet for security headers (default configuration — no custom CSP), CORS (configurable via `CORS_ORIGIN`), optional bearer token auth
+- **Rate limits**: Three independent in-memory sliding-window rate limiters:
+
+  | Limiter | Default | Applies To | Location |
+  |---------|---------|------------|----------|
+  | General API | 100 req/min per IP | All authenticated routes (before auth middleware to throttle brute-force) | `lib/middleware/rate-limit.ts` |
+  | Vault | 5 req/min per IP | All `/api/v1/vault/*` routes | `scripts/api-server.ts:134` |
+  | OAuth callback | 20 req/min per IP | `GET /auth/callback` (public, before auth) | `lib/routes/opencode.ts:97-98` |
+
+  > Rate limit state is in-memory only — resets on process restart. Suitable for single-instance deployments with supervisord restarts. For multi-replica deployments, replace with Redis or an external store.
+
+- **CSP**: Helmet's default Content-Security-Policy is applied. No custom CSP directives are configured. Iframe sandboxing is handled via the `sandbox` attribute on embedded iframes (see [Iframe Sandbox](../security/iframe-sandbox.md)), not via CSP `frame-ancestors`. CSP expansion remains deferred (see [Deferred Items in iframe-sandbox.md](../security/iframe-sandbox.md#-deferred-requires-runtime-testing)).
 
 ## API Endpoints by Category
 
@@ -158,10 +168,10 @@ All email routes are prefixed with `/api/v1/emails`. All email data is global (p
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/api/v1/settings/provider-configs` | Read the ordered managed provider collection. Each provider block returns: `id`, `name`, `npm`, `baseURL`, `models`, `defaultModel`, `roles: ("available"\|"primary"\|"backup")[]`, `enabled`, `allowPrivateNetwork: boolean`, and `apiKeySet: boolean` — **the actual API key is never returned**. Falls back to legacy primary/backup settings until the collection is first saved. At most one provider may have `primary` in its roles array and at most one may have `backup`. |
-| PUT | `/api/v1/settings/provider-configs` | Atomically save any number of provider blocks. Accepts `roles` array and/or legacy `role` scalar (`available`\|`primary`\|`backup`) for backwards compatibility. `roles` supports multi-role: `["available", "primary"]` or `["available", "backup"]`. Validates exclusivity (at most one primary, at most one backup), endpoint SSRF policy via `validateEndpointUrl`, and `allowPrivateNetwork` flag. Projects into OpenCode global config and mirrors primary/backup roles into synthesis settings. |
-| GET | `/api/v1/settings/llm-config` | Read atomic primary+backup LLM config. Returns provider, model, endpoint, `allowPrivateNetwork`, and `apiKeySet: boolean` — **the actual API key is never exposed**. |
-| POST | `/api/v1/settings/llm-config` | Legacy primary+backup save contract retained for existing clients. New clients should use `PUT /provider-configs`. Accepts `allowPrivateNetwork` on primary and backup blocks. |
+| GET | `/api/v1/settings/provider-configs` | Read the ordered managed provider collection. Each provider block returns: `id`, `name`, `npm`, `baseURL`, `models`, `defaultModel`, `roles: ("available"\|"primary"\|"backup")[]`, `enabled`, `allowPrivateNetwork: boolean`, and `apiKeySet: boolean` — **the actual API key is never returned**. Falls back to legacy primary/backup settings until the collection is first saved. At most one provider may have `primary` in its roles array and at most one may have `backup`. Also returns `synthesis` object with `{ primary: { providerId, modelId }, secondary: { providerId, modelId } }` — the explicit synthesis provider+model selection, which may differ from the role-derived defaults. |
+| PUT | `/api/v1/settings/provider-configs` | Atomically save any number of provider blocks. Accepts `roles` array and/or legacy `role` scalar (`available`\|`primary`\|`backup`) for backwards compatibility. `roles` supports multi-role: `["available", "primary"]` or `["available", "backup"]`. Also accepts an optional `synthesis` body field with `{ primary?: SynthesisSelection, secondary?: SynthesisSelection }` to override the role-derived synthesis provider selections — enabling same-provider different-model configurations. Validates exclusivity (at most one primary, at most one backup), synthesis selection constraints (cannot select the same provider+model for both primary and secondary), endpoint SSRF policy via `validateEndpointUrl`, and `allowPrivateNetwork` flag. Projects into OpenCode global config and mirrors synthesis selections into synthesis settings. API keys are stored in the encrypted vault (`vault_items` table, AES-256-GCM). |
+| GET | `/api/v1/settings/llm-config` | Read atomic primary+backup LLM config. Returns provider, model, endpoint, `allowPrivateNetwork`, and `apiKeySet: boolean` — **the actual API key is never exposed**. API keys are stored in the vault, never in plaintext settings. Legacy `synthesis_api_key`/`synthesis_backup_api_key`/`llm_provider_api_keys` settings are auto-migrated into the vault on first read and then deleted from the settings table. |
+| POST | `/api/v1/settings/llm-config` | Legacy primary+backup save contract retained for existing clients. New clients should use `PUT /provider-configs`. Accepts `allowPrivateNetwork` on primary and backup blocks. API keys are stored in the vault. |
 | POST | `/api/v1/settings/test-llm` | Test an LLM connection. Accepts `allowPrivateNetwork` boolean body field. Rejects unsafe/internal endpoint addresses (same `validateEndpointUrl` guard as provider-configs save). On transport failure, returns `{ ok: false, status: 0, message: "Unable to reach LLM endpoint" }` — the endpoint URL is never reflected in error messages. |
 
 ### Pipeline
@@ -297,7 +307,7 @@ The API proxies requests to the OpenCode server at :4098. HTTP Basic Auth creden
 | POST | `/api/v1/opencode/sessions/:id/init` | Initialize a session |
 | GET | `/api/v1/opencode/sessions/:id/events` | SSE event stream (per-session) |
 | GET | `/api/v1/opencode/events` | Global SSE event stream (no session filter) |
-| GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, defaultSelection }`. The `providers[]` array merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). `defaultSelection` picks the managed primary provider first, falls back to the OpenCode Zen runtime default, then the first provider. No API keys are exposed. OpenCode live-reloads provider config changes — no restart required. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. |
+| GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, defaultSelection }`. The `providers[]` array merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). `defaultSelection` picks the managed primary provider first, falls back to the OpenCode Zen runtime default, then the first provider. No API keys are exposed. OpenCode live-reloads provider config changes — no restart required. The `primary` and `backup` fields reflect the explicit synthesis provider+model selection from `llm_provider_configs`, which may differ from the role-derived defaults. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. |
 | GET | `/api/v1/opencode/builtin-providers` | **Runtime OpenCode Zen free model discovery** — queries the OpenCode runtime provider catalog, filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. Response: `{ data: { providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" } }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`. Sanitized — no `apiKey`, `options`, or `env` fields leak through. |
 | GET | `/api/v1/opencode/providers` | List providers + models |
 | GET | `/api/v1/opencode/agents` | List agents |
@@ -309,7 +319,7 @@ The API proxies requests to the OpenCode server at :4098. HTTP Basic Auth creden
 | POST | `/api/v1/opencode/upload` | File upload for chat attachments (multipart, validated MIME allowlist) |
 | GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in v1.18.3) |
 
-> **Security**: The Chat and provider-config endpoints return only provider metadata and key-presence flags. **API keys are never exposed or written to OpenCode config files.** Credentials are stored separately from provider metadata, synchronized to OpenCode through its auth API, and mirrored into the selected synthesis role settings for runtime resolution.
+> **Security**: The Chat and provider-config endpoints return only provider metadata and key-presence flags. **API keys are never exposed or written to OpenCode config files.** Credentials are stored in the encrypted vault (`vault_items` table with AES-256-GCM), separated from provider metadata, synchronized to OpenCode through its auth API, and mirrored into the selected synthesis settings for runtime resolution. Legacy plaintext settings (`synthesis_api_key`, `synthesis_backup_api_key`, `llm_provider_api_keys`) are auto-migrated into the vault on first read and then deleted from the settings table.
 
 > **Known gap**: Questions cannot be replied to via the REST API in v1.18.3. They are TUI-only — delivered through the control channel. There is no `POST /questions/:id/reply` endpoint.
 

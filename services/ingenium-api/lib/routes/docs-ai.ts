@@ -1,5 +1,7 @@
 import { Router, Request, Response } from "express";
-import { logger, safeLlmFetch, synthesisLlm } from "ingenium-core";
+import { logger } from "ingenium-core";
+import { executeSynthesisBroker } from "../opencode-client.js";
+import { requireProject } from "../helpers.js";
 
 /**
  * AI-assisted documentation routes for the Docs wiki.
@@ -130,53 +132,24 @@ router.post("/ai", async (req: Request, res: Response) => {
       return;
     }
 
-    // Resolve LLM config
-    const config = synthesisLlm.resolveLLMConfig();
-    if (!config || !config.model) {
-      res.status(400).json({
-        error: { code: "LLM_NOT_CONFIGURED", message: "AI features require an LLM to be configured in Settings" },
-      });
-      return;
-    }
+    const projectId = requireProject(req, res);
+    if (!projectId) return;
 
     const prompt = buildPrompt(action, content, title, selectedText);
-    const baseEndpoint = (config.endpoint || "https://api.openai.com/v1")
-      .replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
-
-    // temperature 0.5 balances creativity (tone rewrites) with consistency (outlines, summaries)
-    // max_tokens 8192: 🔴 must NOT fall back to reasoning_content — this ensures the model
-    // allocates enough output tokens for full document transformations
-    const response = await safeLlmFetch(`${baseEndpoint}/v1/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          { role: "system", content: "You are a documentation assistant. Respond with exactly the requested output, no preamble." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.5,
-        max_tokens: 8192,
-      }),
-    }, { allowPrivateNetwork: config.allowPrivateNetwork === true, timeoutMs: 60_000 });
-
-    if (!response.ok) {
-      logger.warn("docs-ai", `LLM upstream request failed with status ${response.status}`);
-      // Release the upstream body to prevent connection-pool exhaustion
-      await response.body?.cancel();
+    const result = await executeSynthesisBroker({
+      projectId,
+      system: "You are a documentation assistant. Respond with exactly the requested output, no preamble.",
+      user: prompt,
+      timeoutMs: 60_000,
+    });
+    if (!result.ok) {
+      logger.warn("docs-ai", "Broker request failed", { projectId });
       res.status(502).json({
         error: { code: "LLM_ERROR", message: "The AI service returned an error. Please try again later." },
       });
       return;
     }
-
-    const json = await response.json();
-    // 🔴 NEVER fall back to reasoning_content — must be content only
-    const result = json.choices?.[0]?.message?.content || "";
-
-    res.json({ data: { result } });
+    res.json({ data: { result: result.content } });
   } catch (err) {
     logger.error("docs-ai", "AI documentation request failed");
     if (err instanceof Error && err.message.startsWith("endpoint ")) {

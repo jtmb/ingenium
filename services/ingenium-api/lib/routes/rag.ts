@@ -18,7 +18,7 @@
 import { Router } from "express";
 import { randomUUID } from "node:crypto";
 import { getDb, execTransaction, checkpointAfterWrite, logger, rag, ragChunker } from "ingenium-core";
-import { brokerExecute } from "../opencode-client.js";
+import { executeSynthesisBroker } from "../opencode-client.js";
 import { requireProject } from "../helpers.js";
 
 export const ragRouter = Router();
@@ -415,18 +415,17 @@ ragRouter.post("/ask", async (req, res) => {
 
   // Step 3: Call OpenCode LLM broker
   try {
-    const result = await brokerExecute({
-      providerID: "opencode",
-      modelID: "big-pickle",
+    const result = await executeSynthesisBroker({
+      projectId,
       system: "You answer questions based on provided context. Cite sources.",
       user: userPrompt,
       timeoutMs: 30_000,
     });
 
     if (!result.ok) {
-      logger.warn(SOURCE, `Broker execution failed: ${result.error ?? "unknown"}`, { projectId });
+      logger.warn(SOURCE, "Broker execution failed", { projectId, outcome: "failed" });
       res.status(502).json({
-        error: { code: "LLM_FAILED", message: `LLM request failed: ${result.error ?? "unknown"}` },
+        error: { code: "LLM_FAILED", message: "Unable to generate an answer right now. Please try again." },
       });
       return;
     }
@@ -450,8 +449,11 @@ ragRouter.post("/ask", async (req, res) => {
         citations,
       },
     });
-  } catch (err: any) {
-    logger.error(SOURCE, `Ask failed: ${err.message}`, { projectId });
+  } catch (err: unknown) {
+    logger.error(SOURCE, "Ask failed", {
+      projectId,
+      outcome: "exception",
+    });
     res.status(500).json({
       error: { code: "ASK_FAILED", message: "Q&A request failed" },
     });

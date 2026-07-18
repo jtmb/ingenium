@@ -18,7 +18,7 @@ import { join } from "node:path";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { projects, settings, configs, resetDbForTest } from "ingenium-core";
+import { projects, settings, configs, resetDbForTest, vault } from "ingenium-core";
 import { settingsRouter } from "../lib/routes/settings.js";
 import { opencodeRouter } from "../lib/routes/opencode.js";
 import { opencodeClient } from "../lib/opencode-client.js";
@@ -50,6 +50,10 @@ beforeAll(async () => {
   projectName = "llm-config-test-project";
   projects.createProject(projectName);
   projects.setProjectGlobal(projectName, true);
+  const projectId = projects.getProject(projectName)!.id;
+  // Provider credentials are intentionally vault-only. Tests unseal the same
+  // encrypted storage the production route requires before supplying a key.
+  expect(vault.initializeVault(projectId, "test-vault-passphrase", "test-vault-passphrase").ok).toBe(true);
   vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({});
   vi.spyOn(opencodeClient, "deleteAuth").mockResolvedValue({});
 
@@ -252,21 +256,107 @@ describe("managed provider blocks", () => {
     expect(opencodeClient.deleteAuth).toHaveBeenCalledWith("openai-main", "/workspace");
   });
 
-  it("rejects duplicate IDs, multiple primary roles, and overlapping primary and backup roles", async () => {
+  it("does not save provider settings when a vault credential write fails", async () => {
+    const projectId = projects.getGlobalProject()!.id;
+    const createItem = vi.spyOn(vault, "createItem").mockImplementationOnce(() => {
+      throw new Error("simulated vault storage failure");
+    });
+
+    const response = await putProviderConfigs([{
+      id: "vault-write-failure",
+      name: "Vault Write Failure",
+      npm: "@ai-sdk/openai",
+      baseURL: "https://api.openai.com/v1",
+      models: ["test-model"],
+      defaultModel: "test-model",
+      roles: ["available", "primary"],
+      enabled: true,
+      apiKey: "test-only-credential",
+    }]);
+
+    expect(response.status).toBe(409);
+    const body = await response.json();
+    expect(body.error).toEqual({
+      code: "VAULT_WRITE_FAILED",
+      message: "Could not save API credentials. Verify the vault is available and try again.",
+    });
+    expect(JSON.stringify(body)).not.toContain("simulated vault storage failure");
+    expect(settings.getSetting(projectId, "llm_provider_configs") ?? "").not.toContain("vault-write-failure");
+    expect(vault.listItems(projectId).some((item: any) => item.name === "Managed LLM API Key: vault-write-failure")).toBe(false);
+    createItem.mockRestore();
+  });
+
+  it("keeps legacy settings when migration cannot write a vault credential", async () => {
+    const project = projects.createProject("llm-config-legacy-vault-failure");
+    settings.setSetting(project.id, "synthesis_provider", "legacy-failure-provider");
+    settings.setSetting(project.id, "synthesis_model", "legacy-model");
+    settings.setSetting(project.id, "synthesis_api_key", "legacy-test-credential");
+    const createItem = vi.spyOn(vault, "createItem").mockImplementationOnce(() => {
+      throw new Error("simulated legacy vault failure");
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/settings/llm-config${projectQ("llm-config-legacy-vault-failure")}`);
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error.code).toBe("VAULT_WRITE_FAILED");
+    expect(settings.getSetting(project.id, "synthesis_api_key")).toBe("legacy-test-credential");
+    createItem.mockRestore();
+  });
+
+  it("migrates and removes the fixed-name primary vault credential", async () => {
+    const project = projects.createProject("llm-config-fixed-vault-migration");
+    settings.setSetting(project.id, "synthesis_provider", "legacy-fixed-provider");
+    settings.setSetting(project.id, "synthesis_model", "legacy-model");
+    vault.createItem(project.id, "Synthesis Primary API Key", "api_key", "legacy-fixed-credential");
+
+    const response = await fetch(`${baseUrl}/api/v1/settings/llm-config${projectQ("llm-config-fixed-vault-migration")}`);
+
+    expect(response.status).toBe(200);
+    const items = vault.listItems(project.id) as Array<{ id: string; name: string }>;
+    expect(items.some((item) => item.name === "Synthesis Primary API Key")).toBe(false);
+    const migrated = items.find((item) => item.name === "Managed LLM API Key: legacy-fixed-provider");
+    expect(migrated?.id).toBeTruthy();
+    expect(vault.decryptItem(project.id, migrated!.id)).toBe("legacy-fixed-credential");
+  });
+
+  it("rejects duplicate IDs and permits one provider in both roles when models differ", async () => {
     const response = await putProviderConfigs([
       providers[0]!,
       { ...providers[0]!, name: "Duplicate", role: "primary" },
     ]);
     expect(response.status).toBe(422);
 
-    const overlappingRolesResponse = await putProviderConfigs([{
+    const overlappingRolesResponse = await fetch(`${baseUrl}/api/v1/settings/provider-configs${projectQ()}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        providers: [{
       ...providers[0]!,
+          models: ["gpt-4.1", "gpt-4.1-mini"],
       roles: ["available", "primary", "backup"],
-    }]);
-    expect(overlappingRolesResponse.status).toBe(422);
-    expect((await overlappingRolesResponse.json()).error.message).toBe(
-      "providers[0].roles: a provider cannot be both primary and backup",
-    );
+        }],
+        synthesis: {
+          primary: { providerId: "openai-main", modelId: "gpt-4.1" },
+          secondary: { providerId: "openai-main", modelId: "gpt-4.1-mini" },
+        },
+      }),
+    });
+    expect(overlappingRolesResponse.status).toBe(200);
+  });
+
+  it("rejects identical primary and secondary provider-model selections", async () => {
+    const response = await fetch(`${baseUrl}/api/v1/settings/provider-configs${projectQ()}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        providers: [{ ...providers[0]!, roles: ["available", "primary", "backup"] }],
+        synthesis: {
+          primary: { providerId: "openai-main", modelId: "gpt-4.1" },
+          secondary: { providerId: "openai-main", modelId: "gpt-4.1" },
+        },
+      }),
+    });
+    expect(response.status).toBe(422);
   });
 
   it("rejects provider packages outside the execution allowlist", async () => {

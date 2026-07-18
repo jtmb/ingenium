@@ -27,7 +27,12 @@ settingsRouter.get("/", (req, res) => {
   }
   const value = settings.getSetting(projectId, key);
   if (isSensitiveSettingKey(key)) {
-    res.json({ data: { key, value: "", isSet: Boolean(value?.trim()) } });
+    const providerId = key === "synthesis_api_key"
+      ? settings.getSetting(projectId, "synthesis_provider") || ""
+      : key === "synthesis_backup_api_key"
+        ? settings.getSetting(projectId, "synthesis_backup_provider") || ""
+        : "";
+    res.json({ data: { key, value: "", isSet: providerId ? hasVaultApiKey(projectId, providerId) : Boolean(value?.trim()) } });
     return;
   }
   res.json({ data: { key, value } });
@@ -128,6 +133,11 @@ interface ManagedProviderInput {
   allowPrivateNetwork?: boolean;
 }
 
+interface SynthesisSelection {
+  providerId: string;
+  modelId: string;
+}
+
 interface ManagedProvider extends Omit<ManagedProviderInput, "apiKey" | "role" | "roles"> {
   roles: ProviderRoles;
   apiKeySet: boolean;
@@ -151,16 +161,146 @@ const ALLOWED_PROVIDER_PACKAGES = new Set([
 
 type VaultItemReader = {
   isSealed(): boolean;
-  findItemByName(projectId: string, name: string): { id: string } | null;
-  revealItem(projectId: string, itemId: string): { value: string } | null;
+  listItems(projectId: string): Array<{ id?: string; name?: string }>;
+  decryptItem(projectId: string, itemId: string): string | null;
+  createItem(projectId: string, name: string, type: string, value: string): string;
+  updateItem(projectId: string, itemId: string, value: string): void;
+  deleteItem(projectId: string, itemId: string): void;
 };
 
 const vault = (core as unknown as { vault?: VaultItemReader }).vault;
+const LEGACY_PRIMARY_VAULT_KEY_NAME = "Synthesis Primary API Key";
 
-function getVaultPrimaryApiKey(projectId: string): string | undefined {
+function vaultKeyName(providerId: string): string {
+  return `Managed LLM API Key: ${providerId}`;
+}
+
+function getVaultApiKey(projectId: string, providerId: string): string | undefined {
   if (!vault || vault.isSealed()) return undefined;
-  const item = vault.findItemByName(projectId, "Synthesis Primary API Key");
-  return item ? vault.revealItem(projectId, item.id)?.value : undefined;
+  const item = vault.listItems(projectId).find((candidate) => candidate.name === vaultKeyName(providerId));
+  return item?.id ? vault.decryptItem(projectId, item.id) ?? undefined : undefined;
+}
+
+type VaultWriteRollback = () => void;
+
+class VaultCredentialWriteError extends Error {
+  constructor() {
+    super("Vault credential write failed");
+  }
+}
+
+/**
+ * Write a group of credentials before committing their settings projection.
+ * Vault items use their own transactions, so compensate successful earlier
+ * writes if a later write fails.
+ */
+function stageVaultApiKeyWrites(projectId: string, keys: Record<string, string | undefined>): VaultWriteRollback {
+  if (!Object.values(keys).some((key) => key)) return () => {};
+  if (!vault || vault.isSealed()) throw new VaultCredentialWriteError();
+
+  const rollbackSteps: VaultWriteRollback[] = [];
+  try {
+    for (const [providerId, key] of Object.entries(keys)) {
+      if (!key) continue;
+      const item = vault.listItems(projectId).find((candidate) => candidate.name === vaultKeyName(providerId));
+      if (item?.id) {
+        const previousValue = vault.decryptItem(projectId, item.id);
+        if (previousValue === null) throw new VaultCredentialWriteError();
+        vault.updateItem(projectId, item.id, key);
+        rollbackSteps.push(() => vault.updateItem(projectId, item.id!, previousValue));
+      } else {
+        const createdId = vault.createItem(projectId, vaultKeyName(providerId), "api_key", key);
+        if (!createdId || createdId === "Vault is sealed") throw new VaultCredentialWriteError();
+        rollbackSteps.push(() => vault.deleteItem(projectId, createdId));
+      }
+    }
+  } catch (error) {
+    for (const rollback of rollbackSteps.reverse()) {
+      try {
+        rollback();
+      } catch (rollbackError) {
+        logger.error("settings", "Vault credential compensation failed", {
+          errorName: rollbackError instanceof Error ? rollbackError.name : "UnknownError",
+        });
+      }
+    }
+    logger.warn("settings", "Vault credential write failed", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    throw new VaultCredentialWriteError();
+  }
+
+  return () => {
+    for (const rollback of rollbackSteps.reverse()) {
+      try {
+        rollback();
+      } catch (error) {
+        logger.error("settings", "Vault credential compensation failed", {
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        });
+      }
+    }
+  };
+}
+
+function hasVaultApiKey(projectId: string, providerId: string): boolean {
+  return Boolean(getVaultApiKey(projectId, providerId)?.trim());
+}
+
+function clearVaultApiKey(projectId: string, providerId: string): void {
+  if (!vault || vault.isSealed()) return;
+  const item = vault.listItems(projectId).find((candidate) => candidate.name === vaultKeyName(providerId));
+  if (item?.id) vault.deleteItem(projectId, item.id);
+}
+
+/**
+ * One-way compatibility migration. Legacy values are read only while the vault
+ * is unsealed, encrypted first, and removed in the same completed operation.
+ */
+function migrateLegacyProviderKeys(projectId: string): boolean {
+  if (!vault || vault.isSealed()) return true;
+  const legacyPrimaryItem = vault.listItems(projectId).find((candidate) => candidate.name === LEGACY_PRIMARY_VAULT_KEY_NAME);
+  const legacyPrimaryKey = legacyPrimaryItem?.id ? vault.decryptItem(projectId, legacyPrimaryItem.id) : undefined;
+  const legacy: Array<[string, string | undefined]> = [
+    [settings.getSetting(projectId, "synthesis_provider") || "", settings.getSetting(projectId, "synthesis_api_key") ?? undefined],
+    [settings.getSetting(projectId, "synthesis_backup_provider") || "", settings.getSetting(projectId, "synthesis_backup_api_key") ?? undefined],
+    ...Object.entries(parseJsonObject(settings.getSetting(projectId, "llm_provider_api_keys"))),
+    [settings.getSetting(projectId, "synthesis_provider") || "", legacyPrimaryKey ?? undefined],
+  ];
+  const migrated = legacy.filter(([providerId, key]) => providerId && key?.trim());
+  if (migrated.length === 0) return true;
+
+  let rollback: VaultWriteRollback;
+  try {
+    rollback = stageVaultApiKeyWrites(projectId, Object.fromEntries(
+      migrated.filter(([providerId]) => !hasVaultApiKey(projectId, providerId)),
+    ));
+  } catch {
+    return false;
+  }
+  try {
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    execTransaction(() => {
+      db.prepare("DELETE FROM settings WHERE project_id = ? AND key IN ('synthesis_api_key', 'synthesis_backup_api_key', 'llm_provider_api_keys')").run(projectId);
+    });
+  } catch (error) {
+    rollback();
+    logger.error("settings", "Legacy provider credential migration failed", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    return false;
+  }
+  checkpointAfterWrite();
+  if (legacyPrimaryItem?.id) {
+    try {
+      vault.deleteItem(projectId, legacyPrimaryItem.id);
+    } catch (error) {
+      logger.warn("settings", "Legacy vault credential cleanup failed", {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+      });
+    }
+  }
+  return true;
 }
 
 function parseJsonObject(value: string | undefined): Record<string, string> {
@@ -242,17 +382,9 @@ function getManagedProviders(projectId: string): ManagedProvider[] {
   const stored = parseManagedProviders(settings.getSetting(projectId, "llm_provider_configs"));
   const providers = (stored.length > 0 ? stored : legacyManagedProviders(projectId))
     .map((provider) => normalizeManagedProvider(provider));
-  const keys = parseJsonObject(settings.getSetting(projectId, "llm_provider_api_keys"));
-  const legacyPrimaryKey = getVaultPrimaryApiKey(projectId) ?? settings.getSetting(projectId, "synthesis_api_key");
-  const legacyBackupKey = settings.getSetting(projectId, "synthesis_backup_api_key");
-
   return providers.map((provider) => ({
     ...provider,
-    apiKeySet: Boolean(
-      keys[provider.id]
-       || (provider.roles.includes("primary") && legacyPrimaryKey)
-       || (provider.roles.includes("backup") && legacyBackupKey),
-    ),
+    apiKeySet: hasVaultApiKey(projectId, provider.id),
   }));
 }
 
@@ -275,9 +407,6 @@ function saveLlmConfig(
   // An omitted key means "keep the saved credential". The Settings UI only
   // receives apiKeySet metadata, never the credential itself, so treating an
   // omitted field as empty would erase a saved key on an unrelated save.
-  if (primary.apiKey !== undefined) values.push(["synthesis_api_key", primary.apiKey]);
-  if (backup?.apiKey !== undefined) values.push(["synthesis_backup_api_key", backup.apiKey]);
-
   execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const upsert = db.prepare(
@@ -436,9 +565,6 @@ async function validateManagedProviders(providersToSave: ManagedProviderInput[])
       || (provider.role !== undefined && !(["available", "primary", "backup"] as const).includes(provider.role))) {
       return `${label}.roles is invalid`;
     }
-    if (roles.includes("primary") && roles.includes("backup")) {
-      return `${label}.roles: a provider cannot be both primary and backup`;
-    }
     if (typeof provider.enabled !== "boolean") return `${label}.enabled must be a boolean`;
     if (provider.apiKey !== undefined && typeof provider.apiKey !== "string") {
       return `${label}.apiKey must be a string when supplied`;
@@ -465,7 +591,14 @@ async function validateManagedProviders(providersToSave: ManagedProviderInput[])
 settingsRouter.get("/provider-configs", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  res.json({ data: { providers: getManagedProviders(projectId) } });
+  if (!migrateLegacyProviderKeys(projectId)) {
+    res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not secure legacy credentials. Verify the vault is available and try again." } });
+    return;
+  }
+  res.json({ data: { providers: getManagedProviders(projectId), synthesis: {
+    primary: { providerId: settings.getSetting(projectId, "synthesis_provider") || "", modelId: settings.getSetting(projectId, "synthesis_model") || "" },
+    secondary: { providerId: settings.getSetting(projectId, "synthesis_backup_provider") || "", modelId: settings.getSetting(projectId, "synthesis_backup_model") || "" },
+  } } });
 });
 
 settingsRouter.put("/provider-configs", async (req, res) => {
@@ -476,19 +609,21 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "providers must be an array" } });
     return;
   }
+  const requestedSynthesis = req.body?.synthesis as { primary?: SynthesisSelection; secondary?: SynthesisSelection } | undefined;
 
   const validationError = await validateManagedProviders(providersInput as ManagedProviderInput[]);
   if (validationError) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: validationError } });
     return;
   }
+  if (!migrateLegacyProviderKeys(projectId)) {
+    res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not secure legacy credentials. Verify the vault is available and try again." } });
+    return;
+  }
 
   const previous = getManagedProviders(projectId);
   const previousIds = previous.map((provider) => provider.id);
-  const previousKeys = parseJsonObject(settings.getSetting(projectId, "llm_provider_api_keys"));
-  const legacyPrimaryKey = getVaultPrimaryApiKey(projectId) ?? settings.getSetting(projectId, "synthesis_api_key") ?? "";
-  const legacyBackupKey = settings.getSetting(projectId, "synthesis_backup_api_key") ?? "";
-  const resolvedKeys: Record<string, string> = {};
+  const resolvedKeys: Record<string, string | undefined> = {};
   const clearedKeyIds = new Set<string>();
   const metadata = (providersInput as ManagedProviderInput[]).map((provider) => {
     const normalized = {
@@ -502,15 +637,16 @@ settingsRouter.put("/provider-configs", async (req, res) => {
       enabled: provider.enabled,
       allowPrivateNetwork: provider.allowPrivateNetwork === true,
     } satisfies Omit<ManagedProvider, "apiKeySet">;
-    const previousRoles = previous.find((entry) => entry.id === normalized.id)?.roles ?? [];
-    const preservedKey = previousKeys[normalized.id]
-      || (previousRoles.includes("primary") ? legacyPrimaryKey : "")
-      || (previousRoles.includes("backup") ? legacyBackupKey : "");
-    const resolvedKey = provider.apiKey === undefined ? preservedKey : provider.apiKey.trim();
+    const resolvedKey = provider.apiKey === undefined ? undefined : provider.apiKey.trim();
     if (resolvedKey) resolvedKeys[normalized.id] = resolvedKey;
     if (provider.apiKey !== undefined && !provider.apiKey.trim()) clearedKeyIds.add(normalized.id);
     return normalized;
   });
+
+  if (Object.values(resolvedKeys).some((key) => key) && (!vault || vault.isSealed())) {
+    res.status(409).json({ error: { code: "VAULT_REQUIRED", message: "Unseal and initialize the vault before saving an API key" } });
+    return;
+  }
 
   let globalProject = projects.getGlobalProject();
   if (!globalProject) {
@@ -534,29 +670,53 @@ settingsRouter.put("/provider-configs", async (req, res) => {
 
   const primary = metadata.find((provider) => provider.enabled && provider.roles.includes("primary"));
   const backup = metadata.find((provider) => provider.enabled && provider.roles.includes("backup"));
+  const select = (value: SynthesisSelection | undefined, fallback: typeof primary): SynthesisSelection | null => {
+    if (!value?.providerId && !value?.modelId) return fallback ? { providerId: fallback.id, modelId: fallback.defaultModel } : { providerId: "", modelId: "" };
+    const provider = metadata.find((candidate) => candidate.id === value?.providerId && candidate.enabled);
+    return provider && provider.models.includes(value!.modelId) ? { providerId: provider.id, modelId: value!.modelId } : null;
+  };
+  const primarySelection = select(requestedSynthesis?.primary, primary);
+  const secondarySelection = select(requestedSynthesis?.secondary, backup);
+  if (!primarySelection || !secondarySelection || (primarySelection.providerId && primarySelection.providerId === secondarySelection.providerId && primarySelection.modelId === secondarySelection.modelId)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Synthesis selections must reference enabled custom models and cannot be identical" } });
+    return;
+  }
   const values: Array<[string, string]> = [
     ["llm_provider_configs", JSON.stringify(metadata)],
-    ["llm_provider_api_keys", JSON.stringify(resolvedKeys)],
-    ["synthesis_provider", primary?.id ?? ""],
-    ["synthesis_model", primary?.defaultModel ?? ""],
-    ["synthesis_endpoint", primary?.baseURL ?? ""],
-    ["synthesis_allow_private_network", String(primary?.allowPrivateNetwork === true)],
-    ["synthesis_api_key", primary ? resolvedKeys[primary.id] ?? "" : ""],
-    ["synthesis_backup_provider", backup?.id ?? ""],
-    ["synthesis_backup_model", backup?.defaultModel ?? ""],
-    ["synthesis_backup_endpoint", backup?.baseURL ?? ""],
-    ["synthesis_backup_allow_private_network", String(backup?.allowPrivateNetwork === true)],
-    ["synthesis_backup_api_key", backup ? resolvedKeys[backup.id] ?? "" : ""],
+    ["synthesis_provider", primarySelection.providerId],
+    ["synthesis_model", primarySelection.modelId],
+    ["synthesis_endpoint", metadata.find((p) => p.id === primarySelection.providerId)?.baseURL ?? ""],
+    ["synthesis_allow_private_network", String(metadata.find((p) => p.id === primarySelection.providerId)?.allowPrivateNetwork === true)],
+    ["synthesis_backup_provider", secondarySelection.providerId],
+    ["synthesis_backup_model", secondarySelection.modelId],
+    ["synthesis_backup_endpoint", metadata.find((p) => p.id === secondarySelection.providerId)?.baseURL ?? ""],
+    ["synthesis_backup_allow_private_network", String(metadata.find((p) => p.id === secondarySelection.providerId)?.allowPrivateNetwork === true)],
   ];
-  execTransaction(() => {
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const upsert = db.prepare(
-      `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
-       ON CONFLICT(project_id, key) DO UPDATE SET value = excluded.value`,
-    );
-    for (const [key, value] of values) upsert.run(projectId, key, value);
-  });
-  checkpointAfterWrite();
+  let rollbackVaultWrites: VaultWriteRollback;
+  try {
+    rollbackVaultWrites = stageVaultApiKeyWrites(projectId, resolvedKeys);
+  } catch {
+    res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not save API credentials. Verify the vault is available and try again." } });
+    return;
+  }
+  try {
+    execTransaction(() => {
+      const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+      const upsert = db.prepare(
+        `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
+         ON CONFLICT(project_id, key) DO UPDATE SET value = excluded.value`,
+      );
+      for (const [key, value] of values) upsert.run(projectId, key, value);
+    });
+    checkpointAfterWrite();
+  } catch (error) {
+    rollbackVaultWrites();
+    logger.error("settings", "Provider settings write failed after vault update", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    res.status(409).json({ error: { code: "CONFIG_SAVE_FAILED", message: "Could not save provider configuration. Please try again." } });
+    return;
+  }
 
   if (globalProject && projectedConfig) {
     try {
@@ -582,8 +742,9 @@ settingsRouter.put("/provider-configs", async (req, res) => {
     }
   }
   for (const provider of metadata) {
-    const key = resolvedKeys[provider.id];
-    if (clearedKeyIds.has(provider.id)) {
+    const key = resolvedKeys[provider.id] ?? getVaultApiKey(projectId, provider.id);
+  if (clearedKeyIds.has(provider.id)) {
+      clearVaultApiKey(projectId, provider.id);
       const result = await opencodeClient.deleteAuth(provider.id, "/workspace");
       if (isOpenCodeError(result)) authWarnings.push(`Authentication cleanup for ${provider.name} could not be completed`);
       continue;
@@ -603,14 +764,18 @@ settingsRouter.put("/provider-configs", async (req, res) => {
 settingsRouter.get("/llm-config", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!migrateLegacyProviderKeys(projectId)) {
+    res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not secure legacy credentials. Verify the vault is available and try again." } });
+    return;
+  }
 
-  const primaryKey = getVaultPrimaryApiKey(projectId) ?? settings.getSetting(projectId, "synthesis_api_key");
-  const backupKey = settings.getSetting(projectId, "synthesis_backup_api_key");
+  const primaryProvider = settings.getSetting(projectId, "synthesis_provider") || "";
+  const backupProvider = settings.getSetting(projectId, "synthesis_backup_provider") || "";
 
   const primary: LlmConfigEntry = {
     provider: settings.getSetting(projectId, "synthesis_provider") || "",
     model: settings.getSetting(projectId, "synthesis_model") || "",
-    apiKeySet: Boolean(primaryKey && primaryKey.trim().length > 0),
+    apiKeySet: hasVaultApiKey(projectId, primaryProvider),
     endpoint: settings.getSetting(projectId, "synthesis_endpoint") || "",
     allowPrivateNetwork: settings.getSetting(projectId, "synthesis_allow_private_network") === "true",
   };
@@ -618,7 +783,7 @@ settingsRouter.get("/llm-config", (req, res) => {
   const backup: LlmConfigEntry = {
     provider: settings.getSetting(projectId, "synthesis_backup_provider") || "",
     model: settings.getSetting(projectId, "synthesis_backup_model") || "",
-    apiKeySet: Boolean(backupKey && backupKey.trim().length > 0),
+    apiKeySet: hasVaultApiKey(projectId, backupProvider),
     endpoint: settings.getSetting(projectId, "synthesis_backup_endpoint") || "",
     allowPrivateNetwork: settings.getSetting(projectId, "synthesis_backup_allow_private_network") === "true",
   };
@@ -657,6 +822,16 @@ settingsRouter.post("/llm-config", async (req, res) => {
     return;
   }
 
+  const suppliedKeys = [primary.apiKey, backup?.apiKey].filter((key): key is string => typeof key === "string" && key.trim().length > 0);
+  if (suppliedKeys.length > 0 && (!vault || vault.isSealed())) {
+    res.status(409).json({ error: { code: "VAULT_REQUIRED", message: "Unseal and initialize the vault before saving an API key" } });
+    return;
+  }
+  if (!migrateLegacyProviderKeys(projectId)) {
+    res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not secure legacy credentials. Verify the vault is available and try again." } });
+    return;
+  }
+
   const endpointsToCheck = [primary.endpoint];
   if (backup?.endpoint) endpointsToCheck.push(backup.endpoint);
   try {
@@ -689,7 +864,32 @@ settingsRouter.post("/llm-config", async (req, res) => {
     }
   }
 
-  saveLlmConfig(projectId, primary as Required<Pick<LlmConfigBody["primary"], "provider" | "model">> & Pick<LlmConfigBody["primary"], "apiKey" | "endpoint" | "allowPrivateNetwork">, backup);
+  const credentialWrites: Record<string, string | undefined> = {};
+  if (primary.apiKey?.trim()) credentialWrites[primary.provider.trim()] = primary.apiKey.trim();
+  if (backup?.provider && backup.apiKey?.trim()) credentialWrites[backup.provider.trim()] = backup.apiKey.trim();
+  let rollbackVaultWrites: VaultWriteRollback;
+  try {
+    rollbackVaultWrites = stageVaultApiKeyWrites(projectId, credentialWrites);
+  } catch {
+    res.status(409).json({ error: { code: "VAULT_WRITE_FAILED", message: "Could not save API credentials. Verify the vault is available and try again." } });
+    return;
+  }
+  try {
+    saveLlmConfig(projectId, primary as Required<Pick<LlmConfigBody["primary"], "provider" | "model">> & Pick<LlmConfigBody["primary"], "apiKey" | "endpoint" | "allowPrivateNetwork">, backup);
+  } catch (error) {
+    rollbackVaultWrites();
+    logger.error("settings", "LLM settings write failed after vault update", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    res.status(409).json({ error: { code: "CONFIG_SAVE_FAILED", message: "Could not save LLM configuration. Please try again." } });
+    return;
+  }
+  if (primary.apiKey !== undefined) {
+    if (!primary.apiKey.trim()) clearVaultApiKey(projectId, primary.provider.trim());
+  }
+  if (backup?.provider && backup.apiKey !== undefined) {
+    if (!backup.apiKey.trim()) clearVaultApiKey(projectId, backup.provider.trim());
+  }
 
   // Self-heal global project marking
   if (primary.provider || primary.model) {
