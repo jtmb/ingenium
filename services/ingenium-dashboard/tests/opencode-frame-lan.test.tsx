@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import OpenCodeFrame from "@/app/components/OpenCodeFrame";
 
 /**
@@ -45,6 +46,25 @@ afterEach(() => {
 // ── Iframe rendering ──────────────────────────────────────────────────────
 
 describe("OpenCodeFrame — web iframe", () => {
+  it("omits iframe sources during SSR so hydration resolves the client URL once", () => {
+    const savedWindow = globalThis.window;
+    // @ts-expect-error — deleting window simulates the SSR environment
+    delete globalThis.window;
+    try {
+      const html = renderToStaticMarkup(
+        React.createElement(OpenCodeFrame, { mode: "web", cliMounted: true }),
+      );
+      expect(html).not.toMatch(/<iframe[^>]+src=/);
+    } finally {
+      globalThis.window = savedWindow;
+    }
+  });
+
+  it("resolves the loopback Web URL after mount instead of the SSR proxy URL", () => {
+    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
+    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe("http://localhost:4098/");
+  });
+
   it("uses a same-origin proxy for a LAN dashboard", () => {
     setLocation("http://192.168.1.50:3000/");
     render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));

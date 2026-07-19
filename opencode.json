@@ -10,29 +10,33 @@
     "ingenium": {
       "type": "local",
       "command": [
+        "/usr/bin/env",
         "node",
-        "packages/ingenium-extension/dist/scripts/mcp-server.js"
+        "services/ingenium-server/dist/scripts/mcp-server.js"
       ],
       "enabled": true,
       "environment": {
+        "PATH": "/home/brajam/.local/bin:/usr/local/bin:/usr/bin:/bin",
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
         "INGENIUM_API_TIMEOUT": "10000",
         "LOG_LEVEL": "info",
-        "INGENIUM_PROJECT": "gh-llm-bootstrap"
+        "INGENIUM_PROJECT": "ingenium"
       }
     },
     "playwright": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
-        "@playwright/mcp@latest",
+        "/usr/bin/env",
+        "playwright-mcp",
         "--caps=vision",
-        "--headless",
-        "--executable-path",
-        "/home/brajam/.cache/ms-playwright/chromium-1232/chrome-linux64/chrome"
+        "--browser",
+        "chromium"
       ],
-      "enabled": true
+      "enabled": true,
+      "environment": {
+        "PATH": "/home/brajam/.local/bin:/usr/local/bin:/usr/bin:/bin"
+      },
+      "timeout": 60000
     }
   },
   "plugin": [

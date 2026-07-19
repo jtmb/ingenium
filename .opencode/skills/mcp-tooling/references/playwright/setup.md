@@ -16,7 +16,7 @@ The Playwright MCP server is configured in `opencode.json`:
   "mcp": {
     "playwright": {
       "type": "local",
-      "command": ["npx", "-y", "@playwright/mcp@latest", "--caps=vision"],
+      "command": ["npx", "-y", "@playwright/mcp@0.0.78", "--caps=vision"],
       "enabled": true
     }
   }
@@ -31,11 +31,11 @@ In WSL environments, the Playwright MCP server may fail to detect a display or f
 
 ```json
 "command": [
-  "npx", "-y", "@playwright/mcp@latest",
+  "npx", "-y", "@playwright/mcp@0.0.78",
   "--caps=vision",
   "--headless",
   "--executable-path",
-  "/home/brajam/.cache/ms-playwright/chromium-1232/chrome-linux64/chrome"
+  "$HOME/.cache/ms-playwright/chromium-<version>/chrome-linux64/chrome"
 ]
 ```
 
@@ -44,7 +44,7 @@ In WSL environments, the Playwright MCP server may fail to detect a display or f
 | `--headless` | Forces headless mode — required when no display server is available (WSL, SSH, headless servers) |
 | `--executable-path` | Points to the Playwright-bundled Chromium binary. Find your installed path with `find ~/.cache/ms-playwright -name "chrome" -type f 2>/dev/null \| head -1` |
 
-The `--executable-path` version suffix (`chromium-1232`) may differ based on your `@playwright/mcp` version. Run `npx playwright install chromium` to ensure Chromium is installed, then check the path with the find command above.
+The `--executable-path` version suffix (`chromium-<version>`) may differ based on your `@playwright/mcp` version. Run `npx playwright install chromium` to ensure Chromium is installed, then check the path with the find command above.
 
 ### Prerequisites
 
