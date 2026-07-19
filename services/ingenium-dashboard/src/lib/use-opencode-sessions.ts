@@ -59,6 +59,8 @@ export interface UseOpenCodeSessionsReturn {
   archive: (id: string) => Promise<void>;
   /** Un-archive a session (no-op when API lacks archive support). */
   unarchive: (id: string) => Promise<void>;
+  /** True while auto-creating the initial session when the list is empty. */
+  autoCreated: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -113,6 +115,9 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
   const abortRef = useRef<AbortController | null>(null);
   /** Snapshot of previous sessions for optimistic rollback in rename. */
   const renameSnapshotRef = useRef<OpenCodeSession[]>([]);
+  /** Guards against duplicate auto-creation when the session list is empty. */
+  const autoCreatedRef = useRef(false);
+  const [autoCreated, setAutoCreated] = useState(false);
 
   /* ---- derived: search filter ---- */
 
@@ -149,12 +154,45 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
       );
       setAllSessions(sorted);
 
-      // Auto-select if no active session and sessions exist
-      setActiveId((prev) => {
-        if (prev && sorted.some((s) => s.id === prev)) return prev;
-        const first = sorted[0];
-        return first ? first.id : null;
-      });
+      // Auto-create session when the list is empty (once per mount)
+      if (
+        sorted.length === 0 &&
+        !autoCreatedRef.current &&
+        mountedRef.current
+      ) {
+        autoCreatedRef.current = true;
+        setAutoCreated(true);
+        try {
+          const createdSession = await opencode.sessions.create({
+            title: "New conversation",
+            directory: "/workspace",
+          });
+          if (!mountedRef.current) return;
+          setAllSessions([createdSession]);
+          setActiveId(createdSession.id);
+          persistActive(createdSession.id);
+        } catch (createErr: unknown) {
+          if (!mountedRef.current) return;
+          if (
+            (createErr as Error)?.name === "AbortError"
+          )
+            return;
+          const message =
+            createErr instanceof Error
+              ? createErr.message
+              : "Failed to create a new conversation. Please try again.";
+          setError(message);
+        } finally {
+          if (mountedRef.current) setAutoCreated(false);
+        }
+      } else {
+        // Auto-select if no active session and sessions exist
+        setActiveId((prev) => {
+          if (prev && sorted.some((s) => s.id === prev)) return prev;
+          const first = sorted[0];
+          return first ? first.id : null;
+        });
+      }
     } catch (err: unknown) {
       if (!mountedRef.current) return;
       const message =
@@ -411,5 +449,6 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     refresh,
     archive,
     unarchive,
+    autoCreated,
   };
 }

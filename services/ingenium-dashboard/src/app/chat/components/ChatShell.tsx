@@ -67,6 +67,7 @@ export default function ChatShell() {
     share,
     isLoading: sessionsLoading,
     error: sessionsError,
+    autoCreated = false,
   } = useOpenCodeSessions();
 
   const chat = useOpenCodeChat(activeId);
@@ -325,9 +326,9 @@ export default function ChatShell() {
   /* ---- Chat handlers ---- */
 
   const handleSend = useCallback(
-    async (text: string, _systemPrompt: string) => {
-      if (!activeId) return;
-      if (!hasSelectableModel || !providerId || !modelId) return;
+    async (text: string, _systemPrompt: string): Promise<boolean> => {
+      if (!activeId) return false;
+      if (!hasSelectableModel || !providerId || !modelId) return false;
 
       const shouldRename =
         wasFirstMessage.current &&
@@ -361,6 +362,8 @@ export default function ChatShell() {
           text.length > 50 ? `${text.slice(0, 47)}...` : text;
         await rename(activeId, title);
       }
+
+      return true;
     },
     [activeId, activeSession, chat, rename, attachments, providerId, modelId, agentName, hasSelectableModel],
   );
@@ -639,27 +642,158 @@ export default function ChatShell() {
             </span>
           </div>
         )}
-        <ChatMessages
-          messages={chat.messages}
-          isLoading={chat.isLoading}
-          isStreaming={chat.isStreaming}
-          error={displayError}
-          onRetry={handleRetry}
-          onRevert={handleRevert}
-          onDismissError={handleDismissError}
-          permissions={chat.permissions}
-          replyPermission={chat.replyPermission}
-          questions={chat.questions}
-          onSendReply={handleSendReply}
-        />
-        <ChatInput
-          onSend={handleSend}
-          onStop={handleStop}
-          isLoading={chat.isStreaming || chat.isLoading}
-          attachments={attachments}
-          onAttachmentsChange={setAttachments}
-          hasSelectableModel={hasSelectableModel}
-        />
+        {autoCreated ? (
+          <>
+            <ChatMessages
+              messages={chat.messages}
+              isLoading={chat.isLoading}
+              isStreaming={chat.isStreaming}
+              error={displayError}
+              onRetry={handleRetry}
+              onRevert={handleRevert}
+              onDismissError={handleDismissError}
+              permissions={chat.permissions}
+              replyPermission={chat.replyPermission}
+              questions={chat.questions}
+              onSendReply={handleSendReply}
+            />
+            {/* Disabled composer — waiting for auto-created session */}
+            <div className="shrink-0 px-4 pb-4 pt-2 w-full">
+              <div className="max-w-3xl mx-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] shadow-sm px-4 py-3">
+                <p className="text-sm text-[var(--color-text-muted)] text-center">
+                  Starting conversation...
+                </p>
+              </div>
+            </div>
+          </>
+        ) : !activeId && !sessionsLoading && sessionsError ? (
+          /* Auto-create failure — sessionsError is set, no active conversation */
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center max-w-sm px-4">
+              <svg
+                width="48"
+                height="48"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="mx-auto mb-4 text-red-500"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856C20.06 19 21 17.921 21 16.645V7.355C21 6.079 20.06 5 18.918 5H8.92A3 3 0 006 7.355L4.083 16.053C3.698 17.691 4.963 19 6.643 19"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 9v2m0 4h.01"
+                  strokeWidth="2"
+                />
+              </svg>
+              <p className="text-sm text-red-600 dark:text-red-400 font-medium mb-2">
+                Failed to create conversation
+              </p>
+              <p className="text-xs text-[var(--color-text-muted)] mb-4 max-h-20 overflow-y-auto">
+                {sessionsError ?? "An unknown error occurred."}
+              </p>
+              <button
+                type="button"
+                onClick={handleNew}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8 3.33v9.34M3.33 8h9.34"
+                  />
+                </svg>
+                Retry
+              </button>
+            </div>
+          </div>
+        ) : !activeId && !sessionsLoading && !sessionsError ? (
+          /* Missing session — no conversation exists yet */
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center max-w-sm px-4">
+              <svg
+                width="48"
+                height="48"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="mx-auto mb-4 text-[var(--color-text-muted)]"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
+                />
+              </svg>
+              <p className="text-sm text-[var(--color-text-secondary)] mb-4">
+                No conversation available. Please create one.
+              </p>
+              <button
+                type="button"
+                onClick={handleNew}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 text-white px-4 py-2 text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8 3.33v9.34M3.33 8h9.34"
+                  />
+                </svg>
+                New Conversation
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <ChatMessages
+              messages={chat.messages}
+              isLoading={chat.isLoading}
+              isStreaming={chat.isStreaming}
+              error={displayError}
+              onRetry={handleRetry}
+              onRevert={handleRevert}
+              onDismissError={handleDismissError}
+              permissions={chat.permissions}
+              replyPermission={chat.replyPermission}
+              questions={chat.questions}
+              onSendReply={handleSendReply}
+            />
+            <ChatInput
+              onSend={handleSend}
+              onStop={handleStop}
+              isLoading={chat.isStreaming || chat.isLoading}
+              attachments={attachments}
+              onAttachmentsChange={setAttachments}
+              hasSelectableModel={hasSelectableModel}
+            />
+          </>
+        )}
       </div>
 
       {/* MCP drawer */}

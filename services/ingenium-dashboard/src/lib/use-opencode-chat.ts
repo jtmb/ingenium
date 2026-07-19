@@ -118,6 +118,7 @@ interface PermissionState {
 
 type ChatAction =
   | { type: "LOAD_MESSAGES"; messages: ChatMessage[] }
+  | { type: "RECONCILE_MESSAGES"; messages: ChatMessage[] }
   | { type: "ADD_USER_MESSAGE"; message: ChatMessage }
   | { type: "ACCUMULATE_DELTA"; messageID: string; partID: string; delta: string; partType?: string }
   | { type: "UPSERT_PART"; messageID: string; part: OpenCodePart }
@@ -168,6 +169,27 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "LOAD_MESSAGES":
       return { ...state, messages: action.messages, isLoading: false, error: null };
+
+    case "RECONCILE_MESSAGES": {
+      const refreshedById = new Map(
+        action.messages.map((message) => [message.id, message]),
+      );
+      const existingIds = new Set(state.messages.map((message) => message.id));
+      const reconciled = state.messages.map((message) => {
+        const refreshed = refreshedById.get(message.id);
+        return refreshed
+          ? { ...message, isStreaming: refreshed.isStreaming }
+          : message;
+      });
+
+      for (const message of action.messages) {
+        if (!existingIds.has(message.id)) {
+          reconciled.push(message);
+        }
+      }
+
+      return { ...state, messages: reconciled, isLoading: false };
+    }
 
     case "ADD_USER_MESSAGE": {
       return {
@@ -400,6 +422,8 @@ function normalizeMessage(raw: OpenCodeApiMessage): ChatMessage {
     reasoning: extractReasoning(parts),
     model,
     timestamp: raw.info.time.created,
+    isStreaming:
+      raw.info.role === "assistant" && raw.info.time.completed === undefined,
   };
 }
 
@@ -630,6 +654,8 @@ export function useOpenCodeChat(sessionId: string | null) {
         reconnectAttemptRef.current = 0; // Reset on successful connection
 
         async function readStream(): Promise<void> {
+          let receivedTerminalEvent = false;
+
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -657,8 +683,19 @@ export function useOpenCodeChat(sessionId: string | null) {
                 continue;
               }
 
+              if (evt.type === "session.idle" || evt.type === "session.error") {
+                receivedTerminalEvent = true;
+              }
               dispatchSSEEvent(evt, sid);
             }
+          }
+
+          if (!receivedTerminalEvent) {
+            dispatch({ type: "SET_STREAMING", value: false });
+            dispatch({
+              type: "SET_ERROR",
+              error: "Stream ended unexpectedly. The response may be incomplete.",
+            });
           }
         }
 
@@ -686,6 +723,7 @@ export function useOpenCodeChat(sessionId: string | null) {
             connectSSE(sid);
           }, delay);
         } else {
+          dispatch({ type: "SET_STREAMING", value: false });
           dispatch({
             type: "SET_ERROR",
             error: "Connection lost after multiple retries. Please refresh.",
@@ -1049,7 +1087,13 @@ export function useOpenCodeChat(sessionId: string | null) {
       parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }>,
       options?: { model?: { providerID: string; modelID: string }; agent?: string; variant?: string; system?: string; tools?: Record<string, boolean> },
     ) => {
-      if (!sessionId) return;
+      if (!sessionId) {
+        dispatch({
+          type: "SET_ERROR",
+          error: "Cannot send message — no active conversation.",
+        });
+        return;
+      }
       dispatch({ type: "SET_ERROR", error: null });
 
       // Store for retry
@@ -1111,12 +1155,10 @@ export function useOpenCodeChat(sessionId: string | null) {
           sessionId,
         )) as unknown as OpenCodeApiMessage[];
         dispatch({
-          type: "LOAD_MESSAGES",
+          type: "RECONCILE_MESSAGES",
           messages: normalizeMessages(rawMessages),
         });
-        dispatch({ type: "SET_STREAMING", value: false });
       } catch (err: unknown) {
-        dispatch({ type: "REMOVE_LAST_USER" });
         dispatch({ type: "SET_STREAMING", value: false });
         dispatch({
           type: "SET_ERROR",

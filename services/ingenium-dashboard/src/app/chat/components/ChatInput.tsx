@@ -19,7 +19,7 @@ export interface Attachment {
 }
 
 interface ChatInputProps {
-  onSend: (message: string, systemPrompt: string, options?: SendOptions) => void;
+  onSend: (message: string, systemPrompt: string, options?: SendOptions) => Promise<boolean>;
   onStop: () => void;
   isLoading: boolean;
   providerId?: string;
@@ -98,6 +98,7 @@ export default function ChatInput({
   const [systemPrompt, setSystemPrompt] = useState("");
   const [showInstructions, setShowInstructions] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -225,18 +226,27 @@ export default function ChatInput({
     [processFiles],
   );
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = value.trim();
-    if (!trimmed || isLoading || !hasSelectableModel) return;
-    onSend(trimmed, systemPrompt.trim(), {
-      providerId,
-      modelId,
-      agentName,
-    });
-    setValue("");
-    // Reset textarea height
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "24px";
+    if (!trimmed || isLoading || sending || !hasSelectableModel) return;
+    setSending(true);
+    try {
+      const accepted = await onSend(trimmed, systemPrompt.trim(), {
+        providerId,
+        modelId,
+        agentName,
+      });
+      if (accepted) {
+        setValue("");
+        // Reset textarea height
+        if (textareaRef.current) {
+          textareaRef.current.style.height = "24px";
+        }
+      }
+    } catch {
+      // Swallow — input text is preserved so user can retry
+    } finally {
+      setSending(false);
     }
   };
 
@@ -468,7 +478,7 @@ export default function ChatInput({
             onKeyDown={handleKeyDown}
             placeholder="Ask Ingenium anything..."
             rows={1}
-            disabled={isLoading}
+            disabled={isLoading || sending}
             className="flex-1 resize-none bg-transparent text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] outline-none py-1 min-h-[24px] max-h-[200px] disabled:opacity-50"
             aria-label="Chat message input"
             data-testid="chat-composer"
@@ -498,10 +508,10 @@ export default function ChatInput({
             <button
               type="button"
               onClick={handleSend}
-              disabled={!hasText || !hasSelectableModel}
+              disabled={!hasText || !hasSelectableModel || sending}
               className={[
-                "rounded-lg p-2 transition-colors shrink-0",
-                hasText
+                "rounded-lg p-2 transition-colors shrink-0 flex items-center justify-center",
+                hasText && !sending
                   ? "bg-blue-600 text-white hover:bg-blue-700"
                   : "bg-[var(--color-surface-hover)] text-[var(--color-text-muted)] cursor-not-allowed",
               ].join(" ")}
@@ -509,21 +519,44 @@ export default function ChatInput({
               title="Send message"
               data-testid="chat-send-btn"
             >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M14 2L7 9M14 2l-4.67 12L7 9l-3.33-1.33L14 2z"
-                />
-              </svg>
+              {sending ? (
+                <svg
+                  className="animate-spin"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <circle
+                    cx="8"
+                    cy="8"
+                    r="6"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeDasharray="28"
+                    strokeDashoffset="10"
+                    strokeLinecap="round"
+                    opacity="0.5"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  aria-hidden="true"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M14 2L7 9M14 2l-4.67 12L7 9l-3.33-1.33L14 2z"
+                  />
+                </svg>
+              )}
             </button>
           )}
         </div>
