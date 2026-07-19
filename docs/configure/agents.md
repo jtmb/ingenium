@@ -11,9 +11,9 @@ description: Agent profiles, pipeline lifecycle, and subagent invocation for the
 
 ### Chat Agent Model Inheritance
 
-The `ingenium-chat` agent uses **Settings-backed model resolution** rather than a hardcoded model:
+The `ingenium-chat` agent uses a default model that the Chat request can override:
 
-- **No `model` field** — The agent inherits its model from the Chat request's `modelID` parameter at send time, not from a static agent config.
+- **Default model** — The profile's default model is `deepseek/deepseek-v4-flash`; the Chat request's `modelID` parameter overrides it at send time.
 - **`hidden: true`** — Prevents the agent from appearing in OpenCode's non-Chat agent selectors (e.g., the OpenCode Web/CLI agent dropdown). It is only visible in the Chat page's agent selector.
 - **Provider from Settings** — The available providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
 
@@ -40,15 +40,16 @@ flowchart TB
         GATE -->|"📄 DOCS"| DOCS["@ingenium-docs"]
         GATE -->|"🛡️ AUDIT"| AUDITOR["@ingenium-security-auditor"]
         GATE -->|"🧠 CONTEXT"| SCOUT["@ingenium-scout"]
-        GATE -->|"👁️ VISION"| VB["@vision-bridge"]
         EXP --> MERGE["Merge results"]
         SE --> MERGE
         QA --> MERGE
         SCOUT --> MERGE
-        VB --> MERGE
         AUDITOR --> MERGE
         MERGE --> VERIFY["✅ Verify · tests · type-check"]
-        VERIFY --> DOC["🔴 Spawn @ingenium-docs after EVERY change"]
+        VERIFY --> HEALTH["🚀 Deploy + health verification"]
+        HEALTH --> VISION["@ingenium-qa-vision<br/>passive evidence only"]
+        VISION --> VISION_GATE["👁️ Changed-route visual gate"]
+        VISION_GATE --> DOC["🔴 Spawn @ingenium-docs after EVERY change"]
         DOC --> OBSERVE["📋 Observations (auto-extracted)"]
         OBSERVE --> COMMIT["git add/commit/push"]
     end
@@ -60,16 +61,17 @@ flowchart TB
 
 | Agent | Type | Model | Provider | Access | Skills Allowed | Purpose |
 |-------|------|-------|----------|--------|---------------|---------|
-| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Full R/W (`edit: deny, write: deny`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
+| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only + bash (`edit/write` denied) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
+| **ingenium-chat** | Primary | Settings-backed (inherited) | Settings → Providers | Read-only (`hidden: true`) | — | Conversational Chat agent — inherits the request `modelID`; hidden from non-Chat selectors |
 | **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | — | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `local-models` | Codebase search — grep, glob, file discovery, pattern analysis |
 | **ingenium-scout** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `local-models` | Docs RAG persistent memory — past decisions, preferences |
-| **vision-bridge** | Subagent | `qwen/qwen3.5-9b` | LM Studio | Read-only (`read: allow`) | `local-models` | Vision analysis — reads screenshot files and produces structured technical descriptions for non-vision models |
+| **ingenium-qa-vision** | Subagent | `openai/gpt-5.6-luna` | OpenAI OAuth | Read-only passive evidence (`read/glob/grep`; constrained Playwright) | `development-conventions`, `engineering-workflow`, `mcp-tooling` | Visual QA only — passively captures screenshots/snapshots, network, and console evidence; never evaluates, interacts, fixes, or mutates data |
 | **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Complex multi-file refactoring, architectural changes, performance-critical code |
 | **ingenium-software-engineer-terra** | Subagent | `openai/gpt-5.6-terra` | OpenAI OAuth | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Standard fixes, test authoring, routine refactors leveraging GPT-5.6 Terra OAuth |
 | **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` | Code review + test verification. Reviews tests, does NOT write production code or author tests |
-| **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Edit + Write (`edit: allow, write: allow, bash: deny`) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` | Documentation + skill updates — observations are auto-extracted by the server-side engine |
+| **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Edit + Write + bash (`edit/write: allow; bash: allow with exclusions`) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` | Documentation + skill updates — observations are auto-extracted by the server-side engine |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` | Security audit + git-history leak scanning |
 | **browser-agent** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Free | Read/Write | `mcp-tooling`, `engineering-workflow` | Browser automation — Puppeteer/Playwright-based web interaction and testing |
 
@@ -90,11 +92,14 @@ The 13 email MCP tools (`ingenium_email_list` through `ingenium_email_watch_stat
 | 3 | **Read plan** | Tab switch | Orchestrator | Reads plan from conversation context, decomposes into subagent tasks |
 | 4 | **Pre-Action Gate** | EVERY tool use | Orchestrator | ⚡ Checks: "Should a subagent do this?" before any tool call |
 | 5 | **Code writing** | Implementation needed | Orchestrator → **Software-Engineer** | Implements code, self-verifies (tests/type-check), returns results |
-| 6 | **Review + test** | Code written | Orchestrator → **QA** | Reviews quality, writes tests, returns findings |
-| 7 | **Security audit** | Sensitive changes | Orchestrator → **Security-Auditor** | Scans for secrets, auth issues, CI vulnerabilities |
-| 8 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/ — observations automatically captured by server-side extraction engine |
-| 9 | **Commit** | All subagents done | Orchestrator (bash) | `git add/commit/push` — the ONLY bash the orchestrator runs |
-| 10 | **Observations** | After commit | Extraction engine | Observations automatically captured by server-side extraction engine scanning OpenCode messages |
+| 6 | **Normal QA + test** | Code written | Orchestrator → **QA** | Reviews quality and verifies tests; visual QA is a separate gate |
+| 7 | **Deploy + health verification** | Normal QA/test complete | Orchestrator | Completes deployment and health verification before visual QA is spawned |
+| 8 | **Changed-route visual gate** | UI implementation + normal QA/test/deployment/health verification | Orchestrator → **QA Vision** | Passively checks changed non-sensitive UI routes at 1440x900 and 390x844; confirms browser cleanup; FAIL/BLOCKED routes to a writer, then rechecks |
+| 9 | **Security audit** | Sensitive changes | Orchestrator → **Security-Auditor** | Scans for secrets, auth issues, CI vulnerabilities |
+| 10 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/ — observations automatically captured by server-side extraction engine |
+| 11 | **Final visual sweep** | Before final completion/commit | Orchestrator → **QA Vision** | After deployment/health verification, passively sweeps non-sensitive primary routes at both viewports; PASS and cleanup confirmation required |
+| 12 | **Commit** | All gates pass | Orchestrator (bash) | `git add/commit/push` — the ONLY bash the orchestrator runs |
+| 13 | **Observations** | After commit | Extraction engine | Observations automatically captured by server-side extraction engine scanning OpenCode messages |
 
 ---
 
@@ -171,7 +176,9 @@ Conflicting writers (touching the same file) MUST be serialized across waves —
 
 ### Restart Required for New Agent Profiles
 
-Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCode before the agent becomes invocable by `@` mention. The agent must also be registered in the `opencode.json` agents array.
+Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCode before the auto-discovered agent becomes invocable by `@` mention.
+
+After an OpenCode restart, invoke `@ingenium-qa-vision` on a known non-sensitive dashboard state. A **BLOCKED** result means stop and reconfigure the visual-QA path; it is not a pass.
 
 > See the [orchestrator agent profile](../../.opencode/agents/primary/ingenium-orchestrator.md) for the full policy specification, dispatch examples, and collision resolution rules.
 
@@ -179,16 +186,18 @@ Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCod
 
 ## Per-Agent Profiles
 
-Full details for each agent are available in the agent definition files at `.opencode/agents/`. See also the [IGENIUM orchestrator agent](../.opencode/agents/primary/ingenium-orchestrator.md) for orchestrator-specific controls and the full pipeline flow.
+Full details for each agent are available in the agent definition files at `.opencode/agents/`. See also the [INGENIUM orchestrator agent](../../.opencode/agents/primary/ingenium-orchestrator.md) for orchestrator-specific controls and the full pipeline flow.
 
 ### Compute Split
 
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
-| DeepSeek V4 Pro (API) | `ingenium-software-engineer-premium`, `ingenium-orchestrator` | 2 | Paid |
-| DeepSeek V4 Flash (API) | `ingenium-security-auditor` | 1 | Paid |
+| DeepSeek V4 Pro (API) | `ingenium-software-engineer-premium`, `ingenium-orchestrator`, `ingenium-prompt-engineer` | 3 | Paid |
+| DeepSeek V4 Flash (API) | `ingenium-chat`, `ingenium-explore`, `ingenium-scout`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-security-auditor`; `ingenium-llm-broker` (internal/hidden) | 7 public + 1 internal | Paid |
 | OpenAI GPT-5.6 Terra (OAuth) | `ingenium-software-engineer-terra` | 1 | Paid (user OpenAI subscription) |
-| qwen3.5-9b (LM Studio) | `ingenium-explore`, `ingenium-prompt-engineer`, `ingenium-scout`, `vision-bridge`, `ingenium-software-engineer`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs` | 8 | Local |
+| OpenAI GPT-5.6 Luna (OAuth) | `ingenium-qa-vision` | 1 | Paid (user OpenAI subscription) |
+| OpenCode Free | `browser-agent` | 1 | Free |
+| qwen3.5-9b (LM Studio) | None | 0 | Local |
 
 **Model configuration**: Model assignments are defined per-agent in their `.md` agent profile files (stored in `.opencode/agents/` and the DB `agents` table).
 
@@ -204,7 +213,7 @@ Primary agents invoke subagents via the Task tool automatically. All subagents c
 | ingenium-scout | `@ingenium-scout` | Read-only | orchestrator + user |
 | ingenium-prompt-engineer | `@ingenium-prompt-engineer` | Read-only | orchestrator + user |
 | ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | orchestrator + user |
-| vision-bridge | `@vision-bridge` | Read-only | orchestrator + user |
+| ingenium-qa-vision | `@ingenium-qa-vision` | Visual QA only | orchestrator only |
 | ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
 | ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Read/Write | orchestrator only |
 | ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |

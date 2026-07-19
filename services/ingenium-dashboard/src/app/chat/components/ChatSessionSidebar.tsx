@@ -46,6 +46,23 @@ export default function ChatSessionSidebar({
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
 
+  /** Escape-to-close when mounted as a mobile drawer overlay. */
+  const onToggleRef = useRef(onToggle);
+  onToggleRef.current = onToggle;
+
+  useEffect(() => {
+    if (!isDrawer) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onToggleRef.current();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isDrawer]);
+
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
       renameInputRef.current.focus();

@@ -14,7 +14,6 @@ permission:
   playwright_*: allow
   task:
     "*": "deny"
-    "vision-bridge": "allow"
   ingenium_docs_search: allow
   ingenium_docs_get_page: allow
   ingenium_docs_get_page_tree: allow

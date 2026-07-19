@@ -1014,6 +1014,290 @@ test_orchestration_policy() {
         pass "All orchestration policy checks passed"
     fi
 }
+
+# ═══════════════════════════════════════════════════════════
+# TEST 12 — Luna Visual QA Migration
+# Protect the visual-QA profile, its read-only permission boundary,
+# exclusive orchestrator delegation, and mandatory visual gates.
+# ═══════════════════════════════════════════════════════════
+test_luna_visual_qa_migration() {
+    section "TEST 12 — Luna Visual QA Migration"
+
+    local errors=0
+    local vision_agent="ingenium-qa-vision"
+    local legacy_agent="vision""-bridge"
+    local profile="$AGENTS_DIR/execution/${vision_agent}.md"
+    local legacy_profile="$AGENTS_DIR/research/${legacy_agent}.md"
+    local orchestrator="$AGENTS_DIR/primary/ingenium-orchestrator.md"
+    local plan_template="$REPO_ROOT/next-steps-plan/next-steps-template.md"
+    local deepseek_protocol="$SKILLS_DIR/local-models/references/deep-seek.md"
+    local agents_md="$REPO_ROOT/AGENTS.md"
+    local agents_doc="$REPO_ROOT/docs/configure/agents.md"
+
+    if [[ -e "$legacy_profile" ]]; then
+        fail "Legacy visual profile" "Deprecated profile still exists: $legacy_profile"
+        errors=$((errors + 1))
+    else
+        pass "Legacy visual profile is absent"
+    fi
+
+    local stale_refs
+    stale_refs=$(grep -R -n -F --exclude-dir=.git "$legacy_agent" "$REPO_ROOT" || true)
+    if [[ -n "$stale_refs" ]]; then
+        fail "Legacy visual references" "Found stale references: $stale_refs"
+        errors=$((errors + 1))
+    else
+        pass "No stale legacy visual references remain"
+    fi
+
+    local spaced_legacy_refs=""
+    local migration_file
+    for migration_file in "$profile" "$orchestrator" "$plan_template" "$deepseek_protocol"; do
+        if [[ -f "$migration_file" ]]; then
+            local matches
+            matches=$(grep -inE 'vision[[:space:]]+bridge' "$migration_file" || true)
+            if [[ -n "$matches" ]]; then
+                spaced_legacy_refs="${spaced_legacy_refs}${migration_file}: ${matches}"$'\n'
+            fi
+        fi
+    done
+    if [[ -z "$spaced_legacy_refs" ]]; then
+        pass "No case-insensitive spaced legacy visual references remain in migration paths"
+    else
+        fail "Legacy visual references" "Found spaced remnants: $spaced_legacy_refs"
+        errors=$((errors + 1))
+    fi
+
+    if [[ ! -f "$profile" ]]; then
+        fail "$vision_agent" "Missing profile: $profile"
+        errors=$((errors + 1))
+        return
+    fi
+
+    local fm
+    fm=$(extract_frontmatter "$profile")
+    local model
+    model=$(get_field_value "$fm" "model" | tr -d '[:space:]')
+    if [[ "$model" == "openai/gpt-5.6-luna" ]]; then
+        pass "$vision_agent uses openai/gpt-5.6-luna"
+    else
+        fail "$vision_agent" "Expected model openai/gpt-5.6-luna, found '$model'"
+        errors=$((errors + 1))
+    fi
+
+    local permission_checks=(
+        '^  read: allow$'
+        '^  glob: allow$'
+        '^  grep: allow$'
+        '^  playwright_\*: allow$'
+        '^  edit: deny$'
+        '^  write: deny$'
+        '^  bash: deny$'
+        '^    "\*": "deny"$'
+        '^    "\*": deny$'
+    )
+    local missing_permission=false
+    for pattern in "${permission_checks[@]}"; do
+        if ! echo "$fm" | grep -qE "$pattern"; then
+            missing_permission=true
+            fail "$vision_agent" "Missing required permission pattern: $pattern"
+            errors=$((errors + 1))
+        fi
+    done
+    if ! $missing_permission; then
+        pass "$vision_agent has the required read-only Playwright permissions"
+    fi
+
+    # OpenCode's schema permits individual permission keys in addition to
+    # wildcard keys. Deny interaction and evaluation tools explicitly.
+    local forbidden_playwright_tools=(
+        playwright_browser_click playwright_browser_drag playwright_browser_drop
+        playwright_browser_evaluate playwright_browser_file_upload playwright_browser_fill_form playwright_browser_find
+        playwright_browser_handle_dialog playwright_browser_hover playwright_browser_mouse_click_xy
+        playwright_browser_mouse_down playwright_browser_mouse_drag_xy playwright_browser_mouse_move_xy
+        playwright_browser_mouse_up playwright_browser_mouse_wheel playwright_browser_navigate_back
+        playwright_browser_press_key playwright_browser_run_code_unsafe playwright_browser_select_option
+        playwright_browser_type playwright_browser_wait_for
+        playwright_browser_press_sequentially playwright_browser_check playwright_browser_uncheck
+        playwright_browser_keydown playwright_browser_keyup playwright_browser_cookie_clear
+        playwright_browser_cookie_delete playwright_browser_cookie_set playwright_browser_cookie_get
+        playwright_browser_cookie_list playwright_browser_localstorage_clear playwright_browser_localstorage_delete
+        playwright_browser_localstorage_set playwright_browser_localstorage_get playwright_browser_localstorage_list
+        playwright_browser_sessionstorage_clear playwright_browser_sessionstorage_delete playwright_browser_sessionstorage_set
+        playwright_browser_sessionstorage_get playwright_browser_sessionstorage_list playwright_browser_set_storage_state
+        playwright_browser_storage_state playwright_browser_route playwright_browser_reload
+        playwright_browser_network_state_set playwright_browser_pdf_save playwright_browser_annotate
+        playwright_browser_navigate_forward
+    )
+    local missing_denies=0
+    local forbidden_tool
+    for forbidden_tool in "${forbidden_playwright_tools[@]}"; do
+        if ! echo "$fm" | grep -qE "^  ${forbidden_tool}: deny$"; then
+            fail "$vision_agent" "Forbidden Playwright action is not explicitly denied: $forbidden_tool"
+            errors=$((errors + 1))
+            missing_denies=$((missing_denies + 1))
+        fi
+    done
+    if [[ "$missing_denies" -eq 0 ]]; then
+        pass "$vision_agent explicitly denies all forbidden Playwright actions"
+    fi
+
+    local denied_playwright_count
+    denied_playwright_count=$(echo "$fm" | grep -cE '^  playwright_browser_.*: deny$' || true)
+    if [[ "$denied_playwright_count" -ge 49 ]]; then
+        pass "$vision_agent denies $denied_playwright_count Playwright actions across interaction, storage, cookie, keyboard, navigation, and form domains"
+    else
+        fail "$vision_agent" "Expected at least 49 explicit Playwright action denies, found $denied_playwright_count"
+        errors=$((errors + 1))
+    fi
+
+    local task_block
+    task_block=$(echo "$fm" | awk '/^  task:/{found=1; print; next} found && /^  [a-z]/{exit} found{print}')
+    if [[ "$task_block" == $'  task:\n    "*": "deny"' ]]; then
+        pass "$vision_agent task permission denies every delegation target"
+    else
+        fail "$vision_agent" "Task permission must contain only \"*\": \"deny\""
+        errors=$((errors + 1))
+    fi
+
+    local skill
+    for skill in development-conventions engineering-workflow mcp-tooling; do
+        if ! echo "$fm" | grep -q "\"@${skill}\": allow"; then
+            fail "$vision_agent" "Missing allowed skill @$skill"
+            errors=$((errors + 1))
+        fi
+    done
+    if echo "$fm" | grep -q '^    "\*": deny$'; then
+        pass "$vision_agent denies all remaining skills"
+    else
+        fail "$vision_agent" "Missing deny-all skill permission"
+        errors=$((errors + 1))
+    fi
+    local actual_skills expected_skills
+    actual_skills=$(extract_skill_list "$fm" | sort)
+    expected_skills=$(printf '%s\n' development-conventions engineering-workflow mcp-tooling | sort)
+    if [[ "$actual_skills" == "$expected_skills" ]]; then
+        pass "$vision_agent allows exactly the approved skills"
+    else
+        fail "$vision_agent" "Unexpected allowed skills: $actual_skills"
+        errors=$((errors + 1))
+    fi
+
+    local orch_fm
+    orch_fm=$(extract_frontmatter "$orchestrator")
+    if echo "$orch_fm" | grep -q "\"${vision_agent}\": \"allow\""; then
+        pass "Orchestrator may spawn $vision_agent"
+    else
+        fail "Orchestrator" "Missing task allow-list entry for $vision_agent"
+        errors=$((errors + 1))
+    fi
+
+    local non_orchestrator_allows=""
+    local file
+    for file in $(find_agent_files); do
+        [[ "$file" == "$orchestrator" ]] && continue
+        if extract_frontmatter "$file" | grep -q "\"${vision_agent}\": \"allow\""; then
+            non_orchestrator_allows="${non_orchestrator_allows}${file}"$'\n'
+        fi
+    done
+    if [[ -z "$non_orchestrator_allows" ]]; then
+        pass "Only the orchestrator may spawn $vision_agent"
+    else
+        fail "$vision_agent" "Unexpected task allow-list entries: $non_orchestrator_allows"
+        errors=$((errors + 1))
+    fi
+
+    local orch_body
+    orch_body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$orchestrator")
+    for phrase in "mandatory changed-route visual gate" "final full-site desktop/mobile visual sweep"; do
+        if echo "$orch_body" | grep -qiF "$phrase"; then
+            pass "Orchestrator contains '$phrase'"
+        else
+            fail "Orchestrator" "Missing required visual gate phrase: $phrase"
+            errors=$((errors + 1))
+        fi
+    done
+
+    local architecture_diagram
+    architecture_diagram=$(awk '/^## Architecture$/ { capture=1; next } capture && /^## / { exit } capture { print }' "$orchestrator")
+    local per_task_line visual_gate_line deploy_line
+    per_task_line=$(echo "$architecture_diagram" | grep -nF '├─► For each task:' | cut -d: -f1 | head -1 || true)
+    visual_gate_line=$(echo "$architecture_diagram" | grep -nF '@ingenium-qa-vision changed-route visual gate' | cut -d: -f1 | head -1 || true)
+    deploy_line=$(echo "$architecture_diagram" | grep -nF 'Deploy + health verification' | cut -d: -f1 | head -1 || true)
+    if [[ -n "$per_task_line" && -n "$visual_gate_line" && -n "$deploy_line" \
+        && "$visual_gate_line" -gt "$per_task_line" && "$visual_gate_line" -gt "$deploy_line" ]]; then
+        pass "Orchestrator diagram places the changed-route visual gate after per-task QA/test and deploy/health verification"
+    else
+        fail "Orchestrator" "Architecture diagram must place the changed-route visual gate after the per-task block and deploy/health verification"
+        errors=$((errors + 1))
+    fi
+
+    local vision_body
+    vision_body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$profile")
+    local vision_policy_phrases=(
+        'http://localhost:3000'
+        'http://localhost:4097'
+        'about:blank'
+        'browser_evaluate'
+        'BLOCKED — sensitive content'
+        '/secrets'
+        '/config'
+        'Settings **Providers**'
+        '**Config** tabs'
+        'email bodies or attachments'
+        'private message contents'
+    )
+    local missing_vision_policy=0
+    local phrase
+    for phrase in "${vision_policy_phrases[@]}"; do
+        if ! echo "$vision_body" | grep -qF "$phrase"; then
+            fail "$vision_agent" "Missing passive/sensitive-data policy phrase: $phrase"
+            errors=$((errors + 1))
+            missing_vision_policy=$((missing_vision_policy + 1))
+        fi
+    done
+    if [[ "$missing_vision_policy" -eq 0 ]]; then
+        pass "$vision_agent contains localhost-only and sensitive-page rules"
+    fi
+
+    local forbidden_body_actions='evaluate|type/fill|click|press keys|hover|drag/drop/upload|mouse controls|dialogs|select options'
+    if echo "$vision_body" | grep -qiE "$forbidden_body_actions"; then
+        pass "$vision_agent body explicitly prohibits interactive Playwright actions"
+    else
+        fail "$vision_agent" "Missing explicit body prohibition for interactive Playwright actions"
+        errors=$((errors + 1))
+    fi
+
+    local restart_file
+    for restart_file in "$agents_md" "$agents_doc"; do
+        if grep -qiE 'After an OpenCode restart.*known non-sensitive dashboard state' "$restart_file" \
+            && grep -qiE 'BLOCKED.*stop and reconfigure.*not a pass' "$restart_file"; then
+            pass "Restart/smoke gate present in $(basename "$restart_file")"
+        else
+            fail "Restart/smoke gate" "Missing required Luna restart/smoke language in $restart_file"
+            errors=$((errors + 1))
+        fi
+    done
+
+    local docs_table
+    docs_table=$(awk '
+        /^## Agent Table$/ { capture=1; next }
+        capture && /^---$/ { exit }
+        capture { print }
+    ' "$agents_doc")
+    local docs_agent_count
+    docs_agent_count=$(echo "$docs_table" | grep -cP '^\| \*\*[^*]+\*\* \|' || true)
+    if [[ "$docs_agent_count" -eq 13 ]]; then
+        pass "docs/configure/agents.md lists 13 public agents"
+    else
+        fail "docs/configure/agents.md" "Expected 13 public agents in Agent Table, found $docs_agent_count"
+        errors=$((errors + 1))
+    fi
+
+    if [[ "$errors" -eq 0 ]]; then
+        pass "Luna visual QA migration checks passed"
+    fi
+}
 main() {
     echo "═══════════════════════════════════════════════════════"
     echo "  Agent Validation Tests"
@@ -1032,6 +1316,7 @@ main() {
     test_body_skills_in_frontmatter
     test_agents_table_task_block_coverage
     test_orchestration_policy
+    test_luna_visual_qa_migration
 
     echo ""
     echo "═══════════════════════════════════════════════════════"

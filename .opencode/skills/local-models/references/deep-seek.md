@@ -508,8 +508,8 @@ EVERY file in this commit belongs to this specific phase and wasn't leftover fro
 ### 43. Dirty-Worktree Completion — A Dirty Worktree and Blocked Acceptance Is Not "Complete"
 
 **Failure signature:** Declaring "all 9 phases complete" with a dirty worktree (untracked
-DeepSeek work files, stale test artifacts), blocked visual acceptance (Vision Bridge can't
-run), and a pre-existing email test failure. DeepSeek rationalizes: "the untracked files
+DeepSeek work files, stale test artifacts), blocked visual acceptance (the former visual-QA
+path could not collect passive evidence), and a pre-existing email test failure. DeepSeek rationalizes: "the untracked files
 are leftover, the visual acceptance is blocked by a tool issue, the email test was pre-existing"
 — three separate rationalizations that each let it stop working.
 

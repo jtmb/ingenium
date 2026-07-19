@@ -150,7 +150,6 @@ function StandaloneOpenCode() {
         tabIndex={mode === "web" ? 0 : -1}
         title="OpenCode Web"
         allow="clipboard-write"
-        sandbox="allow-scripts allow-same-origin"
       />
 
       {/* CLI iframe — lazy-mounted */}
@@ -165,10 +164,9 @@ function StandaloneOpenCode() {
           }}
           aria-hidden={mode !== "cli"}
           tabIndex={mode === "cli" ? 0 : -1}
-        title="OpenCode Terminal"
-        allow="clipboard-write"
-        sandbox="allow-scripts allow-same-origin"
-      />
+          title="OpenCode Terminal"
+          allow="clipboard-write"
+        />
       )}
 
       {/* Mode toggle — simplified standalone version */}

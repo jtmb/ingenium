@@ -78,11 +78,9 @@ describe("OpenCodeFrame — web iframe", () => {
     expect(screen.getByTitle("OpenCode Web")).not.toBeNull();
   });
 
-  it("has sandbox='allow-scripts allow-same-origin'", () => {
+  it("has no sandbox attribute (bundled OpenCode is trusted first-party content)", () => {
     render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("sandbox")).toBe(
-      "allow-scripts allow-same-origin",
-    );
+    expect(screen.getByTitle("OpenCode Web").getAttribute("sandbox")).toBeNull();
   });
 
   it("has allow='clipboard-write'", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useId } from "react";
 import Link from "next/link";
 import ChatSessionSidebar from "./ChatSessionSidebar";
 import ChatHeader from "./ChatHeader";
@@ -10,7 +10,7 @@ import MCPDrawer from "./MCPDrawer";
 import { useOpenCodeSessions } from "../../../lib/use-opencode-sessions";
 import { useOpenCodeChat } from "../../../lib/use-opencode-chat";
 import { opencode } from "../../../lib/opencode";
-import { api, type ChatConfigResponse } from "../../../lib/api";
+import { api, ApiError, type ChatConfigResponse } from "../../../lib/api";
 
 /* ------------------------------------------------------------------ */
 /*  ChatShell — main layout orchestrator for the Chat mode            */
@@ -47,6 +47,9 @@ export default function ChatShell() {
   }, []);
 
   /* ---- MCP drawer state ---- */
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const drawerTitleId = useId();
+
   const [mcpDrawerOpen, setMcpDrawerOpen] = useState(false);
   const [mcpServers, setMcpServers] = useState<
     Array<{ name: string; connected: boolean; toolCount?: number }>
@@ -84,6 +87,21 @@ export default function ChatShell() {
   const [chatConfigLoading, setChatConfigLoading] = useState(true);
   const [chatConfigError, setChatConfigError] = useState<string | null>(null);
 
+  /* ---- Rate-limit recovery ---- */
+  const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null);
+  const [rateLimitMessage, setRateLimitMessage] = useState<string>("");
+  const rateLimitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** Clear the rate-limit timer and reset state. */
+  const clearRateLimit = useCallback(() => {
+    if (rateLimitTimerRef.current) {
+      clearInterval(rateLimitTimerRef.current);
+      rateLimitTimerRef.current = null;
+    }
+    setRateLimitSeconds(null);
+    setRateLimitMessage("");
+  }, []);
+
   /* ---- Provider / Model / Agent selection ---- */
   const [providerId, setProviderId] = useState<string>("");
   const [modelId, setModelId] = useState<string>("");
@@ -91,24 +109,73 @@ export default function ChatShell() {
 
   // Fetch sanitized chat config from the API
   const providersInitialized = useRef(false);
-  useEffect(() => {
-    let cancelled = false;
-    async function loadChatConfig() {
-      try {
-        setChatConfigLoading(true);
-        setChatConfigError(null);
-        const result = await api.settings.chatConfig();
-        if (cancelled) return;
-        setChatConfig(result.data);
-      } catch (err) {
-        if (cancelled) return;
-        setChatConfigError(err instanceof Error ? err.message : "Failed to load chat config");
-      } finally {
-        if (!cancelled) setChatConfigLoading(false);
+
+  const fetchChatConfig = useCallback(async (isRetry = false) => {
+    try {
+      setChatConfigLoading(true);
+      if (!isRetry) setChatConfigError(null);
+      const result = await api.settings.chatConfig();
+      setChatConfig(result.data);
+      // Success clears any active rate-limit state
+      clearRateLimit();
+      return result.data;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 429) {
+        const retryAfter = err.retryAfterSeconds ?? 5;
+        setRateLimitSeconds(retryAfter);
+        setRateLimitMessage(err.message);
+        // Don't set generic chatConfigError — the rate-limit banner handles it
+        if (!isRetry) setChatConfigError(null);
+        return null;
       }
+      clearRateLimit();
+      setChatConfigError(err instanceof Error ? err.message : "Failed to load chat config");
+      return null;
+    } finally {
+      setChatConfigLoading(false);
     }
-    loadChatConfig();
-    return () => { cancelled = true; };
+  }, [clearRateLimit]);
+
+  // Countdown effect — decrement rateLimitSeconds every second
+  useEffect(() => {
+    if (rateLimitSeconds === null || rateLimitSeconds <= 0) return;
+    rateLimitTimerRef.current = setInterval(() => {
+      setRateLimitSeconds((prev) => {
+        if (prev === null || prev <= 1) {
+          // Countdown expired — clear the timer and signal auto-retry
+          if (rateLimitTimerRef.current) {
+            clearInterval(rateLimitTimerRef.current);
+            rateLimitTimerRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => {
+      if (rateLimitTimerRef.current) {
+        clearInterval(rateLimitTimerRef.current);
+        rateLimitTimerRef.current = null;
+      }
+    };
+  }, [rateLimitSeconds !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-retry when countdown reaches 0
+  useEffect(() => {
+    if (rateLimitSeconds === 0) {
+      fetchChatConfig(true);
+    }
+  }, [rateLimitSeconds, fetchChatConfig]);
+
+  const handleRateLimitRetry = useCallback(() => {
+    clearRateLimit();
+    fetchChatConfig(true);
+  }, [clearRateLimit, fetchChatConfig]);
+
+  useEffect(() => {
+    fetchChatConfig();
+    // Only on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Initialize provider/model from chat config once loaded
@@ -154,8 +221,8 @@ export default function ChatShell() {
   /** A prompt can run only when the selected provider exposes the selected model. */
   const hasSelectableModel = currentModels.some((model) => model.id === modelId);
 
-  /** Disable selectors during loading, errors, or when no selectable model. */
-  const selectorsDisabled = chatConfigLoading || !!chatConfigError || !hasSelectableModel;
+  /** Disable selectors during loading, errors, rate-limiting, or when no selectable model. */
+  const selectorsDisabled = chatConfigLoading || !!chatConfigError || !hasSelectableModel || rateLimitSeconds !== null;
 
   /* ---- Derived session data ---- */
   const activeSession = sessions.find((s) => s.id === activeId);
@@ -210,6 +277,20 @@ export default function ChatShell() {
   useEffect(() => {
     refreshMcpStatus();
   }, [refreshMcpStatus]);
+
+  /** Auto-focus the first focusable element in the mobile drawer when it opens. */
+  useEffect(() => {
+    if (!mobileDrawerOpen) return;
+    const timer = setTimeout(() => {
+      const drawer = drawerRef.current;
+      if (!drawer) return;
+      const firstFocusable = drawer.querySelector<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      firstFocusable?.focus();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [mobileDrawerOpen]);
 
   /* ---- Session handlers ---- */
 
@@ -398,7 +479,13 @@ export default function ChatShell() {
 
       {/* Mobile drawer overlay */}
       {mobileDrawerOpen && (
-        <div className="md:hidden fixed inset-0 z-40 flex">
+        <div
+          ref={drawerRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Chat sessions"
+          className="md:hidden fixed inset-0 z-40 flex"
+        >
           <div
             className="absolute inset-0 bg-black/50"
             onClick={() => setMobileDrawerOpen(false)}
@@ -495,6 +582,40 @@ export default function ChatShell() {
               <path strokeLinecap="round" d="M8 5v2.5M8 10.5h.005" />
             </svg>
             <span className="truncate">Failed to load chat config: {chatConfigError}</span>
+          </div>
+        )}
+        {/* Rate-limit recovery banner — countdown + manual retry */}
+        {rateLimitSeconds !== null && !chatConfigError && (
+          <div className="px-4 py-2 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-800 text-sm text-amber-700 dark:text-amber-300 flex items-center gap-2 shrink-0">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              className="shrink-0 animate-spin"
+              aria-hidden="true"
+            >
+              <circle cx="8" cy="8" r="6.5" strokeOpacity="0.3" />
+              <path strokeLinecap="round" d="M8 1.5a6.5 6.5 0 016.5 6.5" />
+            </svg>
+            <span className="flex-1 truncate">
+              {rateLimitMessage || "Rate limited"}{" "}
+              {rateLimitSeconds > 0 && (
+                <span className="font-mono tabular-nums">
+                  — retrying in {rateLimitSeconds}s
+                </span>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={handleRateLimitRetry}
+              disabled={chatConfigLoading}
+              className="shrink-0 px-3 py-1 rounded-md text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+            >
+              Retry Now
+            </button>
           </div>
         )}
         {/* Inline error banner for share/compact failures */}

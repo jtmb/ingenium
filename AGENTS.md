@@ -118,7 +118,7 @@ services/
 | **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | `local-models` |
 | **ingenium-scout** | Subagent | `deepseek/deepseek-v4-flash` | `local-models` |
 | **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-pro` | — |
-| **vision-bridge** | Subagent | `qwen/qwen3.5-9b` | `local-models` |
+| **ingenium-qa-vision** | Subagent | `openai/gpt-5.6-luna` | `development-conventions`, `engineering-workflow`, `mcp-tooling` |
 | **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-software-engineer-terra** | Subagent | `openai/gpt-5.6-terra` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
@@ -264,9 +264,15 @@ Every orchestration phase MUST declare before dispatch:
 
 Conflicting writers (touching the same file) MUST be serialized across waves — never dispatched simultaneously.
 
+### Mandatory Visual QA Gates
+
+After UI implementation plus normal QA, test, deployment, and health verification, the orchestrator MUST run a changed-route visual gate through `@ingenium-qa-vision` at 1440x900 and 390x844. Before final completion or commit, it MUST run a passive full-site desktop/mobile sweep of every non-sensitive primary route at both viewports. PASS requires screenshot, accessibility, network/console, and browser-cleanup evidence. FAIL or BLOCKED status routes work back to a writer and requires a visual recheck.
+
 ### Restart Required for New Agent Profiles
 
-Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCode before the agent becomes invocable by `@` mention. The agent must also be registered in the `opencode.json` agents array.
+Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCode before the auto-discovered agent becomes invocable by `@` mention.
+
+After an OpenCode restart, invoke `@ingenium-qa-vision` on a known non-sensitive dashboard state. A **BLOCKED** result means stop and reconfigure the visual-QA path; it is not a pass.
 
 > See the [orchestrator agent profile](./.opencode/agents/primary/ingenium-orchestrator.md) for the full policy specification, dispatch examples, and collision resolution rules.
 

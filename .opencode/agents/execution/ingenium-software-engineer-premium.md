@@ -19,7 +19,6 @@ permission:
   webfetch: allow
   task:
     "*": "deny"
-    "vision-bridge": "allow"
   ingenium_docs_search: allow
   ingenium_docs_get_page: allow
   ingenium_docs_create_page: allow

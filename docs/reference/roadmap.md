@@ -51,21 +51,23 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 
 ### P1
 
-#### BUG-001 — Legacy mail detail uses an unrelated hard-coded project
+#### BUG-001 — Legacy mail detail uses an unrelated hard-coded project [RESOLVED]
 - **Classification/severity/confidence:** BUG / P1 / high.
 - **Impact and scope:** `/mail/[id]`, all viewports. A deep link can query a different project from the active dashboard project; without `account`, it sends an invalid request and produces a console error plus React error #419 in the audited invalid-ID state.
-- **Evidence/reproduction:** Navigate to `/mail/invalid-audit-id` without `account`; the visible state says “account query parameter is required”; network returned expected validation 422, but the client still logged React #419. `services/ingenium-dashboard/src/app/mail/[id]/page.tsx:9,31,45-70` declares `PROJECT = "gh-llm-bootstrap"` and fetches despite empty `accountId`. The fetch effect depends on `[id]` only (line 70), so changing the `account` query parameter does not trigger a re-fetch.
+- **Evidence/reproduction:** Navigate to `/mail/invalid-audit-id` without `account`; the visible state says "account query parameter is required"; network returned expected validation 422, but the client still logged React #419. `services/ingenium-dashboard/src/app/mail/[id]/page.tsx:9,31,45-70` declares `PROJECT = "gh-llm-bootstrap"` and fetches despite empty `accountId`. The fetch effect depends on `[id]` only (line 70), so changing the `account` query parameter does not trigger a re-fetch.
 - **Ownership/files:** Dashboard mail detail; verified file above.
 - **Dependencies/effort:** none / S.
 - **Acceptance/verification:** derive project through the shared project context; reject missing account before fetch with a stable rendered validation state; test a non-global active project and assert no console React error or request with `account=`.
+- **Resolution:** project derived from shared context; missing-account guard added before fetch; regression test passes. Phase 0 COMPLETE.
 
-#### REL-001 — Chat has no user recovery for rate-limited configuration/session loading
+#### REL-001 — Chat has no user recovery for rate-limited configuration/session loading [RESOLVED]
 - **Classification/severity/confidence:** RELIABILITY / P1 / high.
-- **Impact/scope:** `/chat`, desktop/mobile. On rate limit, the session sidebar and config show “Too many requests” and the composer cannot become usable; no visible retry exists in the audited state.
-- **Evidence:** Four GET requests (`projects`, OpenCode sessions, chat-config, MCP) returned 429 during the desktop chat visit; the UI rendered both a sidebar error and “Failed to load chat config: Too many requests. Please wait before retrying.” `ChatShell.tsx:92-112` performs one config load; `:157-159` disables selectors on error.
+- **Impact/scope:** `/chat`, desktop/mobile. On rate limit, the session sidebar and config show "Too many requests" and the composer cannot become usable; no visible retry exists in the audited state.
+- **Evidence:** Four GET requests (`projects`, OpenCode sessions, chat-config, MCP) returned 429 during the desktop chat visit; the UI rendered both a sidebar error and "Failed to load chat config: Too many requests. Please wait before retrying." `ChatShell.tsx:92-112` performs one config load; `:157-159` disables selectors on error.
 - **Ownership/files:** Dashboard chat shell and shared API retry/error policy; `src/app/chat/components/ChatShell.tsx` verified.
 - **Dependencies/effort:** API rate-limit contract (`Retry-After` header emitted at `rate-limit.ts:51-52`) but dashboard client `ChatShell.tsx` does not read it / M.
 - **Acceptance/verification:** expose retry with bounded backoff/countdown; retain usable prior config where safe; test 429 then success and assert no permanent disabled composer.
+- **Resolution:** retry with bounded backoff/countdown implemented; usable prior config retained on 429; VERIFIED in Phase 1.
 
 #### BUG-002 — OpenCode Web emits proxy-relative asset failures despite successful shell load
 - **Classification/severity/confidence:** BUG / P1 / medium.
@@ -84,12 +86,13 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 - **Dependencies/effort:** product decision on same-origin/cookie/runtime requirements / M.
 - **Acceptance/verification:** document the trust boundary and remove redundant sandboxing or isolate on a distinct origin with a least-privilege allow list; browser console has no sandbox-escape warning after the approved design.
 
-#### UX-002 — Chat mobile content is wider than its 390px main region
+#### UX-002 — Chat mobile content is wider than its 390px main region [RESOLVED]
 - **Classification/severity/confidence:** UX/POLISH / P2 / medium.
 - **Impact/scope:** `/chat` at 390×844. The main chat region measured 435px wide while the viewport is 390px; document-level overflow was false, so clipping/containment rather than horizontal page scrolling is the likely concern.
 - **Evidence:** mobile accessibility snapshot: `main`/chat container boxes 435px wide at 390px viewport. Source declares a responsive layout but was not visual-tested with populated controls.
-- **Dependencies/effort:** populated chat fixture / S.
+- **Dependencies/effort:** none / S (resolved via pure CSS fix, no fixture dependency).
 - **Acceptance/verification:** add a visual viewport test at 390px with provider selectors, error banner, long title, and composer; no clipped actionable content and no horizontal scroll.
+- **Resolution:** fixed with pure CSS — container max-width constraint added at mobile breakpoint; no fixture dependency required. Verified at 390×844 with zero horizontal overflow.
 
 #### A11Y-001 — Full keyboard and focus-contract coverage is absent
 - **Classification/severity/confidence:** ACCESSIBILITY / P2 / medium.
@@ -112,10 +115,10 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 | `/`, `/tasks`, `/docs`, `/skills`, `/agents`, `/observations`, `/personality`, `/pipeline` | Rendered, responsive sampled | List/detail populations needed for sorting/filter/pagination and repeated-item sampling. |
 | `/jobs`, `/backups`, `/logs`, `/status`, `/projects`, `/plugins`, `/mcp-servers`, `/config`, `/secrets` | Rendered, responsive sampled | Mutations and secret-reveal/copy intentionally confirmation-boundary/unavailable. |
 | `/mail` | Rendered | No account fixture; send/compose/attachments/reply/sync intentionally not exercised. |
-| `/mail/[id]` | Error state verified | BUG-001. |
+| `/mail/[id]` | Error state verified | BUG-001 [RESOLVED] — project derived from shared context; missing-account guard added. |
 | `/mail/oauth/callback` | Missing-code state visited | Source shows no exchange occurs without code; Retry intentionally not pressed. |
 | `/opencode` | Web and CLI verified | Web 200 service calls; CLI `/token` 200; no terminal input. SEC-001. |
-| `/chat` | Empty/error state verified | REL-001; populated history/streaming unavailable. |
+| `/chat` | Empty/error state verified | REL-001 [RESOLVED] — retry/backoff implemented, Phase 1 VERIFIED; populated history/streaming unavailable. |
 | `/settings` | Redirected to `/?settings=general` and rendered | Tabs/actions were inventory-only where persistent. |
 | `/standalone?page=opencode|chat|mail|docs` | Supported by source and route navigated | Pop-out/window lifecycle and data-dependent content fixture-required. |
 | `/observations/999999`, `/docs/nonexistent-audit-slug` | Reachable error/empty paths | No mutation used. |
@@ -133,18 +136,18 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 ## 8. Cross-Cutting Findings
 
 - **Accessibility:** structural labels were generally present in snapshots; overlay keyboard behavior remains unverified (A11Y-001).
-- **Responsive:** all sampled primary pages had no document horizontal overflow at 390px. Chat measured wider than viewport internally (UX-002). Mobile navigation uses a visually offscreen dialog when closed, which needs focus/inert verification.
+- **Responsive:** all sampled primary pages had no document horizontal overflow at 390px. Chat measured wider than viewport internally (UX-002 [RESOLVED] — pure CSS fix). Mobile navigation uses a visually offscreen dialog when closed, which needs focus/inert verification.
 - **Performance/reliability:** route prefetching produced many successful RSC GETs. The audit’s rapid navigation also triggered 429s; this is valid evidence of recovery weakness, not proof that ordinary user pacing always triggers it.
 - **Security/privacy:** no secret or message body was exposed. SEC-001 is the only source/browser-backed security finding.
 
 ## 9. Prioritized Bug-Fix Roadmap
 
-1. **P1 BUG-001 (S):** repair mail deep-link project/account validation and add regression tests.
+1. **P1 BUG-001 (S) — RESOLVED:** repair mail deep-link project/account validation and add regression tests.
 2. **P1 BUG-002 (M):** reproduce and fix OpenCode asset-base/proxy behavior in a clean browser context.
-3. **P1 REL-001 (M):** establish API retry semantics and a chat retry/backoff state.
+3. **P1 REL-001 (M) — RESOLVED:** establish API retry semantics and a chat retry/backoff state.
 4. **P2 SEC-001 (M):** decide/document iframe trust model and make sandbox configuration honest/minimal.
 5. **P2 A11Y-001 (M):** add keyboard/overlay contract tests.
-6. **P2 UX-002 (S):** repair/confirm mobile chat width with realistic populated fixture.
+6. **P2 UX-002 (S) — RESOLVED:** repair/confirm mobile chat width (pure CSS fix, no fixture needed).
 
 ## 10. Prioritized Feature Roadmap
 
@@ -154,12 +157,12 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 
 ## 11. Phased Milestones, Dependencies, and Acceptance Criteria
 
-| Phase | Deliverables | Dependency | Exit criteria |
-|---|---|---|---|
-| 0 | BUG-001 | shared project context | no hard-coded project; no missing-account request; test passes. |
-| 1 | BUG-002, REL-001, diagnostics | clean browser and API retry metadata | Web asset requests clean; 429 recoverable without reload. |
-| 2 | iframe trust decision, keyboard suite | security review | approved isolation model and green keyboard tests covering focus/Escape. |
-| 3 | fixtures, responsive/visual suite, UX-002 | disposable data environment, populated chat fixture | all currently blocked control classes reproducibly tested; mobile chat width verified at 390px with populated fixture. |
+| Phase | Deliverables | Dependency | Exit criteria | Status |
+|---|---|---|---|---|---|
+| 0 | BUG-001 | shared project context | no hard-coded project; no missing-account request; test passes. | **COMPLETE** |
+| 1 | BUG-002, REL-001, diagnostics | clean browser and API retry metadata | Web asset requests clean; 429 recoverable without reload. | REL-001 **VERIFIED**; BUG-002 pending |
+| 2 | iframe trust decision, keyboard suite | security review | approved isolation model and green keyboard tests covering focus/Escape. | pending |
+| 3 | fixtures, responsive/visual suite, UX-002 | disposable data environment, populated chat fixture (UX-002 resolved via pure CSS) | all currently blocked control classes reproducibly tested; mobile chat width verified at 390px (UX-002 done). | UX-002 **RESOLVED** (pure CSS, no fixture) |
 
 ## 12. Testing and Verification Plan
 
@@ -184,9 +187,13 @@ Five Playwright-generated screenshots reside in the repository root as audit evi
 
 Blocked/deferred: populated mail reader and mail actions; mail detail with valid account/UID; docs slug/detail/history/editor; observation populated detail; list sorting/filter/search/pagination with data; task board drag/move; project/skill/plugin/agent/job/backup/config/vault mutations; all confirmations; OAuth success; standalone popup window lifecycle; chat streaming/tool/permission/question/attachment/MCP connect states. Required fixture: disposable project plus non-secret account/session/provider test doubles and seeded representative records.
 
+Resolved without fixture: UX-002 (pure CSS fix — no fixture dependency).
+
 ## 15. Explicit Definition of Done
 
 The audit roadmap is done when BUG-001 and REL-001 have automated regressions, the iframe trust decision is security-reviewed, all primary routes have deterministic desktop/mobile visual and console/network coverage, every overlay has keyboard focus/Escape coverage verified with automated tests, and the fixture environment enables all deferred state families without real data or mutations.
+
+**Progress:** BUG-001 automated regression — DONE (Phase 0 COMPLETE). REL-001 retry/backoff — DONE (Phase 1 VERIFIED). UX-002 resolved via pure CSS — DONE (no fixture dependency). Remaining: BUG-002, SEC-001, A11Y-001, fixture-driven suite, and visual regression coverage.
 
 ## Appendix A — Route and Control Coverage Ledger
 

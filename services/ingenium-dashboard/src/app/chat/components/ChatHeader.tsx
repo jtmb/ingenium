@@ -461,7 +461,7 @@ export default function ChatHeader({
       </div>
     </header>
     {/* Mobile provider/model/agent selectors — horizontal scroll below header */}
-    <div className="sm:hidden flex gap-2 px-4 py-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] shrink-0">
+    <div className="sm:hidden flex gap-2 px-4 py-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] min-w-0">
       {/* Provider */}
       <select
         value={providerId}
@@ -483,7 +483,7 @@ export default function ChatHeader({
         value={modelId}
         onChange={(e) => onModelChange(e.target.value)}
         disabled={disabled}
-        className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[140px] disabled:opacity-40 disabled:cursor-not-allowed"
+        className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[100px] disabled:opacity-40 disabled:cursor-not-allowed"
         aria-label="Select model"
       >
         {availableModels.length === 0 && <option value="">No models available</option>}
@@ -499,7 +499,7 @@ export default function ChatHeader({
         <select
           value={variant ?? variantKeys[0]}
           onChange={(e) => onVariantChange?.(e.target.value)}
-          className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5"
+          className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[90px] disabled:opacity-40 disabled:cursor-not-allowed"
           aria-label="Select variant"
         >
           {variantKeys.map((key) => (
@@ -515,7 +515,7 @@ export default function ChatHeader({
         value={agentName}
         onChange={(e) => onAgentChange(e.target.value)}
         disabled={disabled}
-        className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[130px] disabled:opacity-40 disabled:cursor-not-allowed"
+        className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[110px] disabled:opacity-40 disabled:cursor-not-allowed"
         aria-label="Select agent"
       >
         {agents.length === 0 && <option value="">No agents available</option>}

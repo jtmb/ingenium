@@ -11,6 +11,34 @@ permission:
   glob: allow
   grep: allow
   playwright_*: deny
+  playwright_browser_press_sequentially: deny
+  playwright_browser_check: deny
+  playwright_browser_uncheck: deny
+  playwright_browser_keydown: deny
+  playwright_browser_keyup: deny
+  playwright_browser_cookie_clear: deny
+  playwright_browser_cookie_delete: deny
+  playwright_browser_cookie_set: deny
+  playwright_browser_cookie_get: deny
+  playwright_browser_cookie_list: deny
+  playwright_browser_localstorage_clear: deny
+  playwright_browser_localstorage_delete: deny
+  playwright_browser_localstorage_set: deny
+  playwright_browser_localstorage_get: deny
+  playwright_browser_localstorage_list: deny
+  playwright_browser_sessionstorage_clear: deny
+  playwright_browser_sessionstorage_delete: deny
+  playwright_browser_sessionstorage_set: deny
+  playwright_browser_sessionstorage_get: deny
+  playwright_browser_sessionstorage_list: deny
+  playwright_browser_set_storage_state: deny
+  playwright_browser_storage_state: deny
+  playwright_browser_route: deny
+  playwright_browser_reload: deny
+  playwright_browser_network_state_set: deny
+  playwright_browser_pdf_save: deny
+  playwright_browser_annotate: deny
+  playwright_browser_navigate_forward: deny
   ingenium_docs_search: allow
   ingenium_docs_get_page: allow
   ingenium_docs_list_comments: allow
@@ -74,4 +102,3 @@ For confirmed leaks in git history:
 1. Create a Docs page with the commit SHA and fix instructions
 2. Recommend: rotate the secret, then purge it with `git filter-branch` or BFG
 3. Reference the affected skill (e.g. `@development-conventions` for missing patterns, `@devops-conventions` for secret-in-args)
-

@@ -17,7 +17,7 @@ A **writer** is any subagent with `edit: allow` or `write: allow` in its permiss
 - `@ingenium-software-engineer-terra` — writer
 
 **Non-writers** (read-only agents — always count toward active limit, never toward writer limit):
-- `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`, `@ingenium-docs`, `@ingenium-security-auditor`, `@ingenium-prompt-engineer`, `@browser-agent`, `@vision-bridge`
+- `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`, `@ingenium-qa-vision`, `@ingenium-docs`, `@ingenium-security-auditor`, `@ingenium-prompt-engineer`, `@browser-agent`
 
 ## Mandatory Phase Declarations
 

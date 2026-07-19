@@ -19,13 +19,13 @@ description: "Implementation workflow patterns including verification gates, age
 - Always verify sub-agent outputs for concerns, recommendations, findings, and bugs before advancing phases
 - All sub-agent outputs must be audited before proceeding to next phase
 - Every sub-agent finding must be added as a todo task before next phase begins
-- Gates must not advance until real tests pass AND screenshots verified via @vision-bridge
+- UI gates must not advance until real tests pass and `@ingenium-qa-vision` returns PASS with evidence
 - Self-verification mandatory at end of every task before delivery
 - Health checks at Gate 1 should be short verification (not 5-minute waits) when changes don't affect schedulers/timers
 
 ## 🔴 HARD RULEs — Visual & Tooling
 
-- Apply @vision-bridge in Phase 2.5 for visual validation (not just subagent-reported checks)
+- Apply `@ingenium-qa-vision` after UI implementation for changed routes, then run its final all-primary-routes desktop/mobile sweep before completion
 - Use todo tool throughout all implementation phases
 - Provide text summary of what was done at end of sessions
 - Final summary required explaining what was performed and verified
@@ -51,13 +51,12 @@ description: "Implementation workflow patterns including verification gates, age
 |------|--------|
 | [`references/agent-limits.md`](references/agent-limits.md) | Canonical concurrency policy: 12 active subagents per phase, 6 concurrent writers, exclusive territories, mandatory phase declarations, collision resolution |
 | [`references/verification-gates.md`](references/verification-gates.md) | Sub-agent output verification patterns and gate requirements |
-| [`references/visual-validation.md`](references/visual-validation.md) | @vision-bridge visual check requirements and Phase 2.5 workflow |
+| [`references/visual-validation.md`](references/visual-validation.md) | Canonical changed-route and final-sweep visual QA protocol |
 | [`references/todo-workflow.md`](references/todo-workflow.md) | Todo tool usage patterns across implementation phases |
 | [`references/session-summary.md`](references/session-summary.md) | End-of-session text summary requirements |
 | [`references/orchestrator-phases.md`](references/orchestrator-phases.md) | Plans architected into distinct phases |
 | [`references/plan-handoff-format.md`](references/plan-handoff-format.md) | Copy-paste handoff instruction format with agent limits and verification steps |
 | [`references/phase-documentation-mapping.md`](references/phase-documentation-mapping.md) | Documentation and testing mapped at every phase before implementation begins |
-| [`references/orchestrator-visual-validation.md`](references/orchestrator-visual-validation.md) | Visual validation requirements for orchestrator acceptance |
 | [`references/handoff-message-template.md`](references/handoff-message-template.md) | Plan handoff messages with agent count and verification instructions |
 | [`references/self-verification.md`](references/self-verification.md) | End-of-task self-verification requirements |
 | [`references/task-summary.md`](references/task-summary.md) | Final summary format and content expectations |

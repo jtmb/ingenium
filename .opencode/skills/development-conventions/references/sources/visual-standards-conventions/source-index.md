@@ -20,13 +20,5 @@ description: "Visual design and UI standardization rules for overlays, cards, an
 | [`references/css-variables.md`](references/css-variables.md) | INFO-badge and visual standard CSS variables |
 
 
-## 🔴 HARD RULEs
-- Visual validation required during orchestration testing
-- Use @vision-bridge for dark-mode screenshot review before accepting work
-- Status page cards must distinguish between supervisord services (/services/:name) and in-process applications (/services/applications/:name)
-
-## Reference Files
-
-| File | Content |
-|------|--------|
-| [`references/orchestrator-visual-validation.md`](references/orchestrator-visual-validation.md) | Visual validation requirements with @vision-bridge for dark-mode screenshots |
+## 🔴 Orchestration Visual Validation
+- Visual validation is required during orchestration testing. Follow the canonical `@engineering-workflow` visual-validation protocol for changed UI routes and the final all-primary-routes desktop/mobile sweep.

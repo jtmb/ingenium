@@ -7,7 +7,7 @@
  * 3. Review with AI panel (Smart Suggestions)
  * 4. Smart-reply cache-hit behavior (instant cached suggestions)
  *
- * Saves screenshots to tests/qa-screenshots/ for vision-bridge analysis.
+ * Saves screenshots to tests/qa-screenshots/ for visual QA analysis.
  */
 
 import { test, expect, Page } from "@playwright/test";

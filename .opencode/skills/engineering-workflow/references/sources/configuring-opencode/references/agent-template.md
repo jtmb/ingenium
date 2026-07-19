@@ -38,6 +38,10 @@ permission:
 
 ### Role-Specific Templates
 
+### 🔴 Playwright Permission Warning
+
+`playwright_*` includes arbitrary JavaScript evaluation and interactive browser controls, not just screenshots. Grant it only to trusted agents. Read-only visual review must follow the passive `@ingenium-qa-vision` protocol: screenshots, snapshots, console/network evidence, resize, tab inspection, and browser cleanup only; no evaluation or interaction.
+
 **Orchestrator** (coordinates subagents, never writes code):
 ```yaml
 permission:
@@ -59,12 +63,12 @@ permission:
   skill:
     "development-conventions": allow
     "devops-conventions": allow
-    "debugging-patterns": allow
+    "@engineering-workflow": allow
     "local-models": allow
-    "configuring-opencode": allow
+    "@engineering-workflow": allow
     "skill-maintenance": allow
     "mcp-tooling": allow
-    "github-cli": allow
+    "@devops-conventions": allow
     "*": deny
 ```
 
@@ -81,8 +85,7 @@ permission:
   skill:
     "development-conventions": allow
     "devops-conventions": allow
-    "debugging-patterns": allow
-    "configuring-opencode": allow
+    "@engineering-workflow": allow
     "mcp-tooling": allow
     "*": deny
 ```

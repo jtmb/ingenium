@@ -4,9 +4,9 @@ import { useState, useEffect, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EmailReader from "../components/EmailReader";
 import { getApiBase } from "@/lib/api";
+import { useProject } from "@/lib/ProjectContext";
 
 const API_BASE = getApiBase();
-const PROJECT = "gh-llm-bootstrap";
 
 /**
  * EmailDetailPage — Full-page reader for a single email by UID.
@@ -15,8 +15,7 @@ const PROJECT = "gh-llm-bootstrap";
  * This page exists as a legacy deep-link target / standalone mode entry
  * point. The primary email experience is the 3-pane layout at /mail.
  *
- * NOTE: Uses a hardcoded PROJECT const rather than useMailProject() from
- * the parent page because this route predates the global-project pattern.
+ * Project is resolved dynamically via useProject() context.
  * The EmailReader component handles its own account resolution.
  */
 export default function EmailDetailPage({
@@ -27,6 +26,7 @@ export default function EmailDetailPage({
   const resolvedParams = use(params);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const project = useProject();
   const id = resolvedParams.id;
   const accountId = searchParams.get("account") || "";
   const folder = searchParams.get("folder") || "INBOX";
@@ -45,13 +45,14 @@ export default function EmailDetailPage({
   // Fetch email by UID
   useEffect(() => {
     if (!id || id === "compose") return;
+    if (!accountId) return;
 
     const fetchEmail = async () => {
       setLoading(true);
       setError(null);
       try {
         const res = await fetch(
-          `${API_BASE}/emails/${id}?project=${PROJECT}&account=${accountId}&folder=${encodeURIComponent(folder)}`
+          `${API_BASE}/emails/${id}?project=${project}&account=${accountId}&folder=${encodeURIComponent(folder)}`
         );
         if (res.ok) {
           const data = await res.json();
@@ -67,7 +68,7 @@ export default function EmailDetailPage({
       }
     };
     fetchEmail();
-  }, [id]);
+  }, [id, accountId, folder, project]);
 
   const handleReply = () => {
     if (email) {
@@ -84,7 +85,7 @@ export default function EmailDetailPage({
   const handleDelete = async () => {
     if (!email) return;
     try {
-      const res = await fetch(`${API_BASE}/emails/${email.uid}?project=${PROJECT}`, {
+      const res = await fetch(`${API_BASE}/emails/${email.uid}?project=${project}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account: accountId }),
@@ -100,7 +101,7 @@ export default function EmailDetailPage({
   const handleArchive = async () => {
     if (!email) return;
     try {
-      const res = await fetch(`${API_BASE}/emails/${email.uid}/move?project=${PROJECT}`, {
+      const res = await fetch(`${API_BASE}/emails/${email.uid}/move?project=${project}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account: accountId, fromFolder: folder, toFolder: "Archive" }),
@@ -114,6 +115,23 @@ export default function EmailDetailPage({
   };
 
   if (id === "compose") return null;
+
+  if (!accountId) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-3xl font-bold text-[var(--color-text-primary)] mb-6">Email</h1>
+        <div className="bg-[var(--color-surface)] p-6 rounded-lg border text-center">
+          <p className="text-[var(--color-text-muted)] text-sm mb-4">account query parameter is required</p>
+          <button
+            onClick={() => router.push("/mail")}
+            className="bg-blue-600 text-white py-2 px-4 rounded text-sm font-medium"
+          >
+            Back to Inbox
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

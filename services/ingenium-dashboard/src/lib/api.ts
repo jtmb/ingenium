@@ -17,9 +17,42 @@ export function getApiBase(): string {
 const DEFAULT_PROJECT = "global-default";
 
 /**
+ * Structured API error carrying the HTTP status and optional Retry-After header.
+ *
+ * Callers can check `instanceof ApiError` to distinguish API errors from network
+ * failures, and read `retryAfterSeconds` for rate-limit (429) backoff.
+ */
+export class ApiError extends Error {
+  /** HTTP status code (e.g. 429, 503). */
+  status: number;
+  /** Seconds to wait before retrying, parsed from the `Retry-After` header (capped at 60). */
+  retryAfterSeconds: number | null;
+
+  constructor(status: number, message: string, retryAfterSeconds: number | null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+/**
+ * Parse the `Retry-After` header value into seconds, capped at 60.
+ * Accepts integer seconds only (the API emits seconds, not HTTP-date).
+ *
+ * @returns Parsed seconds, or `null` if the header was absent or invalid.
+ */
+function parseRetryAfter(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = parseInt(header, 10);
+  if (isNaN(seconds) || seconds <= 0) return null;
+  return Math.min(seconds, 60);
+}
+
+/**
  * Typed fetch wrapper for the Ingenium API.
  *
- * - Throws on non-OK responses, extracting the server's error message when available
+ * - Throws `ApiError` on non-OK responses, preserving status + Retry-After header
  * - Handles 204 No Content (returned by DELETE endpoints) without trying to parse JSON
  * - Overwrites the `Content-Type` header if `options.headers` is provided, so callers
  *   can pass FormData (for file uploads) without the default JSON header
@@ -34,8 +67,9 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     },
   });
   if (!res.ok) {
+    const retryAfter = parseRetryAfter(res.headers?.get?.("Retry-After") ?? null);
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
-    throw new Error(err.error?.message ?? res.statusText);
+    throw new ApiError(res.status, err.error?.message ?? res.statusText, retryAfter);
   }
   // 204 No Content — returned by DELETE endpoints; no body to parse
   if (res.status === 204) return undefined as T;
