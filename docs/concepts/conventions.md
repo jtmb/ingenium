@@ -10,7 +10,7 @@ The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/
 
 - **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved: loopback HTTP → `http://localhost:4098/`, LAN HTTP / HTTPS → `/opencode-web/` (same-origin proxy path). Overridable via `NEXT_PUBLIC_OPENCODE_WEB_URL` (relative same-origin paths only).
 - **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. URL resolution follows the same pattern: loopback HTTP → `http://localhost:4099/`, LAN HTTP / HTTPS → `/opencode-cli/` (overridable via `NEXT_PUBLIC_OPENCODE_CLI_URL`, relative same-origin paths only). Runs `opencode attach http://localhost:4098 --dir /workspace`, sharing session state.
-- **Mode switch** — A right-edge glass tab (`OpenCodeSwitch` component with `backdrop-blur-sm`) toggles between modes. The inactive iframe is hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
+- **Mode switch** — On the main `/opencode` page, a **segmented Web/CLI toggle** is integrated into the `OpenCodeToolbar` (a compact top toolbar with fullscreen, pop-out, and a green/red status indicator). The old floating right-edge `OpenCodeSwitch` component is deprecated in the main page but persists for the standalone pop-out (`/standalone?page=opencode`), which uses its own simplified right-edge floating toggle. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage`.
 - **Session sharing**: All sessions (Web iframe, CLI ttyd, direct terminal attachments) share the same backend process state.
@@ -118,6 +118,35 @@ export default function PortalComponent() {
 - `ServiceOverlay.tsx` — status detail overlay (both service and application types)
 
 The `Overlay.tsx` shared component does NOT include this guard — it relies on callers passing `isOpen={false}` during SSR. For directly rendered portals (always in the DOM tree), the `mounted` guard is mandatory.
+
+## SSR Iframe Guard — Deferred `src` Resolution
+
+Iframes with a dynamically-resolved `src` that depends on `window.location` **must defer URL resolution to after client hydration** to prevent the iframe from navigating to the SSR-generated fallback URL before React hydration replaces it. The pattern:
+
+```tsx
+"use client";
+import { useState, useEffect } from "react";
+
+export default function DynamicIframe() {
+  const [src, setSrc] = useState<string | null>(null);
+
+  // Resolve after hydration so the iframe never first navigates to
+  // the SSR fallback proxy URL.
+  useEffect(() => {
+    setSrc(getRuntimeUrl());
+  }, []);
+
+  return <iframe src={src ?? undefined} /* ... */ />;
+}
+```
+
+**When to use this pattern:**
+- Iframe `src` is computed from `window.location.protocol`, `hostname`, or `port`
+- The computation falls back to a same-origin proxy path during SSR (when `window` is undefined)
+- Navigating the iframe to the proxy path before hydration would cause a spurious redirect or mixed-content request
+
+**Components using this pattern:**
+- `OpenCodeFrame.tsx` — OpenCode Web/CLI iframe URLs resolved post-hydration
 
 ## 🔴 Skill Data Integrity & Security Rules
 

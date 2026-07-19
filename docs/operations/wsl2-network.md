@@ -82,7 +82,9 @@ so `opencode web --hostname 0.0.0.0` shows the "Network access" line automatical
 ## Dashboard LAN / Proxy — OpenCode Web/CLI URL Derivation
 
 The embedded OpenCode Web and CLI iframes derive their backend URL from the
-dashboard's own URL at render time (`services/ingenium-dashboard/src/lib/runtime-urls.ts`).
+dashboard's own URL after client hydration (`services/ingenium-dashboard/src/lib/runtime-urls.ts`).
+Resolution is deferred from SSR to post-hydration via `useState`/`useEffect` so that
+loopback clients never first navigate to the SSR-generated proxy fallback URL.
 The logic uses `window.location` to decide between a direct port or a same-origin
 proxy path:
 

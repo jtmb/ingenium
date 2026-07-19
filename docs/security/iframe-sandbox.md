@@ -29,7 +29,7 @@ additional standalone iframes in `services/ingenium-dashboard/src/app/standalone
 
 ### Dynamic Origin Resolution
 
-The iframe `src` is **not hardcoded to localhost:4098/4099**. It is derived at runtime by `services/ingenium-dashboard/src/lib/runtime-urls.ts` based on the dashboard's own protocol and hostname:
+The iframe `src` is **not hardcoded to localhost:4098/4099**. It is derived at runtime by `services/ingenium-dashboard/src/lib/runtime-urls.ts` based on the dashboard's own protocol and hostname. Resolution is deferred from SSR to post-hydration via `useState(null)` + `useEffect` (see the deferred URL resolution pattern in `OpenCodeFrame.tsx`), so the iframe renders without a `src` during SSR and never navigates to the SSR-proxy fallback before receiving the correct runtime URL:
 
 | Dashboard Protocol | Web iframe src | CLI iframe src |
 |-------------------|----------------|----------------|
@@ -306,8 +306,8 @@ After any sandbox token change, verify the `/opencode` page still works:
 ### ✅ Completed in W2
 
 1. **Sandbox attribute added** to all four OpenCode iframes — both iframes in
-   `OpenCodeFrame.tsx` (lines 64, 82) AND both standalone iframes in
-   `standalone/page.tsx` (lines 147, 164).
+   `OpenCodeFrame.tsx` AND both standalone iframes in
+   `standalone/page.tsx`.
 2. **Baseline tokens deployed**: `allow-scripts allow-same-origin` on all
    four OpenCode iframes.
 3. **`allow="clipboard-write"` preserved** alongside sandbox attribute (via

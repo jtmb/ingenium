@@ -1,0 +1,91 @@
+- generic [active] [ref=f13e1]:
+  - navigation [ref=f13e2]:
+    - link "Ingenium" [ref=f13e3] [cursor=pointer]:
+      - /url: /
+    - generic [ref=f13e4]:
+      - button "Project switching disabled on this page" [disabled] [ref=f13e6]
+      - button "Settings" [ref=f13e11]
+  - generic [ref=f13e15]:
+    - complementary [ref=f13e16]:
+      - link "Home" [ref=f13e18] [cursor=pointer]:
+        - /url: /
+      - navigation "Main navigation" [ref=f13e24]:
+        - generic [ref=f13e25]:
+          - button "Workspace" [expanded] [ref=f13e26] [cursor=pointer]
+          - region "Workspace" [ref=f13e30]:
+            - listitem [ref=f13e31]:
+              - link "Chat" [ref=f13e32] [cursor=pointer]:
+                - /url: /chat
+            - listitem [ref=f13e37]:
+              - link "OpenCode" [ref=f13e38] [cursor=pointer]:
+                - /url: /opencode
+            - listitem [ref=f13e44]:
+              - link "Mail" [ref=f13e45] [cursor=pointer]:
+                - /url: /mail
+            - listitem [ref=f13e51]:
+              - link "Tasks" [ref=f13e52] [cursor=pointer]:
+                - /url: /tasks
+            - listitem [ref=f13e58]:
+              - link "Docs" [ref=f13e59] [cursor=pointer]:
+                - /url: /docs
+        - generic [ref=f13e65]:
+          - button "Intelligence" [expanded] [ref=f13e66] [cursor=pointer]
+          - region "Intelligence" [ref=f13e70]:
+            - listitem [ref=f13e71]:
+              - link "Skills" [ref=f13e72] [cursor=pointer]:
+                - /url: /skills
+            - listitem [ref=f13e78]:
+              - link "Agents" [ref=f13e79] [cursor=pointer]:
+                - /url: /agents
+            - listitem [ref=f13e87]:
+              - link "Observations" [ref=f13e88] [cursor=pointer]:
+                - /url: /observations
+            - listitem [ref=f13e94]:
+              - link "Personality" [ref=f13e95] [cursor=pointer]:
+                - /url: /personality
+            - listitem [ref=f13e101]:
+              - link "Pipeline" [ref=f13e102] [cursor=pointer]:
+                - /url: /pipeline
+        - generic [ref=f13e110]:
+          - button "Operations" [expanded] [ref=f13e111] [cursor=pointer]
+          - region "Operations" [ref=f13e115]:
+            - listitem [ref=f13e116]:
+              - link "Jobs" [ref=f13e117] [cursor=pointer]:
+                - /url: /jobs
+            - listitem [ref=f13e123]:
+              - link "Backups" [ref=f13e124] [cursor=pointer]:
+                - /url: /backups
+            - listitem [ref=f13e130]:
+              - link "Logs" [ref=f13e131] [cursor=pointer]:
+                - /url: /logs
+            - listitem [ref=f13e136]:
+              - link "Status" [ref=f13e137] [cursor=pointer]:
+                - /url: /status
+        - generic [ref=f13e142]:
+          - button "Configure" [expanded] [ref=f13e143] [cursor=pointer]
+          - region "Configure" [ref=f13e147]:
+            - listitem [ref=f13e148]:
+              - link "Projects" [ref=f13e149] [cursor=pointer]:
+                - /url: /projects
+            - listitem [ref=f13e154]:
+              - link "Plugins" [ref=f13e155] [cursor=pointer]:
+                - /url: /plugins
+            - listitem [ref=f13e161]:
+              - link "MCP Servers" [ref=f13e162] [cursor=pointer]:
+                - /url: /mcp-servers
+            - listitem [ref=f13e170]:
+              - link "Config" [ref=f13e171] [cursor=pointer]:
+                - /url: /config
+            - listitem [ref=f13e177]:
+              - link "Secrets" [ref=f13e178] [cursor=pointer]:
+                - /url: /secrets
+    - main [ref=f13e187]:
+      - generic [ref=f13e189]:
+        - generic [ref=f13e191]:
+          - button "Switch to Web mode" [ref=f13e192]: Web
+          - button "Switch to CLI mode" [pressed] [ref=f13e193]: CLI
+        - generic [ref=f13e194]:
+          - button "Toggle fullscreen" [ref=f13e195]
+          - button "Pop out to new window" [ref=f13e198]
+          - generic "OpenCode loading" [ref=f13e201]
+  - alert [ref=f13e204]

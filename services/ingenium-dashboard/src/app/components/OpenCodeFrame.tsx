@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { getOpenCodeWebUrl, getOpenCodeCliUrl } from "@/lib/runtime-urls";
 
 interface OpenCodeFrameProps {
@@ -28,10 +28,12 @@ export default function OpenCodeFrame({
   onCliLoaded,
 }: OpenCodeFrameProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [iframeUrls, setIframeUrls] = useState<{ web: string; cli: string } | null>(null);
 
-  // Derive iframe URLs from runtime location for correct protocol/hostname
-  const webUrl = getOpenCodeWebUrl();
-  const cliUrl = getOpenCodeCliUrl();
+  // Resolve after hydration so loopback clients never first navigate to the SSR proxy URL.
+  useEffect(() => {
+    setIframeUrls({ web: getOpenCodeWebUrl(), cli: getOpenCodeCliUrl() });
+  }, []);
 
   // Observe container size changes to provide stable dimensions to ttyd / OpenCode
   useEffect(() => {
@@ -56,7 +58,7 @@ export default function OpenCodeFrame({
     <div ref={containerRef} className="absolute inset-0">
       {/* Web iframe — always mounted */}
       <iframe
-        src={webUrl}
+        src={iframeUrls?.web}
         className="absolute inset-0 w-full h-full border-0"
         style={{
           opacity: mode === "web" ? 1 : 0,
@@ -74,7 +76,7 @@ export default function OpenCodeFrame({
       {/* CLI iframe — lazy-mounted on first CLI activation */}
       {cliMounted && (
         <iframe
-          src={cliUrl}
+          src={iframeUrls?.cli}
           className="absolute inset-0 w-full h-full border-0"
           style={{
             opacity: mode === "cli" ? 1 : 0,
