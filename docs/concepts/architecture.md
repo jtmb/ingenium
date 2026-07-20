@@ -819,11 +819,16 @@ The Express API uses `express.json({ limit: "2mb" })` for request body parsing. 
 ### OpenCode Web/CLI Embedded in Dashboard
 The dashboard includes an embedded OpenCode experience at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
-- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts`: HTTP → `http://<host>:4098/`, HTTPS → `/opencode-web/` (same-origin proxy). Overridable via `NEXT_PUBLIC_OPENCODE_WEB_URL`. The session persists across tab navigation with a hidden iframe technique.
-- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. Same dynamic URL pattern: HTTP → `http://<host>:4099/`, HTTPS → `/opencode-cli/` (overridable via `NEXT_PUBLIC_OPENCODE_CLI_URL`). Connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing session state.
+- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts` using a **two-tier embedding model**:
+  - **Loopback HTTP** (localhost/127.0.0.1/::1): direct port (`http://localhost:4098/`)
+  - **Remote HTTPS**: requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` pointing to a dedicated root HTTPS origin (e.g., `https://opencode.example.com/`)
+  - **Unsupported LAN HTTP**: `getOpenCodeAvailability()` returns `"unavailable"` — the iframe shows explicit guidance instead of a broken proxy
+  - The old same-origin proxy rewrites (`/opencode-web/`, `/opencode-cli/`) have been **removed** — OpenCode v1.18.3+ serves root-relative assets and cannot be proxied under a sub-path.
+- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. URL resolution follows the same two-tier model: loopback HTTP → `http://localhost:4099/`, remote HTTPS → explicit `NEXT_PUBLIC_OPENCODE_CLI_URL` (root HTTPS origin only). Connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing session state.
 - **Mode switch** — A right-edge glass tab toggles between Web and CLI modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
+- **Sandbox**: The `sandbox` attribute has been **removed** from all OpenCode iframes (trusted first-party content; separate origin provides isolation). Only `allow="clipboard-write"` (Permissions Policy) is retained.
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 - The `appuser` has passwordless `sudo` access inside the container for package installation.
 
@@ -887,8 +892,8 @@ docker compose up --build
 | Host Port | Service | Description |
 |-----------|---------|-------------|
 | `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
-| `4097` | API | Express REST gateway (sole DB authority) |
-| `127.0.0.1:4098` | opencode-web | OpenCode Web UI (host loopback only; container binds **0.0.0.0** via `--hostname 0.0.0.0`) |
+| `127.0.0.1:4097` | API | Express REST gateway (sole DB authority) |
+| `127.0.0.1:4098` | opencode-web | OpenCode Web UI — container binds **0.0.0.0** via `--hostname 0.0.0.0`; Compose publishes to host loopback only |
 | `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
 | `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → container `:4097` (API). OpenCode redirects OAuth provider callbacks here; the API validates state, consumes it (preventing replay), and either forwards to OpenCode's internal listener (auto mode) or completes the exchange (code mode). |
 

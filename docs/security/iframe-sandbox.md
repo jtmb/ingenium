@@ -5,80 +5,77 @@ description: Iframe sandbox configuration, risk assessment, and deferred securit
 
 # Iframe Sandbox Baseline
 
-> **Status**: Baseline implemented in W2 — all four OpenCode iframes have
-> `sandbox="allow-scripts allow-same-origin"`. Expansion to service-specific
-> tokens (forms, popups, modals, downloads) and CSP/frame-ancestor policy
-> remain deferred pending runtime testing.
-> **Last updated**: 2026-07-18
+> **Status**: Baseline was implemented in W2 — all four OpenCode iframes previously had
+> `sandbox="allow-scripts allow-same-origin"`. The `sandbox` attribute has been **removed**
+> from all OpenCode iframes in Phase 2: OpenCode is trusted first-party content embedded
+> via direct loopback ports or configured HTTPS origins. The same-origin proxy rewrites
+> (`/opencode-web/`, `/opencode-cli/`) were also removed. The Email HTML iframe retains
+> its separate sandbox policy (no `allow-scripts`). CSP/frame-ancestor policy remains
+> deferred pending runtime testing.
+> **Last updated**: 2026-07-19
 
 ---
 
-## 1. Current Sandboxed Setup
+## 1. Current Setup (Post-Phase 2)
 
 The dashboard embeds two iframes on the `/opencode` page, rendered by
 `services/ingenium-dashboard/src/app/components/OpenCodeFrame.tsx`, plus two
 additional standalone iframes in `services/ingenium-dashboard/src/app/standalone/page.tsx`.
-**All four OpenCode iframes** have an identical sandbox configuration.
+**All four OpenCode iframes have had the `sandbox` attribute removed** — OpenCode is
+trusted first-party content embedded via direct loopback ports or configured HTTPS origins.
 
 | Iframe | Source | Sandbox | Purpose |
 |--------|--------|---------|---------|
-| OpenCode Web (dashboard) | `Dynamic` (see below) | `allow-scripts allow-same-origin` | OpenCode Web UI |
-| ttyd Terminal (dashboard) | `Dynamic` (see below) | `allow-scripts allow-same-origin` | OpenCode CLI via ttyd + xterm.js |
-| OpenCode Web (standalone) | `Dynamic` (see below) | `allow-scripts allow-same-origin` | Standalone OpenCode Web UI |
-| ttyd Terminal (standalone) | `Dynamic` (see below) | `allow-scripts allow-same-origin` | Standalone OpenCode CLI terminal |
+| OpenCode Web (dashboard) | `Dynamic` (see below) | _(removed)_ | OpenCode Web UI |
+| ttyd Terminal (dashboard) | `Dynamic` (see below) | _(removed)_ | OpenCode CLI via ttyd + xterm.js |
+| OpenCode Web (standalone) | `Dynamic` (see below) | _(removed)_ | Standalone OpenCode Web UI |
+| ttyd Terminal (standalone) | `Dynamic` (see below) | _(removed)_ | Standalone OpenCode CLI terminal |
 
-### Dynamic Origin Resolution
+### Dynamic Origin Resolution (Updated)
 
-The iframe `src` is **not hardcoded to localhost:4098/4099**. It is derived at runtime by `services/ingenium-dashboard/src/lib/runtime-urls.ts` based on the dashboard's own protocol and hostname. Resolution is deferred from SSR to post-hydration via `useState(null)` + `useEffect` (see the deferred URL resolution pattern in `OpenCodeFrame.tsx`), so the iframe renders without a `src` during SSR and never navigates to the SSR-proxy fallback before receiving the correct runtime URL:
+The iframe `src` is derived at runtime by `services/ingenium-dashboard/src/lib/runtime-urls.ts`
+based on the dashboard's own protocol and hostname. The **same-origin proxy rewrites
+(`/opencode-web/`, `/opencode-cli/`) have been removed** — OpenCode v1.18.3+ serves
+root-relative assets and cannot be proxied under a sub-path.
 
-| Dashboard Protocol | Web iframe src | CLI iframe src |
-|-------------------|----------------|----------------|
-| **HTTP** | `http://<dashboard-host>:4098/` | `http://<dashboard-host>:4099/` |
-| **HTTPS** | `/opencode-web/` (same-origin proxy path) | `/opencode-cli/` (same-origin proxy path) |
+Resolution is deferred from SSR to post-hydration via `useState(null)` + `useEffect`
+(see `OpenCodeFrame.tsx`), so the iframe renders without a `src` during SSR.
 
-Overrides are available via `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL`. Under HTTPS, using `http://hostname:4098/` directly would be a mixed-content error, so a same-origin reverse-proxy path is used automatically.
+| Dashboard Environment | Web iframe src | CLI iframe src |
+|-----------------------|----------------|----------------|
+| **Loopback HTTP** | `http://localhost:4098/` | `http://localhost:4099/` |
+| **Remote HTTPS (with NEXT_PUBLIC_OPENCODE_WEB_URL set)** | Configured root HTTPS origin | Configured root HTTPS origin |
+| **LAN HTTP or HTTPS without override** | `null` — shows guidance overlay | `null` — shows guidance overlay |
+
+Overrides are available via `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL`.
+Only root HTTPS origins are accepted (e.g., `https://opencode.example.com/`). Relative
+same-origin paths are no longer supported.
 
 ### Current iframe attributes (both dashboard iframes)
 
 ```html
 <iframe
-  src="<dynamically-resolved>"    <!-- :4098/:4099 or /opencode-web//opencode-cli/ -->
+  src="<dynamically-resolved>"    <!-- :4098/:4099 or configured HTTPS origin -->
   class="absolute inset-0 w-full h-full border-0"
   style="{{ opacity, visibility, pointerEvents }}"
   aria-hidden="{{ condition }}"
   tabIndex="{{ 0 or -1 }}"
   title="OpenCode Web"            <!-- or "OpenCode Terminal" -->
-  sandbox="allow-scripts allow-same-origin"
   allow="clipboard-write"
 />
 ```
 
-**Key observation**: The `sandbox` attribute with `allow-scripts` and
-`allow-same-origin` tokens is the **baseline configuration** implemented
-in W2. This prevents the iframe from accessing the dashboard's origin
-while still allowing the embedded services to function:
-
-- `allow-scripts` enables JavaScript execution (React, Monaco editor, xterm.js)
-- `allow-same-origin` enables WebSocket connections, localStorage, and API
-  calls within the iframe's own origin (dynamically resolved host:port or same-origin proxy)
-
-**What the baseline sandbox prevents:**
-- Access to the dashboard's cookies, localStorage, and sessionStorage
-- DOM access to the embedding page (`window.top`, `window.parent`)
-- Fetch/XHR requests as the dashboard origin
-- Navigation away from the dashboard page
-
-**What the baseline sandbox does NOT fully prevent:**
-- If the embedded service itself is compromised, the attacker can still
-  operate within the iframe's own origin (localhost:4098 or :4099)
-- See [Risk Assessment](#6-risk-assessment) for details
+> 🔴 The `sandbox` attribute has been **removed** from all OpenCode iframes. These iframes embed
+> trusted first-party content from our own services (opencode-web, ttyd), not third-party content.
+> The same-origin proxy path is no longer used, so the sandbox is not needed for origin isolation.
+> The Email HTML iframe retains a separate `sandbox` policy (no `allow-scripts`) — see §Service-Specific Note.
 
 ### What's present — `allow="clipboard-write"`
 
 The `allow` attribute enables the [Permissions Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/Permissions_Policy)
 `clipboard-write` feature. This lets OpenCode Web and ttyd write to the
 clipboard (e.g., copy code blocks, terminal output). This is a legitimate
-permission and should be preserved.
+permission and is preserved.
 
 ---
 
@@ -150,55 +147,45 @@ storage and network resources within the sandbox constraints.
 
 ## 4. Current Sandbox Configuration vs. Desired Tokens
 
-### Deployed Baseline (all four OpenCode iframes)
+### Current State (Post-Phase 2)
+
+The `sandbox` attribute has been **removed** from all OpenCode iframes.
+Only `allow="clipboard-write"` (Permissions Policy) remains:
 
 ```html
 <iframe
-  src="<dynamically-resolved>"    <!-- :4098/:4099 or same-origin proxy path -->
-  sandbox="allow-scripts allow-same-origin"
+  src="<dynamically-resolved>"    <!-- :4098/:4099 or configured HTTPS origin -->
   allow="clipboard-write"
   ...
 />
 ```
 
-Both OpenCode Web and ttyd use the **identical** `sandbox` token set in
-the current baseline. This is a conservative starting point that ensures
-both services function without breakage. The iframe `src` is resolved
-dynamically by `runtime-urls.ts` — see [Dynamic Origin Resolution](#dynamic-origin-resolution) above.
+### Sandbox Removal Rationale
 
-### Tokens Baseline Already Deploys
+| Reason | Detail |
+|--------|--------|
+| Trust boundary | OpenCode Web and ttyd are first-party services running in our own container, not third-party content. The sandbox was originally added with the same-origin proxy path to prevent the iframe from accessing the dashboard origin during the proxy era. |
+| Proxy path removed | The `/opencode-web/` and `/opencode-cli/` same-origin proxy rewrites have been removed. OpenCode iframes now load from direct loopback ports or configured HTTPS origins — they are on separate origins from the dashboard, making the sandbox redundant. |
+| Origin isolation | Direct port URLs (`localhost:4098`/`:4099`) are inherently different origins from the dashboard (`localhost:3000`). Same-origin access to the dashboard's cookies, localStorage, and DOM is already prevented by the browser's same-origin policy without requiring a sandbox attribute. |
+| Chromium warning | The previous `allow-scripts allow-same-origin` combination triggered a Chromium warning about potential sandbox escape. Removing the sandbox attribute resolves this warning for trusted first-party content. |
 
-| Token | Why Included |
-|-------|-------------|
-| `allow-scripts` | JavaScript execution for React, Monaco editor, xterm.js, WebSocket I/O |
-| `allow-same-origin` | WebSocket connections, localStorage, fetch to own origin (`:4098`/`:4099`) |
-| `clipboard-write` (via `allow` attr) | Copy code blocks, terminal output (Permissions Policy, not sandbox) |
+### Clipboard Permission Preserved
 
-### Tokens Deferred (Require Runtime Testing)
+The `allow="clipboard-write"` Permissions Policy attribute is retained,
+enabling OpenCode Web and ttyd to write to the clipboard (copy code blocks,
+terminal output).
 
-The following tokens from the [per-service analysis](#2-sandbox-permissions-each-service-needs)
-have NOT been added to the baseline. Each requires proving the service
-actually needs it via runtime testing before inclusion — adding sandbox
-tokens is additive-only (safe to grant extra, breaking to remove).
+### Deferred Items (CSP)
 
-| Token | OpenCode Web | ttyd | Risk of Omitting |
-|-------|-------------|------|------------------|
-| `allow-forms` | Form submissions (prompts, settings) | Terminal input forms | May break form submission if service relies on sandbox-restricted form behavior |
-| `allow-popups` | OAuth flows, external links | Not needed | OAuth popups may fail to open |
-| `allow-modals` | `alert()`, `confirm()`, `prompt()` | Not needed | Modal dialogs silently fail |
-| `allow-downloads` | File exports, logs | Not needed | Download links do nothing |
-| `allow-popups-to-escape-sandbox` | Deliberately excluded for security | Not needed | Popups remain sandboxed (security-positive) |
+Although the sandbox has been removed, CSP `frame-ancestors` headers on
+the opencode-web and ttyd responses remain a deferred security enhancement
+— they would prevent other sites from framing these services. Not yet implemented.
 
-### Tokens Permanently Excluded
+### Tokens Permanently Excluded (Sandbox Not Needed)
 
-| Token | Reason |
-|-------|--------|
-| `allow-top-navigation` | Prevents iframe from navigating dashboard away |
-| `allow-top-navigation-by-user-activation` | Not needed by either service |
-| `allow-pointer-lock` | Not needed for web UI or terminal |
-| `allow-orientation-lock` | Not needed |
-| `allow-presentation` | Not needed |
-| `allow-top-navigation-to-custom-protocols` | Not needed |
+Since the sandbox attribute has been removed, sandbox tokens no longer apply
+to the OpenCode iframes. The Email HTML iframe retains its separate sandbox
+configuration (see below).
 
 ### Service-Specific Note: Email HTML Iframe
 
@@ -219,48 +206,35 @@ expects links to work when clicking them in an email).
 
 ---
 
-## 5. Testing Expanded Sandbox Tokens
+## 5. Testing the No-Sandbox Configuration
 
-The baseline (`allow-scripts allow-same-origin`) is already deployed and
-verified. Any future expansion (adding `allow-forms`, `allow-popups`, etc.)
-must be tested incrementally.
+The sandbox attribute has been removed from all OpenCode iframes. This
+configuration is already deployed and verified. No future expansion of
+sandbox tokens is planned for OpenCode iframes.
 
-### Step 1: Add one token at a time
+### Step 1: Verify sandbox removal
 
-Modify the `sandbox` attribute in `OpenCodeFrame.tsx` for one iframe.
-Start with ttyd (lower risk if it breaks). Example:
+Open DevTools on the `/opencode` page and inspect the iframe element.
+Confirm no `sandbox` attribute is present on either the Web or CLI iframe.
+Expected:
 
-```diff
-- sandbox="allow-scripts allow-same-origin"
-+ sandbox="allow-scripts allow-same-origin allow-forms"
+```html
+<iframe
+  src="http://localhost:4098/"
+  allow="clipboard-write"
+  ...
+/>
 ```
 
-Test the specific feature the token enables before moving to the next
-token. Adding tokens is additive-only — it never breaks existing
-functionality (but may be unnecessary).
+### Step 2: Verify separate-origin isolation
 
-### Step 2: Check the browser console
+Even without the sandbox attribute, the iframe is on a separate origin
+from the dashboard:
 
-Open DevTools on the dashboard page. If a token is missing that the
-service actually needs, look for warnings like:
-
-```
-Blocked script execution in 'http://localhost:4098/' because the document's
-frame is sandboxed and the 'allow-scripts' permission is not set.
-```
-
-```
-Uncaught SecurityError: Failed to read the 'localStorage' property from
-'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.
-```
-
-```
-WebSocket connection to 'ws://localhost:4099/...' failed: The operation is
-insecure.
-```
-
-If the baseline tokens ever change to a more restrictive set (not
-recommended), these errors will appear.
+| Dashboard origin | Iframe origin | Isolation mechanism |
+|-----------------|---------------|---------------------|
+| `localhost:3000` | `localhost:4098` / `localhost:4099` | Browser same-origin policy — cross-origin access blocked automatically |
+| `https://dashboard.example.com` | `https://opencode.example.com` | Browser same-origin policy — different hostname, access blocked |
 
 ### Step 3: Test functional behavior
 
@@ -280,7 +254,8 @@ Toggle between Web and CLI modes (click the glass tab or press
 
 ### Step 5: Regression test
 
-After any sandbox token change, verify the `/opencode` page still works:
+After any OpenCode iframe configuration change, verify the `/opencode`
+page still works:
 
 1. Navigate to `/opencode` from the nav bar
 2. Switch modes several times
@@ -289,21 +264,22 @@ After any sandbox token change, verify the `/opencode` page still works:
 
 ---
 
-## 6. Risk Assessment
+## 6. Risk Assessment (Post-Phase 2)
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| ttyd is exposed on host loopback only (`127.0.0.1:4099`) | Low | Already isolated. Sandbox adds defense-in-depth. |
-| OpenCode Web is exposed on host loopback only (`127.0.0.1:4098`) | Low | Same as above. |
-| `allow-same-origin` + `allow-scripts` together allow the iframe to operate within its own origin | Medium | Mitigated by: (a) both services are on localhost only, (b) neither service stores sensitive tokens in localStorage (OpenCode uses an auth cookie scoped to its own port). The sandbox prevents access to the dashboard's origin but does NOT fully prevent compromise of the embedded service's own origin. |
-| Dashboard is a management UI — compromise of dashboard origin is critical | High | The sandbox attribute prevents compromised embedded content from accessing the dashboard's cookies, localStorage, DOM, or making authenticated API calls as the dashboard. This is the primary value of the baseline sandbox. |
-| Service-specific tokens (forms, popups, modals) not yet granted | Low | Features that need these tokens (OAuth popups, file downloads) may silently fail. No security impact — tokens are additive-only. |
+| ttyd is exposed on host loopback only (`127.0.0.1:4099`) | Low | Already isolated by Compose port mapping. |
+| OpenCode Web is exposed on host loopback only (`127.0.0.1:4098`) | Low | Already isolated by Compose port mapping. Remote deployments require explicit HTTPS origin configuration. |
+| OpenCode iframes are on separate origins from dashboard | Low | Browser same-origin policy prevents iframe from accessing dashboard's cookies, localStorage, or DOM without a sandbox attribute. No sandbox required because the origin difference provides the isolation. |
+| HTTPS origin configured for remote access | Medium | The configured HTTPS origin must be a trusted deployment. The `NEXT_PUBLIC_OPENCODE_WEB_URL` env var accepts only root HTTPS origins (validated by regex). No relative paths or non-HTTPS origins are accepted. |
+| Dashboard is a management UI — compromise of dashboard origin is critical | High | The iframe's separate origin (different port or hostname) is the primary isolation mechanism. The dashboard does not share cookies, localStorage, or auth state with the OpenCode iframe's origin. |
+| Compromise of the embedded OpenCode service | Medium | An attacker who compromises the opencode-web or ttyd service could operate within that service's own origin. Mitigated by: (a) loopback-only deployment in Docker, (b) HTTPS origin must be explicitly configured for remote access, (c) the compromised service would still be on a separate origin from the dashboard. |
 
 ---
 
 ## 7. Completed Work & Remaining Deferred Items
 
-### ✅ Completed in W2
+### ✅ Completed in W2 (Initial Sandbox Baseline)
 
 1. **Sandbox attribute added** to all four OpenCode iframes — both iframes in
    `OpenCodeFrame.tsx` AND both standalone iframes in
@@ -315,28 +291,38 @@ After any sandbox token change, verify the `/opencode` page still works:
 4. **Identical baseline for both services** — same token set for OpenCode Web
    and ttyd, ensuring both function without breakage.
 
+### ✅ Phase 2 Changes
+
+1. **Sandbox attribute removed** from all OpenCode iframes — OpenCode is trusted
+   first-party content embedded via direct loopback ports or configured HTTPS origins.
+   The browser same-origin policy (different port/hostname) provides isolation
+   without needing a sandbox attribute.
+2. **Same-origin proxy rewrites removed** — `/opencode-web/` and `/opencode-cli/`
+   reverse-proxy paths are eliminated. OpenCode v1.18.3+ serves root-relative assets
+   and cannot be proxied under a sub-path.
+3. **Two-tier embedding model** — Loopback HTTP uses direct ports; remote HTTPS
+   requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL`;
+   unsupported LAN shows guidance overlay.
+4. **Chromium sandbox-escape warning resolved** — removing the `allow-scripts
+   allow-same-origin` combination eliminates the browser warning.
+
 ### ⏳ Deferred (Requires Runtime Testing)
 
-1. **Service-specific sandbox tokens** — `allow-forms`, `allow-popups`,
-   `allow-modals`, `allow-downloads` per the [per-service analysis](#2-sandbox-permissions-each-service-needs).
-   Each token requires proving the service actually needs it before adding.
-2. **Differentiated sandbox per service** — OpenCode Web (needs more tokens)
-   vs. ttyd (needs fewer). Currently both use the same baseline.
-3. **Content-Security-Policy headers** — `frame-ancestors` directive on the
+1. **Content-Security-Policy headers** — `frame-ancestors` directive on the
    Express API responses, or on the opencode-web/ttyd backend responses, as
    an additional defense layer.
-4. **CSP for the iframe responses** — nginx/Express CSP headers for
+2. **CSP for the iframe responses** — nginx/Express CSP headers for
    opencode-web and ttyd responses, restricting what those services can load.
-5. **Email HTML iframe sandbox audit** — the email reader's iframe currently
+3. **Email HTML iframe sandbox audit** — the email reader's iframe currently
    uses a different, more restrictive sandbox (`allow-same-origin allow-popups
    allow-popups-to-escape-sandbox`, no `allow-scripts`). This should be
    reviewed for completeness.
 
 ### Testing Notes
 
-- Test sandbox changes in both Firefox and Chrome — behavior is consistent
-  but error messages differ.
 - Adding sandbox tokens is **additive-only**: granting extra tokens never
-  breaks existing functionality. Only removing tokens risks breakage.
+  breaks existing functionality. Only removing tokens risks breakage. However,
+  since the sandbox has been removed from OpenCode iframes, this consideration
+  applies only to the Email HTML iframe.
 - The email HTML iframe intentionally omits `allow-scripts` for security
   (email HTML should not execute JavaScript).

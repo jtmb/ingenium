@@ -69,13 +69,54 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 - **Acceptance/verification:** expose retry with bounded backoff/countdown; retain usable prior config where safe; test 429 then success and assert no permanent disabled composer.
 - **Resolution:** retry with bounded backoff/countdown implemented; usable prior config retained on 429; VERIFIED in Phase 1.
 
-#### BUG-002 — OpenCode Web emits proxy-relative asset failures despite successful shell load
+#### BUG-002 — OpenCode Web emits proxy-relative asset failures despite successful shell load [RESOLVED]
 - **Classification/severity/confidence:** BUG / P1 / medium.
 - **Impact/scope:** `/opencode` Web mode and potentially standalone OpenCode. The embedded application shell rendered, but the browser recorded a stylesheet MIME refusal and a missing JavaScript asset under the dashboard origin's `/opencode-web` path. This can leave embedded OpenCode partially styled or non-functional after cache/build changes.
 - **Evidence/reproduction:** navigate to `/opencode` at loopback; browser console recorded `http://localhost:3000/opencode-web` stylesheet as `text/html` and a 404 JavaScript asset. `runtime-urls.ts:40-53` intends direct `:4098` URLs on loopback, so the proxy-relative asset resolution is unexpected. Direct service API calls were separately 200; this finding does not claim the Web UI was wholly unavailable.
 - **Ownership/files:** dashboard runtime URL/proxy deployment integration; `services/ingenium-dashboard/src/lib/runtime-urls.ts` is source-verified. The service asset-base owner is a hypothesis pending OpenCode server configuration inspection.
 - **Dependencies/effort:** reproduce in a clean browser/cache and inspect reverse-proxy/OpenCode asset-base settings / M.
-- **Acceptance/verification:** clean-context Web load has no `/opencode-web` asset MIME/404 errors, and Web navigation remains functional after a hard refresh at loopback and proxied origins.
+- **Resolution:** The broken same-origin proxy rewrites (`/opencode-web/`, `/opencode-cli/`) have been **removed** from `runtime-urls.ts`. OpenCode v1.18.3+ serves root-relative assets and cannot be proxied under a sub-path. The embedding model is now:
+  - **Loopback HTTP**: direct ports (`http://localhost:4098/` / `http://localhost:4099/`) — unchanged
+  - **Remote HTTPS**: requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL` pointing to a dedicated root HTTPS origin
+  - **Unsupported LAN HTTP**: `getOpenCodeAvailability()` returns `"unavailable"`; the iframe shows explicit guidance instead of a broken proxy iframe. A "Open OpenCode in a new tab" fallback button is provided.
+  - The `sandbox` attribute was also removed from all OpenCode iframes (no longer needed for same-origin proxy isolation — iframes are trusted first-party content).
+- **Acceptance/verification:** clean-context Web load at loopback direct port succeeds; LAN HTTP shows guidance overlay; HTTPS without configured URL shows guidance overlay; no `/opencode-web` asset errors.
+
+#### INFRA-001 — Docker startup NETWORK_ERRORs from opencode-web/ttyd [RESOLVED]
+- **Classification/severity/confidence:** INFRASTRUCTURE / P1 / high.
+- **Impact/scope:** Container startup, all viewports. On first boot, the entrypoint previously stopped/restarted opencode-web as part of its setup sequence; combined with supervisord startup interleaving, the dashboard's OpenCode iframe could transiently show `NETWORK_ERROR` or health-failure states before all services were ready.
+- **Root cause:** The entrypoint (`scripts/docker-entrypoint.sh`) ran setup commands that stopped/restarted opencode-web before supervisord was the PID 1 process. This created a race between the entrypoint's service management and supervisord's own process monitoring.
+- **Resolution:** The entrypoint no longer stops or restarts opencode-web. All startup setup (config seeding, directory creation, agent file copies) completes **before** `exec supervisord` is called. Worktree + agent copies are done via simple `cp` and `mkdir` — no service management commands. Supervisord starts as PID 1 after all seeding is complete, eliminating the race. See `scripts/docker-entrypoint.sh`.
+- **Acceptance/verification:** Clean container restart → no `NETWORK_ERROR` from OpenCode iframes during startup; dashboard health gate (`useOpenCodeHealth`) sees clean transition from `"starting"` to healthy.
+
+#### INFRA-002 — Tool cards redesigned with identity, state, summary, and structured output [RESOLVED]
+- **Classification/severity/confidence:** UI / P2 / medium.
+- **Impact/scope:** `/chat`, all tool call rendering. Previous tool cards showed only minimal status (pending/running/completed/failed). Users could not see what input was passed, how long a tool took, or what the structured output was without inspecting network logs.
+- **Resolution:** `ToolCallCard.tsx` now renders:
+  - **Tool identity and iconography**: Human-friendly label + SVG icon per tool name (webSearch, webfetch, read, glob, bash, edit, etc.)
+  - **State badge**: Visual state indicator (pending/running/completed/failed/retry) with appropriate icon and color
+  - **Input summary**: Collapsible JSON view of the tool's input parameters
+  - **Elapsed time**: Live-updating duration counter during execution, final duration on completion
+  - **Structured output**: Parsed and displayed output on completion; error detail on failure
+  - **Revert button**: On failed tool calls, users can revert the tool's effects
+- **Acceptance/verification:** Tool calls display identity icon + label, show live duration, expand input/output on click, and offer revert on failure.
+
+#### INFRA-003 — Reasoning streaming with visible thinking content [RESOLVED]
+- **Classification/severity/confidence:** UI / P2 / medium.
+- **Impact/scope:** `/chat`, assistant responses with reasoning content. Previously, reasoning content from the model was either not displayed or required manual expansion with no visual indication of streaming progress.
+- **Resolution:** `ChatMessages.tsx` now includes a `ReasoningBlock` component that:
+  - **Auto-expands** during streaming — the `details` element starts `open={true}` while `isStreaming` is active
+  - **Auto-collapses** when streaming completes — `useEffect` sets `expanded=false` once `isStreaming` transitions to `false`
+  - Shows summary text: "Thinking…" during stream, "Thought for a moment" when complete
+  - Renders reasoning content in a `border-l-2` styled block with muted text
+  - Toggle remains clickable to re-expand after collapse
+- **Activity status indicator**: A human-readable status label displays during streaming:
+  - "Connecting…" — establishing session connection
+  - "Thinking…" — model reasoning phase
+  - "Using tools…" — tool execution phase
+  - "Writing response…" — response generation phase
+  - "Reconnecting…" — reconnecting after disconnect
+- **Acceptance/verification:** Reasoning content auto-expands during generation, collapses when done; activity status matches the current streaming phase. Verified via `data-testid="chat-activity-status"` and `data-testid="chat-reasoning"` attributes.
 
 #### BUG-003 — Chat silently fails to send prompts on fresh DB [RESOLVED]
 - **Classification/severity/confidence:** BUG / P1 / high.
@@ -161,7 +202,7 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 ## 9. Prioritized Bug-Fix Roadmap
 
 1. **P1 BUG-001 (S) — RESOLVED:** repair mail deep-link project/account validation and add regression tests.
-2. **P1 BUG-002 (M):** reproduce and fix OpenCode asset-base/proxy behavior in a clean browser context.
+2. **P1 BUG-002 (M) — RESOLVED:** broken same-origin proxy rewrites removed; remote HTTPS requires explicit origin override; unsupported LAN shows guidance overlay.
 3. **P1 REL-001 (M) — RESOLVED:** establish API retry semantics and a chat retry/backoff state.
 4. **P1 BUG-003 (M) — RESOLVED:** chat silently fails to send on fresh DB — zero-session state. Auto-create session, async send, RECONCILE_MESSAGES dedup, streaming safety net. 43 unit tests + fixture E2E + real-provider smoke. Commits 915d1ff, e24581f, d60c90f.
 5. **P2 SEC-001 (M):** decide/document iframe trust model and make sandbox configuration honest/minimal.
@@ -177,11 +218,11 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 ## 11. Phased Milestones, Dependencies, and Acceptance Criteria
 
 | Phase | Deliverables | Dependency | Exit criteria | Status |
-|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|
 | 0 | BUG-001 | shared project context | no hard-coded project; no missing-account request; test passes. | **COMPLETE** |
-| 1 | BUG-002, BUG-003, REL-001, diagnostics | clean browser and API retry metadata | Web asset requests clean; 429 recoverable without reload; fresh DB → chat auto-creates session and sends. | BUG-003 **RESOLVED** (3 phases); REL-001 **VERIFIED**; BUG-002 pending |
-| 2 | iframe trust decision, keyboard suite | security review | approved isolation model and green keyboard tests covering focus/Escape. | pending |
-| 3 | fixtures, responsive/visual suite, UX-002 | disposable data environment, populated chat fixture (UX-002 resolved via pure CSS) | all currently blocked control classes reproducibly tested; mobile chat width verified at 390px (UX-002 done). | UX-002 **RESOLVED** (pure CSS, no fixture) |
+| 1 | BUG-002, BUG-003, REL-001, diagnostics | clean browser and API retry metadata | Web asset requests clean; 429 recoverable without reload; fresh DB → chat auto-creates session and sends. | **RESOLVED** — BUG-003 (3 phases), REL-001 verified, BUG-002 resolved via same-origin proxy removal + HTTPS origin model |
+| 2 | iframe trust decision, keyboard suite, infrastructure hardening | security review | approved isolation model and green keyboard tests covering focus/Escape; no Docker startup race conditions. | INFRA-001 **RESOLVED** — entrypoint no longer stops/restarts opencode-web; setup completes before supervisord exec. SEC-001 partially resolved — sandbox removed from OpenCode iframes (trusted first-party content). |
+| 3 | fixtures, responsive/visual suite, UX-002, tool card redesign, reasoning streaming | disposable data environment, populated chat fixture (UX-002 resolved via pure CSS) | all currently blocked control classes reproducibly tested; mobile chat width verified at 390px (UX-002 done); tool cards show identity/state/summary/duration; reasoning auto-expands/collapses. | UX-002 **RESOLVED** (pure CSS, no fixture). INFRA-002 **RESOLVED** (tool card redesign). INFRA-003 **RESOLVED** (reasoning streaming + activity status). |
 
 ## 12. Testing and Verification Plan
 
@@ -214,7 +255,7 @@ Resolved without fixture: UX-002 (pure CSS fix — no fixture dependency).
 
 The audit roadmap is done when BUG-001 and REL-001 have automated regressions, the iframe trust decision is security-reviewed, all primary routes have deterministic desktop/mobile visual and console/network coverage, every overlay has keyboard focus/Escape coverage verified with automated tests, and the fixture environment enables all deferred state families without real data or mutations.
 
-**Progress:** BUG-001 automated regression — DONE (Phase 0 COMPLETE). REL-001 retry/backoff — DONE (Phase 1 VERIFIED). BUG-003 chat silent-send failure — DONE (3 phases: auto-create + async send + fixture E2E + real-provider smoke). UX-002 resolved via pure CSS — DONE (no fixture dependency). Remaining: BUG-002, SEC-001, A11Y-001, fixture-driven suite, and visual regression coverage.
+**Progress:** BUG-001 automated regression — DONE (Phase 0 COMPLETE). REL-001 retry/backoff — DONE (Phase 1 VERIFIED). BUG-003 chat silent-send failure — DONE (3 phases: auto-create + async send + fixture E2E + real-provider smoke). BUG-002 — RESOLVED (same-origin proxy rewrites removed; HTTPS origin model). UX-002 resolved via pure CSS — DONE (no fixture dependency). INFRA-001 — RESOLVED (entrypoint no longer stops/restarts opencode-web; setup completes before supervisord exec). INFRA-002 — RESOLVED (tool card redesign: identity, state, summary, structured output, duration). INFRA-003 — RESOLVED (reasoning streaming auto-expand/collapse, activity status indicator). SEC-001 partially resolved (sandbox removed from OpenCode iframes — trusted first-party content). Remaining: A11Y-001, fixture-driven suite, and visual regression coverage.
 
 ## Appendix A — Route and Control Coverage Ledger
 

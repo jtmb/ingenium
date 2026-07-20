@@ -105,10 +105,22 @@ Right-aligned with `rounded-2xl` and a `--color-surface-selected` background.
 
 ### Assistant Messages
 Left-aligned with **no card wrapper** — full-width text with relaxed leading. Includes:
-- **Reasoning blocks**: Collapsible `<details>` element showing model reasoning content
+- **Reasoning blocks**: `ReasoningBlock` component — auto-expands during streaming (shows "Thinking…"), auto-collapses on completion ("Thought for a moment"). Content renders with a left border accent and muted text. Click the summary to re-expand after collapse.
 - **Markdown content**: Rendered via ChatMarkdown component
 - **File parts**: Rendered inline based on MIME type
-- **Tool call cards**: Status cards for tool calls (pending, running, completed, failed). Failed cards show a revert button.
+- **Tool call cards**: `ToolCallCard` component showing tool identity (human-friendly label + SVG icon), input summary (collapsible JSON), live elapsed time (updates during execution, final duration on completion), state badge (pending/running/completed/failed/retry), structured output or error detail, and a revert button on failed calls.
+
+### Activity Status Indicator
+During streaming, a human-readable status label appears beneath the last assistant message:
+| Phase | Label | When |
+|-------|-------|------|
+| **Connecting** | "Connecting…" | Establishing session connection |
+| **Thinking** | "Thinking…" | Model reasoning phase (coincides with auto-expanded reasoning block) |
+| **Using tools** | "Using tools…" | Tool execution phase (coincides with tool call cards) |
+| **Writing response** | "Writing response…" | Response generation phase |
+| **Reconnecting** | "Reconnecting…" | Reconnecting after disconnect |
+
+The status is derived from the `streamActivity` prop and maps via `data-testid="chat-activity-status"` with `role="status"` for accessibility.
 
 ### Action Row
 Each assistant message has an action row beneath it with:

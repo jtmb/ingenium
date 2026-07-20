@@ -351,8 +351,8 @@ docker compose exec ingenium npm run test   # Execute inside container
 | Host Port | Service | Description |
 |-----------|---------|-------------|
 | `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
-| `127.0.0.1:4097` | API | Express REST gateway (sole DB authority — dashboard uses same-origin proxy) |
-| `127.0.0.1:4098` | OpenCode Web | OpenCode web server (host loopback only) |
+| `127.0.0.1:4097` | API | Express REST gateway (sole DB authority) |
+| `127.0.0.1:4098` | OpenCode Web | OpenCode web server (host loopback only; container binds 0.0.0.0 via `--hostname 0.0.0.0`) |
 | `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
 | `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → container `:4097` (API). OpenCode redirects OAuth here; API validates and forwards callback |
 
@@ -361,9 +361,14 @@ docker compose exec ingenium npm run test   # Execute inside container
 ### Key Docker Notes
 
 - **Volumes**: `ingenium-data` (/app/.ingenium), `opencode-config`, `opencode-data`. Workspace bind-mount: `~/repos` → `/workspace`.
-- **OpenCode Web/CLI**: Dashboard `/opencode` page has dual-mode iframes (Web: :4098, CLI: ttyd :4099). Glass tab toggle with `Ctrl+Shift+\``. Mode persisted in `localStorage`.
+- **OpenCode Web/CLI**: Dashboard `/opencode` page has dual-mode iframes (Web: :4098, CLI: ttyd :4099). Glass tab toggle with `Ctrl+Shift+\``. Mode persisted in `localStorage`. The `sandbox` attribute has been removed from OpenCode iframes (trusted first-party content on separate origins).
 - **Direct terminal attachment**: `opencode attach http://localhost:4098 --dir /workspace`
-- **OpenCode Access**: The Dashboard iframe connects to OpenCode Web via a URL derived at runtime by `runtime-urls.ts`: loopback HTTP (localhost/127.0.0.1/::1) uses the direct port (`http://localhost:4098/`); LAN HTTP (e.g., `http://192.168.1.50:3000/`) and all HTTPS use a same-origin reverse-proxy path (`/opencode-web/` for Web mode, `/opencode-cli/` for CLI mode) to avoid mixed-content errors. An environment override (`NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL`) is available for custom deployments — only relative same-origin paths are accepted; direct service origins are deliberately unsupported. The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty so the iframe never opens a native login prompt. Compose publishes ports 4098 and 4099 to host loopback only (`127.0.0.1`). The root `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
+- **OpenCode Access**: The Dashboard iframe connects to OpenCode Web via a URL derived at runtime by `runtime-urls.ts` using a **two-tier embedding model**. The old same-origin proxy rewrites (`/opencode-web/`, `/opencode-cli/`) have been **removed** — OpenCode v1.18.3+ serves root-relative assets and cannot be proxied under a sub-path:
+  - **Loopback HTTP** (localhost/127.0.0.1/::1): direct port (`http://localhost:4098/` for Web, `http://localhost:4099/` for CLI)
+  - **Remote HTTPS**: requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL` pointing to a dedicated root HTTPS origin (e.g., `https://opencode.example.com/`). Only root HTTPS origins are accepted — relative same-origin paths are no longer supported.
+  - **Unsupported LAN HTTP**: `getOpenCodeAvailability()` returns `"unavailable"`. The iframe shows explicit guidance: "OpenCode serves root-relative assets and cannot be proxied under a shared origin" with a fallback "Open OpenCode in a new tab" button.
+  - The `sandbox` attribute has been **removed** from all OpenCode iframes (trusted first-party content; separate origin provides isolation). The `allow="clipboard-write"` Permissions Policy is retained.
+  - The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty so the iframe never opens a native login prompt. Compose publishes ports 4098 and 4099 to host loopback only (`127.0.0.1`). The root `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
 - 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks in the API Express process. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts).
 - 🔴 **Docker sudo**: `appuser` has passwordless sudo for package installs.
 - 🔴 **Docker git**: `git` package installed for OpenCode repo creation.
