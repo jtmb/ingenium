@@ -77,6 +77,18 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 - **Dependencies/effort:** reproduce in a clean browser/cache and inspect reverse-proxy/OpenCode asset-base settings / M.
 - **Acceptance/verification:** clean-context Web load has no `/opencode-web` asset MIME/404 errors, and Web navigation remains functional after a hard refresh at loopback and proxied origins.
 
+#### BUG-003 — Chat silently fails to send prompts on fresh DB [RESOLVED]
+- **Classification/severity/confidence:** BUG / P1 / high.
+- **Impact/scope:** `/chat`, all viewports. Fresh database has zero OpenCode sessions, `activeId` is null, and `handleSend()` returns silently without dispatching any prompt POST. The user types a message, clicks send, and nothing happens — no error, no network request, no feedback.
+- **Evidence/reproduction:** Fresh DB → navigate to `/chat` → type a message → click send. No POST to API, no visible error. Rate-limit tests mocked `activeId=1` (hiding the defect); chat-states spec only tested disabled-UI state.
+- **Root cause:** Fresh DB zero sessions → `activeId=null` → `handleSend` silent return. No prompt POST reached API.
+- **Test gap:** rate-limit test mocked `activeId=1`; chat-states only tested disabled UI; `opencode-chat.spec.ts` targeted obsolete `/opencode` page.
+- **Ownership/files:** `use-opencode-sessions.ts`, `use-opencode-chat.ts`, `ChatShell.tsx`, `ChatInput.tsx` (dashboard chat layer).
+- **Dependencies/effort:** none / M.
+- **Fix:** auto-create session on empty list (ref guard + failure surface); async `handleSend` with accept/reject return, preserves text on failure; `RECONCILE_MESSAGES` non-destructive deduplication; streaming safety net with max-retry clear; error surfaces for null sessionId, auto-create failure, streaming-stuck.
+- **Tests added:** 43 unit tests (reducer + SSE hook integration), deterministic fixture E2E on port 4999, real-provider smoke against deployed Docker + OpenCode LLM.
+- **Acceptance/verification:** fresh DB → auto-created session appears → send completes → message renders in stream. VERIFIED across 3 phases (commits 915d1ff, e24581f, d60c90f).
+
 ### P2
 
 #### SEC-001 — OpenCode iframe sandbox warning indicates ineffective isolation
@@ -133,6 +145,12 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 
 **PROPOSED FEATURE GAPS:** explicit chat retry/backoff (REL-001); a non-sending “connection/configuration diagnostics” state; an integration contract/test fixture for project/docs/tasks/OpenCode context rather than inferring those integrations from navigation alone.
 
+**RESOLVED — Chat silent-send failure:** The chat communication layer has been hardened against the zero-session state. Fix deployed across 3 phases:
+
+- **Phase 1 (Hook & UI fixes, 915d1ff):** auto-create session on empty list with ref guard + failure surface; async handleSend with accept/reject return preserving text on failure; RECONCILE_MESSAGES non-destructive deduplication; streaming safety net with max-retry clear; error surfaces for null sessionId, auto-create failure, and streaming-stuck.
+- **Phase 2 (Deterministic tests, e24581f):** chat-fixture-server (port 4999) with SSE streaming; 43 unit tests covering chatReducer (LOAD_MESSAGES, ACCUMULATE_DELTA, RECONCILE_MESSAGES) and SSE hook integration; rewritten opencode-chat.spec.ts targeting `/chat` with real data-testid attributes; dynamic ports for test isolation.
+- **Phase 3 (Real-provider smoke, d60c90f):** end-to-end test against deployed Docker + real OpenCode LLM; unique prompts per run; streaming completion verified (stop→send transition).
+
 ## 8. Cross-Cutting Findings
 
 - **Accessibility:** structural labels were generally present in snapshots; overlay keyboard behavior remains unverified (A11Y-001).
@@ -145,9 +163,10 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 1. **P1 BUG-001 (S) — RESOLVED:** repair mail deep-link project/account validation and add regression tests.
 2. **P1 BUG-002 (M):** reproduce and fix OpenCode asset-base/proxy behavior in a clean browser context.
 3. **P1 REL-001 (M) — RESOLVED:** establish API retry semantics and a chat retry/backoff state.
-4. **P2 SEC-001 (M):** decide/document iframe trust model and make sandbox configuration honest/minimal.
-5. **P2 A11Y-001 (M):** add keyboard/overlay contract tests.
-6. **P2 UX-002 (S) — RESOLVED:** repair/confirm mobile chat width (pure CSS fix, no fixture needed).
+4. **P1 BUG-003 (M) — RESOLVED:** chat silently fails to send on fresh DB — zero-session state. Auto-create session, async send, RECONCILE_MESSAGES dedup, streaming safety net. 43 unit tests + fixture E2E + real-provider smoke. Commits 915d1ff, e24581f, d60c90f.
+5. **P2 SEC-001 (M):** decide/document iframe trust model and make sandbox configuration honest/minimal.
+6. **P2 A11Y-001 (M):** add keyboard/overlay contract tests.
+7. **P2 UX-002 (S) — RESOLVED:** repair/confirm mobile chat width (pure CSS fix, no fixture needed).
 
 ## 10. Prioritized Feature Roadmap
 
@@ -160,7 +179,7 @@ Keyboard: `Ctrl+Shift+\`` safely toggled the OpenCode mode. Accessibility snapsh
 | Phase | Deliverables | Dependency | Exit criteria | Status |
 |---|---|---|---|---|---|
 | 0 | BUG-001 | shared project context | no hard-coded project; no missing-account request; test passes. | **COMPLETE** |
-| 1 | BUG-002, REL-001, diagnostics | clean browser and API retry metadata | Web asset requests clean; 429 recoverable without reload. | REL-001 **VERIFIED**; BUG-002 pending |
+| 1 | BUG-002, BUG-003, REL-001, diagnostics | clean browser and API retry metadata | Web asset requests clean; 429 recoverable without reload; fresh DB → chat auto-creates session and sends. | BUG-003 **RESOLVED** (3 phases); REL-001 **VERIFIED**; BUG-002 pending |
 | 2 | iframe trust decision, keyboard suite | security review | approved isolation model and green keyboard tests covering focus/Escape. | pending |
 | 3 | fixtures, responsive/visual suite, UX-002 | disposable data environment, populated chat fixture (UX-002 resolved via pure CSS) | all currently blocked control classes reproducibly tested; mobile chat width verified at 390px (UX-002 done). | UX-002 **RESOLVED** (pure CSS, no fixture) |
 
@@ -193,7 +212,7 @@ Resolved without fixture: UX-002 (pure CSS fix — no fixture dependency).
 
 The audit roadmap is done when BUG-001 and REL-001 have automated regressions, the iframe trust decision is security-reviewed, all primary routes have deterministic desktop/mobile visual and console/network coverage, every overlay has keyboard focus/Escape coverage verified with automated tests, and the fixture environment enables all deferred state families without real data or mutations.
 
-**Progress:** BUG-001 automated regression — DONE (Phase 0 COMPLETE). REL-001 retry/backoff — DONE (Phase 1 VERIFIED). UX-002 resolved via pure CSS — DONE (no fixture dependency). Remaining: BUG-002, SEC-001, A11Y-001, fixture-driven suite, and visual regression coverage.
+**Progress:** BUG-001 automated regression — DONE (Phase 0 COMPLETE). REL-001 retry/backoff — DONE (Phase 1 VERIFIED). BUG-003 chat silent-send failure — DONE (3 phases: auto-create + async send + fixture E2E + real-provider smoke). UX-002 resolved via pure CSS — DONE (no fixture dependency). Remaining: BUG-002, SEC-001, A11Y-001, fixture-driven suite, and visual regression coverage.
 
 ## Appendix A — Route and Control Coverage Ledger
 
