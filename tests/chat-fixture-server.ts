@@ -182,8 +182,17 @@ function parseBody(req: IncomingMessage): Promise<string> {
  * - "simple": basic text-only response (backward compatible)
  * - "rich": full v1.18.3 pipeline — reasoning deltas, tool calls (pending→running→completed),
  *           response text, completed metadata, session.idle
+ *
+ * In rich mode, small delays between event groups give the frontend time
+ * to render intermediate states (reasoning, tool call, activity status)
+ * before the stream completes.
  */
-function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): void {
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"): Promise<void> {
   // Parse query string for session ID
   const url = new URL(`http://localhost${res.req.url ?? ""}`);
   const sessionId = url.searchParams.get("session");
@@ -209,6 +218,9 @@ function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): voi
       })}\n\n`,
     );
 
+    // Give frontend time to register the busy state
+    await delay(300);
+
     // 2. message.updated — skeleton
     res.write(
       `event: message.updated\ndata: ${JSON.stringify({
@@ -225,6 +237,8 @@ function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): voi
       })}\n\n`,
     );
 
+    await delay(300);
+
     // 3. reasoning delta — multiple chunks for streaming visibility
     const reasoningChunks = [
       "Let me think about this...",
@@ -232,6 +246,7 @@ function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): voi
       " I should explain how it works step by step.",
     ];
     for (const chunk of reasoningChunks) {
+      await delay(100);
       res.write(
         `event: message.part.delta\ndata: ${JSON.stringify({
           type: "message.part.delta",
@@ -244,6 +259,9 @@ function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): voi
         })}\n\n`,
       );
     }
+
+    // Pause to separate reasoning and tool phases in UI
+    await delay(500);
 
     // 4. tool call — pending, then running, then completed
     const toolPartId = "tool-part-1";
@@ -271,6 +289,8 @@ function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): voi
       })}\n\n`,
     );
 
+    await delay(300);
+
     // running
     res.write(
       `event: message.part.updated\ndata: ${JSON.stringify({
@@ -292,6 +312,8 @@ function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): voi
         },
       })}\n\n`,
     );
+
+    await delay(300);
 
     // completed
     res.write(
@@ -317,6 +339,8 @@ function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): voi
       })}\n\n`,
     );
 
+    await delay(300);
+
     // 5. response text
     res.write(
       `event: message.part.delta\ndata: ${JSON.stringify({
@@ -329,6 +353,8 @@ function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): voi
         },
       })}\n\n`,
     );
+
+    await delay(300);
 
     // 6. completed message metadata
     res.write(
@@ -487,7 +513,7 @@ function route(req: IncomingMessage, res: ServerResponse): void {
   // ── GET /event?session={id}&mode={simple|rich} ──
   if (method === "GET" && path === "/event") {
     const sessionParam = query.get("session");
-    const mode = (query.get("mode") || "simple") as "simple" | "rich";
+    const mode = (query.get("mode") || "rich") as "simple" | "rich";
     if (sessionParam && sessionParam !== FIXTURE_SESSION_ID) {
       // Unknown session — return empty SSE that immediately ends
       res.writeHead(200, {

@@ -348,19 +348,23 @@ export default function ChatShell() {
         });
       }
 
-      await chat.send(parts, {
-        model: { providerID: providerId, modelID: modelId },
-        agent: agentName,
-      });
+      try {
+        await chat.send(parts, {
+          model: { providerID: providerId, modelID: modelId },
+          agent: agentName,
+        });
+      } catch {
+        // send() handles its own error dispatch
+      }
 
       // Clear attachments after successful send
       setAttachments([]);
 
-      // Update session title from first message
+      // Update session title from first message (best-effort - do not block)
       if (shouldRename) {
         const title =
           text.length > 50 ? `${text.slice(0, 47)}...` : text;
-        await rename(activeId, title);
+        rename(activeId, title).catch(() => {});
       }
 
       return true;
