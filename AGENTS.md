@@ -175,7 +175,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 20 primary routes plus t
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
-| Settings (overlay) | Full-screen overlay via gear icon. 6 functional tabs (General, Projects, Skills, Tasks, Jobs, Plugins, Mail, Agents, MCP, Config, Observations, Personality, Providers, Logs), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. The **Providers** tab (aliased to PipelinePanel) features native-provider cards with Connect/Disconnect, an OAuth connect dialog with auto/code modes, and separate Primary/Secondary synthesis provider selectors. |
+| Settings (overlay) | Full-screen overlay via gear icon. 14 functional tabs (General, Projects, Skills, Tasks, Jobs, Plugins, Mail, Agents, MCP, Config, Observations, Personality, Providers, Logs), deep-link: `?settings=<tab>`. Auto-selects tab matching current page. The **Providers** tab (aliased to PipelinePanel) features native-provider cards with Connect/Disconnect, an OAuth connect dialog with auto/code modes, and separate Primary/Secondary synthesis provider selectors. |
 
 > **Nav bar layout**: Settings gear far-right. **ProjectDropdown** (folder icon) to its left for project switching — disabled on `/mail` and `/opencode`. Chat link added to the Workspace group alongside OpenCode. The dashboard talks to the API layer only — zero direct DB access.
 
@@ -266,6 +266,8 @@ Conflicting writers (touching the same file) MUST be serialized across waves —
 ### Mandatory Visual QA Gates
 
 After UI implementation plus normal QA, test, deployment, and health verification, the orchestrator MUST run a changed-route visual gate through `@ingenium-qa-vision` at 1440x900 and 390x844. Before final completion or commit, it MUST run a passive full-site desktop/mobile sweep of every non-sensitive primary route at both viewports. PASS requires screenshot, accessibility, network/console, and browser-cleanup evidence. FAIL or BLOCKED status routes work back to a writer and requires a visual recheck.
+
+All screenshots from visual QA gates must be saved under `tests/artifacts/visual-qa/<run-id>/` (e.g., `tests/artifacts/visual-qa/run-20260719/homepage-desktop.png`). Historical artifacts reside in `tests/artifacts/legacy/`. See [mcp-tooling skill](../.opencode/skills/mcp-tooling/SKILL.md) for the complete screenshot storage convention.
 
 ### Restart Required for New Agent Profiles
 

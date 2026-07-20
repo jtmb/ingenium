@@ -50,7 +50,7 @@ The sole DB authority. All CRUD operations flow through this service.
 
 ### 2. Dashboard (Next.js on :3000)
 
-17 primary route-based pages plus the Settings overlay. Talks to the API layer only — zero direct DB access.
+20 primary route-based pages plus the Settings overlay. Talks to the API layer only — zero direct DB access.
 
 ### 3. opencode-web (on :4098)
 

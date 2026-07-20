@@ -30,11 +30,11 @@ sequenceDiagram
 
 1. `browser_navigate({ url: "http://localhost:3000" })`
 2. `browser_resize({ width: 375, height: 812 })` — mobile
-3. `browser_take_screenshot({})` — save as `screenshot-mobile.png`
+3. `browser_take_screenshot({})` — save as `tests/artifacts/visual-qa/screenshot-mobile.png`
 4. `browser_resize({ width: 768, height: 1024 })` — tablet
-5. `browser_take_screenshot({})` — save as `screenshot-tablet.png`
+5. `browser_take_screenshot({})` — save as `tests/artifacts/visual-qa/screenshot-tablet.png`
 6. `browser_resize({ width: 1280, height: 800 })` — desktop
-7. `browser_take_screenshot({})` — save as `screenshot-desktop.png`
+7. `browser_take_screenshot({})` — save as `tests/artifacts/visual-qa/screenshot-desktop.png`
 8. `browser_close({})`
 
 ### 3. Debug Console Errors

@@ -84,7 +84,7 @@ Model identity: GPT-5.6 Luna (`gpt-5.6-luna`). This visual QA specialist collect
 
 ## Evidence Contract
 
-Return one of **PASS**, **FAIL**, or **BLOCKED**. Include route, viewport, descriptive screenshot path, accessibility evidence, console errors, non-2xx requests, browser-cleanup confirmation, and any visual defect. Never include sensitive text. A FAIL blocks completion until a writer fixes it and this agent rechecks the affected route.
+Return one of **PASS**, **FAIL**, or **BLOCKED**. Include route, viewport, descriptive screenshot path, accessibility evidence, console errors, non-2xx requests, browser-cleanup confirmation, and any visual defect. 🔴 **Save all screenshots under `tests/artifacts/visual-qa/<run-id>/` and all accessibility/snapshot markdown to `tests/artifacts/visual-qa/<run-id>/`.** Report paths relative to repo root (e.g., `tests/artifacts/visual-qa/run-20260719/homepage-1440x900.png`). Never save artifacts to repo root (`./`) or home root (`~/`). Never include sensitive text. A FAIL blocks completion until a writer fixes it and this agent rechecks the affected route.
 
 ## Luna Vision Smoke Test
 

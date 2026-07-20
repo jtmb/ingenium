@@ -208,7 +208,7 @@ The Plan agent (OpenCode's built-in Plan mode) generates plans as conversation t
    ```json
    [{ "content": "Add login API endpoint", "status": "pending", "priority": "high" }]
    ```
-4. **Set output directory** — Create and use `benchmark/<project-name>/` for build artifacts.
+4. **Set output directory** — Create and use `benchmark/<project-name>/` for build artifacts. Visual artifacts (screenshots, accessibility snapshots) MUST land in `tests/artifacts/visual-qa/<run-id>/`, never in repo root or home root.
 
 ### Phase 2 — Execute Tasks (Per-Task Loop)
 

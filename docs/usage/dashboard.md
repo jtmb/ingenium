@@ -158,14 +158,14 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 **How to use**:
 - Navigate to `/chat` in the dashboard
 - Select a **Provider**, **Model**, and **Agent** from the header selectors. Selectors are disabled (`opacity-40 cursor-not-allowed`) when loading, when the chat config API failed, or when no providers are available. Providers with `source === "builtin"` show a **"(Free)"** badge — these are auto-discovered from the OpenCode Zen built-in provider (free tier, no API key required).
-- **No LLM configured state**: When no providers exist (`isConfigured === false`), a blue info banner links to Settings → Providers. The send button is blocked, all selectors are disabled, and the composer has `hasSelectableModel={false}` preventing sends. Once a provider is configured and saved, selectors populate dynamically from `GET /api/v1/settings/chat-config`. OpenCode live-reloads provider config changes — no restart required.
+- **No LLM configured state**: When no providers exist (`isConfigured === false`), a blue info banner links to Settings → Providers. The send button is blocked, all selectors are disabled, and the composer has `hasSelectableModel={false}` preventing sends. Once a provider is configured and saved, selectors populate dynamically from `GET /api/v1/opencode/chat-config`. OpenCode live-reloads provider config changes — no restart required.
 - Attach files via the paperclip button (max 5, 10MB each) or drag-and-drop. Images show inline previews; text files show code-block previews; binary files show download links.
 - Use the **Instructions** toggle (gear icon) to set a system prompt for the conversation.
 - Session management via collapsible sidebar: create, rename (double-click title), and delete sessions. On mobile (<768px) the sidebar becomes a drawer overlay.
 - Fork, share (copy link to clipboard), and compact conversations via header action buttons.
 - Footer reads "OpenCode Chat".
 
-**API**: Uses `GET /api/v1/settings/chat-config` to fetch sanitized provider/agent/model data. Messages are sent through OpenCode's native session `send()` API with provider/model selection.
+**API**: Uses `GET /api/v1/opencode/chat-config` to fetch sanitized provider/agent/model data. Messages are sent through OpenCode's native session `send()` API with provider/model selection.
 
 ## Settings
 

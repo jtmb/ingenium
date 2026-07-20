@@ -17,7 +17,7 @@ import * as path from "path";
 const BASE = "http://localhost:3000";
 const GMAIL_EMAIL = "james.branco@gmail.com";
 const ACCOUNT_ID = "5a214d5b-1d89-4e89-9bd9-7a857495efa7";
-const SCREENSHOT_DIR = path.resolve(__dirname, "qa-screenshots");
+const SCREENSHOT_DIR = path.resolve(__dirname, "../artifacts/visual-qa");
 
 const MOCK_ACCOUNTS = {
   data: [

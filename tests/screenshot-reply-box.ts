@@ -1,7 +1,7 @@
 import { chromium } from "@playwright/test";
 
 const BASE = "http://localhost:3000";
-const SCREENSHOT_DIR = "/tmp/opencode";
+const SCREENSHOT_DIR = "tests/artifacts/manual";
 
 async function main() {
   const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
@@ -51,7 +51,7 @@ async function main() {
     path: `${SCREENSHOT_DIR}/mail-reply-box-light.png`,
     fullPage: false,
   });
-  console.log("✅ Light mode screenshot saved to /tmp/opencode/mail-reply-box-light.png");
+  console.log("✅ Light mode screenshot saved to tests/artifacts/manual/mail-reply-box-light.png");
 
   // ── DARK MODE ──
   // Toggle to dark mode
@@ -85,7 +85,7 @@ async function main() {
     path: `${SCREENSHOT_DIR}/mail-reply-box-dark.png`,
     fullPage: false,
   });
-  console.log("✅ Dark mode screenshot saved to /tmp/opencode/mail-reply-box-dark.png");
+  console.log("✅ Dark mode screenshot saved to tests/artifacts/manual/mail-reply-box-dark.png");
 
   await browser.close();
   console.log("\nDone — both screenshots captured.");

@@ -11,7 +11,7 @@ export default defineConfig({
   timeout: 30000,
   retries: 0,
   fullyParallel: false,
-  outputDir: "test-results",
+  outputDir: "test-results", // resolves to tests/test-results/ (relative to config dir tests/)
   use: {
     baseURL: "http://localhost:3000",
     headless: true,

@@ -13,7 +13,7 @@
 const { chromium } = require('playwright');
 const path = require('path');
 
-const SCREENSHOTS_DIR = '/tmp/opencode/ingenium-acceptance';
+const SCREENSHOTS_DIR = 'tests/artifacts/manual';
 
 (async () => {
   const browser = await chromium.launch({ headless: true });

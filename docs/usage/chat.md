@@ -126,7 +126,7 @@ The MCP drawer (triggered by the server icon button in the header) shows connect
 
 ## API
 
-The chat page fetches configuration from `GET /api/v1/settings/chat-config`. This endpoint returns:
+The chat page fetches configuration from `GET /api/v1/opencode/chat-config`. This endpoint returns:
 - Sanitized provider list (no API keys)
 - Models per provider
 - Available agents

@@ -27,8 +27,6 @@ Thumbs.db
 
 # ── Playwright test artifacts ────────────────────────────
 playwright-report/
-test-results/
-tests/test-results/
 playwright/.cache/
 
 # ── Build outputs ─────────────────────────────────────────
@@ -77,6 +75,14 @@ email-plan.md
 *.plan.md
 plan.md
 servers-page.yml
-mail-page-screenshot.png
-mail-inbox-loaded.png
-*.png
+# QA screenshots at repo root (legacy, being migrated to tests/artifacts/)
+/*.png
+
+# QA visual-sweep snapshot and accessibility outputs
+*-snapshot.md
+*-accessibility.md
+
+# Generated test artifacts
+tests/artifacts/
+tests/qa-screenshots/
+tests/test-results/

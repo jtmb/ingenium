@@ -19,7 +19,7 @@ import fs from "fs";
  */
 
 const BASE = "http://localhost:3000";
-const SCREENSHOTS_DIR = "/tmp/opencode";
+const SCREENSHOTS_DIR = "tests/artifacts/visual-qa";
 const GMAIL_EMAIL = "james.branco@gmail.com";
 const ACCOUNT_ID = "5a214d5b-1d89-4e89-9bd9-7a857495efa7";
 const EMAIL_LOAD_DELAY = 350; // ms delay to make loading skeleton observable

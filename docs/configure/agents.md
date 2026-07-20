@@ -93,7 +93,7 @@ The 13 email MCP tools (`ingenium_email_list` through `ingenium_email_watch_stat
 | 5 | **Code writing** | Implementation needed | Orchestrator → **Software-Engineer** | Implements code, self-verifies (tests/type-check), returns results |
 | 6 | **Normal QA + test** | Code written | Orchestrator → **QA** | Reviews quality and verifies tests; visual QA is a separate gate |
 | 7 | **Deploy + health verification** | Normal QA/test complete | Orchestrator | Completes deployment and health verification before visual QA is spawned |
-| 8 | **Changed-route visual gate** | UI implementation + normal QA/test/deployment/health verification | Orchestrator → **QA Vision** | Passively checks changed non-sensitive UI routes at 1440x900 and 390x844; confirms browser cleanup; FAIL/BLOCKED routes to a writer, then rechecks |
+| 8 | **Changed-route visual gate** | UI implementation + normal QA/test/deployment/health verification | Orchestrator → **QA Vision** | Passively checks changed non-sensitive UI routes at 1440x900 and 390x844; confirms browser cleanup; FAIL/BLOCKED routes to a writer, then rechecks. All screenshots saved under `tests/artifacts/visual-qa/<run-id>/` |
 | 9 | **Security audit** | Sensitive changes | Orchestrator → **Security-Auditor** | Scans for secrets, auth issues, CI vulnerabilities |
 | 10 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/ — observations automatically captured by server-side extraction engine |
 | 11 | **Final visual sweep** | Before final completion/commit | Orchestrator → **QA Vision** | After deployment/health verification, passively sweeps non-sensitive primary routes at both viewports; PASS and cleanup confirmation required |

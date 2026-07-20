@@ -33,9 +33,9 @@ After taking screenshots or inspecting a page, close the browser session. Leavin
 
 Do not use Playwright to log into services with real user credentials or submit forms with sensitive data. Use test accounts or mock data.
 
-### 🔴 Save Screenshots to Describable Paths
+### 🔴 Save Screenshots Under `tests/artifacts/`
 
-When saving screenshots, use paths that describe what they contain: `screenshot-homepage-mobile.png`, `screenshot-error-state.png`. Avoid generic names like `screenshot1.png`.
+Save ALL screenshots under `tests/artifacts/visual-qa/<run-id>/` or `tests/artifacts/manual/<date>/`. Use paths that describe what they contain: `tests/artifacts/visual-qa/run-20260719/homepage-mobile.png`, `tests/artifacts/manual/2026-07-19/error-state.png`. Avoid generic names like `screenshot1.png`. 🔴 **Do NOT save screenshots to repo root (`./`), home root (`~/`), or `/tmp/opencode/`.**
 
 ### 🔴 Verify MCP Server is Running Before Tool Calls
 

@@ -22,7 +22,7 @@ import fs from "fs";
 // ————————————————————————————————————————————————————————————————————————————
 
 const BASE = "http://localhost:3000";
-const SCREENSHOTS_DIR = "/tmp/opencode";
+const SCREENSHOTS_DIR = "tests/artifacts/visual-qa";
 const PROJECT = "global-default";
 const PROJECT_WITH_SKILLS = "gh-llm-bootstrap";
 const GMAIL_EMAIL = "james.branco@gmail.com";

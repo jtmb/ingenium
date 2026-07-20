@@ -202,6 +202,8 @@ Five Playwright-generated screenshots reside in the repository root as audit evi
 | `dashboard-mobile-settings.png` | 390×844 settings-overlay route sample. |
 | `dashboard-chat-mobile-rate-limited.png` | 390×844 chat error/empty state. |
 
+> **Canonical location**: New visual QA screenshots MUST be saved to `tests/artifacts/visual-qa/<run-id>/`. The five artifacts above are legacy audit evidence and remain at the repo root for historical reference. Historical artifacts should be migrated to `tests/artifacts/legacy/` when convenient. See the [mcp-tooling skill](../../.opencode/skills/mcp-tooling/SKILL.md) for the complete screenshot storage convention.
+
 ## 14. Deferred, Blocked, and Fixture-Dependent Items
 
 Blocked/deferred: populated mail reader and mail actions; mail detail with valid account/UID; docs slug/detail/history/editor; observation populated detail; list sorting/filter/search/pagination with data; task board drag/move; project/skill/plugin/agent/job/backup/config/vault mutations; all confirmations; OAuth success; standalone popup window lifecycle; chat streaming/tool/permission/question/attachment/MCP connect states. Required fixture: disposable project plus non-secret account/session/provider test doubles and seeded representative records.
