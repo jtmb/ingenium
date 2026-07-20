@@ -1,7 +1,7 @@
 "use client";
 
 import { useReducer, useEffect, useCallback, useRef, useState } from "react";
-import { opencode, type OpenCodePart, type FilePart, type OpenCodePromptParams } from "./opencode";
+import { opencode, type OpenCodePart, type FilePart, type ToolPart, type OpenCodePromptParams } from "./opencode";
 import { getApiBase } from "./api";
 import type {
   QuestionItem as ChatQuestionItem,
@@ -84,6 +84,18 @@ export interface SessionInfo {
   shareUrl?: string;
 }
 
+/** Activity phase tracking for streaming UI feedback. */
+export type StreamActivity =
+  | "idle"
+  | "connecting"   // SSE being established
+  | "thinking"     // reasoning deltas arriving
+  | "tool"         // tool parts executing
+  | "responding"   // text deltas arriving
+  | "reconnecting" // SSE reconnect in progress
+  | "complete"     // session.idle received
+  | "stopped"      // user clicked stop
+  | "error";       // session.error received
+
 interface ChatState {
   messages: ChatMessage[];
   isStreaming: boolean;
@@ -92,6 +104,7 @@ interface ChatState {
   sessionStatus: "idle" | "busy" | null;
   sessionInfo?: SessionInfo;
   questions: ChatQuestionItem[];
+  streamActivity: StreamActivity;
 }
 
 /* ------------------------------------------------------------------ */
@@ -126,12 +139,14 @@ type ChatAction =
   | { type: "SET_STREAMING"; value: boolean }
   | { type: "SET_LOADING"; value: boolean }
   | { type: "SET_STATUS"; status: "idle" | "busy" | null }
+  | { type: "SET_STREAM_ACTIVITY"; activity: StreamActivity }
   | { type: "SET_ERROR"; error: string | null }
   | { type: "UPDATE_SESSION_INFO"; info: SessionInfo }
   | { type: "ADD_QUESTION"; question: ChatQuestionItem }
   | { type: "ADD_QUESTIONS"; questions: ChatQuestionItem[] }
   | { type: "REMOVE_QUESTIONS" }
   | { type: "REMOVE_LAST_USER" }
+  | { type: "FINALIZE_STREAMING" }
   | { type: "CLEAR" };
 
 /* ------------------------------------------------------------------ */
@@ -319,7 +334,15 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const msgs = [...state.messages];
       const idx = msgs.findIndex((m) => m.id === action.message.id);
       if (idx >= 0) {
-        msgs[idx] = action.message;
+        // 🔴 Merge metadata WITHOUT replacing accumulated parts
+        const existing = msgs[idx]!;
+        msgs[idx] = {
+          ...existing,
+          model: action.message.model ?? existing.model,
+          isStreaming: action.message.isStreaming ?? existing.isStreaming,
+          // Only update timestamp if the incoming one is more recent
+          timestamp: Math.max(existing.timestamp, action.message.timestamp),
+        };
       } else {
         msgs.push(action.message);
       }
@@ -341,8 +364,22 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "SET_STATUS":
       return { ...state, sessionStatus: action.status };
 
+    case "SET_STREAM_ACTIVITY":
+      return { ...state, streamActivity: action.activity };
+
     case "SET_ERROR":
       return { ...state, error: action.error, isStreaming: false, isLoading: false };
+
+    case "FINALIZE_STREAMING": {
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.role === "assistant" && m.isStreaming
+            ? { ...m, isStreaming: false }
+            : m,
+        ),
+      };
+    }
 
     case "ADD_QUESTION": {
       // Add or replace a single question (deduplicate by id)
@@ -392,6 +429,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         sessionStatus: null,
         sessionInfo: undefined,
         questions: [],
+        streamActivity: "idle" as StreamActivity,
       };
 
     default:
@@ -413,20 +451,37 @@ interface SSEEnvelope {
 /*  ChatMessage normalization helpers                                 */
 /* ------------------------------------------------------------------ */
 
+function normalizePart(raw: OpenCodeApiMessage["parts"][number]): OpenCodePart {
+  const base: Partial<OpenCodePart> = {
+    id: raw.id,
+    sessionID: raw.sessionID,
+    messageID: raw.messageID,
+    type: raw.type as OpenCodePart["type"],
+    text: raw.text,
+    ...(raw.time?.start ? { time: { start: raw.time.start, end: raw.time.end } } : {}),
+    ...(raw.snapshot ? { snapshot: raw.snapshot } : {}),
+    ...(raw.reason ? { reason: raw.reason } : {}),
+    ...(raw.tokens !== undefined ? { tokens: raw.tokens } : {}),
+    ...(raw.cost !== undefined ? { cost: raw.cost } : {}),
+  };
+
+  // 🔴 Preserve tool-specific fields
+  if (raw.type === "tool") {
+    const toolRaw = raw as unknown as Record<string, unknown>;
+    return {
+      ...base,
+      tool: toolRaw.tool,
+      callID: toolRaw.callID,
+      state: toolRaw.state,
+    } as ToolPart;
+  }
+
+  return base as OpenCodePart;
+}
+
 function normalizeMessage(raw: OpenCodeApiMessage): ChatMessage {
   // Convert OpenCode parts to our part format
-  const parts: OpenCodePart[] = raw.parts.map((p) => ({
-    id: p.id,
-    sessionID: p.sessionID,
-    messageID: p.messageID,
-    type: p.type as OpenCodePart["type"],
-    text: p.text,
-    ...(p.time?.start ? { time: { start: p.time.start, end: p.time.end } } : {}),
-    ...(p.snapshot ? { snapshot: p.snapshot } : {}),
-    ...(p.reason ? { reason: p.reason } : {}),
-    ...(p.tokens !== undefined ? { tokens: p.tokens } : {}),
-    ...(p.cost !== undefined ? { cost: p.cost } : {}),
-  })) as unknown as OpenCodePart[];
+  const parts: OpenCodePart[] = raw.parts.map(normalizePart);
 
   const model = raw.info.providerID && raw.info.modelID
     ? { providerID: raw.info.providerID, modelID: raw.info.modelID }
@@ -562,6 +617,7 @@ export function useOpenCodeChat(sessionId: string | null) {
     error: null,
     sessionStatus: null,
     questions: [],
+    streamActivity: "idle" as StreamActivity,
   });
 
   /* ---- Refs for SSE lifecycle ---- */
@@ -784,6 +840,8 @@ export function useOpenCodeChat(sessionId: string | null) {
       case "session.idle": {
         dispatch({ type: "SET_STATUS", status: "idle" });
         dispatch({ type: "SET_STREAMING", value: false });
+        dispatch({ type: "SET_STREAM_ACTIVITY", activity: "complete" });
+        dispatch({ type: "FINALIZE_STREAMING" });
         // Mark all streaming messages as complete
         break;
       }
@@ -801,6 +859,7 @@ export function useOpenCodeChat(sessionId: string | null) {
               : "Unknown session error";
         dispatch({ type: "SET_ERROR", error: msg });
         dispatch({ type: "SET_STREAMING", value: false });
+        dispatch({ type: "SET_STREAM_ACTIVITY", activity: "error" });
         break;
       }
 
@@ -821,6 +880,11 @@ export function useOpenCodeChat(sessionId: string | null) {
             partID,
             delta,
             partType: field,
+          });
+          // Track activity phase
+          dispatch({
+            type: "SET_STREAM_ACTIVITY",
+            activity: field === "reasoning" ? "thinking" : "responding",
           });
         }
         break;
@@ -845,6 +909,7 @@ export function useOpenCodeChat(sessionId: string | null) {
           ...(part.tokens !== undefined ? { tokens: part.tokens } : {}),
           ...(part.tool ? { tool: part.tool } : {}),
           ...(part.callID ? { callID: part.callID } : {}),
+          ...(part.state ? { state: part.state } : {}),
         } as unknown as OpenCodePart;
 
         dispatch({
@@ -852,6 +917,11 @@ export function useOpenCodeChat(sessionId: string | null) {
           messageID,
           part: normalizedPart,
         });
+
+        // Track tool execution phase
+        if (part.type === "tool") {
+          dispatch({ type: "SET_STREAM_ACTIVITY", activity: "tool" });
+        }
 
         // Detect question-type parts (type "ask" or with question/options properties)
         if (
@@ -1104,13 +1174,13 @@ export function useOpenCodeChat(sessionId: string | null) {
     async (
       parts: Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }>,
       options?: { model?: { providerID: string; modelID: string }; agent?: string; variant?: string; system?: string; tools?: Record<string, boolean> },
-    ) => {
+    ): Promise<boolean> => {
       if (!sessionId) {
         dispatch({
           type: "SET_ERROR",
           error: "Cannot send message — no active conversation.",
         });
-        return;
+        return false;
       }
       dispatch({ type: "SET_ERROR", error: null });
 
@@ -1165,6 +1235,7 @@ export function useOpenCodeChat(sessionId: string | null) {
           tools: options?.tools,
         };
         dispatch({ type: "SET_STREAMING", value: true });
+        dispatch({ type: "SET_STREAM_ACTIVITY", activity: "connecting" });
         await opencode.sessions.prompt(sessionId, promptBody);
 
         // The prompt endpoint can finish before the SSE subscription is established.
@@ -1182,12 +1253,15 @@ export function useOpenCodeChat(sessionId: string | null) {
         if (normalized.some((m) => m.role === "assistant" && !m.isStreaming)) {
           dispatch({ type: "SET_STREAMING", value: false });
         }
+        return true;
       } catch (err: unknown) {
         dispatch({ type: "SET_STREAMING", value: false });
+        dispatch({ type: "SET_STREAM_ACTIVITY", activity: "error" });
         dispatch({
           type: "SET_ERROR",
           error: err instanceof Error ? err.message : "Failed to send message",
         });
+        return false;
       }
     },
     [sessionId],

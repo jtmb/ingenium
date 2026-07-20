@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useOpenCodeHealth } from "@/lib/use-opencode-health";
 
 export type OpenCodeToolbarMode = "web" | "cli";
 
@@ -36,6 +37,8 @@ export default function OpenCodeToolbar({
   modeRef.current = mode;
   const onModeChangeRef = useRef(onModeChange);
   onModeChangeRef.current = onModeChange;
+
+  const { status: healthStatus } = useOpenCodeHealth();
 
   // Global keyboard shortcut: Ctrl+Shift+` — toggles Web ↔ CLI
   useEffect(() => {
@@ -161,14 +164,36 @@ export default function OpenCodeToolbar({
           </svg>
         </button>
 
-        {/* Status indicator — green when loaded, red when loading */}
+        {/* Health status indicator */}
         <span
-          title={isLoaded ? "Connected" : "Loading..."}
+          title={
+            healthStatus === "starting"
+              ? "OpenCode is starting up…"
+              : healthStatus === "unavailable"
+                ? "OpenCode is unavailable"
+                : isLoaded
+                  ? "Connected"
+                  : "Loading…"
+          }
           className={[
             "w-2 h-2 rounded-full shrink-0 transition-colors duration-300",
-            isLoaded ? "bg-green-500" : "bg-red-500",
+            healthStatus === "starting"
+              ? "bg-yellow-500 animate-pulse"
+              : healthStatus === "unavailable"
+                ? "bg-red-500"
+                : isLoaded
+                  ? "bg-green-500"
+                  : "bg-red-500 animate-pulse",
           ].join(" ")}
-          aria-label={isLoaded ? "OpenCode connected" : "OpenCode loading"}
+          aria-label={
+            healthStatus === "starting"
+              ? "OpenCode starting"
+              : healthStatus === "unavailable"
+                ? "OpenCode unavailable"
+                : isLoaded
+                  ? "OpenCode connected"
+                  : "OpenCode loading"
+          }
         />
       </div>
     </div>

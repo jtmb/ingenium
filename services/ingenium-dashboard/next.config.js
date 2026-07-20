@@ -16,14 +16,6 @@ const nextConfig = {
         source: "/api/v1/:path*",
         destination: `http://127.0.0.1:${apiPort}/api/v1/:path*`,
       },
-      {
-        source: "/opencode-web/:path*",
-        destination: "http://127.0.0.1:4098/:path*",
-      },
-      {
-        source: "/opencode-cli/:path*",
-        destination: "http://127.0.0.1:4099/:path*",
-      },
     ];
   },
 

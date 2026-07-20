@@ -11,7 +11,7 @@
  * (same pattern as dashboard.test.ts).
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -857,35 +857,45 @@ describe("GET /opencode/chat-config — configured state", () => {
    ══════════════════════════════════════════════════════════════════════════ */
 
 describe("GET /opencode/chat-config — unconfigured state", () => {
-  it("returns configured:false and primary:null when no synthesis_provider set", async () => {
+  let providerSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    providerSpy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      error: { code: "NETWORK_ERROR", message: "OpenCode is unreachable" },
+    });
+  });
+
+  afterEach(() => {
+    providerSpy?.mockRestore();
+  });
+
+  it("returns OPENCODE_UNAVAILABLE when no synthesis_provider set and OpenCode is unreachable", async () => {
     // Use a fresh project name that has no settings saved
     const freshProjectName = "llm-config-unconfigured";
     projects.createProject(freshProjectName);
 
     const res = await fetch(`${baseUrl}/api/v1/opencode/chat-config${projectQ(freshProjectName)}`);
-    expect(res.status).toBe(200);
+    // With no managed providers and OpenCode unreachable, the endpoint returns 503
+    // so the frontend can show a "starting up" message instead of "No model available".
+    expect(res.status).toBe(503);
     const body = await res.json();
 
-    expect(body.data.configured).toBe(false);
-    expect(body.data.primary).toBeNull();
-    expect(body.data.backup).toBeNull();
-    // agents should still be present
-    expect(Array.isArray(body.data.agents)).toBe(true);
-    expect(body.data.agents.length).toBeGreaterThanOrEqual(1);
+    expect(body.error).toBeDefined();
+    expect(body.error.code).toBe("OPENCODE_UNAVAILABLE");
   });
 
-  it("returns configured:false when only apiKey is set without provider", async () => {
+  it("returns OPENCODE_UNAVAILABLE when only apiKey is set without provider and OpenCode is unreachable", async () => {
     const freshProjectName = "llm-config-partial";
     const proj = projects.createProject(freshProjectName);
     // Set an apiKey but no provider
     settings.setSetting(proj.id, "synthesis_api_key", "sk-orphaned");
 
     const res = await fetch(`${baseUrl}/api/v1/opencode/chat-config${projectQ(freshProjectName)}`);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     const body = await res.json();
 
-    expect(body.data.configured).toBe(false);
-    expect(body.data.primary).toBeNull();
+    expect(body.error).toBeDefined();
+    expect(body.error.code).toBe("OPENCODE_UNAVAILABLE");
   });
 });
 

@@ -5,7 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import WorkspaceControl from "../components/WorkspaceControl";
 import type { WorkspaceControlProps } from "../components/WorkspaceControl";
 import { api, type DocSpace } from "@/lib/api";
-import { getOpenCodeWebUrl, getOpenCodeCliUrl } from "@/lib/runtime-urls";
+import { getOpenCodeWebUrl, getOpenCodeCliUrl, getOpenCodeAvailability } from "@/lib/runtime-urls";
+import { useOpenCodeHealth } from "@/lib/use-opencode-health";
 
 /**
  * StandalonePage — Renders page content WITHOUT the full layout chrome
@@ -117,6 +118,8 @@ function StandaloneContent() {
 function StandaloneOpenCode() {
   const [mode, setMode] = useState<"web" | "cli">("web");
   const [cliMounted, setCliMounted] = useState(false);
+  const { status: healthStatus } = useOpenCodeHealth();
+  const availability = getOpenCodeAvailability();
 
   // Derive iframe URLs from runtime location for correct protocol/hostname
   const webUrl = getOpenCodeWebUrl();
@@ -135,11 +138,43 @@ function StandaloneOpenCode() {
     if (newMode === "cli" && !cliMounted) setCliMounted(true);
   };
 
+  // ── Availability guard ──────────────────────────────────────────────
+  if (availability === "unavailable") {
+    return (
+      <div className="flex items-center justify-center h-full bg-black">
+        <div className="max-w-md text-center px-6">
+          <h2 className="text-white text-lg font-semibold mb-2">OpenCode cannot be embedded on this connection</h2>
+          <p className="text-gray-400 text-sm mb-4">
+            OpenCode serves root-relative assets and cannot be proxied under a shared origin.
+            Set NEXT_PUBLIC_OPENCODE_WEB_URL to a dedicated HTTPS origin, or access the dashboard
+            from http://localhost:3000.
+          </p>
+          <button onClick={() => window.open("http://localhost:4098", "_blank")}
+            className="text-sm text-blue-400 hover:text-blue-300 underline">
+            Open OpenCode in a new tab
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Health guard ────────────────────────────────────────────────────
+  if (healthStatus === "starting") {
+    return (
+      <div className="flex items-center justify-center h-full bg-black">
+        <div className="text-center">
+          <div className="animate-spin h-8 w-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-3" />
+          <p className="text-gray-400 text-sm">OpenCode is starting up…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-full">
       {/* Web iframe */}
       <iframe
-        src={webUrl}
+        src={webUrl ?? undefined}
         className="absolute inset-0 w-full h-full border-0"
         style={{
           opacity: mode === "web" ? 1 : 0,
@@ -155,7 +190,7 @@ function StandaloneOpenCode() {
       {/* CLI iframe — lazy-mounted */}
       {cliMounted && (
         <iframe
-          src={cliUrl}
+          src={cliUrl ?? undefined}
           className="absolute inset-0 w-full h-full border-0"
           style={{
             opacity: mode === "cli" ? 1 : 0,

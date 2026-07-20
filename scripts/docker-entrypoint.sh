@@ -5,10 +5,8 @@
 # - Uses `sh` (not bash) for Alpine-based distroless compatibility
 # - Deliberately omits `-o pipefail` since `sh` doesn't support it;
 #   commands use explicit `|| true` for error tolerance instead
-# - Supervisord is backgrounded (not exec'd) so one-shot setup can run
-#   before yielding control to the process supervisor
-# - `wait` at the end keeps the container alive as PID 1 without
-#   requiring a separate supervisor/parent process dependency
+# - One-shot setup completes before supervisord starts
+# - Supervisord is exec'd so it receives container lifecycle signals as PID 1
 set -eu
 
 # SECURITY: Require auth for OpenCode server — prevents unauthenticated
@@ -71,69 +69,13 @@ OCEOF
   echo "Seeded OpenCode config with Ingenium MCP"
 fi
 
-# Auto-create global-default project if it doesn't exist
-# NOTE: `|| true` makes this idempotent across restarts — curl fails
-# silently when the project already exists (HTTP 409). The 5s sleep
-# gives supervisord time to start the API process on first launch.
-exec supervisord -c /app/supervisord.conf &
-sleep 5
-curl -s -X POST 'http://localhost:4097/api/v1/projects?project=global-default' \
-  -H 'Content-Type: application/json' -d '{"name":"global-default","is_global":true}' > /dev/null 2>&1 || true
-
-# Register Ingenium MCP server in Ingenium DB so dashboard shows it
-# NOTE: This is a POST (not PUT) so `|| true` handles the "already exists"
-# case gracefully across container restarts.
-curl -s -X POST 'http://localhost:4097/api/v1/servers?project=global-default' \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"ingenium","command":"node /app/services/ingenium-server/dist/scripts/mcp-server.js","args":"[]","env":"{\"INGENIUM_API_URL\":\"http://localhost:4097/api/v1\"}"}' > /dev/null 2>&1 || true
-curl -s -X PATCH 'http://localhost:4097/api/v1/servers/ingenium?project=global-default' \
-  -H 'Content-Type: application/json' \
-  -d '{"running":1}' > /dev/null 2>&1 || true
-
-# Set OpenCode workspace to /workspace
-# NOTE: Must stop OpenCode before updating the DB because the process
-# retains the worktree in memory and overwrites the DB on graceful
-# shutdown. The 3s sleep after stopping gives the process time to
-# release the SQLite WAL lock before we write.
-OC_DB="/home/appuser/.local/share/opencode/opencode.db"
-sleep 3
-if [ -f "$OC_DB" ]; then
-  WORKTREE=$(node -e "
-const D = require('/app/node_modules/better-sqlite3');
-const db = new D('$OC_DB');
-try {
-  const p = db.prepare('SELECT worktree FROM project WHERE id = ?').get('global');
-  console.log(p ? p.worktree : '');
-} finally { db.close(); }
-")
-  if [ "$WORKTREE" != "/workspace" ]; then
-    supervisorctl stop opencode-web 2>/dev/null || true
-    node -e "
-const D = require('/app/node_modules/better-sqlite3');
-const db = new D('$OC_DB');
-db.prepare('UPDATE project SET worktree = ? WHERE id = ?').run('/workspace', 'global');
-console.log('Updated OpenCode workspace to /workspace');
-db.close();
-"
-    supervisorctl start opencode-web 2>/dev/null || true
-  fi
-fi
-# Ensure ingenium-chat agent is available to OpenCode runtime
-# OpenCode scans its worktree's .opencode/agents/ for agent definitions.
-# The agent file at /app/.opencode/agents/ is invisible to OpenCode because
-# the worktree is /workspace (mounted volume). Copy it to /workspace so
-# OpenCode discovers it at startup.
+# Copy agents to workspace before OpenCode starts. OpenCode scans its
+# worktree's .opencode/agents/ directory, while the source agents live in /app.
 mkdir -p /workspace/.opencode/agents
 cp /app/.opencode/agents/chat/ingenium-chat.md /workspace/.opencode/agents/ingenium-chat.md 2>/dev/null || true
-
-# Ensure ingenium-llm-broker agent is available to OpenCode runtime
 if [ -f /app/.opencode/agents/execution/ingenium-llm-broker.md ]; then
-  mkdir -p /workspace/.opencode/agents
   cp /app/.opencode/agents/execution/ingenium-llm-broker.md /workspace/.opencode/agents/ingenium-llm-broker.md 2>/dev/null || true
 fi
 
-# Keep container alive as PID 1. Normally `exec supervisord` would serve
-# this role, but we backgrounded it above to run setup steps. `wait` is
-# the POSIX-compliant way to block indefinitely on the background process
-# without busy-looping.
-wait
+# Start supervisord as PID 1 after all startup setup has completed.
+exec supervisord -c /app/supervisord.conf

@@ -77,6 +77,10 @@ COPY --chown=appuser:appuser .opencode/commands ./.opencode/commands
 COPY --chown=appuser:appuser .opencode/skills ./.opencode/skills
 # Copy database migrations (needed for incremental DB upgrades)
 COPY packages/ingenium-core/data/migrations/ /app/packages/ingenium-core/data/migrations/
+ARG NEXT_PUBLIC_OPENCODE_WEB_URL=""
+ARG NEXT_PUBLIC_OPENCODE_CLI_URL=""
+ENV NEXT_PUBLIC_OPENCODE_WEB_URL=${NEXT_PUBLIC_OPENCODE_WEB_URL}
+ENV NEXT_PUBLIC_OPENCODE_CLI_URL=${NEXT_PUBLIC_OPENCODE_CLI_URL}
 RUN chmod +x /app/entrypoint.sh
 
 # Create shared config and data directories with proper ownership

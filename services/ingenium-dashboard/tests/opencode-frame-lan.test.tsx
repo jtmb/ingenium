@@ -9,7 +9,21 @@ import OpenCodeFrame from "@/app/components/OpenCodeFrame";
  *
  * Verifies runtime URL derivation, conditional CLI mount, sandbox/security
  * attributes, active/inactive visibility, and accessibility attributes.
+ *
+ * Health-gating (useOpenCodeHealth) is mocked to return "ready" so the
+ * iframes render. The mock is set in beforeEach.
  */
+
+// ── Mock useOpenCodeHealth ─────────────────────────────────────────────────
+
+vi.mock("@/lib/use-opencode-health", () => ({
+  useOpenCodeHealth: () => ({
+    status: "ready" as const,
+    error: null,
+    lastChecked: Date.now(),
+    retry: vi.fn(),
+  }),
+}));
 
 // ── window.location helpers (mutable for testing) ─────────────────────────
 
@@ -54,7 +68,9 @@ describe("OpenCodeFrame — web iframe", () => {
       const html = renderToStaticMarkup(
         React.createElement(OpenCodeFrame, { mode: "web", cliMounted: true }),
       );
-      expect(html).not.toMatch(/<iframe[^>]+src=/);
+      // During SSR, availability is "unavailable" (no window), so the component
+      // renders the guidance message, not an iframe
+      expect(html).toContain("OpenCode cannot be embedded on this connection");
     } finally {
       globalThis.window = savedWindow;
     }
@@ -65,12 +81,11 @@ describe("OpenCodeFrame — web iframe", () => {
     expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe("http://localhost:4098/");
   });
 
-  it("uses a same-origin proxy for a LAN dashboard", () => {
+  it("shows unavailable guidance for LAN HTTP without HTTPS override", () => {
+    delete process.env.NEXT_PUBLIC_OPENCODE_WEB_URL;
     setLocation("http://192.168.1.50:3000/");
     render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe(
-      "http://192.168.1.50:3000/opencode-web/",
-    );
+    expect(screen.getByText("OpenCode cannot be embedded on this connection")).not.toBeNull();
   });
 
   it("renders with title 'OpenCode Web'", () => {
@@ -122,11 +137,25 @@ describe("OpenCodeFrame — CLI iframe conditional mount", () => {
     expect(screen.getByTitle("OpenCode Terminal")).not.toBeNull();
   });
 
-  it("uses same-origin proxy iframe URLs under HTTPS", () => {
+  it("shows unavailable for HTTPS without override, not the old proxy URLs", () => {
+    delete process.env.NEXT_PUBLIC_OPENCODE_WEB_URL;
+    delete process.env.NEXT_PUBLIC_OPENCODE_CLI_URL;
     setLocation("https://dashboard.example.com/opencode");
     render(React.createElement(OpenCodeFrame, { mode: "cli", cliMounted: true }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe("https://dashboard.example.com/opencode-web/");
-    expect(screen.getByTitle("OpenCode Terminal").getAttribute("src")).toBe("https://dashboard.example.com/opencode-cli/");
+    // HTTPS without override is "ok-https-origin" for availability but URLs are null
+    // The component still renders because health is mocked as "ready" and availability
+    // is not "unavailable" (it's "ok-https-origin"). But the iframe src is null.
+    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBeNull();
+    expect(screen.getByTitle("OpenCode Terminal").getAttribute("src")).toBeNull();
+  });
+
+  it("uses configured HTTPS origin when NEXT_PUBLIC_OPENCODE_WEB_URL is set", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "https://opencode.example.com/";
+    setLocation("https://dashboard.example.com/opencode");
+    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: true }));
+    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe(
+      "https://opencode.example.com/",
+    );
   });
 });
 

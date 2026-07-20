@@ -18,6 +18,8 @@ services:
       - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET:-}
       - INGENIUM_EMAIL_ENCRYPTION_KEY=${INGENIUM_EMAIL_ENCRYPTION_KEY:?INGENIUM_EMAIL_ENCRYPTION_KEY (64 hex chars) is required}
       - OAUTH_REDIRECT_URI=${OAUTH_REDIRECT_URI:-http://localhost:3000/mail/oauth/callback}
+      - NEXT_PUBLIC_OPENCODE_WEB_URL=${NEXT_PUBLIC_OPENCODE_WEB_URL:-}
+      - NEXT_PUBLIC_OPENCODE_CLI_URL=${NEXT_PUBLIC_OPENCODE_CLI_URL:-}
     security_opt: ["seccomp=unconfined"]
     volumes:
       - ingenium-data:/app/.ingenium
@@ -28,10 +30,10 @@ services:
       - ${HOME:-~}/.local/share/opencode:/var/opencode:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4097/api/v1/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
+      interval: 15s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
 
 volumes:
   ingenium-data:

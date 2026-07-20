@@ -261,6 +261,12 @@ function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): voi
     let status: number;
     if (code === "AUTH_NOT_CONFIGURED") {
       status = 503;
+    } else if (code === "NETWORK_ERROR") {
+      status = 503;
+      result.error.code = "OPENCODE_UNAVAILABLE";
+      result.error.message = "OpenCode is starting up. Please wait a moment and try again.";
+      // Set Retry-After header so clients can back off gracefully
+      res.setHeader("Retry-After", "5");
     } else if (code === "NOT_FOUND" || code === "NotFoundError") {
       status = 404;
     } else if (code === "BadRequest" || code.startsWith("HTTP_4")) {
@@ -593,7 +599,22 @@ opencodeRouter.get("/chat-config", async (req, res) => {
       : null;
 
   const managedProviders = getManagedChatProviders(projectId);
-  const builtinProvider = getBuiltinChatProvider(await opencodeClient.listProviders());
+  const builtinResult = await opencodeClient.listProviders();
+  const builtinProvider = getBuiltinChatProvider(builtinResult);
+
+  // When no managed providers are configured and OpenCode's builtin provider is
+  // unavailable (e.g. OpenCode is still starting up), return a clear status
+  // instead of an empty provider list that causes a false "No model available" banner.
+  if (managedProviders.length === 0 && !builtinProvider && isOpenCodeError(builtinResult) && builtinResult.error.code === "NETWORK_ERROR") {
+    res.status(503).json({
+      error: {
+        code: "OPENCODE_UNAVAILABLE",
+        message: "OpenCode is starting up. Provider list will be available shortly.",
+      },
+    });
+    return;
+  }
+
   const providers = builtinProvider ? [...managedProviders, builtinProvider] : managedProviders;
   const managedPrimary = managedProviders.find((candidate) => {
     try {
@@ -631,6 +652,12 @@ opencodeRouter.get("/chat-config", async (req, res) => {
 opencodeRouter.get("/health", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const result = await opencodeClient.health();
+  if (isOpenCodeError(result) && result.error.code === "NETWORK_ERROR") {
+    res.status(503).json({
+      data: { healthy: false, status: "unavailable" },
+    });
+    return;
+  }
   sendResult(req, res, result);
 });
 

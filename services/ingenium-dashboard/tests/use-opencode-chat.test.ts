@@ -125,6 +125,7 @@ function createInitialState(overrides?: Partial<ChatState>): ChatState {
     sessionStatus: null,
     sessionInfo: undefined,
     questions: [],
+    streamActivity: "idle" as StreamActivity,
     ...overrides,
   };
 }
@@ -406,28 +407,39 @@ describe("chatReducer", () => {
   // ── UPSERT_MESSAGE ───────────────────────────────────────────────
 
   describe("UPSERT_MESSAGE", () => {
-    it("updates an existing message by id", () => {
+    it("updates an existing message by id (merges metadata, preserves parts)", () => {
       const original = createMessage({
         id: "msg-1",
         role: "assistant",
-        content: "old",
+        content: "existing text",
+        parts: [textPart({ id: "p1", text: "existing text" })],
+        isStreaming: true,
       });
-      const updated = createMessage({
+      const update = createMessage({
         id: "msg-1",
         role: "assistant",
-        content: "new",
+        content: "",
+        parts: [],
         isStreaming: false,
+        model: { providerID: "openai", modelID: "gpt-4" },
       });
       const state = createInitialState({ messages: [original] });
 
       const next = reducer(state, {
         type: "UPSERT_MESSAGE",
-        message: updated,
+        message: update,
       });
 
       expect(next.messages).toHaveLength(1);
-      expect(next.messages[0]!.content).toBe("new");
+      // Content and parts preserved from original
+      expect(next.messages[0]!.content).toBe("existing text");
+      expect(next.messages[0]!.parts.length).toBe(1);
+      // Metadata merged from update
       expect(next.messages[0]!.isStreaming).toBe(false);
+      expect(next.messages[0]!.model).toEqual({
+        providerID: "openai",
+        modelID: "gpt-4",
+      });
     });
 
     it("appends a new message if id does not match any existing", () => {
@@ -743,6 +755,7 @@ describe("chatReducer", () => {
         sessionStatus: null,
         sessionInfo: undefined,
         questions: [],
+        streamActivity: "idle",
       });
     });
   });

@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { logger, getDb, MAX_ATTACHMENT_SIZE } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
@@ -34,7 +36,7 @@ import { router as docsRouter } from "../lib/routes/docs.js";
 import { router as docsAiRouter } from "../lib/routes/docs-ai.js";
 import { backupsRouter } from "../lib/routes/backups.js";
 import { ragRouter } from "../lib/routes/rag.js";
-import { projects as projectsDb } from "ingenium-core";
+import { projects as projectsDb, servers } from "ingenium-core";
 import { startScheduler } from "../lib/scheduler.js";
 import { startBackupScheduler } from "../lib/backup-scheduler.js";
 
@@ -196,6 +198,28 @@ app.listen(config.port, () => {
     logger.info("api", "DB startup check", { checkpoint, integrity });
   } catch (e: any) {
     logger.error("api", `DB startup check failed: ${e.message}`, { stack: e.stack });
+  }
+
+  // Register the default Ingenium MCP server in the DB (idempotent — skips if exists).
+  // Previously done by docker-entrypoint.sh curl calls; moving here ensures the server
+  // is registered in all environments (Docker, tsx dev, etc.) at startup.
+  try {
+    const globalProjectRec = projectsDb.getGlobalProject();
+    if (globalProjectRec) {
+      const localServerPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../ingenium-server/dist/scripts/mcp-server.js");
+      servers.registerServer(
+        globalProjectRec.id,
+        "ingenium",
+        `node ${localServerPath}`,
+        "[]",
+        JSON.stringify({ INGENIUM_API_URL: "http://localhost:4097/api/v1" }),
+        "opencode",
+      );
+      servers.updateServer(globalProjectRec.id, "ingenium", { running: 1 });
+      logger.info("api", "Registered default Ingenium MCP server");
+    }
+  } catch (err: unknown) {
+    logger.warn("api", `MCP server registration skipped: ${(err as Error).message}`);
   }
 });
 
