@@ -1384,6 +1384,7 @@ export function useOpenCodeChat(sessionId: string | null) {
     questions: state.questions,
     permissions: activePermissions,
     replyPermission,
+    streamActivity: state.streamActivity,
     send,
     stop,
     retry,

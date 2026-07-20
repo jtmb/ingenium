@@ -648,6 +648,7 @@ export default function ChatShell() {
               messages={chat.messages}
               isLoading={chat.isLoading}
               isStreaming={chat.isStreaming}
+              streamActivity={chat.streamActivity}
               error={displayError}
               onRetry={handleRetry}
               onRevert={handleRevert}
@@ -775,6 +776,7 @@ export default function ChatShell() {
               messages={chat.messages}
               isLoading={chat.isLoading}
               isStreaming={chat.isStreaming}
+              streamActivity={chat.streamActivity}
               error={displayError}
               onRetry={handleRetry}
               onRevert={handleRevert}

@@ -50,4 +50,37 @@ test.describe("Chat — end-to-end smoke", () => {
     // and the provider selector must be available.
     await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 15000 });
   });
+
+  test("rich fixture: reasoning, tool call, and response stream correctly", async ({ page }) => {
+    test.setTimeout(90000);
+
+    await page.goto("/chat", { waitUntil: "domcontentloaded" });
+
+    // Wait for provider selector
+    await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 20000 });
+
+    // Send a message
+    const composer = page.locator('[data-testid="chat-composer"]');
+    await expect(composer).toBeEnabled({ timeout: 15000 });
+    await composer.fill("Test rich fixture");
+    await composer.press("Enter");
+
+    // Reasoning should appear (streaming)
+    await expect(page.locator('[data-testid="chat-reasoning"]')).toBeVisible({ timeout: 15000 });
+
+    // Reasoning content should contain the fixture text
+    await expect(page.locator('[data-testid="chat-reasoning-content"]')).toContainText("think about this");
+
+    // Tool call card should render
+    await expect(page.locator('[data-testid="chat-tool-call"]')).toBeVisible({ timeout: 10000 });
+
+    // Tool name should show
+    await expect(page.locator('[data-testid="chat-tool-name"]')).toContainText("Shell");
+
+    // Activity status should be visible during streaming
+    await expect(page.locator('[data-testid="chat-activity-status"]')).toBeVisible({ timeout: 5000 });
+
+    // Streaming should complete — send button visible (stop button hidden)
+    await expect(page.locator('[data-testid="chat-send-btn"]')).toBeVisible({ timeout: 30000 });
+  });
 });

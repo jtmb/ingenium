@@ -177,14 +177,18 @@ function parseBody(req: IncomingMessage): Promise<string> {
  * The SSE parser in use-opencode-chat.ts accumulates `data:` lines until a
  * blank line is encountered, then JSON.parses the accumulated content.
  * `event:` lines are ignored but included for spec compliance.
+ *
+ * Two modes:
+ * - "simple": basic text-only response (backward compatible)
+ * - "rich": full v1.18.3 pipeline — reasoning deltas, tool calls (pending→running→completed),
+ *           response text, completed metadata, session.idle
  */
-function streamSSE(res: ServerResponse): void {
+function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "simple"): void {
   // Parse query string for session ID
   const url = new URL(`http://localhost${res.req.url ?? ""}`);
   const sessionId = url.searchParams.get("session");
   const messageID = "fixture-assistant-msg";
   const partID = "fixture-part-1";
-  const streamText = "Hello! I received your message. This confirms the chat pipeline is working.";
 
   // SSE response headers
   res.writeHead(200, {
@@ -194,42 +198,205 @@ function streamSSE(res: ServerResponse): void {
     "X-Accel-Buffering": "no",
   });
 
-  // 1. message.updated — announces the assistant message
-  res.write(
-    `event: message.updated\ndata: ${JSON.stringify({
-      type: "message.updated",
-      properties: {
-        info: {
-          id: messageID,
-          role: "assistant",
-          sessionID: sessionId ?? FIXTURE_SESSION_ID,
-          providerID: "opencode",
-          modelID: "fixture-model",
+  if (mode === "rich") {
+    // ── Rich mode: full v1.18.3 pipeline ──
+
+    // 1. session.status: busy
+    res.write(
+      `event: session.status\ndata: ${JSON.stringify({
+        type: "session.status",
+        properties: { status: { type: "busy" } },
+      })}\n\n`,
+    );
+
+    // 2. message.updated — skeleton
+    res.write(
+      `event: message.updated\ndata: ${JSON.stringify({
+        type: "message.updated",
+        properties: {
+          info: {
+            id: messageID,
+            role: "assistant",
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            providerID: "opencode",
+            modelID: "fixture-model",
+          },
         },
-      },
-    })}\n\n`,
-  );
+      })}\n\n`,
+    );
 
-  // 2. message.part.delta — stream a single text chunk
-  res.write(
-    `event: message.part.delta\ndata: ${JSON.stringify({
-      type: "message.part.delta",
-      properties: {
-        messageID,
-        partID,
-        field: "text",
-        delta: streamText,
-      },
-    })}\n\n`,
-  );
+    // 3. reasoning delta — multiple chunks for streaming visibility
+    const reasoningChunks = [
+      "Let me think about this...",
+      " The user wants to know about the chat pipeline.",
+      " I should explain how it works step by step.",
+    ];
+    for (const chunk of reasoningChunks) {
+      res.write(
+        `event: message.part.delta\ndata: ${JSON.stringify({
+          type: "message.part.delta",
+          properties: {
+            messageID,
+            partID: "reason-part-1",
+            field: "reasoning",
+            delta: chunk,
+          },
+        })}\n\n`,
+      );
+    }
 
-  // 3. session.idle — signal completion
-  res.write(
-    `event: session.idle\ndata: ${JSON.stringify({
-      type: "session.idle",
-      properties: {},
-    })}\n\n`,
-  );
+    // 4. tool call — pending, then running, then completed
+    const toolPartId = "tool-part-1";
+    const toolCallId = "call_bash_001";
+
+    // pending
+    res.write(
+      `event: message.part.updated\ndata: ${JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: toolPartId,
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            messageID,
+            type: "tool",
+            tool: "bash",
+            callID: toolCallId,
+            state: {
+              status: "pending",
+              input: { command: "echo 'Hello from tool'" },
+              time: { start: Date.now() },
+            },
+          },
+        },
+      })}\n\n`,
+    );
+
+    // running
+    res.write(
+      `event: message.part.updated\ndata: ${JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: toolPartId,
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            messageID,
+            type: "tool",
+            tool: "bash",
+            callID: toolCallId,
+            state: {
+              status: "running",
+              input: { command: "echo 'Hello from tool'" },
+              time: { start: Date.now() - 500 },
+            },
+          },
+        },
+      })}\n\n`,
+    );
+
+    // completed
+    res.write(
+      `event: message.part.updated\ndata: ${JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: toolPartId,
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            messageID,
+            type: "tool",
+            tool: "bash",
+            callID: toolCallId,
+            state: {
+              status: "completed",
+              input: { command: "echo 'Hello from tool'" },
+              output: "Hello from tool\n",
+              time: { start: Date.now() - 1000, end: Date.now() },
+              title: "Run shell command",
+            },
+          },
+        },
+      })}\n\n`,
+    );
+
+    // 5. response text
+    res.write(
+      `event: message.part.delta\ndata: ${JSON.stringify({
+        type: "message.part.delta",
+        properties: {
+          messageID,
+          partID,
+          field: "text",
+          delta: "I've completed the analysis. The chat pipeline is working correctly.",
+        },
+      })}\n\n`,
+    );
+
+    // 6. completed message metadata
+    res.write(
+      `event: message.updated\ndata: ${JSON.stringify({
+        type: "message.updated",
+        properties: {
+          info: {
+            id: messageID,
+            role: "assistant",
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            providerID: "opencode",
+            modelID: "fixture-model",
+            completed: true,
+            time: { created: Date.now() - 3000, completed: Date.now() },
+          },
+        },
+      })}\n\n`,
+    );
+
+    // 7. session.idle
+    res.write(
+      `event: session.idle\ndata: ${JSON.stringify({
+        type: "session.idle",
+        properties: {},
+      })}\n\n`,
+    );
+  } else {
+    // ── Simple mode: original text-only response (backward compatible) ──
+
+    const streamText = "Hello! I received your message. This confirms the chat pipeline is working.";
+
+    // 1. message.updated — announces the assistant message
+    res.write(
+      `event: message.updated\ndata: ${JSON.stringify({
+        type: "message.updated",
+        properties: {
+          info: {
+            id: messageID,
+            role: "assistant",
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            providerID: "opencode",
+            modelID: "fixture-model",
+          },
+        },
+      })}\n\n`,
+    );
+
+    // 2. message.part.delta — stream a single text chunk
+    res.write(
+      `event: message.part.delta\ndata: ${JSON.stringify({
+        type: "message.part.delta",
+        properties: {
+          messageID,
+          partID,
+          field: "text",
+          delta: streamText,
+        },
+      })}\n\n`,
+    );
+
+    // 3. session.idle — signal completion
+    res.write(
+      `event: session.idle\ndata: ${JSON.stringify({
+        type: "session.idle",
+        properties: {},
+      })}\n\n`,
+    );
+  }
 
   res.end();
 }
@@ -317,9 +484,10 @@ function route(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
-  // ── GET /event?session={id} ──
+  // ── GET /event?session={id}&mode={simple|rich} ──
   if (method === "GET" && path === "/event") {
     const sessionParam = query.get("session");
+    const mode = (query.get("mode") || "simple") as "simple" | "rich";
     if (sessionParam && sessionParam !== FIXTURE_SESSION_ID) {
       // Unknown session — return empty SSE that immediately ends
       res.writeHead(200, {
@@ -331,7 +499,7 @@ function route(req: IncomingMessage, res: ServerResponse): void {
       res.end();
       return;
     }
-    streamSSE(res);
+    streamSSE(res, mode);
     return;
   }
 

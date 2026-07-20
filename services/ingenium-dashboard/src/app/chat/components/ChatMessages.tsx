@@ -25,6 +25,8 @@ interface ChatMessagesProps {
   messages: ChatMessage[];
   isLoading: boolean;
   isStreaming?: boolean;
+  /** Current streaming activity phase (thinking, tool, responding, etc.) */
+  streamActivity?: string;
   error?: string | null;
   onRetry?: () => void;
   onRevert?: (messageId: string, partId?: string) => void;
@@ -65,14 +67,37 @@ function outputToString(output: unknown): string | undefined {
 
 /**
  * ReasoningBlock — collapsible reasoning content shown above an assistant message.
+ * Auto-expands during streaming; auto-collapses when streaming completes.
  */
-function ReasoningBlock({ content }: { content: string }) {
+function ReasoningBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+  const [expanded, setExpanded] = useState(true); // auto-expand during stream
+
+  // Auto-collapse when streaming completes
+  useEffect(() => {
+    if (!isStreaming) setExpanded(false);
+  }, [isStreaming]);
+
+  const summary = isStreaming
+    ? "Thinking…"
+    : "Thought for a moment";
+
   return (
-    <details className="my-2">
-      <summary className="text-xs font-medium text-[var(--color-text-muted)] cursor-pointer hover:text-[var(--color-text-secondary)] transition-colors select-none">
-        Thinking...
+    <details
+      className="my-2"
+      open={expanded}
+      data-testid="chat-reasoning"
+    >
+      <summary
+        className="text-xs font-medium text-[var(--color-text-muted)] cursor-pointer hover:text-[var(--color-text-secondary)] transition-colors select-none"
+        data-testid="chat-reasoning-toggle"
+        onClick={(e) => { e.preventDefault(); setExpanded(!expanded); }}
+      >
+        {summary}
       </summary>
-      <div className="mt-2 pl-3 border-l-2 border-[var(--color-border)] text-xs text-[var(--color-text-muted)] leading-relaxed whitespace-pre-wrap">
+      <div
+        className="mt-2 pl-3 border-l-2 border-[var(--color-border)] text-xs text-[var(--color-text-muted)] leading-relaxed whitespace-pre-wrap"
+        data-testid="chat-reasoning-content"
+      >
         {content}
       </div>
     </details>
@@ -339,6 +364,7 @@ export default function ChatMessages({
   messages,
   isLoading,
   isStreaming,
+  streamActivity,
   error,
   onRetry,
   onRevert,
@@ -354,6 +380,16 @@ export default function ChatMessages({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  // Map stream activity to human-readable labels
+  const activityLabels: Record<string, string> = {
+    connecting: "Connecting…",
+    thinking: "Thinking…",
+    tool: "Using tools…",
+    responding: "Writing response…",
+    reconnecting: "Reconnecting…",
+  };
+  const activityLabel = streamActivity ? activityLabels[streamActivity] : undefined;
 
   // Empty state — show loading spinner, error, or welcome message
   if (messages.length === 0) {
@@ -543,7 +579,7 @@ export default function ChatMessages({
                 <div className="max-w-full sm:max-w-[85%] text-sm leading-relaxed break-words">
                   {/* Reasoning blocks */}
                   {reasoningContent && (
-                    <ReasoningBlock content={reasoningContent} />
+                    <ReasoningBlock content={reasoningContent} isStreaming={msg.isStreaming} />
                   )}
 
                   {/* Main content — Markdown rendered */}
@@ -559,6 +595,7 @@ export default function ChatMessages({
                     <div key={tp.id} className="relative">
                       <ToolCallCard
                         toolName={tp.tool ?? "Tool call"}
+                        callID={tp.callID}
                         state={mapToolState(tp.state?.status)}
                         input={
                           tp.state?.input as Record<string, unknown> | undefined
@@ -636,6 +673,16 @@ export default function ChatMessages({
                 </div>
               </div>
             )}
+
+            {/* Activity status during streaming */}
+            {msg.isStreaming && msg.role === "assistant" && (
+              <div className="flex items-center gap-2 mt-1" data-testid="chat-activity-status" role="status">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                <span className="text-xs text-[var(--color-text-muted)]">
+                  {activityLabel || "Thinking…"}
+                </span>
+              </div>
+            )}
           </div>
         );
       })}
@@ -683,7 +730,7 @@ export default function ChatMessages({
 
       {/* Loading indicator */}
       {isLoading && (
-        <div className="flex justify-start">
+        <div className="flex justify-start" data-testid="chat-activity-status">
           <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-[var(--color-surface)] border border-[var(--color-border)]">
             <div className="flex items-center gap-1.5">
               <span
@@ -701,6 +748,23 @@ export default function ChatMessages({
                 style={{ animationDelay: "300ms" }}
                 aria-hidden="true"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Streaming activity indicator — visible while assistant is generating */}
+      {isStreaming && !isLoading && (
+        <div className="flex justify-start" data-testid="chat-activity-status">
+          <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-[var(--color-surface)] border border-[var(--color-border)]">
+            <div className="flex items-center gap-1.5">
+              <span
+                className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] animate-pulse"
+                aria-label="Assistant is working"
+              />
+              <span className="text-xs text-[var(--color-text-muted)]">
+                Generating…
+              </span>
             </div>
           </div>
         </div>
