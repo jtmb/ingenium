@@ -1294,3 +1294,20 @@ export function useOpenCodeChat(sessionId: string | null) {
     resume,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Test exports                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Runtime test export — the internal chatReducer is only exposed when
+ * NODE_ENV === "test" so production code never depends on it.
+ */
+export const __test =
+  process.env.NODE_ENV === "test"
+    ? {
+        chatReducer,
+      }
+    : undefined;
+
+export type { ChatAction, ChatState };

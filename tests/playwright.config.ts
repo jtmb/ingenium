@@ -11,8 +11,18 @@ import { randomUUID } from "node:crypto";
  * Creates an isolated temporary DB and test project so tests never
  * mutate the developer's real database.
  *
- * Starts both the API server (port 4097) and the Next.js dashboard (port 3000)
- * as managed web servers with bounded lifecycles.
+ * Starts both the API server and the Next.js dashboard as managed web
+ * servers with bounded lifecycles.
+ *
+ * Port selection:
+ * - Default: API on :4097, Dashboard on :3000
+ * - With INGENIUM_E2E_API_PORT / INGENIUM_E2E_DASH_PORT: use custom ports
+ *   (useful when Docker already occupies :3000/:4097)
+ *
+ * Chat E2E fixture:
+ * - Set OPENCODE_SERVER_URL=http://localhost:4999 to route OpenCode requests
+ *   to the fixture server instead of the real OpenCode backend
+ * - Set OPENCODE_SERVER_PASSWORD=test-fixture so the API can authenticate
  *
  * Set INGENIUM_PLAYWRIGHT_REPO_ROOT to override repo-root discovery
  * (defaults to process.cwd() — run from repo root).
@@ -34,6 +44,14 @@ const TEST_DB_PATH = join(TEST_TMP, ".ingenium", "data.db");
 // Unique project name per run to avoid collisions
 const TEST_PROJECT = `playwright-test-${randomUUID().slice(0, 8)}`;
 
+// Allow custom ports via env vars (Docker occupies default 3000/4097)
+const API_PORT = process.env.INGENIUM_E2E_API_PORT
+  ? parseInt(process.env.INGENIUM_E2E_API_PORT, 10)
+  : 4097;
+const DASH_PORT = process.env.INGENIUM_E2E_DASH_PORT
+  ? parseInt(process.env.INGENIUM_E2E_DASH_PORT, 10)
+  : 3000;
+
 // Log the temp paths for debugging
 // eslint-disable-next-line no-console
 console.log(`[playwright] REPO_ROOT   = ${REPO_ROOT}`);
@@ -41,6 +59,10 @@ console.log(`[playwright] REPO_ROOT   = ${REPO_ROOT}`);
 console.log(`[playwright] TEST_DB_PATH = ${TEST_DB_PATH}`);
 // eslint-disable-next-line no-console
 console.log(`[playwright] TEST_PROJECT = ${TEST_PROJECT}`);
+// eslint-disable-next-line no-console
+console.log(`[playwright] API_PORT     = ${API_PORT}`);
+// eslint-disable-next-line no-console
+console.log(`[playwright] DASH_PORT    = ${DASH_PORT}`);
 
 export default defineConfig({
   testDir: ".",
@@ -49,7 +71,7 @@ export default defineConfig({
   fullyParallel: false,
   outputDir: "./tests/test-results",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: `http://localhost:${DASH_PORT}`,
     headless: true,
     viewport: { width: 1280, height: 720 },
     trace: "retain-on-failure",
@@ -57,26 +79,39 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: [
-        `INGENIUM_CORE_DB_PATH="${TEST_DB_PATH}"`,
-        `INGENIUM_HOME="${TEST_TMP}/.ingenium"`,
-        `INGENIUM_PROJECT="${TEST_PROJECT}"`,
-        `NODE_ENV=production`,
-        `npx tsx "${REPO_ROOT}/services/ingenium-api/scripts/api-server.ts"`,
-      ].join(" "),
-      port: 4097,
+      command: `npx tsx "${REPO_ROOT}/services/ingenium-api/scripts/api-server.ts"`,
+      env: {
+        INGENIUM_CORE_DB_PATH: TEST_DB_PATH,
+        INGENIUM_HOME: `${TEST_TMP}/.ingenium`,
+        INGENIUM_PROJECT: TEST_PROJECT,
+        INGENIUM_API_PORT: String(API_PORT),
+        CORS_ORIGIN: `http://localhost:${DASH_PORT}`,
+        NODE_ENV: "production",
+        OPENCODE_SERVER_URL: "http://localhost:4999",
+        OPENCODE_SERVER_PASSWORD: "test-fixture",
+      },
+      port: API_PORT,
       timeout: 15000,
       reuseExistingServer: false,
     },
     {
-      command: [
-        `INGENIUM_CORE_DB_PATH="${TEST_DB_PATH}"`,
-        `INGENIUM_HOME="${TEST_TMP}/.ingenium"`,
-        `NODE_ENV=development`,
-      ].join(" ") + ` && npx next dev --port 3000`,
+      command: `npx next dev --port ${DASH_PORT}`,
       cwd: resolve(REPO_ROOT, "services", "ingenium-dashboard"),
-      port: 3000,
+      env: {
+        INGENIUM_CORE_DB_PATH: TEST_DB_PATH,
+        INGENIUM_HOME: `${TEST_TMP}/.ingenium`,
+        INGENIUM_API_PORT: String(API_PORT),
+        NODE_ENV: "development",
+        PORT: String(DASH_PORT),
+      },
+      port: DASH_PORT,
       timeout: 30000,
+      reuseExistingServer: false,
+    },
+    {
+      command: `npx tsx "${REPO_ROOT}/tests/chat-fixture-server.ts"`,
+      port: 4999,
+      timeout: 5000,
       reuseExistingServer: false,
     },
   ],

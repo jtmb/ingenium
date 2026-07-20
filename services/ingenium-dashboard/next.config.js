@@ -10,10 +10,11 @@ const nextConfig = {
    * host ports are loopback-only.
    */
   async rewrites() {
+    const apiPort = process.env.INGENIUM_API_PORT || "4097";
     return [
       {
         source: "/api/v1/:path*",
-        destination: "http://127.0.0.1:4097/api/v1/:path*",
+        destination: `http://127.0.0.1:${apiPort}/api/v1/:path*`,
       },
       {
         source: "/opencode-web/:path*",
@@ -27,6 +28,7 @@ const nextConfig = {
   },
 
   async headers() {
+    const apiPort = process.env.INGENIUM_API_PORT || "4097";
     return [
       {
         source: "/(.*)",
@@ -50,7 +52,7 @@ const nextConfig = {
               "object-src 'none'; " +
               "img-src 'self' data: blob:; " +
               "font-src 'self' data:; " +
-              "connect-src 'self' http://localhost:4097; " +
+              "connect-src 'self' http://localhost:" + apiPort + "; " +
               "frame-src 'self' http://localhost:4098 http://localhost:4099; " +
               "frame-ancestors 'self'; " +
               "base-uri 'self'; " +
