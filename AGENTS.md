@@ -109,7 +109,7 @@ services/
 
 ## Agent Table
 
-**13 agents total: 2 primary + 11 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
+**12 agents total: 2 primary + 10 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
 
 | Agent | Type | Model | Skills Allowed |
 |-------|------|-------|----------------|
@@ -125,9 +125,8 @@ services/
 | **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
 | **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
-| **browser-agent** | Subagent | `opencode/deepseek-v4-flash-free` | `mcp-tooling`, `engineering-workflow` |
 
-> Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter. `browser-agent-errors.md` lives at `.opencode/agents/browser-agent-errors.md`.
+> Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter.
 
 ### MCP Tool Naming Convention
 

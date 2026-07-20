@@ -1287,8 +1287,8 @@ test_luna_visual_qa_migration() {
     ' "$agents_doc")
     local docs_agent_count
     docs_agent_count=$(echo "$docs_table" | grep -cP '^\| \*\*[^*]+\*\* \|' || true)
-    if [[ "$docs_agent_count" -eq 13 ]]; then
-        pass "docs/configure/agents.md lists 13 public agents"
+    if [[ "$docs_agent_count" -eq 12 ]]; then
+        pass "docs/configure/agents.md lists 12 public agents"
     else
         fail "docs/configure/agents.md" "Expected 13 public agents in Agent Table, found $docs_agent_count"
         errors=$((errors + 1))

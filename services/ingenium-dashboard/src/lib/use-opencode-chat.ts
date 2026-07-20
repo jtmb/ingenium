@@ -174,18 +174,36 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const refreshedById = new Map(
         action.messages.map((message) => [message.id, message]),
       );
-      const existingIds = new Set(state.messages.map((message) => message.id));
       const reconciled = state.messages.map((message) => {
         const refreshed = refreshedById.get(message.id);
-        return refreshed
-          ? { ...message, isStreaming: refreshed.isStreaming }
-          : message;
+        // SSE may have newer assistant content than the fetch response.
+        if (message.role === "assistant" && message.isStreaming) {
+          return message;
+        }
+        return refreshed ?? message;
       });
+      const existingIds = new Set(reconciled.map((message) => message.id));
 
       for (const message of action.messages) {
-        if (!existingIds.has(message.id)) {
+        if (existingIds.has(message.id)) {
+          continue;
+        }
+
+        const matchingUserIndex =
+          message.role === "user"
+            ? reconciled.findIndex(
+                (existing) =>
+                  existing.role === "user" && existing.content === message.content,
+              )
+            : -1;
+
+        if (matchingUserIndex >= 0) {
+          // Replace the optimistic timestamp ID with authoritative metadata.
+          reconciled[matchingUserIndex] = message;
+        } else {
           reconciled.push(message);
         }
+        existingIds.add(message.id);
       }
 
       return { ...state, messages: reconciled, isLoading: false };
@@ -1154,10 +1172,16 @@ export function useOpenCodeChat(sessionId: string | null) {
         const rawMessages = (await opencode.sessions.messages(
           sessionId,
         )) as unknown as OpenCodeApiMessage[];
+        const normalized = normalizeMessages(rawMessages);
         dispatch({
           type: "RECONCILE_MESSAGES",
-          messages: normalizeMessages(rawMessages),
+          messages: normalized,
         });
+        // Safety net: if the server shows a completed assistant response,
+        // stop streaming even if SSE's session.idle hasn't arrived yet.
+        if (normalized.some((m) => m.role === "assistant" && !m.isStreaming)) {
+          dispatch({ type: "SET_STREAMING", value: false });
+        }
       } catch (err: unknown) {
         dispatch({ type: "SET_STREAMING", value: false });
         dispatch({

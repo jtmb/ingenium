@@ -7,7 +7,7 @@ description: Agent profiles, pipeline lifecycle, and subagent invocation for the
 
 ## Overview
 
-13 agents total: 2 primary, 11 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. A dedicated **chat agent** (`ingenium-chat`) handles conversational interactions with read-only access. Eleven specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, security, browser automation, vision analysis, and terra-throughput.
+12 agents total: 2 primary, 10 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. A dedicated **chat agent** (`ingenium-chat`) handles conversational interactions with read-only access. Ten specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, security, vision analysis, and terra-throughput.
 
 ### Chat Agent Model Inheritance
 
@@ -73,7 +73,6 @@ flowchart TB
 | **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` | Code review + test verification. Reviews tests, does NOT write production code or author tests |
 | **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Edit + Write + bash (`edit/write: allow; bash: allow with exclusions`) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` | Documentation + skill updates — observations are auto-extracted by the server-side engine |
 | **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` | Security audit + git-history leak scanning |
-| **browser-agent** | Subagent | `opencode/deepseek-v4-flash-free` | OpenCode Free | Read/Write | `mcp-tooling`, `engineering-workflow` | Browser automation — Puppeteer/Playwright-based web interaction and testing |
 
 ---
 
@@ -151,7 +150,7 @@ The orchestrator (`@ingenium-orchestrator`) follows a **behavioral** concurrency
 |-------|-------|-------|
 | **Active subagents per phase** | 12 | Total simultaneous subagents (writers + read-only) in a single orchestration phase |
 | **Concurrent writers per wave** | 6 | Subagents with `edit: allow` or `write: allow` permissions |
-| **Remaining capacity** | 6 | Reserved for read-only agents (explore, QA, docs, security, browser, scout, vision) |
+| **Remaining capacity** | 6 | Reserved for read-only agents (explore, QA, docs, security, scout, vision) |
 | **Write territory overlap** | 0 | No two writers may touch the same file/directory path concurrently |
 
 ### Writer Tiers and Routing
@@ -196,7 +195,6 @@ Full details for each agent are available in the agent definition files at `.ope
 | DeepSeek V4 Flash (API) | `ingenium-chat`, `ingenium-explore`, `ingenium-scout`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-security-auditor`; `ingenium-llm-broker` (internal/hidden) | 7 public + 1 internal | Paid |
 | OpenAI GPT-5.6 Terra (OAuth) | `ingenium-software-engineer-terra` | 1 | Paid (user OpenAI subscription) |
 | OpenAI GPT-5.6 Luna (OAuth) | `ingenium-qa-vision` | 1 | Paid (user OpenAI subscription) |
-| OpenCode Free | `browser-agent` | 1 | Free |
 | qwen3.5-9b (LM Studio) | None | 0 | Local |
 
 **Model configuration**: Model assignments are defined per-agent in their `.md` agent profile files (stored in `.opencode/agents/` and the DB `agents` table).

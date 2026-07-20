@@ -480,7 +480,11 @@ describe("chatReducer", () => {
       expect(next.messages[1]!.id).toBe("assist-1");
     });
 
-    it("updates isStreaming on existing messages from refreshed data", () => {
+    it("preserves locally streaming assistant messages during reconciliation", () => {
+      // When SSE is still delivering deltas, the local assistant message
+      // has isStreaming:true.  RECONCILE_MESSAGES must keep that flag so
+      // the UI continues to show the live streaming experience instead of
+      // snapping to the completed snapshot from a stale fetch.
       const streaming = createMessage({
         id: "msg-1",
         role: "assistant",
@@ -500,7 +504,7 @@ describe("chatReducer", () => {
         messages: [refreshed],
       });
 
-      expect(next.messages[0]!.isStreaming).toBe(false);
+      expect(next.messages[0]!.isStreaming).toBe(true);
     });
 
     it("adds server messages that are not yet in local state", () => {

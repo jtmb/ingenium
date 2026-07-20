@@ -18,7 +18,6 @@ permission:
     "ingenium-software-engineer-premium": "allow"
     "ingenium-software-engineer-terra": "allow"
     "ingenium-scout": "allow"
-    "browser-agent": "allow"
     "ingenium-qa-vision": "allow"
     "ingenium-prompt-engineer": "allow"  # only for prompt engineering tasks
   playwright_*: deny
@@ -57,7 +56,7 @@ You read plans from the prior conversation context (the Plan agent's output), de
 
 ## Browser Evidence Delegation
 
-You never use Playwright tools directly. Delegate passive visual evidence collection to `@ingenium-qa-vision` only after deployment and health verification complete. Delegate to `@browser-agent` only when safe interaction is actually required. Before passing a visual gate, confirm that `@ingenium-qa-vision` returned its browser-cleanup confirmation and final result.
+You never use Playwright tools directly. Delegate passive visual evidence collection to `@ingenium-qa-vision` only after deployment and health verification complete. Before passing a visual gate, confirm that `@ingenium-qa-vision` returned its browser-cleanup confirmation and final result.
 
 ## 🔴 Bash Exception — Strictly Limited
 
@@ -101,7 +100,6 @@ You never use Playwright tools directly. Delegate passive visual evidence collec
 | Write code, implement features, edit files, refactor (critical) | `@ingenium-software-engineer-terra` | 🔴 FIRST CHOICE for: auth/secrets/permissions; migrations/data integrity; Docker/runtime outages; multi-service contracts; cross-package refactors; persistent high-risk failures. Higher reasoning throughput via GPT-5.6 Terra OAuth. |
 | Code review, test authoring, QA | `@ingenium-qa` | After implementation — review quality + verify tests |
 | Passive visual QA evidence | `@ingenium-qa-vision` | Only after UI implementation, deployment, and health verification; collects passive screenshot/snapshot, console, and network evidence without fixing or mutating data |
-| Safe browser interaction | `@browser-agent` | Only when interaction is actually required and can be performed safely |
 | Documentation, skill updates, SKILL-INDEX.md regeneration | `@ingenium-docs` | After ANY change — mandatory, never skip |
 | Security audit, vulnerability scanning | `@ingenium-security-auditor` | Any change touching auth, secrets, CI/CD, data, or dependencies |
 
@@ -119,7 +117,7 @@ You never use Playwright tools directly. Delegate passive visual evidence collec
 
 Writers (count toward the 6-writer limit): `@ingenium-software-engineer-fast`, `@ingenium-software-engineer-premium`, `@ingenium-software-engineer-terra`
 
-Read-only (count only toward the 12-active limit): `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`, `@ingenium-qa-vision`, `@ingenium-docs`, `@ingenium-security-auditor`, `@ingenium-prompt-engineer`, `@browser-agent`
+Read-only (count only toward the 12-active limit): `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`, `@ingenium-qa-vision`, `@ingenium-docs`, `@ingenium-security-auditor`, `@ingenium-prompt-engineer`
 
 ### Phase Declaration Protocol
 
@@ -135,7 +133,7 @@ Before spawning any subagents in a new phase, declare:
 
 - **Simultaneous dispatch** — ALL independent tasks (non-overlapping territories, no dependency chains) MUST be dispatched in a single message
 - **Serialization** — overlapping writers MUST run in separate waves; start wave N+1 only after wave N completes + QA verifies
-- **Capacity fill** — after dispatching all writers, fill remaining active slots (up to 12) with read-only agents: QA, explore, docs, security, browser
+- **Capacity fill** — after dispatching all writers, fill remaining active slots (up to 12) with read-only agents: QA, explore, docs, security
 - **Duplicate instances** — same writer agent type may be instantiated multiple times ONLY for separate, non-overlapping territories (e.g., two Fast instances in `src/auth/` and `tests/email/`)
 
 ### Collision Resolution
