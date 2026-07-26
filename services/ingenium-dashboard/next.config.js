@@ -71,12 +71,17 @@ const nextConfig = {
    */
   async rewrites() {
     const apiPort = process.env.INGENIUM_API_PORT || "4097";
-    return [
-      {
-        source: "/api/v1/:path*",
-        destination: `http://127.0.0.1:${apiPort}/api/v1/:path*`,
-      },
-    ];
+    return {
+      // A fallback rewrite lets dashboard-owned API route handlers win. In
+      // particular, the persistent OpenCode SSE route must not pass through
+      // Next's after-files proxy, which buffers it until the connection ends.
+      fallback: [
+        {
+          source: "/api/v1/:path*",
+          destination: `http://127.0.0.1:${apiPort}/api/v1/:path*`,
+        },
+      ],
+    };
   },
 
   async headers() {

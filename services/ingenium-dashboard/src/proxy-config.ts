@@ -109,15 +109,20 @@ export function buildCsp(): string {
 }
 
 /**
- * Rewrite rules to inject into the Next.js `async rewrites()` config.
+ * Fallback rewrite rules to inject into the Next.js `async rewrites()` config.
  *
- * Proxies `/api/v1/*` requests to the internal API container at
- * 127.0.0.1:4097, enabling same-origin API access from the dashboard.
- * OpenCode proxy rewrites have been removed — OpenCode v1.18.3+ serves
- * root-relative assets and cannot be proxied under a sub-path.
+ * The API proxy must be a fallback rather than an after-files rewrite. The
+ * session-events route is a dashboard-owned streaming endpoint; an after-files
+ * rewrite captures it before its route handler and buffers OpenCode's persistent
+ * SSE response. All other `/api/v1/*` requests remain same-origin proxies to
+ * the private API container.
  */
-export function getRewrites(): Array<{ source: string; destination: string }> {
-  return [
-    { source: API_V1_SOURCE, destination: API_V1_DESTINATION },
-  ];
+export function getRewrites(): {
+  fallback: Array<{ source: string; destination: string }>;
+} {
+  return {
+    fallback: [
+      { source: API_V1_SOURCE, destination: API_V1_DESTINATION },
+    ],
+  };
 }

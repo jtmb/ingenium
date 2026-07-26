@@ -84,12 +84,14 @@ describe("Phase 2C — build-time gateway configuration", () => {
     const rewrites = await config.rewrites();
     const csp = getHeaderValue(await config.headers(), "Content-Security-Policy");
 
-    expect(rewrites).toEqual([
-      {
-        source: "/api/v1/:path*",
-        destination: "http://127.0.0.1:4317/api/v1/:path*",
-      },
-    ]);
+    expect(rewrites).toEqual({
+      fallback: [
+        {
+          source: "/api/v1/:path*",
+          destination: "http://127.0.0.1:4317/api/v1/:path*",
+        },
+      ],
+    });
     expect(csp).toContain("connect-src 'self' http://localhost:4317");
     expect(csp).toContain("frame-ancestors 'self'");
   });

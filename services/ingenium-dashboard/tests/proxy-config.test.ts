@@ -17,10 +17,12 @@ afterEach(() => {
 describe("Dashboard gateway and proxy configuration", () => {
   it("routes only API service to container loopback, never OpenCode", () => {
     expect(API_PROXY_TARGET).toBe("http://127.0.0.1:4097");
-    expect(getRewrites()).toEqual([
-      { source: "/api/v1/:path*", destination: "http://127.0.0.1:4097/api/v1/:path*" },
-    ]);
-    expect(getRewrites().some(({ source, destination }) =>
+    expect(getRewrites()).toEqual({
+      fallback: [
+        { source: "/api/v1/:path*", destination: "http://127.0.0.1:4097/api/v1/:path*" },
+      ],
+    });
+    expect(getRewrites().fallback.some(({ source, destination }) =>
       /opencode-web|opencode-cli|4098|4099/.test(`${source} ${destination}`),
     )).toBe(false);
   });

@@ -78,14 +78,30 @@ test.describe("Chat — end-to-end smoke", () => {
     await composer.fill("Test rich fixture");
     await composer.press("Enter");
 
-    // Reasoning should appear (streaming)
-    await expect(page.locator('[data-testid="chat-reasoning"]')).toBeVisible({ timeout: 15000 });
+    // Reasoning must appear incrementally while the rich fixture is still in
+    // its thinking/tool phases (the response delta is emitted later). The
+    // fixture deliberately keeps the real-shaped /event SSE connection open
+    // after session.idle, matching deployed OpenCode rather than a response-
+    // per-turn mock. This therefore fails if the dashboard's route path buffers
+    // SSE until the connection closes.
+    const reasoning = page.locator('[data-testid="chat-reasoning"]');
+    const finalResponse = page.getByText(
+      "I've completed the analysis. The chat pipeline is working correctly.",
+    );
+    await expect(reasoning).toBeVisible({ timeout: 15000 });
 
     // Reasoning content should contain the fixture text
     await expect(page.locator('[data-testid="chat-reasoning-content"]')).toContainText("think about this");
+    await expect(page.locator('[data-testid="chat-reasoning-content"]')).not.toHaveClass(
+      /\b(?:border|rounded|bg-)/,
+    );
+    await expect(page.getByText("Generating…")).toHaveCount(0);
+    await expect(finalResponse).toHaveCount(0);
 
     // Tool call should render as a non-interactive inline trace.
-    const toolTrace = page.locator('[data-testid="chat-tool-call"]');
+    const toolTrace = page
+      .locator('[data-testid="chat-tool-call"]')
+      .filter({ hasText: "Shell" });
     await expect(toolTrace).toBeVisible({ timeout: 10000 });
 
     // Tool name should show
@@ -99,7 +115,43 @@ test.describe("Chat — end-to-end smoke", () => {
     await expect(toolTrace.locator('[data-testid="chat-tool-status"]')).toHaveCount(0);
     await expect(toolTrace).not.toHaveClass(/\b(?:border|rounded|bg-)/);
 
-    // Streaming should complete — send button visible (stop button hidden)
+    // Web Search remains the only tool disclosure and exposes concrete fixture
+    // results/visited sites, not URLs derived from its query.
+    const webSearchTrace = page
+      .locator('[data-testid="chat-tool-call"]')
+      .filter({ hasText: "Web Search" });
+    await expect(webSearchTrace).toBeVisible({ timeout: 10000 });
+    await webSearchTrace.locator('[data-testid="chat-tool-trigger"]').click();
+    await expect(webSearchTrace.locator('[data-label="Visited"]')).toBeVisible();
+    await expect(webSearchTrace.locator('[data-label="Results"]')).toBeVisible();
+    await expect(
+      webSearchTrace.locator('[data-testid="chat-web-search-link"]'),
+    ).toHaveCount(2);
+    await expect(
+      webSearchTrace.getByRole("link", { name: "https://visited.example.test/stream-lifecycle" }),
+    ).toHaveAttribute("href", "https://visited.example.test/stream-lifecycle");
+    await expect(
+      webSearchTrace.getByRole("link", { name: "https://results.example.test/chat-streaming" }),
+    ).toHaveAttribute("target", "_blank");
+
+    // The fixture emits completed message metadata before session.idle.
+    await expect(finalResponse).toBeVisible({ timeout: 10000 });
+    const assistantOutput = page.locator('[data-testid="chat-assistant-message"]').last();
+    await expect(assistantOutput).not.toHaveClass(/\b(?:border|rounded|bg-)/);
+    const callout = assistantOutput.locator(".chat-markdown .callout");
+    await expect(callout).toBeVisible();
+    await expect(callout).not.toHaveCSS("border-left-width", "4px");
+    await expect(callout).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+
+    // User prompts intentionally retain their distinct bubble treatment.
+    const userBubble = page.locator('[data-testid="chat-user-message"]').last();
+    await expect(userBubble).toHaveClass(/rounded-2xl/);
+    await expect(userBubble).toHaveClass(/bg-\[var\(--color-surface-selected\)\]/);
+
+    // Streaming completes at the terminal event, which restores the composer
+    // and collapses the active reasoning disclosure.
     await expect(page.locator('[data-testid="chat-send-btn"]')).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('[data-testid="chat-stop-btn"]')).toBeHidden({ timeout: 10000 });
+    expect(await reasoning.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false);
   });
 });

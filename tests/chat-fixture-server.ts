@@ -211,8 +211,8 @@ function parseBody(req: IncomingMessage): Promise<string> {
  *
  * Two modes:
  * - "simple": basic text-only response (backward compatible)
- * - "rich": full v1.18.3 pipeline — reasoning deltas, tool calls (pending→running→completed),
- *           response text, completed metadata, session.idle
+ * - "rich": full v1.18.3 pipeline — reasoning deltas, shell and Web Search
+ *           calls, response text, completed metadata, session.idle
  *
  * In rich mode, small delays between event groups give the frontend time
  * to render intermediate states (reasoning, tool call, activity status)
@@ -292,7 +292,25 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // 3. reasoning delta — multiple chunks for streaming visibility
+    // 3. v1.18.3 announces the semantic part before its deltas. Reasoning
+    // deltas themselves use field: "text", just like answer text does.
+    writeSse(res,
+      `event: message.part.updated\ndata: ${JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "reason-part-1",
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            messageID,
+            type: "reasoning",
+          },
+        },
+      })}\n\n`,
+    );
+
+    await delay(100);
+
+    // 4. reasoning delta — multiple chunks for streaming visibility
     const reasoningChunks = [
       "Let me think about this...",
       " The user wants to know about the chat pipeline.",
@@ -306,17 +324,18 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
           properties: {
             messageID,
             partID: "reason-part-1",
-            field: "reasoning",
+            field: "text",
             delta: chunk,
           },
         })}\n\n`,
       );
     }
 
-    // Pause to separate reasoning and tool phases in UI
-    await delay(500);
+    // Keep the provider in the thinking phase separate from later tool and
+    // response events so the rich fixture exercises incremental reasoning.
+    await delay(1_500);
 
-    // 4. tool call — pending, then running, then completed
+    // 5. tool call — pending, then running, then completed
     const toolPartId = "tool-part-1";
     const toolCallId = "call_bash_001";
 
@@ -394,7 +413,58 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // 5. response text
+    // 6. Web Search — completed output includes concrete result and visited
+    // URLs so the disclosure can be tested without an external provider.
+    writeSse(res,
+      `event: message.part.updated\ndata: ${JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: "web-search-part-1",
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            messageID,
+            type: "tool",
+            tool: "websearch",
+            callID: "call_websearch_001",
+            state: {
+              status: "completed",
+              input: { query: "transparent chat streaming" },
+              output: {
+                results: [
+                  { url: "https://results.example.test/chat-streaming" },
+                ],
+                visited: [
+                  { url: "https://visited.example.test/stream-lifecycle" },
+                ],
+              },
+              time: { start: Date.now() - 700, end: Date.now() },
+            },
+          },
+        },
+      })}\n\n`,
+    );
+
+    await delay(300);
+
+    // 7. The answer part follows the same v1.18.3 part-updated → text-delta
+    // contract. Its different part type keeps answer and reasoning separate.
+    writeSse(res,
+      `event: message.part.updated\ndata: ${JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: partID,
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            messageID,
+            type: "text",
+          },
+        },
+      })}\n\n`,
+    );
+
+    await delay(100);
+
+    // 8. response text
     writeSse(res,
       `event: message.part.delta\ndata: ${JSON.stringify({
         type: "message.part.delta",
@@ -402,14 +472,15 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
           messageID,
           partID,
           field: "text",
-          delta: "I've completed the analysis. The chat pipeline is working correctly.",
+          delta: "I've completed the analysis. The chat pipeline is working correctly.\n\n> **Note:** This callout remains plain provider output.",
         },
       })}\n\n`,
     );
 
     await delay(300);
 
-    // 6. completed message metadata
+    // 9. completed message metadata. Keep the terminal state separate so the
+    // browser can prove reasoning remains open until session.idle.
     writeSse(res,
       `event: message.updated\ndata: ${JSON.stringify({
         type: "message.updated",
@@ -427,13 +498,27 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       })}\n\n`,
     );
 
-    // 7. session.idle
+    await delay(1_200);
+
+    // 10. session.idle
     writeSse(res,
       `event: session.idle\ndata: ${JSON.stringify({
         type: "session.idle",
         properties: {},
       })}\n\n`,
     );
+
+    // OpenCode's real /event endpoint remains connected after a turn reaches
+    // session.idle. Hold this fixture connection open until the browser closes
+    // it so the E2E path catches intermediary proxies that buffer an entire
+    // SSE response instead of forwarding events as they arrive.
+    await new Promise<void>((resolve) => {
+      if (res.destroyed || res.writableEnded) {
+        resolve();
+        return;
+      }
+      res.once("close", resolve);
+    });
   } else {
     // ── Simple mode: original text-only response (backward compatible) ──
 
@@ -455,7 +540,22 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       })}\n\n`,
     );
 
-    // 2. message.part.delta — stream a single text chunk
+    // 2. v1.18.3 announces the text part before its text delta.
+    writeSse(res,
+      `event: message.part.updated\ndata: ${JSON.stringify({
+        type: "message.part.updated",
+        properties: {
+          part: {
+            id: partID,
+            sessionID: sessionId ?? FIXTURE_SESSION_ID,
+            messageID,
+            type: "text",
+          },
+        },
+      })}\n\n`,
+    );
+
+    // 3. message.part.delta — stream a single text chunk
     writeSse(res,
       `event: message.part.delta\ndata: ${JSON.stringify({
         type: "message.part.delta",
@@ -468,7 +568,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       })}\n\n`,
     );
 
-    // 3. session.idle — signal completion
+    // 4. session.idle — signal completion
     writeSse(res,
       `event: session.idle\ndata: ${JSON.stringify({
         type: "session.idle",

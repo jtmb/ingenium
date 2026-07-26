@@ -163,10 +163,12 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 - Use the **Instructions** toggle (gear icon) to set a system prompt for the conversation.
 - Session management via collapsible sidebar: create, rename (double-click title), and delete sessions. On mobile (<768px) the sidebar becomes a drawer overlay.
 - Fork, share (copy link to clipboard), and compact conversations via header action buttons.
-- Tool calls appear as compact trace rows with a friendly tool label and short argument summary. **Web Search is the sole exception**: its row provides an accessible inline disclosure of the search query (including keyboard and `aria-expanded` state). All other tools remain non-interactive compact traces; detailed payload, status, timing, output, and error metadata are not shown in the trace.
+- Provider-emitted reasoning appears live in a separate escaped plain-text disclosure above the assistant answer. OpenCode v1.18.3 identifies the reasoning part in `message.part.updated` before sending its `field: "text"` deltas, and Chat uses that authoritative part mapping to keep reasoning out of the rendered Markdown answer and copy. The disclosure remains open while streaming, then becomes user-toggleable after the terminal event.
+- Tool calls appear as compact trace rows with a friendly tool label and short argument summary. **Web Search is the sole exception**: its row provides an accessible inline disclosure of the actual query (keyboard support and `aria-expanded` state). When the provider returns concrete sites, only validated `http`/`https` URLs are disclosed, grouped as **Visited**, **Results**, or **Sites**; query text cannot fabricate a site, and result titles/arbitrary payload fields are omitted. External links open with `target="_blank"` and `rel="noopener noreferrer"`. All other tools remain non-interactive compact traces; detailed payload, status, timing, output, and error metadata are not shown in the trace.
+- Assistant prose, reasoning, stream activity/errors, generated attachments, Chat-only Markdown callouts, and agent permission/question prompts use borderless, background-free plain flow. User-message bubbles retain their selected-surface styling; Docs Markdown callouts are unaffected.
 - Footer reads "OpenCode Chat".
 
-**API**: Uses `GET /api/v1/opencode/chat-config` to fetch sanitized provider/agent/model data. Messages are sent through OpenCode's native session `send()` API with provider/model selection.
+**API**: Uses `GET /api/v1/opencode/chat-config` to fetch sanitized provider/agent/model data. Chat opens the per-session SSE stream before posting a prompt; the prompt endpoint returns HTTP `202` as an acceptance acknowledgement, while SSE is the authoritative channel for response content and terminal status.
 
 ## Settings
 

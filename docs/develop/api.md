@@ -331,7 +331,7 @@ itself remains private and bearer-protected. SSE routes stream
 | GET | `/api/v1/opencode/sessions/:id/messages` | Get messages (with optional `limit` and `before` pagination) |
 | GET | `/api/v1/opencode/sessions/:id/messages/:msgId` | Get a single message |
 | DELETE | `/api/v1/opencode/sessions/:id/messages/:msgId` | Delete a message |
-| POST | `/api/v1/opencode/sessions/:id/prompt` | Send prompt (body uses `parts` array per v1.18.3 contract) |
+| POST | `/api/v1/opencode/sessions/:id/prompt` | Accept a prompt for asynchronous processing. The body uses the `parts` array per the v1.18.3 contract; success returns HTTP `202` with `{ data: { accepted: true } }`. This response is only an acknowledgement and does not contain the assistant response. |
 | POST | `/api/v1/opencode/sessions/:id/abort` | Abort session |
 | POST | `/api/v1/opencode/sessions/:id/fork` | Fork session |
 | POST | `/api/v1/opencode/sessions/:id/share` | Share session |
@@ -343,7 +343,7 @@ itself remains private and bearer-protected. SSE routes stream
 | GET | `/api/v1/opencode/sessions/:id/diff` | Get session diff (optional `messageID` query param) |
 | POST | `/api/v1/opencode/sessions/:id/command` | Send a command (slash commands) |
 | POST | `/api/v1/opencode/sessions/:id/init` | Initialize a session |
-| GET | `/api/v1/opencode/sessions/:id/events` | SSE event stream (per-session) |
+| GET | `/api/v1/opencode/sessions/:id/events` | SSE event stream (per-session). The dashboard-owned route is a dedicated unbuffered Node handler that forwards the persistent upstream readable stream directly; it sets `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`. Do not send this path through the generic compressed Next rewrite, which can buffer or transform an open SSE response and prevent live frames from reaching Chat. |
 | GET | `/api/v1/opencode/events` | Global SSE event stream (no session filter) |
 | GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, defaultSelection }`. The `providers[]` array merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). `defaultSelection` picks the managed primary provider first, falls back to the OpenCode Zen runtime default, then the first provider. No API keys are exposed. OpenCode live-reloads provider config changes — no restart required. The `primary` and `backup` fields reflect the explicit synthesis provider+model selection from `llm_provider_configs`, which may differ from the role-derived defaults. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. |
 | GET | `/api/v1/opencode/builtin-providers` | **Runtime OpenCode Zen free model discovery** — queries the OpenCode runtime provider catalog, filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. Response: `{ data: { providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" } }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`. Sanitized — no `apiKey`, `options`, or `env` fields leak through. |
@@ -356,6 +356,22 @@ itself remains private and bearer-protected. SSE routes stream
 | POST | `/api/v1/opencode/sessions/:id/permissions/:permId` | Reply to a permission request (session-scoped) |
 | POST | `/api/v1/opencode/upload` | File upload for chat attachments (multipart, validated MIME allowlist) |
 | GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in v1.18.3) |
+
+### Chat prompt response lifecycle
+
+`POST /api/v1/opencode/sessions/:id/prompt` acknowledges acceptance before the
+provider turn completes. Consumers must open
+`GET /api/v1/opencode/sessions/:id/events` **before** posting the prompt and
+use that per-session SSE stream as the authoritative response channel. Consume
+`message.part.updated`/`message.part.delta` events for incremental message and
+reasoning content; treat `session.idle` as the successful terminal event and
+`session.error` as the terminal failure event. A subsequent messages request
+may be used to reconcile history, but it is not the completion signal.
+
+In the dashboard, the same URL is claimed by a dedicated App Router route
+handler rather than the generic `/api/v1/*` rewrite. That handler forwards the
+stream without buffering or transformation so the connection can remain open
+after `session.idle` for future events.
 
 > **Security**: The Chat and provider-config endpoints return only provider metadata and key-presence flags. **API keys are never exposed or written to OpenCode config files.** Credentials are stored in the encrypted vault (`vault_items` table with AES-256-GCM), separated from provider metadata, synchronized to OpenCode through its auth API, and mirrored into the selected synthesis settings for runtime resolution. Legacy plaintext settings (`synthesis_api_key`, `synthesis_backup_api_key`, `llm_provider_api_keys`) are auto-migrated into the vault on first read and then deleted from the settings table.
 

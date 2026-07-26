@@ -167,6 +167,151 @@ describe("ChatMessages — scroll behavior (UX-004)", () => {
     expect(scrollTopVal).toBe(800);
   });
 
+  it("keeps provider-emitted reasoning open while streaming and renders it as plain text", () => {
+    const reasoning = "Provider delta: <img src=x onerror=alert(1)>";
+    const streamingAssistant: ChatMessage = {
+      id: "reasoning-message",
+      role: "assistant",
+      content: "",
+      reasoning,
+      timestamp: 5_000,
+      isStreaming: true,
+    };
+    const { rerender } = render(
+      React.createElement(ChatMessages, {
+        messages: [streamingAssistant],
+        isLoading: false,
+        isStreaming: true,
+      }),
+    );
+
+    const disclosure = screen.getByTestId("chat-reasoning") as HTMLDetailsElement;
+    const content = screen.getByTestId("chat-reasoning-content");
+    expect(disclosure.open).toBe(true);
+    expect(content.textContent).toBe(reasoning);
+    expect(content.querySelector("img")).toBeNull();
+    expect(content.className).not.toMatch(/\b(?:border|rounded|bg-)/);
+    expect(screen.queryByText("Generating…")).toBeNull();
+    expect(screen.queryByTestId("chat-activity-status")).toBeNull();
+
+    rerender(
+      React.createElement(ChatMessages, {
+        messages: [{ ...streamingAssistant, isStreaming: false }],
+        isLoading: false,
+        isStreaming: false,
+      }),
+    );
+    expect((screen.getByTestId("chat-reasoning") as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("keeps user bubble styling while assistant output and stream errors remain plain flow", () => {
+    render(
+      React.createElement(ChatMessages, {
+        messages: [
+          msg1,
+          {
+            id: "assistant-output",
+            role: "assistant",
+            content: "Plain assistant answer",
+            timestamp: 5_500,
+          },
+        ],
+        isLoading: false,
+        error: "The stream disconnected",
+      }),
+    );
+
+    const userBubble = screen.getByTestId("chat-user-message");
+    expect(userBubble.className).toMatch(/rounded-2xl/);
+    expect(userBubble.className).toMatch(/bg-\[var\(--color-surface-selected\)\]/);
+
+    const assistant = screen.getByTestId("chat-assistant-message");
+    expect(assistant.className).not.toMatch(/\b(?:border|rounded|bg-)/);
+    expect(screen.getByTestId("chat-stream-error").className).not.toMatch(
+      /\b(?:border|rounded|bg-)/,
+    );
+  });
+
+  it("renders assistant-generated file output without card chrome", () => {
+    render(
+      React.createElement(ChatMessages, {
+        messages: [
+          {
+            id: "assistant-file",
+            role: "assistant",
+            content: "",
+            timestamp: 6_500,
+            parts: [
+              {
+                id: "text-file",
+                type: "file",
+                mime: "text/plain",
+                filename: "report.txt",
+                data: "Generated report",
+              },
+              {
+                id: "download-file",
+                type: "file",
+                mime: "application/pdf",
+                filename: "result.pdf",
+                url: "/result.pdf",
+              },
+              {
+                id: "image-file",
+                type: "file",
+                mime: "image/png",
+                filename: "result.png",
+                dataUrl: "data:image/png;base64,iVBORw0KGgo=",
+              },
+            ] as NonNullable<ChatMessage["parts"]>,
+          },
+        ],
+        isLoading: false,
+      }),
+    );
+
+    expect(screen.getByTestId("chat-file-text").className).not.toMatch(
+      /\b(?:border|rounded|bg-)/,
+    );
+    expect(screen.getByTestId("chat-file-download").className).not.toMatch(
+      /\b(?:border|rounded|bg-)/,
+    );
+    expect(screen.getByTestId("chat-file-image").className).not.toMatch(
+      /\b(?:border|rounded|bg-)/,
+    );
+  });
+
+  it("copies only the user-facing answer, excluding provider reasoning", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      React.createElement(ChatMessages, {
+        messages: [
+          {
+            id: "copy-message",
+            role: "assistant",
+            content: "User-facing answer",
+            reasoning: "Private provider reasoning",
+            timestamp: 6_000,
+          },
+        ],
+        isLoading: false,
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy message" }));
+
+    await vi.waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("User-facing answer");
+    });
+    expect(writeText).not.toHaveBeenCalledWith(
+      expect.stringContaining("Private provider reasoning"),
+    );
+  });
+
   // ── Initial auto-follow ───────────────────────────────────────────────────
 
   it("auto-scrolls to bottom when new messages arrive (user near bottom)", () => {

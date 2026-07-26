@@ -244,7 +244,7 @@ describe("OpenCode Proxy — Real Integration Tests", () => {
       promptSessionId = body.data.id;
     });
 
-    it("accepts parts array and returns 201", async () => {
+    it("accepts parts array and returns 202 while the provider runs asynchronously", async () => {
       const res = await fetch(api(`/sessions/${promptSessionId}/prompt`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -253,7 +253,7 @@ describe("OpenCode Proxy — Real Integration Tests", () => {
           model: { providerID: "opencode", modelID: "big-pickle" },
         }),
       });
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(202);
       const body = await res.json();
       expect(body.data).toBeDefined();
     }, 60000);

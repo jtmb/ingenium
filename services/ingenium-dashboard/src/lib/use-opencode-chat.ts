@@ -96,6 +96,9 @@ export type StreamActivity =
   | "stopped"      // user clicked stop
   | "error";       // session.error received
 
+/** Streamable part types whose text deltas belong in the conversation. */
+type StreamTextPartType = "text" | "reasoning";
+
 interface ChatState {
   messages: ChatMessage[];
   isStreaming: boolean;
@@ -105,6 +108,10 @@ interface ChatState {
   sessionInfo?: SessionInfo;
   questions: ChatQuestionItem[];
   streamActivity: StreamActivity;
+  /** Authoritative type for each stream part, established by part.updated. */
+  partTypes: Record<string, StreamTextPartType>;
+  /** The assistant message currently owned by the active SSE turn. */
+  activeAssistantMessageId?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -133,13 +140,20 @@ type ChatAction =
   | { type: "LOAD_MESSAGES"; messages: ChatMessage[] }
   | { type: "RECONCILE_MESSAGES"; messages: ChatMessage[] }
   | { type: "ADD_USER_MESSAGE"; message: ChatMessage }
-  | { type: "ACCUMULATE_DELTA"; messageID: string; partID: string; delta: string; partType?: string }
+  | {
+      type: "ACCUMULATE_DELTA";
+      messageID: string;
+      partID: string;
+      delta: string;
+      partType: StreamTextPartType;
+    }
   | { type: "UPSERT_PART"; messageID: string; part: OpenCodePart }
   | { type: "UPSERT_MESSAGE"; message: ChatMessage }
   | { type: "SET_STREAMING"; value: boolean }
   | { type: "SET_LOADING"; value: boolean }
   | { type: "SET_STATUS"; status: "idle" | "busy" | null }
   | { type: "SET_STREAM_ACTIVITY"; activity: StreamActivity }
+  | { type: "SET_TRANSIENT_ERROR"; error: string | null }
   | { type: "SET_ERROR"; error: string | null }
   | { type: "UPDATE_SESSION_INFO"; info: SessionInfo }
   | { type: "ADD_QUESTION"; question: ChatQuestionItem }
@@ -156,6 +170,26 @@ type ChatAction =
 /** Build a stable key for accumulator lookups. */
 function partKey(messageID: string, partID: string): string {
   return `${messageID}::${partID}`;
+}
+
+function streamTextPartType(part: OpenCodePart): StreamTextPartType | undefined {
+  return part.type === "text" || part.type === "reasoning"
+    ? part.type
+    : undefined;
+}
+
+/** Index only types delivered by OpenCode part records, never delta fields. */
+function collectPartTypes(messages: ChatMessage[]): Record<string, StreamTextPartType> {
+  const partTypes: Record<string, StreamTextPartType> = {};
+  for (const message of messages) {
+    for (const part of message.parts) {
+      const type = streamTextPartType(part);
+      if (type && "id" in part && part.id) {
+        partTypes[partKey(message.id, part.id)] = type;
+      }
+    }
+  }
+  return partTypes;
 }
 
 /** Join text parts into a single content string — excludes reasoning parts. */
@@ -183,7 +217,14 @@ function extractReasoning(parts: OpenCodePart[]): string | undefined {
 function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "LOAD_MESSAGES":
-      return { ...state, messages: action.messages, isLoading: false, error: null };
+      return {
+        ...state,
+        messages: action.messages,
+        partTypes: collectPartTypes(action.messages),
+        isLoading: false,
+        error: null,
+        activeAssistantMessageId: undefined,
+      };
 
     case "RECONCILE_MESSAGES": {
       const refreshedById = new Map(
@@ -191,8 +232,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       );
       const reconciled = state.messages.map((message) => {
         const refreshed = refreshedById.get(message.id);
-        // SSE may have newer assistant content than the fetch response.
-        if (message.role === "assistant" && message.isStreaming) {
+        // A completed fetch snapshot is not a terminal SSE signal. Preserve
+        // event-backed parts for the active assistant turn until terminal.
+        if (
+          message.role === "assistant" &&
+          (message.id === state.activeAssistantMessageId || message.isStreaming)
+        ) {
           return message;
         }
         return refreshed ?? message;
@@ -221,7 +266,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         existingIds.add(message.id);
       }
 
-      return { ...state, messages: reconciled, isLoading: false };
+      return {
+        ...state,
+        messages: reconciled,
+        partTypes: collectPartTypes(reconciled),
+        isLoading: false,
+      };
     }
 
     case "ADD_USER_MESSAGE": {
@@ -234,65 +284,51 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "ACCUMULATE_DELTA": {
       const msgs = [...state.messages];
-      let target = msgs.find((m) => m.id === action.messageID);
+      const key = partKey(action.messageID, action.partID);
+      const mappedType = state.partTypes[key];
+      const target = msgs.find((m) => m.id === action.messageID);
 
-      if (!target) {
-        // Create placeholder assistant message
-        target = {
-          id: action.messageID,
-          role: "assistant" as const,
-          content: "",
-          parts: [],
-          timestamp: Date.now(),
-          isStreaming: true,
-        };
-        msgs.push(target);
+      // v1.18.3 deltas use field: "text" for both answer and reasoning.
+      // Only a preceding part.updated record is authoritative about which one
+      // the part is, so an unmapped delta must never fabricate reasoning.
+      if (!target || mappedType !== action.partType) {
+        return state;
       }
 
-      const key = partKey(action.messageID, action.partID);
       const existingIdx = target.parts.findIndex(
-        (p) => "id" in p && p.id === action.partID,
+        (p) =>
+          "id" in p &&
+          p.id === action.partID &&
+          p.type === mappedType,
       );
 
-      if (existingIdx >= 0) {
-        const part = target.parts[existingIdx]!;
-        if (
-          (part.type === "text" || part.type === "reasoning") &&
-          "text" in part
-        ) {
-          const newParts = [...target.parts];
-          newParts[existingIdx] = {
-            ...part,
-            text: (part as { text: string }).text + action.delta,
-          } as OpenCodePart;
-          const newTarget = {
-            ...target,
-            parts: newParts,
-            content: buildContent(newParts),
-            reasoning: extractReasoning(newParts),
-            isStreaming: true,
-          };
-          msgs[msgs.indexOf(target)] = newTarget;
-        }
-      } else {
-        // Create new part with correct type derived from the SSE field
-        const partType = action.partType === "reasoning" ? "reasoning" : "text";
-        const newPart: OpenCodePart = {
-          id: action.partID,
-          type: partType as OpenCodePart["type"],
-          text: action.delta,
-          time: { created: new Date().toISOString() },
-        } as unknown as OpenCodePart;
-        const newParts = [...target.parts, newPart];
-        msgs[msgs.indexOf(target)] = {
-          ...target,
-          parts: newParts,
-          content: buildContent(newParts),
-          reasoning: extractReasoning(newParts),
-          isStreaming: true,
-        };
+      if (existingIdx < 0) {
+        return state;
       }
-      return { ...state, messages: msgs };
+
+      const part = target.parts[existingIdx]!;
+      const existingText =
+        "text" in part && typeof part.text === "string" ? part.text : "";
+      const newParts = [...target.parts];
+      newParts[existingIdx] = {
+        ...part,
+        // part.updated commonly arrives before its first delta without text.
+        text: existingText + action.delta,
+      } as OpenCodePart;
+      const newTarget = {
+        ...target,
+        parts: newParts,
+        content: buildContent(newParts),
+        reasoning: extractReasoning(newParts),
+        isStreaming: true,
+      };
+      msgs[msgs.indexOf(target)] = newTarget;
+      return {
+        ...state,
+        messages: msgs,
+        isStreaming: true,
+        activeAssistantMessageId: action.messageID,
+      };
     }
 
     case "UPSERT_PART": {
@@ -320,6 +356,14 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       } else {
         newParts.push(action.part);
       }
+      const partType = streamTextPartType(action.part);
+      const partTypes = { ...state.partTypes };
+      const key = partKey(action.messageID, action.part.id);
+      if (partType) {
+        partTypes[key] = partType;
+      } else {
+        delete partTypes[key];
+      }
 
       msgs[msgs.indexOf(target)] = {
         ...target,
@@ -327,26 +371,51 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         content: buildContent(newParts),
         reasoning: extractReasoning(newParts),
       };
-      return { ...state, messages: msgs };
+      return {
+        ...state,
+        messages: msgs,
+        partTypes,
+        activeAssistantMessageId: action.messageID,
+      };
     }
 
     case "UPSERT_MESSAGE": {
       const msgs = [...state.messages];
       const idx = msgs.findIndex((m) => m.id === action.message.id);
+      // message.updated can report completion before session.idle arrives.
+      // The SSE lifecycle, not this intermediate snapshot, closes the turn.
+      const isActiveAssistantMessage =
+        action.message.role === "assistant" &&
+        (state.isStreaming ||
+          state.activeAssistantMessageId === action.message.id ||
+          msgs[idx]?.isStreaming === true);
       if (idx >= 0) {
         // 🔴 Merge metadata WITHOUT replacing accumulated parts
         const existing = msgs[idx]!;
         msgs[idx] = {
           ...existing,
           model: action.message.model ?? existing.model,
-          isStreaming: action.message.isStreaming ?? existing.isStreaming,
+          isStreaming: isActiveAssistantMessage
+            ? true
+            : action.message.isStreaming ?? existing.isStreaming,
           // Only update timestamp if the incoming one is more recent
           timestamp: Math.max(existing.timestamp, action.message.timestamp),
         };
       } else {
-        msgs.push(action.message);
+        msgs.push({
+          ...action.message,
+          isStreaming: isActiveAssistantMessage
+            ? true
+            : action.message.isStreaming,
+        });
       }
-      return { ...state, messages: msgs };
+      return {
+        ...state,
+        messages: msgs,
+        activeAssistantMessageId: isActiveAssistantMessage
+          ? action.message.id
+          : state.activeAssistantMessageId,
+      };
     }
 
     case "UPDATE_SESSION_INFO":
@@ -367,6 +436,10 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "SET_STREAM_ACTIVITY":
       return { ...state, streamActivity: action.activity };
 
+    case "SET_TRANSIENT_ERROR":
+      // Reconnection is not terminal; preserve active reasoning while retrying.
+      return { ...state, error: action.error };
+
     case "SET_ERROR":
       return { ...state, error: action.error, isStreaming: false, isLoading: false };
 
@@ -374,10 +447,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return {
         ...state,
         messages: state.messages.map((m) =>
-          m.role === "assistant" && m.isStreaming
+          m.id === state.activeAssistantMessageId
             ? { ...m, isStreaming: false }
             : m,
         ),
+        isStreaming: false,
+        activeAssistantMessageId: undefined,
       };
     }
 
@@ -430,6 +505,8 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         sessionInfo: undefined,
         questions: [],
         streamActivity: "idle" as StreamActivity,
+        partTypes: {},
+        activeAssistantMessageId: undefined,
       };
 
     default:
@@ -594,6 +671,17 @@ class SSEParser {
   }
 }
 
+/** Let React paint each provider event when a transport coalesces SSE chunks. */
+function yieldSSEEventRender(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      window.requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 16);
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /*  Hook                                                              */
 /* ------------------------------------------------------------------ */
@@ -618,6 +706,7 @@ export function useOpenCodeChat(sessionId: string | null) {
     sessionStatus: null,
     questions: [],
     streamActivity: "idle" as StreamActivity,
+    partTypes: {},
   });
 
   /* ---- Refs for SSE lifecycle ---- */
@@ -627,6 +716,9 @@ export function useOpenCodeChat(sessionId: string | null) {
   const seenEventIdsRef = useRef<Set<string>>(new Set());
   const parserRef = useRef<SSEParser>(new SSEParser());
   const activeSessionRef = useRef<string | null>(null);
+  // Deltas expose only a field name, not a semantic part type. This map is
+  // populated exclusively from OpenCode's preceding message.part.updated.
+  const streamPartTypesRef = useRef<Map<string, StreamTextPartType>>(new Map());
   // Store last send parts for retry
   const lastSendPartsRef = useRef<Array<{ type: "text"; text: string } | { type: "file"; mime: string; url: string; filename?: string }> | null>(
     null,
@@ -648,6 +740,7 @@ export function useOpenCodeChat(sessionId: string | null) {
   useEffect(() => {
     // Track the active session for SSE filter
     activeSessionRef.current = sessionId;
+    streamPartTypesRef.current.clear();
 
     if (!sessionId) {
       dispatch({ type: "CLEAR" });
@@ -726,6 +819,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         const decoder = new TextDecoder();
         const parser = parserRef.current;
         reconnectAttemptRef.current = 0; // Reset on successful connection
+        dispatch({ type: "SET_TRANSIENT_ERROR", error: null });
 
         async function readStream(): Promise<void> {
           let receivedTerminalEvent = false;
@@ -734,10 +828,16 @@ export function useOpenCodeChat(sessionId: string | null) {
             const { done, value } = await reader.read();
             if (done) break;
 
+            // Aborting a prior stream does not guarantee that an already
+            // buffered read cannot resolve. Keep session filtering strict.
+            if (activeSessionRef.current !== sid) return;
+
             const chunk = decoder.decode(value, { stream: true });
             const events = parser.append(chunk);
 
             for (const evt of events) {
+              if (activeSessionRef.current !== sid) return;
+
               // Idempotency: skip already-seen events
               if (evt.id && seenEventIdsRef.current.has(evt.id)) {
                 continue;
@@ -761,11 +861,17 @@ export function useOpenCodeChat(sessionId: string | null) {
                 receivedTerminalEvent = true;
               }
               dispatchSSEEvent(evt, sid);
+
+              // Fetch streams are allowed to coalesce several provider events
+              // into one read. Yielding between events lets incremental
+              // reasoning commit before a later completion event can finalize
+              // the active turn.
+              await yieldSSEEventRender();
             }
           }
 
-          if (!receivedTerminalEvent) {
-            dispatch({ type: "SET_STREAMING", value: false });
+          if (!receivedTerminalEvent && activeSessionRef.current === sid) {
+            dispatch({ type: "FINALIZE_STREAMING" });
             dispatch({
               type: "SET_ERROR",
               error: "Stream ended unexpectedly. The response may be incomplete.",
@@ -776,6 +882,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         await readStream();
       })
       .catch((err: unknown) => {
+        if (activeSessionRef.current !== sid) return;
         if (
           abortController.signal.aborted ||
           (err instanceof DOMException && err.name === "AbortError")
@@ -790,14 +897,15 @@ export function useOpenCodeChat(sessionId: string | null) {
         if (attempts <= 3) {
           const delay = Math.min(1000 * Math.pow(2, attempts - 1), 30000);
           dispatch({
-            type: "SET_ERROR",
+            type: "SET_TRANSIENT_ERROR",
             error: `Connection lost. Reconnecting in ${delay / 1000}s...`,
           });
+          dispatch({ type: "SET_STREAM_ACTIVITY", activity: "reconnecting" });
           reconnectTimerRef.current = setTimeout(() => {
             connectSSE(sid);
           }, delay);
         } else {
-          dispatch({ type: "SET_STREAMING", value: false });
+          dispatch({ type: "FINALIZE_STREAMING" });
           dispatch({
             type: "SET_ERROR",
             error: "Connection lost after multiple retries. Please refresh.",
@@ -813,6 +921,8 @@ export function useOpenCodeChat(sessionId: string | null) {
 
   /* ---- Dispatch SSE events to reducer ---- */
   function dispatchSSEEvent(evt: SSEEnvelope, sid: string): void {
+    if (activeSessionRef.current !== sid) return;
+
     const props = evt.properties as Record<string, unknown>;
 
     switch (evt.type) {
@@ -839,10 +949,8 @@ export function useOpenCodeChat(sessionId: string | null) {
 
       case "session.idle": {
         dispatch({ type: "SET_STATUS", status: "idle" });
-        dispatch({ type: "SET_STREAMING", value: false });
         dispatch({ type: "SET_STREAM_ACTIVITY", activity: "complete" });
         dispatch({ type: "FINALIZE_STREAMING" });
-        // Mark all streaming messages as complete
         break;
       }
 
@@ -857,8 +965,8 @@ export function useOpenCodeChat(sessionId: string | null) {
             : typeof err === "string"
               ? err
               : "Unknown session error";
+        dispatch({ type: "FINALIZE_STREAMING" });
         dispatch({ type: "SET_ERROR", error: msg });
-        dispatch({ type: "SET_STREAMING", value: false });
         dispatch({ type: "SET_STREAM_ACTIVITY", activity: "error" });
         break;
       }
@@ -873,18 +981,26 @@ export function useOpenCodeChat(sessionId: string | null) {
         const partID = props.partID as string;
         const field = props.field as string;
         const delta = props.delta as string;
-        if (messageID && partID && (field === "text" || field === "reasoning") && delta !== undefined) {
+        const partType = streamPartTypesRef.current.get(partKey(messageID, partID));
+        if (
+          messageID &&
+          partID &&
+          field === "text" &&
+          typeof delta === "string" &&
+          partType
+        ) {
           dispatch({
             type: "ACCUMULATE_DELTA",
             messageID,
             partID,
             delta,
-            partType: field,
+            partType,
           });
-          // Track activity phase
+          // field is always "text" in v1.18.3. The prior part.updated type,
+          // not the delta field, determines whether this is live reasoning.
           dispatch({
             type: "SET_STREAM_ACTIVITY",
-            activity: field === "reasoning" ? "thinking" : "responding",
+            activity: partType === "reasoning" ? "thinking" : "responding",
           });
         }
         break;
@@ -895,6 +1011,14 @@ export function useOpenCodeChat(sessionId: string | null) {
         if (!part || !part.id) break;
         const messageID = (part.messageID as string) ?? "";
         const sessionID = (part.sessionID as string) ?? sid;
+        if (!messageID || sessionID !== sid) break;
+        const partType = part.type as OpenCodePart["type"] | undefined;
+        const mapKey = partKey(messageID, part.id as string);
+        if (partType === "text" || partType === "reasoning") {
+          streamPartTypesRef.current.set(mapKey, partType);
+        } else {
+          streamPartTypesRef.current.delete(mapKey);
+        }
         const normalizedPart: OpenCodePart = {
           id: part.id as string,
           sessionID,
@@ -949,6 +1073,7 @@ export function useOpenCodeChat(sessionId: string | null) {
       case "message.updated": {
         const info = props.info as Record<string, unknown>;
         if (!info || !info.id) break;
+        if (typeof info.sessionID === "string" && info.sessionID !== sid) break;
         const modelInfo =
           info.providerID && info.modelID
             ? { providerID: info.providerID as string, modelID: info.modelID as string }
@@ -962,7 +1087,9 @@ export function useOpenCodeChat(sessionId: string | null) {
           timestamp: info.time
             ? (info.time as { created: number }).created ?? Date.now()
             : Date.now(),
-          isStreaming: !info.completed,
+          isStreaming:
+            info.completed !== true &&
+            (info.time as { completed?: number } | undefined)?.completed === undefined,
         };
         dispatch({ type: "UPSERT_MESSAGE", message: msg });
         break;
@@ -1017,13 +1144,21 @@ export function useOpenCodeChat(sessionId: string | null) {
 
   /* ---- Connect SSE when streaming starts ---- */
   useEffect(() => {
-    if (state.isStreaming && sessionId) {
-      const cleanup = connectSSE(sessionId);
-      return () => {
-        cleanup?.();
-      };
+    if (!state.isStreaming || !sessionId) {
+      return undefined;
     }
-    return undefined;
+
+    // send() opens the subscription before awaiting the prompt request so an
+    // immediately-emitted provider delta cannot be missed. This effect owns
+    // that connection's lifecycle and supplies the normal resume path.
+    if (!sseAbortRef.current) connectSSE(sessionId);
+
+    return () => {
+      if (sseAbortRef.current) {
+        sseAbortRef.current.abort();
+        sseAbortRef.current = null;
+      }
+    };
   }, [state.isStreaming, sessionId, connectSSE]);
 
   /* ---- Cleanup on unmount ---- */
@@ -1236,26 +1371,37 @@ export function useOpenCodeChat(sessionId: string | null) {
         };
         dispatch({ type: "SET_STREAMING", value: true });
         dispatch({ type: "SET_STREAM_ACTIVITY", activity: "connecting" });
+        // Subscribe before awaiting the prompt endpoint. Some providers begin
+        // emitting reasoning as soon as the prompt is accepted; delaying this
+        // until a render effect risks receiving only a terminal snapshot.
+        connectSSE(sessionId);
         await opencode.sessions.prompt(sessionId, promptBody);
 
-        // The prompt endpoint can finish before the SSE subscription is established.
-        // Reconcile with the authoritative session state so completed replies are shown.
-        const rawMessages = (await opencode.sessions.messages(
-          sessionId,
-        )) as unknown as OpenCodeApiMessage[];
-        const normalized = normalizeMessages(rawMessages);
-        dispatch({
-          type: "RECONCILE_MESSAGES",
-          messages: normalized,
-        });
-        // Safety net: if the server shows a completed assistant response,
-        // stop streaming even if SSE's session.idle hasn't arrived yet.
-        if (normalized.some((m) => m.role === "assistant" && !m.isStreaming)) {
-          dispatch({ type: "SET_STREAMING", value: false });
+        // The prompt endpoint can finish before the SSE subscription is
+        // established. Reconcile its authoritative snapshot without treating
+        // it as a stream terminal; only session.idle/session.error (or a
+        // local stop) may close an event-backed active turn.
+        try {
+          const rawMessages = (await opencode.sessions.messages(
+            sessionId,
+          )) as unknown as OpenCodeApiMessage[];
+          const normalized = normalizeMessages(rawMessages);
+          dispatch({
+            type: "RECONCILE_MESSAGES",
+            messages: normalized,
+          });
+        } catch (err: unknown) {
+          // Reconciliation is a best-effort snapshot. An event-backed turn
+          // remains authoritative until it reaches an SSE terminal state.
+          const message = err instanceof Error ? err.message : "Failed to refresh messages";
+          dispatch({
+            type: "SET_TRANSIENT_ERROR",
+            error: `${message}. Live updates continue.`,
+          });
         }
         return true;
       } catch (err: unknown) {
-        dispatch({ type: "SET_STREAMING", value: false });
+        dispatch({ type: "FINALIZE_STREAMING" });
         dispatch({ type: "SET_STREAM_ACTIVITY", activity: "error" });
         dispatch({
           type: "SET_ERROR",
@@ -1264,7 +1410,7 @@ export function useOpenCodeChat(sessionId: string | null) {
         return false;
       }
     },
-    [sessionId],
+    [sessionId, connectSSE],
   );
 
   /** Stop generation. */
@@ -1276,7 +1422,8 @@ export function useOpenCodeChat(sessionId: string | null) {
       sseAbortRef.current.abort();
       sseAbortRef.current = null;
     }
-    dispatch({ type: "SET_STREAMING", value: false });
+    dispatch({ type: "FINALIZE_STREAMING" });
+    dispatch({ type: "SET_STREAM_ACTIVITY", activity: "stopped" });
 
     // Abort on server
     try {

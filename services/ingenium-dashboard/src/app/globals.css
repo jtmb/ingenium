@@ -137,3 +137,27 @@
 .callout-info { border-left-color: #06b6d4; }
 .callout-tip { border-left-color: #10b981; }
 .callout-success { border-left-color: #22c55e; }
+
+/* Chat renders provider output as plain flow. Docs retains the callout chrome
+   above; these overrides are deliberately scoped to ChatMarkdown only. */
+.chat-markdown .callout,
+.chat-markdown :where(pre, code) {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+.chat-markdown .callout {
+  padding: 0 !important;
+  margin: 0.75rem 0 !important;
+}
+.chat-markdown :where(pre) {
+  padding: 0 !important;
+}
+.chat-markdown :where(blockquote) {
+  border-left: 0 !important;
+  padding-left: 0 !important;
+  color: var(--color-text-secondary);
+}
+.chat-markdown :where(hr, table, th, td) {
+  border: 0 !important;
+}

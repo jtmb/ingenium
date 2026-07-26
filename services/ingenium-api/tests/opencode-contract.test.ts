@@ -143,7 +143,7 @@ describe("Defect 1: Prompt body field passthrough", () => {
       body: JSON.stringify(fullBody),
     });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(202);
     expect(mockSendPrompt).toHaveBeenCalledTimes(1);
 
     const [sessionId, body, directory] = mockSendPrompt.mock.calls[0];
@@ -180,7 +180,7 @@ describe("Defect 1: Prompt body field passthrough", () => {
       body: JSON.stringify(minimalBody),
     });
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(202);
     expect(mockSendPrompt).toHaveBeenCalledWith(
       "ses_minimal",
       { parts: [{ type: "text", text: "Hi" }] },
@@ -188,9 +188,7 @@ describe("Defect 1: Prompt body field passthrough", () => {
     );
   });
 
-  it("forwards body with ONLY optional fields (no parts) — verifies passthrough is literal", async () => {
-    // The proxy does `req.body` as-is — so even a body with only optionals
-    // goes through unchanged. This tests that the proxy isn't filtering fields.
+  it("rejects a body without parts before accepting asynchronous work", async () => {
     const weirdBody = {
       agent: "test-agent",
       system: "test-system",
@@ -206,20 +204,14 @@ describe("Defect 1: Prompt body field passthrough", () => {
       body: JSON.stringify(weirdBody),
     });
 
-    expect(res.status).toBe(201);
-    expect(mockSendPrompt).toHaveBeenCalledWith(
-      "ses_weird",
-      expect.objectContaining({
-        agent: "test-agent",
-        system: "test-system",
-        variant: "test-variant",
-        tools: { read: true },
-      }),
-      undefined,
-    );
-    // Verify the body is exactly what we sent (not filtered)
-    const [, body] = mockSendPrompt.mock.calls[0];
-    expect(body).toEqual(weirdBody);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({
+      error: {
+        code: "INVALID_PROMPT",
+        message: "Prompt requests require a parts array.",
+      },
+    });
+    expect(mockSendPrompt).not.toHaveBeenCalled();
   });
 
   it("forwards directory query parameter", async () => {
@@ -239,6 +231,31 @@ describe("Defect 1: Prompt body field passthrough", () => {
       expect.any(Object),
       "/workspace/test",
     );
+  });
+
+  it("acknowledges a long-running prompt before the upstream provider settles", async () => {
+    let settlePrompt!: (value: { info: { id: string }; parts: never[] }) => void;
+    mockSendPrompt.mockImplementation(
+      () => new Promise((resolve) => {
+        settlePrompt = resolve;
+      }),
+    );
+
+    const res = await fetch(api("/sessions/ses_streaming/prompt"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ parts: [{ type: "text", text: "Start streaming" }] }),
+    });
+
+    expect(res.status).toBe(202);
+    await expect(res.json()).resolves.toEqual({ data: { accepted: true } });
+    expect(mockSendPrompt).toHaveBeenCalledWith(
+      "ses_streaming",
+      { parts: [{ type: "text", text: "Start streaming" }] },
+      undefined,
+    );
+
+    settlePrompt({ info: { id: "msg_streaming" }, parts: [] });
   });
 
   it("SendPromptBody type includes all contract fields", () => {

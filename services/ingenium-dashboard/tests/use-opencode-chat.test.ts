@@ -12,6 +12,8 @@ import {
   __test,
   useOpenCodeChat,
   type ChatMessage,
+  type ChatAction,
+  type ChatState,
 } from "../src/lib/use-opencode-chat";
 import type { OpenCodePart } from "../src/lib/opencode";
 
@@ -58,61 +60,6 @@ function getReducer(): (
 }
 
 /* ------------------------------------------------------------------ */
-/*  Types (mirrored from the hook module for test use)                 */
-/* ------------------------------------------------------------------ */
-
-interface ChatState {
-  messages: ChatMessage[];
-  isStreaming: boolean;
-  isLoading: boolean;
-  error: string | null;
-  sessionStatus: "idle" | "busy" | null;
-  sessionInfo?: {
-    cost?: number;
-    tokens?: {
-      total?: number;
-      input?: number;
-      output?: number;
-      reasoning?: number;
-      cache?: { write?: number; read?: number };
-    };
-    summary?: { diffs?: unknown[] };
-    shareUrl?: string;
-  };
-  questions: Array<{ id: string; question: string }>;
-}
-
-type ChatAction =
-  | { type: "LOAD_MESSAGES"; messages: ChatMessage[] }
-  | { type: "RECONCILE_MESSAGES"; messages: ChatMessage[] }
-  | { type: "ADD_USER_MESSAGE"; message: ChatMessage }
-  | {
-      type: "ACCUMULATE_DELTA";
-      messageID: string;
-      partID: string;
-      delta: string;
-      partType?: string;
-    }
-  | { type: "UPSERT_PART"; messageID: string; part: OpenCodePart }
-  | { type: "UPSERT_MESSAGE"; message: ChatMessage }
-  | { type: "SET_STREAMING"; value: boolean }
-  | { type: "SET_LOADING"; value: boolean }
-  | { type: "SET_STATUS"; status: "idle" | "busy" | null }
-  | { type: "SET_ERROR"; error: string | null }
-  | { type: "UPDATE_SESSION_INFO"; info: ChatState["sessionInfo"] }
-  | {
-      type: "ADD_QUESTION";
-      question: { id: string; question: string };
-    }
-  | {
-      type: "ADD_QUESTIONS";
-      questions: Array<{ id: string; question: string }>;
-    }
-  | { type: "REMOVE_QUESTIONS" }
-  | { type: "REMOVE_LAST_USER" }
-  | { type: "CLEAR" };
-
-/* ------------------------------------------------------------------ */
 /*  Fixture helpers                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -125,7 +72,8 @@ function createInitialState(overrides?: Partial<ChatState>): ChatState {
     sessionStatus: null,
     sessionInfo: undefined,
     questions: [],
-    streamActivity: "idle" as StreamActivity,
+    streamActivity: "idle",
+    partTypes: {},
     ...overrides,
   };
 }
@@ -172,6 +120,15 @@ function reasoningPart(overrides: {
     type: "reasoning",
     text: overrides.text,
   } as OpenCodePart;
+}
+
+function applyPartUpdated(
+  reducer: ReturnType<typeof getReducer>,
+  state: ChatState,
+  messageID: string,
+  part: OpenCodePart,
+): ChatState {
+  return reducer(state, { type: "UPSERT_PART", messageID, part });
 }
 
 /* ================================================================== */
@@ -263,7 +220,7 @@ describe("chatReducer", () => {
   // ── ACCUMULATE_DELTA ─────────────────────────────────────────────
 
   describe("ACCUMULATE_DELTA", () => {
-    it("creates a placeholder assistant when messageID does not exist", () => {
+    it("ignores unmapped deltas rather than fabricating a reasoning part", () => {
       const state = createInitialState();
 
       const next = reducer(state, {
@@ -271,16 +228,11 @@ describe("chatReducer", () => {
         messageID: "new-msg",
         partID: "part-1",
         delta: "Hello",
-        partType: "text",
+        partType: "reasoning",
       });
 
-      expect(next.messages).toHaveLength(1);
-      const msg = next.messages[0]!;
-      expect(msg.id).toBe("new-msg");
-      expect(msg.role).toBe("assistant");
-      expect(msg.isStreaming).toBe(true);
-      expect(msg.parts).toHaveLength(1);
-      expect(msg.content).toBe("Hello");
+      expect(next).toBe(state);
+      expect(next.messages).toHaveLength(0);
     });
 
     it("appends text delta to an existing text part", () => {
@@ -291,7 +243,8 @@ describe("chatReducer", () => {
         parts: [textPart({ id: "part-1", text: "Hel" })],
         isStreaming: true,
       });
-      const state = createInitialState({ messages: [msg] });
+      let state = createInitialState({ messages: [msg] });
+      state = applyPartUpdated(reducer, state, "msg-1", textPart({ id: "part-1", text: "Hel" }));
 
       const next = reducer(state, {
         type: "ACCUMULATE_DELTA",
@@ -312,14 +265,15 @@ describe("chatReducer", () => {
       expect(part.text).toBe("Hello");
     });
 
-    it("appends text when there's no existing part with that ID (creates new)", () => {
+    it("appends text after the authoritative part update creates the part", () => {
       const msg = createMessage({
         id: "msg-1",
         role: "assistant",
         parts: [],
         isStreaming: true,
       });
-      const state = createInitialState({ messages: [msg] });
+      let state = createInitialState({ messages: [msg] });
+      state = applyPartUpdated(reducer, state, "msg-1", textPart({ id: "part-new", text: "" }));
 
       const next = reducer(state, {
         type: "ACCUMULATE_DELTA",
@@ -340,7 +294,8 @@ describe("chatReducer", () => {
         parts: [],
         isStreaming: true,
       });
-      const state = createInitialState({ messages: [msg] });
+      let state = createInitialState({ messages: [msg] });
+      state = applyPartUpdated(reducer, state, "msg-1", reasoningPart({ id: "reason-part", text: "" }));
 
       const next = reducer(state, {
         type: "ACCUMULATE_DELTA",
@@ -363,7 +318,8 @@ describe("chatReducer", () => {
         parts: [reasoningPart({ id: "reason-part", text: "think" })],
         isStreaming: true,
       });
-      const state = createInitialState({ messages: [msg] });
+      let state = createInitialState({ messages: [msg] });
+      state = applyPartUpdated(reducer, state, "msg-1", reasoningPart({ id: "reason-part", text: "think" }));
 
       const next = reducer(state, {
         type: "ACCUMULATE_DELTA",
@@ -387,7 +343,8 @@ describe("chatReducer", () => {
         ],
         isStreaming: true,
       });
-      const state = createInitialState({ messages: [msg] });
+      let state = createInitialState({ messages: [msg] });
+      state = applyPartUpdated(reducer, state, "msg-1", reasoningPart({ id: "reason-part", text: "hidden thoughts" }));
 
       const next = reducer(state, {
         type: "ACCUMULATE_DELTA",
@@ -435,7 +392,7 @@ describe("chatReducer", () => {
       expect(next.messages[0]!.content).toBe("existing text");
       expect(next.messages[0]!.parts.length).toBe(1);
       // Metadata merged from update
-      expect(next.messages[0]!.isStreaming).toBe(false);
+      expect(next.messages[0]!.isStreaming).toBe(true);
       expect(next.messages[0]!.model).toEqual({
         providerID: "openai",
         modelID: "gpt-4",
@@ -463,6 +420,61 @@ describe("chatReducer", () => {
       expect(next.messages).toHaveLength(2);
       expect(next.messages[1]!.id).toBe("msg-2");
     });
+  });
+
+  it("keeps incremental reasoning open through reconciliation until terminal finalization", () => {
+    let state = createInitialState({ isStreaming: true });
+
+    state = applyPartUpdated(
+      reducer,
+      state,
+      "assistant-1",
+      reasoningPart({
+        id: "reasoning-1",
+        messageID: "assistant-1",
+        text: "",
+      }),
+    );
+
+    state = reducer(state, {
+      type: "ACCUMULATE_DELTA",
+      messageID: "assistant-1",
+      partID: "reasoning-1",
+      partType: "reasoning",
+      delta: "Provider-emitted thinking",
+    });
+    expect(state.messages[0]!.reasoning).toBe("Provider-emitted thinking");
+    expect(state.messages[0]!.isStreaming).toBe(true);
+
+    // The prompt reconciliation can already report a completed snapshot.
+    state = reducer(state, {
+      type: "RECONCILE_MESSAGES",
+      messages: [
+        createMessage({
+          id: "assistant-1",
+          role: "assistant",
+          content: "final snapshot",
+          isStreaming: false,
+        }),
+      ],
+    });
+    expect(state.messages[0]!.reasoning).toBe("Provider-emitted thinking");
+    expect(state.messages[0]!.isStreaming).toBe(true);
+
+    // A completed message.updated record still is not the terminal SSE event.
+    state = reducer(state, {
+      type: "UPSERT_MESSAGE",
+      message: createMessage({
+        id: "assistant-1",
+        role: "assistant",
+        isStreaming: false,
+      }),
+    });
+    expect(state.messages[0]!.isStreaming).toBe(true);
+
+    state = reducer(state, { type: "FINALIZE_STREAMING" });
+    expect(state.messages[0]!.isStreaming).toBe(false);
+    expect(state.isStreaming).toBe(false);
   });
 
   // ── RECONCILE_MESSAGES ───────────────────────────────────────────
@@ -756,6 +768,8 @@ describe("chatReducer", () => {
         sessionInfo: undefined,
         questions: [],
         streamActivity: "idle",
+        partTypes: {},
+        activeAssistantMessageId: undefined,
       });
     });
   });
@@ -978,6 +992,174 @@ describe("useOpenCodeChat hook — send() integration", () => {
 
     // Streaming must be false after error
     expect(result.current.isStreaming).toBe(false);
+  });
+
+  it("keeps the SSE turn active when send reconciliation fails", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    let streamSignal!: AbortSignal;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    fetchSpy.mockImplementation((_input, init) => {
+      streamSignal = (init as RequestInit).signal as AbortSignal;
+      return Promise.resolve(new Response(stream));
+    });
+    mockMessages
+      .mockResolvedValueOnce([])
+      .mockRejectedValueOnce(new Error("History temporarily unavailable"));
+    mockPrompt.mockResolvedValue({ info: {}, parts: [] });
+
+    const { result } = renderHook(() => useOpenCodeChat("session-1"));
+    await vi.waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    let sent = false;
+    await act(async () => {
+      sent = await result.current.send([{ type: "text", text: "Continue" }]);
+    });
+
+    expect(sent).toBe(true);
+    expect(result.current.isStreaming).toBe(true);
+    expect(streamSignal.aborted).toBe(false);
+    expect(result.current.error).toBe(
+      "History temporarily unavailable. Live updates continue.",
+    );
+
+    await act(async () => {
+      streamController.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            id: "part-before-delta-after-reconciliation-error",
+            type: "message.part.updated",
+            properties: {
+              part: {
+                id: "text-1",
+                sessionID: "session-1",
+                messageID: "assistant-1",
+                type: "text",
+              },
+            },
+          })}\n\n` +
+            `data: ${JSON.stringify({
+              id: "delta-after-reconciliation-error",
+              type: "message.part.delta",
+              properties: {
+                sessionID: "session-1",
+                messageID: "assistant-1",
+                partID: "text-1",
+                field: "text",
+                delta: "SSE still delivers.",
+              },
+            })}\n\n`,
+        ),
+      );
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect(result.current.messages.at(-1)?.content).toBe(
+        "SSE still delivers.",
+      );
+    });
+    expect(result.current.isStreaming).toBe(true);
+    expect(streamSignal.aborted).toBe(false);
+  });
+
+  it("maps a live field:text delta to reasoning from its preceding part update", async () => {
+    const encoder = new TextEncoder();
+    let streamController!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    fetchSpy.mockResolvedValue(new Response(stream));
+    mockMessages.mockResolvedValue([]);
+    mockPrompt.mockResolvedValue({ info: {}, parts: [] });
+
+    const { result } = renderHook(() => useOpenCodeChat("session-1"));
+    await vi.waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.send([{ type: "text", text: "Show live reasoning" }]);
+    });
+
+    await act(async () => {
+      streamController.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            type: "message.part.updated",
+            properties: {
+              part: {
+                id: "foreign-reasoning-part",
+                sessionID: "session-2",
+                messageID: "foreign-assistant",
+                type: "reasoning",
+              },
+            },
+          })}\n\n` +
+            `data: ${JSON.stringify({
+              type: "message.part.delta",
+              properties: {
+                messageID: "foreign-assistant",
+                partID: "foreign-reasoning-part",
+                field: "text",
+                delta: "Must not leak across sessions",
+              },
+            })}\n\n` +
+            `data: ${JSON.stringify({
+            type: "message.updated",
+            properties: {
+              info: {
+                id: "assistant-reasoning",
+                sessionID: "session-1",
+                role: "assistant",
+              },
+            },
+          })}\n\n` +
+            `data: ${JSON.stringify({
+              type: "message.part.updated",
+              properties: {
+                part: {
+                  id: "reasoning-part",
+                  sessionID: "session-1",
+                  messageID: "assistant-reasoning",
+                  type: "reasoning",
+                },
+              },
+            })}\n\n` +
+            `data: ${JSON.stringify({
+              type: "message.part.delta",
+              properties: {
+                messageID: "assistant-reasoning",
+                partID: "reasoning-part",
+                field: "text",
+                delta: "Provider-backed thinking",
+              },
+            })}\n\n`,
+        ),
+      );
+    });
+
+    await vi.waitFor(() => {
+      const assistant = result.current.messages.find(
+        (message) => message.id === "assistant-reasoning",
+      );
+      expect(assistant?.reasoning).toBe("Provider-backed thinking");
+      expect(assistant?.content).toBe("");
+      expect(result.current.streamActivity).toBe("thinking");
+      expect(
+        result.current.messages.some(
+          (message) => message.id === "foreign-assistant",
+        ),
+      ).toBe(false);
+    });
   });
 
   // ── Test 14: send dispatches error on null sessionId ────────────

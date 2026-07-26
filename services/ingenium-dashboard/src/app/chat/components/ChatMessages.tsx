@@ -58,28 +58,23 @@ function mapToolState(status?: string): ToolState {
   }
 }
 
-/** Safely convert an unknown output value to a display string. */
-function outputToString(output: unknown): string | undefined {
-  if (output === undefined || output === null) return undefined;
-  if (typeof output === "string") return output;
-  return JSON.stringify(output, null, 2);
-}
-
 /**
  * ReasoningBlock — collapsible reasoning content shown above an assistant message.
- * Auto-expands during streaming; auto-collapses when streaming completes.
+ * Provider-emitted text is rendered as escaped plain text. The block remains
+ * open while its SSE turn is active and only collapses on its terminal state.
  */
 function ReasoningBlock({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
-  const [expanded, setExpanded] = useState(true); // auto-expand during stream
+  const [expanded, setExpanded] = useState(Boolean(isStreaming));
 
-  // Auto-collapse when streaming completes
+  // Every event-backed delta re-opens the active disclosure. A user can still
+  // expand/collapse the persisted reasoning once the stream is terminal.
   useEffect(() => {
-    if (!isStreaming) setExpanded(false);
-  }, [isStreaming]);
+    setExpanded(Boolean(isStreaming));
+  }, [content, isStreaming]);
 
   const summary = isStreaming
     ? "Thinking…"
-    : "Thought for a moment";
+    : "Reasoning";
 
   return (
     <details
@@ -90,12 +85,15 @@ function ReasoningBlock({ content, isStreaming }: { content: string; isStreaming
       <summary
         className="text-xs font-medium text-[var(--color-text-muted)] cursor-pointer hover:text-[var(--color-text-secondary)] transition-colors select-none"
         data-testid="chat-reasoning-toggle"
-        onClick={(e) => { e.preventDefault(); setExpanded(!expanded); }}
+        onClick={(e) => {
+          e.preventDefault();
+          if (!isStreaming) setExpanded(!expanded);
+        }}
       >
         {summary}
       </summary>
       <div
-        className="mt-2 pl-3 border-l-2 border-[var(--color-border)] text-xs text-[var(--color-text-muted)] leading-relaxed whitespace-pre-wrap"
+        className="mt-1 text-xs text-[var(--color-text-muted)] leading-relaxed whitespace-pre-wrap"
         data-testid="chat-reasoning-content"
       >
         {content}
@@ -120,31 +118,21 @@ function FileImagePart({ file }: { file: FilePart }) {
   }
 
   return (
-    <div className="my-2">
+    <div className="my-2" data-testid="chat-file-image">
       {expanded ? (
         <div className="relative">
           <img
             src={src}
             alt={file.filename ?? "attached image"}
-            className="max-w-full rounded-lg border border-[var(--color-border)]"
+            className="max-w-full"
             onClick={() => setExpanded(false)}
           />
-          <button
-            type="button"
-            onClick={() => setExpanded(false)}
-            className="absolute top-1 right-1 p-1 rounded bg-black/50 text-white text-xs hover:bg-black/70 transition-colors"
-            aria-label="Collapse image"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.5 3.5l7 7M10.5 3.5l-7 7" />
-            </svg>
-          </button>
         </div>
       ) : (
         <img
           src={src}
           alt={file.filename ?? "attached image"}
-          className="max-h-48 rounded-lg border border-[var(--color-border)] cursor-pointer hover:opacity-90 transition-opacity"
+          className="max-h-48 cursor-pointer hover:opacity-90 transition-opacity"
           onClick={() => setExpanded(true)}
         />
       )}
@@ -167,8 +155,8 @@ function FileTextPart({ file }: { file: FilePart }) {
     : content;
 
   return (
-    <div className="my-2 rounded-lg border border-[var(--color-border)] overflow-hidden">
-      <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)]">
+    <div className="my-2" data-testid="chat-file-text">
+      <div className="flex items-center gap-1.5 py-1.5">
         <svg
           width="12"
           height="12"
@@ -195,7 +183,7 @@ function FileTextPart({ file }: { file: FilePart }) {
           </span>
         )}
       </div>
-      <pre className="p-3 text-xs leading-relaxed whitespace-pre-wrap break-all font-mono text-[var(--color-text-primary)] bg-[var(--color-surface)] max-h-64 overflow-y-auto">
+      <pre className="py-1 text-xs leading-relaxed whitespace-pre-wrap break-all font-mono text-[var(--color-text-primary)] max-h-64 overflow-y-auto">
         {displayContent || "[No content]"}
       </pre>
     </div>
@@ -212,8 +200,9 @@ function FileOtherPart({ file }: { file: FilePart }) {
         href={file.url ?? "#"}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors no-underline"
+        className="inline-flex items-center gap-2 py-1 text-xs text-[var(--color-text-primary)] underline underline-offset-2 hover:text-[var(--color-text-secondary)] transition-colors"
         download={file.filename}
+        data-testid="chat-file-download"
       >
         <svg
           width="14"
@@ -292,7 +281,7 @@ function CopyButton({ text }: { text: string }) {
       type="button"
       onClick={handleCopy}
       disabled={state !== "idle"}
-      className="p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-60"
+      className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors disabled:opacity-60"
       aria-label="Copy message"
       title="Copy"
     >
@@ -400,6 +389,15 @@ export default function ChatMessages({
     reconnecting: "Reconnecting…",
   };
   const activityLabel = streamActivity ? activityLabels[streamActivity] : undefined;
+  const hasActiveAssistant = messages.some(
+    (message) => message.role === "assistant" && message.isStreaming,
+  );
+  const hasLiveReasoning = messages.some(
+    (message) =>
+      message.role === "assistant" &&
+      message.isStreaming &&
+      Boolean(message.reasoning),
+  );
 
   // Empty state — show loading spinner, error, or welcome message
   if (messages.length === 0) {
@@ -511,8 +509,9 @@ export default function ChatMessages({
       {/* Error banner */}
       {error && (
         <div
-          className="bg-[var(--color-error-bg)] border border-red-300 rounded-lg p-3 text-sm text-[var(--color-text-primary)]"
+          className="py-1 text-xs text-[var(--color-text-muted)]"
           role="alert"
+          data-testid="chat-stream-error"
         >
           <div className="flex items-start gap-2">
             <svg
@@ -522,7 +521,7 @@ export default function ChatMessages({
               fill="none"
               stroke="currentColor"
               strokeWidth="1.5"
-              className="shrink-0 mt-0.5 text-red-400"
+              className="shrink-0 mt-0.5 text-[var(--color-text-muted)]"
               aria-hidden="true"
             >
               <circle cx="8" cy="8" r="6.5" />
@@ -533,7 +532,7 @@ export default function ChatMessages({
               <button
                 type="button"
                 onClick={onDismissError}
-                className="shrink-0 p-0.5 rounded text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                className="shrink-0 p-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
                 aria-label="Dismiss error"
                 title="Dismiss"
               >
@@ -584,17 +583,28 @@ export default function ChatMessages({
             >
               {isUser ? (
                 /* User bubble — right-aligned, surface-selected background */
-                <div className="max-w-full sm:max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed break-words bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]">
+                <div
+                  className="max-w-full sm:max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed break-words bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
+                  data-testid="chat-user-message"
+                >
                   <p className="whitespace-pre-wrap break-words">
                     {msg.content}
                   </p>
                 </div>
               ) : (
                 /* Assistant content — bare, no card wrapper */
-                <div className="max-w-full sm:max-w-[85%] text-sm leading-relaxed break-words">
+                <div
+                  className="max-w-full sm:max-w-[85%] text-sm leading-relaxed break-words"
+                  data-testid="chat-assistant-message"
+                >
                   {/* Reasoning blocks */}
                   {reasoningContent && (
-                    <ReasoningBlock content={reasoningContent} isStreaming={msg.isStreaming} />
+                    <ReasoningBlock
+                      content={reasoningContent}
+                      // session.idle/session.error own the active turn's
+                      // terminal state; intermediate message metadata does not.
+                      isStreaming={Boolean(isStreaming && isLastAssistant)}
+                    />
                   )}
 
                   {/* Main content — Markdown rendered */}
@@ -615,7 +625,7 @@ export default function ChatMessages({
                         input={
                           tp.state?.input as Record<string, unknown> | undefined
                         }
-                        output={outputToString(tp.state?.output)}
+                        output={tp.state?.output}
                         error={tp.state?.error}
                       />
                       {/* Revert button on failed tool parts */}
@@ -623,7 +633,7 @@ export default function ChatMessages({
                         <button
                           type="button"
                           onClick={() => onRevert(msg.id, tp.id)}
-                          className="absolute top-2 right-2 p-1 rounded text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                          className="absolute top-2 right-2 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
                           aria-label={`Revert ${tp.tool ?? "tool"} call`}
                           title="Revert this tool call"
                         >
@@ -664,7 +674,7 @@ export default function ChatMessages({
                     <button
                       type="button"
                       onClick={onRetry}
-                      className="p-1 rounded-md text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                      className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors"
                       aria-label="Retry"
                       title="Retry"
                     >
@@ -690,7 +700,7 @@ export default function ChatMessages({
             )}
 
             {/* Activity status during streaming */}
-            {msg.isStreaming && msg.role === "assistant" && (
+            {msg.isStreaming && msg.role === "assistant" && !reasoningContent && (
               <div className="flex items-center gap-2 mt-1" data-testid="chat-activity-status" role="status">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
                 <span className="text-xs text-[var(--color-text-muted)]">
@@ -746,32 +756,22 @@ export default function ChatMessages({
       {/* Loading indicator */}
       {isLoading && (
         <div className="flex justify-start" data-testid="chat-activity-status">
-          <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-[var(--color-surface)] border border-[var(--color-border)]">
-            <div className="flex items-center gap-1.5">
+          <div className="max-w-[85%] py-1">
+            <div className="flex items-center gap-2">
               <span
-                className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] animate-bounce"
-                style={{ animationDelay: "0ms" }}
+                className="w-1.5 h-1.5 rounded-full bg-[var(--color-text-muted)] animate-pulse"
                 aria-label="Loading"
               />
-              <span
-                className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] animate-bounce"
-                style={{ animationDelay: "150ms" }}
-                aria-hidden="true"
-              />
-              <span
-                className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] animate-bounce"
-                style={{ animationDelay: "300ms" }}
-                aria-hidden="true"
-              />
+              <span className="text-xs text-[var(--color-text-muted)]">Loading…</span>
             </div>
           </div>
         </div>
       )}
 
       {/* Streaming activity indicator — visible while assistant is generating */}
-      {isStreaming && !isLoading && (
+      {isStreaming && !isLoading && !hasActiveAssistant && !hasLiveReasoning && (
         <div className="flex justify-start" data-testid="chat-activity-status">
-          <div className="max-w-[85%] rounded-2xl px-4 py-3 bg-[var(--color-surface)] border border-[var(--color-border)]">
+          <div className="max-w-[85%] py-1">
             <div className="flex items-center gap-1.5">
               <span
                 className="w-2 h-2 rounded-full bg-[var(--color-text-muted)] animate-pulse"

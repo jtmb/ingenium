@@ -13,11 +13,11 @@ interface PermissionPromptProps {
 }
 
 /**
- * PermissionPrompt — inline permission approval card shown within the
- * message stream when the agent requests user confirmation.
+ * PermissionPrompt — inline permission approval shown within the message
+ * stream when the agent requests user confirmation.
  *
- * Displays an amber-bordered warning card with the tool action and
- * the exact command pattern, plus Allow Once / Always Allow / Deny buttons.
+ * Displays the requested tool action, exact command pattern, and choices as
+ * plain flow so agent output does not create a second card hierarchy.
  */
 export default function PermissionPrompt({
   requestId,
@@ -32,16 +32,17 @@ export default function PermissionPrompt({
   };
 
   const sharedBtnClass =
-    "rounded px-3 py-1.5 text-sm font-medium transition-colors";
+    "py-1 text-xs font-medium underline underline-offset-2 transition-colors disabled:opacity-50";
 
   return (
     <div
-      className={`my-3 border rounded-lg bg-[var(--color-warning-bg)] border-amber-500/30 overflow-hidden ${
+      className={`relative my-3 text-sm ${
         !isActive ? "opacity-50 pointer-events-none" : ""
       }`}
+      data-testid="chat-permission-prompt"
     >
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-amber-500/20">
+      <div className="flex items-center gap-2">
         {/* Warning triangle icon */}
         <svg
           width="16"
@@ -50,7 +51,7 @@ export default function PermissionPrompt({
           fill="none"
           stroke="currentColor"
           strokeWidth="1.5"
-          className="text-amber-400 shrink-0"
+          className="text-[var(--color-text-muted)] shrink-0"
           aria-hidden="true"
         >
           <path
@@ -61,29 +62,29 @@ export default function PermissionPrompt({
           <path strokeLinecap="round" d="M8 6v2.67" />
           <circle cx="8" cy="11.33" r="0.67" fill="currentColor" />
         </svg>
-        <span className="text-sm font-medium text-amber-400">
+        <span className="text-sm font-medium text-[var(--color-text-secondary)]">
           Agent wants to run:{" "}
-          <code className="px-1 py-0.5 rounded bg-black/20 text-amber-300 font-mono text-xs">
+          <code className="font-mono text-xs">
             {action}
           </code>
         </span>
       </div>
 
       {/* Pattern preview */}
-      <div className="px-3 py-2.5">
-        <pre className="text-xs font-mono text-[var(--color-text-secondary)] bg-[var(--color-code-bg)] rounded-md p-2.5 leading-relaxed whitespace-pre-wrap break-all overflow-x-auto max-h-[120px] overflow-y-auto">
+      <div className="mt-1">
+        <pre className="text-xs font-mono text-[var(--color-text-secondary)] leading-relaxed whitespace-pre-wrap break-all overflow-x-auto max-h-[120px] overflow-y-auto">
           {pattern}
         </pre>
       </div>
 
       {/* Action buttons */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-t border-amber-500/20">
+      <div className="mt-1 flex items-center gap-3">
         {/* Allow Once */}
         <button
           type="button"
           onClick={() => handleReply("once")}
           disabled={!isActive}
-          className={`${sharedBtnClass} bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50`}
+          className={`${sharedBtnClass} text-[var(--color-text-primary)] hover:text-[var(--color-text-secondary)]`}
         >
           Allow Once
         </button>
@@ -93,7 +94,7 @@ export default function PermissionPrompt({
           type="button"
           onClick={() => handleReply("always")}
           disabled={!isActive}
-          className={`${sharedBtnClass} bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-50`}
+          className={`${sharedBtnClass} text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]`}
         >
           Always Allow
         </button>
@@ -103,7 +104,7 @@ export default function PermissionPrompt({
           type="button"
           onClick={() => handleReply("reject")}
           disabled={!isActive}
-          className={`${sharedBtnClass} bg-red-600 text-white hover:bg-red-500 disabled:opacity-50 ml-auto`}
+          className={`${sharedBtnClass} ml-auto text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]`}
         >
           Deny
         </button>
@@ -111,11 +112,9 @@ export default function PermissionPrompt({
 
       {/* Inactive overlay label */}
       {!isActive && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg pointer-events-none">
-          <span className="text-xs font-medium text-[var(--color-text-muted)] bg-[var(--color-surface)] px-3 py-1 rounded-full">
-            Already replied
-          </span>
-        </div>
+        <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+          Already replied
+        </span>
       )}
     </div>
   );

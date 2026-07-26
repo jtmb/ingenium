@@ -95,6 +95,16 @@ reaches it. The dashboard fallback accepts forwarded Host headers and does not
 challenge browser traffic with HTTP Basic Auth. It talks to the API layer only
 — zero direct DB access.
 
+The Chat session-events path is an exception to the generic API rewrite:
+`/api/v1/opencode/sessions/:id/events` is handled by a dedicated unbuffered
+Node route that forwards the persistent upstream readable stream directly.
+Next's generic compressed rewrite must remain a `fallback`, so the dashboard
+route wins. Routing this persistent SSE connection through the generic rewrite
+can buffer or transform the response, hiding incremental frames until the
+connection ends. The route therefore sends `Cache-Control: no-cache,
+no-transform` and `X-Accel-Buffering: no`; preserve those headers through any
+gateway in front of the dashboard.
+
 ### 3. opencode-web (internal :4098)
 
 OpenCode web server. It is a private internal upstream reached through the local root `http://opencode.localhost:3000`. Do not publish or access host port 4098 directly.

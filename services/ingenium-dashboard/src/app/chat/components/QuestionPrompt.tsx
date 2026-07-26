@@ -23,7 +23,7 @@ interface QuestionPromptProps {
 }
 
 /**
- * QuestionPrompt — structured question card for when the agent asks the
+ * QuestionPrompt — structured question flow for when the agent asks the
  * user a question. Supports both single-choice (radio) and multi-select
  * (checkbox) questions.
  *
@@ -77,12 +77,13 @@ export default function QuestionPrompt({
 
   return (
     <div
-      className={`my-3 border rounded-lg bg-[var(--color-surface)] border-[var(--color-border)] overflow-hidden ${
+      className={`relative my-3 ${
         !isActive ? "opacity-50 pointer-events-none" : ""
       }`}
+      data-testid="chat-question-prompt"
     >
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--color-border)]">
+      <div className="flex items-center gap-2">
         <svg
           width="16"
           height="16"
@@ -103,7 +104,7 @@ export default function QuestionPrompt({
       </div>
 
       {/* Questions */}
-      <div className="px-3 py-3 space-y-4">
+      <div className="mt-2 space-y-4">
         {questions.map((q) => {
           const currentSelections = selected[q.id] ?? [];
           const isMultiple = q.multiple === true;
@@ -128,10 +129,10 @@ export default function QuestionPrompt({
                         onClick={() => toggleOption(q.id, opt.label, isMultiple)}
                         disabled={!isActive}
                         className={[
-                          "w-full flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors border",
+                          "w-full flex items-start gap-2.5 py-1.5 text-left transition-colors",
                           isSelected
-                            ? "bg-[var(--color-surface-selected)] border-[var(--color-text-link)]"
-                            : "bg-[var(--color-surface-muted)] border-transparent hover:bg-[var(--color-surface-hover)] hover:border-[var(--color-border)]",
+                            ? "text-[var(--color-text-primary)]"
+                            : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]",
                         ].join(" ")}
                         role={isMultiple ? "checkbox" : "radio"}
                         aria-checked={isSelected}
@@ -228,7 +229,7 @@ export default function QuestionPrompt({
 
       {/* Submit button — only for structured questions with options */}
       {hasOptions && (
-        <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-t border-[var(--color-border)]">
+        <div className="mt-2 flex items-center justify-between gap-2">
           <p className="text-xs text-[var(--color-text-muted)]">
             {!hasSelection
               ? "Select an option to continue"
@@ -242,7 +243,7 @@ export default function QuestionPrompt({
             type="button"
             onClick={handleSubmit}
             disabled={!isActive || !hasSelection}
-            className="rounded px-4 py-1.5 text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="py-1 text-sm font-medium text-[var(--color-text-primary)] underline underline-offset-2 hover:text-[var(--color-text-secondary)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Submit Answer
           </button>
@@ -251,11 +252,9 @@ export default function QuestionPrompt({
 
       {/* Inactive overlay */}
       {!isActive && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/30 rounded-lg pointer-events-none">
-          <span className="text-xs font-medium text-[var(--color-text-muted)] bg-[var(--color-surface)] px-3 py-1 rounded-full">
-            Already answered
-          </span>
-        </div>
+        <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+          Already answered
+        </span>
       )}
     </div>
   );

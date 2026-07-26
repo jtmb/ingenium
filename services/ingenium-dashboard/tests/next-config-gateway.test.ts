@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 type NextConfigForTest = {
-  rewrites: () => Promise<Array<{ source: string; destination: string }>>;
+  rewrites: () => Promise<{
+    fallback: Array<{ source: string; destination: string }>;
+  }>;
   headers: () => Promise<Array<{ headers: Array<{ key: string; value: string }> }>>;
 };
 
@@ -31,12 +33,14 @@ async function contentSecurityPolicy(config: NextConfigForTest): Promise<string>
 describe("Next.js gateway configuration", () => {
   it("keeps the rewrite surface API-only", async () => {
     const config = await loadNextConfig();
-    expect(await config.rewrites()).toEqual([
-      {
-        source: "/api/v1/:path*",
-        destination: "http://127.0.0.1:4097/api/v1/:path*",
-      },
-    ]);
+    expect(await config.rewrites()).toEqual({
+      fallback: [
+        {
+          source: "/api/v1/:path*",
+          destination: "http://127.0.0.1:4097/api/v1/:path*",
+        },
+      ],
+    });
   });
 
   it("allows direct local ports only in an unconfigured development build", async () => {

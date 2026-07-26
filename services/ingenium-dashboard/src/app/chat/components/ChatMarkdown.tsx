@@ -12,5 +12,5 @@ import MarkdownDocument from "../../components/MarkdownDocument";
  * which provides full GFM support, safe HTML sanitization, and dark mode.
  */
 export default function ChatMarkdown({ content }: { content: string }) {
-  return <MarkdownDocument content={content} className="text-sm" />;
+  return <MarkdownDocument content={content} className="chat-markdown text-sm" />;
 }

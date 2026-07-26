@@ -9,6 +9,7 @@ import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   opencodeClient,
   isOpenCodeError,
+  type SendPromptBody,
 } from "../opencode-client.js";
 import { requireProject } from "../helpers.js";
 
@@ -744,12 +745,60 @@ opencodeRouter.delete("/sessions/:id/messages/:msgId", async (req, res) => {
 
 /* ── Prompt (POST /sessions/:id/message — uses parts array per v1.18.3) ── */
 
+function isPromptPart(part: unknown): boolean {
+  if (part === null || typeof part !== "object") return false;
+  const candidate = part as Record<string, unknown>;
+  if (candidate.type === "text") return typeof candidate.text === "string";
+  return candidate.type === "file"
+    && typeof candidate.mime === "string"
+    && typeof candidate.url === "string"
+    && (candidate.filename === undefined || typeof candidate.filename === "string");
+}
+
+function hasPromptParts(body: unknown): body is SendPromptBody {
+  return body !== null
+    && typeof body === "object"
+    && Array.isArray((body as { parts?: unknown }).parts)
+    && (body as { parts: unknown[] }).parts.every(isPromptPart);
+}
+
 opencodeRouter.post("/sessions/:id/prompt", async (req, res) => {
   if (!guardPassword(req, res)) return;
+  if (!hasPromptParts(req.body)) {
+    res.status(400).json({
+      error: {
+        code: "INVALID_PROMPT",
+        message: "Prompt requests require a parts array.",
+      },
+    });
+    return;
+  }
   const directory = req.query.directory as string | undefined;
-  // Body passes through as-is — frontend sends the parts array per contract
-  const result = await opencodeClient.sendPrompt(req.params.id!, req.body, directory);
-  sendResult(req, res, result, 201);
+  const sessionId = req.params.id!;
+
+  // OpenCode keeps this HTTP request open for the entire provider turn. The
+  // dashboard has already subscribed to the session SSE endpoint before this
+  // route runs, so keeping its API rewrite open ties prompt acceptance to a
+  // long-running generation and makes a dropped intermediary socket surface as
+  // an unrelated 500. Accept the request promptly; terminal provider errors
+  // are delivered on the authoritative session.error SSE event.
+  void opencodeClient.sendPrompt(sessionId, req.body, directory)
+    .then((result) => {
+      if (isOpenCodeError(result)) {
+        logger.warn(SOURCE, `Asynchronous prompt request failed: ${result.error.code}`, {
+          code: result.error.code,
+          sessionId,
+        });
+      }
+    })
+    .catch((error: unknown) => {
+      logger.error(SOURCE, "Asynchronous prompt request threw unexpectedly", {
+        error: error instanceof Error ? error.name : "unknown",
+        sessionId,
+      });
+    });
+
+  res.status(202).json({ data: { accepted: true } });
 });
 
 /* ── Session actions ── */
