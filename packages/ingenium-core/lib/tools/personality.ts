@@ -144,7 +144,7 @@ export function getProfile(projectId: string, options?: { includeHidden?: boolea
          'confidence', confidence,
          'source', source
        )) as traits
-       FROM personality_traits 
+       FROM personality_traits
        WHERE project_id = ? AND is_active = 1
        GROUP BY project_id, trait_type
        ORDER BY trait_type, confidence DESC`
@@ -159,7 +159,7 @@ export function getProfile(projectId: string, options?: { includeHidden?: boolea
        'confidence', confidence,
        'source', source
      )) as traits
-     FROM personality_traits 
+     FROM personality_traits
      WHERE project_id = ? AND is_active = 1 AND confidence >= 0.30
      GROUP BY project_id, trait_type
      ORDER BY trait_type, confidence DESC`

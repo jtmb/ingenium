@@ -1,5 +1,20 @@
 import Database from "better-sqlite3";
 /**
+ * The database file used by deployed Ingenium instances. Do not change this
+ * default to a `.db` sibling: existing containers persist this exact path in
+ * the `/app/.ingenium` volume.
+ */
+export declare const DEPLOYED_CORE_DB_PATH = "/app/.ingenium/data";
+/**
+ * Resolve the single database path used by production code.
+ *
+ * Callers may still supply an explicit path for isolated tests. Historical
+ * production fallback spellings are normalized here rather than being allowed
+ * to create a second database beside the deployed `/app/.ingenium/data` file.
+ * This resolver never moves, creates, or rewrites an existing database.
+ */
+export declare function resolveCoreDbPath(requestedPath?: string): string;
+/**
  * Returns the singleton SQLite database connection, creating it on first call.
  *
  * Pragma rationale:
@@ -11,7 +26,7 @@ import Database from "better-sqlite3";
  * - `foreign_keys = ON` — SQLite defaults to OFF for backward compatibility.
  *   Must be re-enabled every connection because it is not persisted in the DB file.
  */
-export declare function getDb(dbPath: string): Database.Database;
+export declare function getDb(dbPath?: string): Database.Database;
 /**
  * Verify the skills_fts virtual table and all three migration-024 triggers exist,
  * then rebuild the FTS index. If any component is missing, throws an actionable

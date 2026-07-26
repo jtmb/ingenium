@@ -1,0 +1,78 @@
+import { getDb } from "../db.js";
+import { resolve } from "node:path";
+/**
+ * Resolve the project root for disk operations.
+ * For global (is_global=1) projects, returns the global OpenCode config directory.
+ * For normal projects, returns the project root derived from INGENIUM_CORE_DB_PATH.
+ */
+export function resolveProjectBase(projectId) {
+    if (projectId) {
+        try {
+            const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+            const project = db.prepare("SELECT is_global FROM projects WHERE id = ? AND archived_at IS NULL").get(projectId);
+            if (project?.is_global) {
+                return process.env.INGENIUM_GLOBAL_CONFIG_PATH
+                    ?? resolve(process.env.HOME ?? "/home/appuser", ".config", "opencode");
+            }
+        }
+        catch { /* fall through to default path */ }
+    }
+    return resolve(process.env.INGENIUM_CORE_DB_PATH ?? "./data", "..", "..");
+}
+/**
+ * Check whether a project ID corresponds to the global project (is_global=1).
+ * Silently returns false if the project doesn't exist or DB is unavailable —
+ * callers treat "not global" as the safe default for path resolution.
+ */
+export function isGlobal(projectId) {
+    if (!projectId)
+        return false;
+    try {
+        const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+        const project = db.prepare("SELECT is_global FROM projects WHERE id = ? AND archived_at IS NULL").get(projectId);
+        return project?.is_global === 1;
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Resolve the skills directory for a project.
+ * Global: <config>/skills/  |  Normal: <project>/.opencode/skills/
+ */
+export function getSkillsBase(projectId) {
+    const base = resolveProjectBase(projectId);
+    if (isGlobal(projectId))
+        return resolve(base, "skills");
+    return resolve(base, ".opencode", "skills");
+}
+/**
+ * Resolve the plugins directory for a project.
+ * Global: <config>/plugins/  |  Normal: <project>/.opencode/plugins/
+ */
+export function getPluginsBase(projectId) {
+    const base = resolveProjectBase(projectId);
+    if (isGlobal(projectId))
+        return resolve(base, "plugins");
+    return resolve(base, ".opencode", "plugins");
+}
+/**
+ * Resolve the commands directory for a project.
+ * Global: <config>/commands/  |  Normal: <project>/.opencode/commands/
+ */
+export function getCommandsBase(projectId) {
+    const base = resolveProjectBase(projectId);
+    if (isGlobal(projectId))
+        return resolve(base, "commands");
+    return resolve(base, ".opencode", "commands");
+}
+export function getConfigPath(projectId) {
+    const base = resolveProjectBase(projectId);
+    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const project = projectId ? db.prepare("SELECT is_global FROM projects WHERE id = ? AND archived_at IS NULL").get(projectId) : undefined;
+    // Global project uses opencode.jsonc (comment-supporting JSONC), project uses opencode.json
+    if (project?.is_global) {
+        return resolve(base, "opencode.jsonc");
+    }
+    return resolve(base, "opencode.json");
+}

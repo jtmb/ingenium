@@ -1,0 +1,307 @@
+/**
+ * Email cache — persistent DB-backed caching for IMAP email listings and bodies.
+ *
+ * Eliminates the in-memory React useRef Map that was cleared on every navigation.
+ * After the first IMAP fetch, subsequent loads read from SQLite for < 2s response.
+ */
+import { getDb, execTransaction, checkpointAfterWrite, resolveCoreDbPath } from "../db.js";
+import { logger } from "../logger.js";
+// ── Helpers ────────────────────────────────────────────────────────────────
+/** Use the core resolver so cache writes cannot create a divergent database. */
+function dbPath() {
+    return resolveCoreDbPath();
+}
+// ── Email listing cache ────────────────────────────────────────────────────
+/**
+ * Insert or update cached email listings. Uses ON CONFLICT DO UPDATE to handle
+ * the UNIQUE(account_id, folder, uid) constraint without triggering ON DELETE CASCADE
+ * to child tables (email_bodies, email_suggestions, email_summaries). Previously used
+ * INSERT OR REPLACE which deleted the old row → cascading to destroy cached smart
+ * replies, bodies, and summaries on every re-sync cycle.
+ */
+export function upsertEmailCache(accountId, folder, emails) {
+    const result = execTransaction(() => {
+        const db = getDb(dbPath());
+        const stmt = db.prepare(`INSERT INTO email_cache
+         (account_id, folder, uid, subject, from_name, from_addr, date,
+          snippet, flags, has_attachments, envelope_json, labels_json, cached_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+         subject = excluded.subject,
+         from_name = excluded.from_name,
+         from_addr = excluded.from_addr,
+         date = excluded.date,
+         snippet = excluded.snippet,
+         flags = excluded.flags,
+         has_attachments = excluded.has_attachments,
+         envelope_json = excluded.envelope_json,
+         labels_json = excluded.labels_json,
+         cached_at = datetime('now')`);
+        let count = 0;
+        for (const e of emails) {
+            stmt.run(accountId, folder, e.uid, e.subject ?? null, e.from_name ?? null, e.from_addr ?? null, e.date ?? null, e.snippet ?? null, e.flags ?? "[]", e.has_attachments ?? 0, e.envelope_json ?? null, e.labels_json ?? null);
+            count++;
+        }
+        return count;
+    });
+    checkpointAfterWrite();
+    return result;
+}
+/**
+ * Retrieve cached emails for a folder, paginated by date DESC (newest first).
+ */
+export function getCachedEmails(accountId, folder, page, limit) {
+    const db = getDb(dbPath());
+    const offset = (page - 1) * limit;
+    const totalRow = db.prepare("SELECT COUNT(*) as count FROM email_cache WHERE account_id = ? AND folder = ?").get(accountId, folder);
+    const emails = db.prepare(`SELECT * FROM email_cache
+      WHERE account_id = ? AND folder = ?
+      ORDER BY date DESC
+      LIMIT ? OFFSET ?`).all(accountId, folder, limit, offset);
+    return { emails, total: totalRow.count };
+}
+/**
+ * Look up a single cached email by account + folder + uid.
+ */
+export function getCachedEmail(accountId, folder, uid) {
+    const db = getDb(dbPath());
+    return db.prepare("SELECT * FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?").get(accountId, folder, uid);
+}
+// ── Email body cache ───────────────────────────────────────────────────────
+/**
+ * Retrieve a cached email body. Returns undefined if not yet cached.
+ */
+export function getCachedEmailBody(accountId, folder, uid) {
+    const db = getDb(dbPath());
+    return db.prepare("SELECT * FROM email_bodies WHERE account_id = ? AND folder = ? AND uid = ?").get(accountId, folder, uid);
+}
+/**
+ * Cache an email body (HTML, text, headers). Uses ON CONFLICT(account_id, folder, uid)
+ * DO UPDATE so re-fetches update the content without triggering row deletion that
+ * could cascade to child tables. The UNIQUE(account_id, folder, uid) constraint
+ * matches the FK parent's key.
+ *
+ * 🔴 HARD RULE #11: ON CONFLICT DO UPDATE, never INSERT OR REPLACE.
+ */
+export function upsertEmailBody(accountId, folder, uid, html, text, headersJson) {
+    execTransaction(() => {
+        const db = getDb(dbPath());
+        // Defensive: check parent row exists before inserting into FK-constrained email_bodies.
+        // Avoids FOREIGN KEY constraint failed when parent was deleted concurrently
+        // (e.g., account removal mid-backfill).
+        const parent = db.prepare("SELECT 1 FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?").get(accountId, folder, uid);
+        if (!parent) {
+            return; // parent removed — skip silently, this is expected during account deletion
+        }
+        db.prepare(`INSERT INTO email_bodies
+         (account_id, folder, uid, html, text, headers_json, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+         html = excluded.html,
+         text = excluded.text,
+         headers_json = excluded.headers_json,
+         fetched_at = datetime('now')`).run(accountId, folder, uid, html ?? null, text ?? null, headersJson ?? null);
+    });
+    checkpointAfterWrite();
+}
+// ── Sync state ─────────────────────────────────────────────────────────────
+/**
+ * Return the last-known sync state for an account+ folder.
+ */
+export function getSyncState(accountId, folder) {
+    const db = getDb(dbPath());
+    const row = db.prepare("SELECT last_uid, uidvalidity, last_synced_at FROM email_sync_state WHERE account_id = ? AND folder = ?").get(accountId, folder);
+    return {
+        last_uid: String(row?.last_uid ?? "0"),
+        uidvalidity: row?.uidvalidity ?? 0,
+        last_synced_at: row?.last_synced_at ?? null,
+    };
+}
+/**
+ * Update (upsert) the sync state for an account+ folder.
+ */
+export function updateSyncState(accountId, folder, lastUid, uidValidity) {
+    execTransaction(() => {
+        const db = getDb(dbPath());
+        db.prepare(`INSERT INTO email_sync_state (account_id, folder, last_uid, uidvalidity, last_synced_at)
+       VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder) DO UPDATE SET
+         last_uid = excluded.last_uid,
+         uidvalidity = excluded.uidvalidity,
+         last_synced_at = datetime('now')`).run(accountId, folder, lastUid, uidValidity);
+    });
+    checkpointAfterWrite();
+}
+/**
+ * Retrieve cached AI-generated reply suggestions for an email.
+ * Returns undefined if no suggestions have been generated yet.
+ */
+export function getCachedSuggestions(accountId, folder, uid) {
+    const db = getDb(dbPath());
+    return db.prepare("SELECT * FROM email_suggestions WHERE account_id = ? AND folder = ? AND uid = ?").get(accountId, folder, uid);
+}
+/**
+ * Upsert AI-generated reply suggestions for an email.
+ * Uses the same defensive parent-check pattern as upsertEmailBody:
+ * verifies the email_cache row exists before inserting to avoid FK violations.
+ *
+ * Uses ON CONFLICT(account_id, folder, uid) DO UPDATE (not INSERT OR REPLACE)
+ * per HARD RULE #11. The PRIMARY KEY is (account_id, folder, uid) — matching
+ * the FK parent's UNIQUE(account_id, folder, uid). INSERT OR REPLACE would delete
+ * the old row first, which would cascade to any future child tables of
+ * email_suggestions.
+ */
+export function upsertEmailSuggestions(accountId, folder, uid, suggestions, model) {
+    execTransaction(() => {
+        const db = getDb(dbPath());
+        const parent = db.prepare("SELECT 1 FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?").get(accountId, folder, uid);
+        if (!parent) {
+            logger.warn("email-cache", "upsertEmailSuggestions skipped — parent row not found", { accountId, folder, uid });
+            return;
+        }
+        db.prepare(`INSERT INTO email_suggestions
+         (account_id, folder, uid, suggestions_json, model, generated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+         suggestions_json = excluded.suggestions_json,
+         model = excluded.model,
+         generated_at = datetime('now')`).run(accountId, folder, uid, JSON.stringify(suggestions), model);
+    });
+    checkpointAfterWrite();
+}
+/**
+ * Retrieve cached AI-generated email summary for an email.
+ * Returns undefined if no summary has been generated yet.
+ */
+export function getCachedSummary(accountId, folder, uid) {
+    const db = getDb(dbPath());
+    return db.prepare("SELECT * FROM email_summaries WHERE account_id = ? AND folder = ? AND uid = ?").get(accountId, folder, uid);
+}
+/**
+ * Upsert an AI-generated summary for an email.
+ * Uses the same defensive parent-check pattern as upsertEmailSuggestions:
+ * verifies the email_cache row exists before inserting to avoid FK violations.
+ *
+ * Uses ON CONFLICT(account_id, folder, uid) DO UPDATE (not INSERT OR REPLACE)
+ * per HARD RULE #11. The PRIMARY KEY is (account_id, folder, uid) — matching
+ * the FK parent's UNIQUE(account_id, folder, uid).
+ */
+export function upsertEmailSummary(accountId, folder, uid, summaryText, model) {
+    execTransaction(() => {
+        const db = getDb(dbPath());
+        const parent = db.prepare("SELECT 1 FROM email_cache WHERE account_id = ? AND folder = ? AND uid = ?").get(accountId, folder, uid);
+        if (!parent) {
+            logger.warn("email-cache", "upsertEmailSummary skipped — parent row not found", { accountId, folder, uid });
+            return;
+        }
+        db.prepare(`INSERT INTO email_summaries
+         (account_id, folder, uid, summary_text, model, generated_at)
+       VALUES (?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder, uid) DO UPDATE SET
+         summary_text = excluded.summary_text,
+         model = excluded.model,
+         generated_at = datetime('now')`).run(accountId, folder, uid, summaryText, model);
+    });
+    checkpointAfterWrite();
+}
+/**
+ * Return per-folder sync status for all folders of an account.
+ * Used by the /sync-status endpoint to show cache state.
+ */
+export function getAccountFoldersSyncStatus(accountId) {
+    const db = getDb(dbPath());
+    const folders = db.prepare(`SELECT DISTINCT folder FROM email_cache WHERE account_id = ?
+     UNION
+     SELECT DISTINCT folder FROM email_sync_state WHERE account_id = ?`).all(accountId, accountId);
+    return folders.map(({ folder }) => {
+        const cacheRow = db.prepare("SELECT COUNT(*) as count FROM email_cache WHERE account_id = ? AND folder = ?").get(accountId, folder);
+        const bodyRow = db.prepare("SELECT COUNT(*) as count FROM email_bodies WHERE account_id = ? AND folder = ?").get(accountId, folder);
+        const syncRow = db.prepare("SELECT last_synced_at FROM email_sync_state WHERE account_id = ? AND folder = ?").get(accountId, folder);
+        return {
+            folder,
+            cachedCount: cacheRow.count,
+            bodyCount: bodyRow.count,
+            lastSyncedAt: syncRow?.last_synced_at ?? null,
+        };
+    });
+}
+// ── Cache maintenance ──────────────────────────────────────────────────────
+/**
+ * Return UIDs from email_cache that are missing corresponding entries in
+ * email_bodies. Used by backfillFolderBodies to find which emails need
+ * body fetching. Returns the most recent UIDs first (date DESC), capped at limit.
+ */
+export function getUidsMissingBodies(accountId, folder, limit) {
+    const db = getDb(dbPath());
+    const rows = db.prepare(`SELECT ec.uid FROM email_cache ec
+     WHERE ec.account_id = ? AND ec.folder = ?
+       AND ec.uid NOT IN (SELECT uid FROM email_bodies WHERE account_id = ? AND folder = ?)
+     ORDER BY ec.date DESC
+     LIMIT ?`).all(accountId, folder, accountId, folder, limit);
+    return rows.map(r => r.uid);
+}
+/**
+ * Delete all cached data for an account (both email listings and bodies).
+ * Call this when an account is removed or the user wants a fresh sync.
+ */
+export function clearCache(accountId) {
+    const result = execTransaction(() => {
+        const db = getDb(dbPath());
+        const bodyResult = db.prepare("DELETE FROM email_bodies WHERE account_id = ?").run(accountId);
+        // Clean suggestion queue BEFORE email_cache to avoid FK violation from concurrent
+        // engine workers. Also clean suggestions and summaries (which FK-reference email_cache).
+        db.prepare("DELETE FROM email_suggestion_queue WHERE account_id = ?").run(accountId);
+        db.prepare("DELETE FROM email_suggestions WHERE account_id = ?").run(accountId);
+        db.prepare("DELETE FROM email_summaries WHERE account_id = ?").run(accountId);
+        const listingResult = db.prepare("DELETE FROM email_cache WHERE account_id = ?").run(accountId);
+        db.prepare("DELETE FROM email_sync_state WHERE account_id = ?").run(accountId);
+        return { listings: listingResult.changes, bodies: bodyResult.changes };
+    });
+    checkpointAfterWrite();
+    return result;
+}
+/**
+ * Clear cached data for a single folder (listings, bodies, sync state).
+ * Use this when a single folder's UIDVALIDITY changes instead of nuking the
+ * entire account cache. Much cheaper than clearCache().
+ */
+export function clearFolderCache(accountId, folder) {
+    const result = execTransaction(() => {
+        const db = getDb(dbPath());
+        const bodyResult = db.prepare("DELETE FROM email_bodies WHERE account_id = ? AND folder = ?").run(accountId, folder);
+        const listingResult = db.prepare("DELETE FROM email_cache WHERE account_id = ? AND folder = ?").run(accountId, folder);
+        db.prepare("DELETE FROM email_sync_state WHERE account_id = ? AND folder = ?").run(accountId, folder);
+        return { listings: listingResult.changes, bodies: bodyResult.changes };
+    });
+    checkpointAfterWrite();
+    return result;
+}
+// ── Account-level cursor (Gmail historyId / Graph deltaLink) ────────────────
+/**
+ * Read the account-level sync cursor (history_id + provider) from email_sync_state.
+ * Uses a special folder key '__account__' to distinguish from per-folder sync state.
+ */
+export function getAccountCursor(accountId) {
+    const db = getDb(dbPath());
+    const row = db.prepare("SELECT history_id, provider FROM email_sync_state WHERE account_id = ? AND folder = '__account__'").get(accountId);
+    return {
+        historyId: row?.history_id ?? null,
+        provider: row?.provider ?? "imap",
+    };
+}
+/**
+ * Store (upsert) the account-level sync cursor in email_sync_state.
+ * Uses a special folder key '__account__' to store per-account (not per-folder) state.
+ */
+export function setAccountCursor(accountId, historyId, provider) {
+    execTransaction(() => {
+        const db = getDb(dbPath());
+        db.prepare(`INSERT INTO email_sync_state (account_id, folder, last_uid, history_id, provider, last_synced_at)
+       VALUES (?, '__account__', '0', ?, ?, datetime('now'))
+       ON CONFLICT(account_id, folder) DO UPDATE SET
+         history_id = excluded.history_id,
+         provider = excluded.provider,
+         last_synced_at = datetime('now')`).run(accountId, historyId, provider);
+    });
+    checkpointAfterWrite();
+}

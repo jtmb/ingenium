@@ -29,6 +29,7 @@ export * as docs from "./tools/docs.js";
 export * as maintenanceLocks from "./tools/maintenance-locks.js";
 export * as vault from "./tools/vault.js";
 export * as vaultCrypto from "./tools/vault-crypto.js";
+export * as protectedSettings from "./tools/protected-settings.js";
 export * as backups from "./tools/backups.js";
 export * as ragChunker from "./tools/rag-chunker.js";
 export * as rag from "./tools/rag.js";

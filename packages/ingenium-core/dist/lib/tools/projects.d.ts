@@ -11,6 +11,10 @@ import { Project } from "../schema.js";
 /** List all projects, newest first. */
 export declare function listProjects(): Project[];
 export declare const MAX_PROJECT_NAME_LENGTH = 64;
+/** Raised instead of arbitrarily selecting a global project from corrupt legacy data. */
+export declare class GlobalProjectResolutionError extends Error {
+    constructor();
+}
 /** Names are identifiers, never paths. Keep this contract aligned with the extension resolver. */
 export declare function isValidProjectName(value: unknown): value is string;
 export declare function createProject(name: string, isGlobal?: boolean): Project;
@@ -50,12 +54,14 @@ export declare function getProject(name: string): Project | undefined;
 export declare function updateProject(currentName: string, newName: string): Project | undefined;
 /**
  * Toggle a project's global flag. When isGlobal=true, the project's skills/plugins
- * become the shared baseline for all other projects. Only one project should be
- * global at a time (not enforced here — UI layer manages this).
+ * become the shared baseline for all other projects. The database enforces one
+ * active global row; this transaction keeps the transition atomic as well.
  */
 export declare function setProjectGlobal(name: string, isGlobal: boolean): boolean;
-/** Get the single global project (is_global=1, not archived). There should be at most one. */
+/** Get the sole active global project without silently choosing legacy duplicates. */
 export declare function getGlobalProject(): Project | undefined;
+/** Resolve or create the canonical runtime global project without a name-based fallback. */
+export declare function ensureGlobalProject(): Project;
 export interface WorkspaceMigrationResult {
     migrated: boolean;
     dryRun: boolean;

@@ -21,17 +21,17 @@ export declare const ProjectSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
+    created_at: string;
     id: string;
     name: string;
     is_global: boolean;
-    created_at: string;
     path?: string | undefined;
     archived_at?: string | undefined;
 }, {
     updated_at: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
     path?: string | undefined;
     archived_at?: string | undefined;
     is_global?: boolean | undefined;
@@ -55,10 +55,10 @@ export declare const SkillSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     description: string;
     content: string;
     always_apply: number;
@@ -70,10 +70,10 @@ export declare const SkillSchema: z.ZodObject<{
     file_tree?: string | null | undefined;
 }, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     description: string;
     content: string;
     archived_at?: string | null | undefined;
@@ -102,9 +102,9 @@ export declare const SkillVersionSchema: z.ZodObject<{
     created_by: z.ZodDefault<z.ZodString>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
+    created_at: string;
     id: number;
     name: string;
-    created_at: string;
     description: string;
     content: string;
     always_apply: number;
@@ -117,9 +117,9 @@ export declare const SkillVersionSchema: z.ZodObject<{
     tags?: string | null | undefined;
     file_tree?: string | null | undefined;
 }, {
+    created_at: string;
     id: number;
     name: string;
-    created_at: string;
     description: string;
     content: string;
     revision: number;
@@ -148,9 +148,9 @@ export declare const SkillLineageSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     source_project_id: string;
     source_name: string;
     target_skill_id: string;
@@ -160,9 +160,9 @@ export declare const SkillLineageSchema: z.ZodObject<{
     tombstone_path?: string | null | undefined;
 }, {
     updated_at: string;
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     source_project_id: string;
     source_name: string;
     target_skill_id: string;
@@ -205,10 +205,10 @@ export declare const SkillProposalSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     target_created: number;
     updated_at: string;
-    id: string;
-    created_at: string;
-    status: "draft" | "pending" | "rejected" | "applied" | "rolled_back" | "stale";
     project_id: string;
+    created_at: string;
+    id: string;
+    status: "draft" | "pending" | "rejected" | "applied" | "rolled_back" | "stale";
     always_apply: number;
     proposal_type: "create" | "update" | "merge" | "archive";
     target_name: string;
@@ -233,9 +233,9 @@ export declare const SkillProposalSchema: z.ZodObject<{
     rolled_back_at?: string | null | undefined;
 }, {
     updated_at: string;
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     proposal_type: "create" | "update" | "merge" | "archive";
     target_name: string;
     proposed_state: string;
@@ -276,10 +276,10 @@ export declare const LearningSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
-    id: number;
-    created_at: string;
-    status: "pending" | "processed" | "failed";
     project_id: string;
+    created_at: string;
+    id: number;
+    status: "pending" | "processed" | "failed";
     content: string;
     entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "learning" | "plugin" | "architecture" | "implementation" | "code_change" | "enhancement" | "observation" | "ops" | "question" | "review" | "documentation" | "improvement" | "milestone";
     priority: number;
@@ -287,9 +287,9 @@ export declare const LearningSchema: z.ZodObject<{
     session_id?: string | undefined;
 }, {
     updated_at: string;
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     content: string;
     entry_type: "decision" | "bug" | "pattern" | "preference" | "research" | "skill" | "agent" | "config" | "hook" | "learning" | "plugin" | "architecture" | "implementation" | "code_change" | "enhancement" | "observation" | "ops" | "question" | "review" | "documentation" | "improvement" | "milestone";
     status?: "pending" | "processed" | "failed" | undefined;
@@ -324,9 +324,9 @@ export declare const TaskSchema: z.ZodObject<{
     completed_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     priority: number;
     title: string;
     column_id: string;
@@ -347,9 +347,9 @@ export declare const TaskSchema: z.ZodObject<{
     completed_at?: string | null | undefined;
 }, {
     updated_at: string;
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     title: string;
     description?: string | undefined;
     priority?: number | undefined;
@@ -381,8 +381,8 @@ export declare const TaskCommentSchema: z.ZodObject<{
     edited_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: string;
     created_at: string;
+    id: string;
     task_id: string;
     author: string;
     body: string;
@@ -390,8 +390,8 @@ export declare const TaskCommentSchema: z.ZodObject<{
     parent_comment_id?: string | null | undefined;
     edited_at?: string | null | undefined;
 }, {
-    id: string;
     created_at: string;
+    id: string;
     task_id: string;
     author: string;
     body: string;
@@ -409,15 +409,15 @@ export declare const TaskActivitySchema: z.ZodObject<{
     payload: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: string;
     created_at: string;
+    id: string;
     task_id: string;
     actor: string;
     event_type: string;
     payload?: string | null | undefined;
 }, {
-    id: string;
     created_at: string;
+    id: string;
     task_id: string;
     actor: string;
     event_type: string;
@@ -452,17 +452,17 @@ export declare const TaskNotificationSchema: z.ZodObject<{
     read_at: z.ZodNullable<z.ZodOptional<z.ZodString>>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     task_id: string;
     recipient: string;
     kind: "mentioned" | "assigned" | "watched_status";
     read_at?: string | null | undefined;
 }, {
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     task_id: string;
     recipient: string;
     kind: "mentioned" | "assigned" | "watched_status";
@@ -479,16 +479,16 @@ export declare const BoardConfigSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     columns: string;
     custom_field_defs: string;
 }, {
     updated_at: string;
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     columns: string;
     custom_field_defs?: string | undefined;
 }>;
@@ -509,10 +509,10 @@ export declare const JobSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     enabled: boolean;
     agent: string;
     prompt_template: string;
@@ -522,10 +522,10 @@ export declare const JobSchema: z.ZodObject<{
     trigger_event?: string | null | undefined;
 }, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     agent: string;
     prompt_template: string;
     description?: string | null | undefined;
@@ -546,8 +546,8 @@ export declare const JobRunSchema: z.ZodObject<{
     exit_code: z.ZodNullable<z.ZodOptional<z.ZodNumber>>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: string;
     created_at: string;
+    id: string;
     status: "failed" | "queued" | "running" | "success" | "timeout" | "cancelled";
     job_id: string;
     trigger: "manual" | "cron" | "event";
@@ -555,8 +555,8 @@ export declare const JobRunSchema: z.ZodObject<{
     finished_at?: string | null | undefined;
     exit_code?: number | null | undefined;
 }, {
-    id: string;
     created_at: string;
+    id: string;
     job_id: string;
     trigger: "manual" | "cron" | "event";
     status?: "failed" | "queued" | "running" | "success" | "timeout" | "cancelled" | undefined;
@@ -574,15 +574,15 @@ export declare const JobRunLogSchema: z.ZodObject<{
     line: z.ZodString;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: number;
     created_at: string;
+    id: number;
     run_id: string;
     seq: number;
     stream: "stdout" | "stderr";
     line: string;
 }, {
-    id: number;
     created_at: string;
+    id: number;
     run_id: string;
     seq: number;
     stream: "stdout" | "stderr";
@@ -604,9 +604,9 @@ export declare const ContextSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     source: "system" | "agent" | "manual" | "import";
     updated_at: string;
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     content: string;
     tags: string;
     priority: number;
@@ -614,9 +614,9 @@ export declare const ContextSchema: z.ZodObject<{
     session_id?: string | null | undefined;
 }, {
     updated_at: string;
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     content: string;
     source?: "system" | "agent" | "manual" | "import" | undefined;
     tags?: string | undefined;
@@ -639,20 +639,20 @@ export declare const ServerSchema: z.ZodObject<{
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     source: "opencode" | "ingenium";
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     enabled: boolean;
     running: boolean;
     command: string;
     args?: string | undefined;
     env?: string | undefined;
 }, {
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     command: string;
     source?: "opencode" | "ingenium" | undefined;
     enabled?: boolean | undefined;
@@ -677,10 +677,10 @@ export declare const ObservationSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     source: "auto-observer" | "agent" | "manual" | "import" | "email" | "chat" | "document" | "calendar" | "synthesis";
     updated_at: string;
-    id: number;
-    created_at: string;
-    status: "pending" | "processed" | "failed" | "skipped";
     project_id: string;
+    created_at: string;
+    id: number;
+    status: "pending" | "processed" | "failed" | "skipped";
     content: string;
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
     importance: number;
@@ -688,9 +688,9 @@ export declare const ObservationSchema: z.ZodObject<{
     context?: string | undefined;
 }, {
     updated_at: string;
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     content: string;
     observation_type: "error" | "pattern" | "preference" | "correction" | "insight" | "feedback" | "behavior" | "terminology" | "workflow" | "goal";
     source?: "auto-observer" | "agent" | "manual" | "import" | "email" | "chat" | "document" | "calendar" | "synthesis" | undefined;
@@ -718,9 +718,9 @@ export declare const PersonalityTraitSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     source: string;
     updated_at: string;
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     trait_type: "terminology" | "communication_style" | "code_preference" | "workflow_pattern" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
     trait_value: string;
     confidence: number;
@@ -731,9 +731,9 @@ export declare const PersonalityTraitSchema: z.ZodObject<{
     exemplar_text?: string | undefined;
 }, {
     updated_at: string;
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     trait_type: "terminology" | "communication_style" | "code_preference" | "workflow_pattern" | "priority_signal" | "feedback_style" | "interaction_pattern" | "domain_knowledge" | "learned_skill" | "personality_trait";
     trait_value: string;
     source?: string | undefined;
@@ -757,19 +757,19 @@ export declare const PluginSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     enabled: boolean;
     file_path: string;
     source_content?: string | undefined;
 }, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     file_path: string;
     enabled?: boolean | undefined;
     source_content?: string | undefined;
@@ -785,15 +785,15 @@ export declare const MCPToolStateSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
     enabled: boolean;
     tool_name: string;
     id?: number | undefined;
 }, {
     updated_at: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
     tool_name: string;
     id?: number | undefined;
     enabled?: boolean | undefined;
@@ -810,18 +810,18 @@ export declare const CommandSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     file_path: string;
     content?: string | undefined;
 }, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     file_path: string;
     content?: string | undefined;
 }>;
@@ -832,7 +832,7 @@ export declare const AgentSchema: z.ZodObject<{
     project_id: z.ZodString;
     name: z.ZodString;
     description: z.ZodDefault<z.ZodString>;
-    category: z.ZodDefault<z.ZodEnum<["primary", "execution", "research", "security"]>>;
+    category: z.ZodDefault<z.ZodEnum<["primary", "execution", "research", "security", "chat"]>>;
     mode: z.ZodDefault<z.ZodEnum<["primary", "subagent"]>>;
     model: z.ZodOptional<z.ZodString>;
     reasoning_effort: z.ZodOptional<z.ZodString>;
@@ -844,13 +844,13 @@ export declare const AgentSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     description: string;
     content: string;
-    category: "research" | "primary" | "execution" | "security";
+    category: "research" | "chat" | "primary" | "execution" | "security";
     enabled: boolean;
     mode: "primary" | "subagent";
     permissions: string;
@@ -859,13 +859,13 @@ export declare const AgentSchema: z.ZodObject<{
     reasoning_effort?: string | undefined;
 }, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
-    project_id: string;
     content: string;
     description?: string | undefined;
-    category?: "research" | "primary" | "execution" | "security" | undefined;
+    category?: "research" | "chat" | "primary" | "execution" | "security" | undefined;
     enabled?: boolean | undefined;
     mode?: "primary" | "subagent" | undefined;
     model?: string | undefined;
@@ -884,17 +884,17 @@ export declare const ConfigSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
-    id: string;
-    created_at: string;
-    type: "project" | "global";
     project_id: string;
+    created_at: string;
+    id: string;
+    type: "project" | "global";
     content: string;
 }, {
     updated_at: string;
-    id: string;
-    created_at: string;
-    type: "project" | "global";
     project_id: string;
+    created_at: string;
+    id: string;
+    type: "project" | "global";
     content: string;
 }>;
 export type Config = z.infer<typeof ConfigSchema>;
@@ -912,28 +912,28 @@ export declare const PipelineEventSchema: z.ZodObject<{
     importance: z.ZodDefault<z.ZodNumber>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     title: string;
     event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "proposal_created" | "proposal_submitted" | "proposal_approved" | "proposal_rejected" | "proposal_applied" | "proposal_rolled_back" | "plugin_initialized" | "plugin_error";
     importance: number;
     event_source: "system" | "agent" | "plugin" | "synthesis";
+    data?: string | undefined;
     description?: string | undefined;
     session_id?: string | undefined;
-    data?: string | undefined;
     parent_event_id?: number | undefined;
 }, {
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     title: string;
     event_type: "extraction_completed" | "session_created" | "session_idle" | "observation_created" | "observation_imported" | "observation_detected" | "synthesis_triggered" | "synthesis_started" | "synthesis_completed" | "synthesis_failed" | "extraction_failed" | "trait_created" | "trait_updated" | "skill_created" | "skill_updated" | "proposal_created" | "proposal_submitted" | "proposal_approved" | "proposal_rejected" | "proposal_applied" | "proposal_rolled_back" | "plugin_initialized" | "plugin_error";
     event_source: "system" | "agent" | "plugin" | "synthesis";
+    data?: string | undefined;
     description?: string | undefined;
     session_id?: string | undefined;
     importance?: number | undefined;
-    data?: string | undefined;
     parent_event_id?: number | undefined;
 }>;
 export type PipelineEvent = z.infer<typeof PipelineEventSchema>;
@@ -957,11 +957,11 @@ export declare const VaultItemSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
     type: "login" | "api_key" | "note" | "oauth";
-    project_id: string;
     tags: string;
     folder_id: string | null;
     urls: string;
@@ -974,11 +974,11 @@ export declare const VaultItemSchema: z.ZodObject<{
     access_count: number;
 }, {
     updated_at: string;
+    project_id: string;
+    created_at: string;
     id: string;
     name: string;
-    created_at: string;
     type: "login" | "api_key" | "note" | "oauth";
-    project_id: string;
     folder_id: string | null;
     username: string | null;
     expires_at: string | null;
@@ -998,14 +998,14 @@ export declare const VaultFolderSchema: z.ZodObject<{
     name: z.ZodString;
     parent_folder_id: z.ZodNullable<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
+    project_id: string;
     id: string;
     name: string;
-    project_id: string;
     parent_folder_id: string | null;
 }, {
+    project_id: string;
     id: string;
     name: string;
-    project_id: string;
     parent_folder_id: string | null;
 }>;
 export type VaultFolder = z.infer<typeof VaultFolderSchema>;
@@ -1021,9 +1021,9 @@ export declare const VaultAuditSchema: z.ZodObject<{
     user_agent: z.ZodNullable<z.ZodString>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     actor: string;
     event_type: string;
     item_id: string | null;
@@ -1031,9 +1031,9 @@ export declare const VaultAuditSchema: z.ZodObject<{
     ip_address: string | null;
     user_agent: string | null;
 }, {
-    id: number;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: number;
     actor: string;
     event_type: string;
     item_id: string | null;
@@ -1073,10 +1073,10 @@ export declare const BackupRecordSchema: z.ZodObject<{
     error_message: z.ZodNullable<z.ZodString>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: string;
-    created_at: string;
-    status: "pending" | "failed" | "in_progress" | "completed";
     project_id: string;
+    created_at: string;
+    id: string;
+    status: "pending" | "failed" | "in_progress" | "completed";
     filename: string;
     size_bytes: number;
     sha256: string;
@@ -1084,9 +1084,9 @@ export declare const BackupRecordSchema: z.ZodObject<{
     components: string;
     error_message: string | null;
 }, {
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     filename: string;
     size_bytes: number;
     sha256: string;
@@ -1108,19 +1108,19 @@ export declare const BackupRestoreJobSchema: z.ZodObject<{
     completed_at: z.ZodNullable<z.ZodString>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: string;
-    created_at: string;
-    status: "rolled_back" | "failed" | "completed" | "validating" | "confirmed" | "applying";
     project_id: string;
+    created_at: string;
+    id: string;
+    status: "rolled_back" | "failed" | "completed" | "validating" | "confirmed" | "applying";
     completed_at: string | null;
     started_at: string | null;
     components: string;
     error_message: string | null;
     backup_id: string | null;
 }, {
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     completed_at: string | null;
     started_at: string | null;
     error_message: string | null;
@@ -1145,9 +1145,9 @@ export declare const RagSourceSchema: z.ZodObject<{
     updated_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
     updated_at: string;
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     source_hash: string | null;
     title: string;
     metadata: string;
@@ -1158,9 +1158,9 @@ export declare const RagSourceSchema: z.ZodObject<{
     chunk_count: number;
 }, {
     updated_at: string;
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     source_hash: string | null;
     title: string;
     source_type: "file" | "text" | "url";
@@ -1183,8 +1183,8 @@ export declare const RagChunkSchema: z.ZodObject<{
     tags: z.ZodDefault<z.ZodString>;
     created_at: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: string;
     created_at: string;
+    id: string;
     content: string;
     tags: string;
     priority: number;
@@ -1193,8 +1193,8 @@ export declare const RagChunkSchema: z.ZodObject<{
     token_count: number;
     heading_path: string | null;
 }, {
-    id: string;
     created_at: string;
+    id: string;
     content: string;
     source_id: string;
     chunk_index: number;
@@ -1223,9 +1223,9 @@ export declare const RagSearchResultSchema: z.ZodObject<{
     source_type: z.ZodString;
     project_id: z.ZodString;
 }, "strip", z.ZodTypeAny, {
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     content: string;
     tags: string;
     source_name: string;
@@ -1239,9 +1239,9 @@ export declare const RagSearchResultSchema: z.ZodObject<{
     rank: number;
     snippet: string;
 }, {
-    id: string;
-    created_at: string;
     project_id: string;
+    created_at: string;
+    id: string;
     content: string;
     source_name: string;
     source_type: string;

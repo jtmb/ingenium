@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node scripts/api-server.js",
+    "start": "npm run build && node dist/scripts/api-server.js",
     "dev": "tsx watch scripts/api-server.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
