@@ -1,12 +1,15 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import type { Server } from "node:http";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { logger, getDb, MAX_ATTACHMENT_SIZE } from "ingenium-core";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
+import { assertApiTokenConfigured } from "../lib/middleware/api-token.js";
+import { csrfMiddleware } from "../lib/middleware/csrf.js";
 import { rateLimit, vaultRateLimiter } from "../lib/middleware/rate-limit.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
@@ -20,8 +23,7 @@ import { observationsRouter } from "../lib/routes/observations.js";
 import { personalityRouter } from "../lib/routes/personality.js";
 import { synthesisRouter } from "../lib/routes/synthesis.js";
 import { pipelineRouter } from "../lib/routes/pipeline.js";
-import { emailsRouter, migrateEmailAccountsToGlobal } from "../lib/routes/emails.js";
-import { startEngine, getGlobalProjectId } from "ingenium-email";
+import { emailsRouter } from "../lib/routes/emails.js";
 import { commandsRouter } from "../lib/routes/commands.js";
 import { configRouter } from "../lib/routes/configs.js";
 import { mcpToolsRouter } from "../lib/routes/mcp-tools.js";
@@ -36,9 +38,12 @@ import { router as docsRouter } from "../lib/routes/docs.js";
 import { router as docsAiRouter } from "../lib/routes/docs-ai.js";
 import { backupsRouter } from "../lib/routes/backups.js";
 import { ragRouter } from "../lib/routes/rag.js";
-import { projects as projectsDb, servers } from "ingenium-core";
+import { projects as projectsDb, protectedSettings, servers } from "ingenium-core";
 import { startScheduler } from "../lib/scheduler.js";
 import { startBackupScheduler } from "../lib/backup-scheduler.js";
+import { createApiLifecycle, installShutdownSignalHandlers, type ApiLifecycle } from "../lib/lifecycle.js";
+import { startMailMaintenance } from "../lib/mail-maintenance.js";
+import { shouldStartBackgroundSchedulers, shouldStartMailMaintenance } from "../lib/runtime-mode.js";
 
 /**
  * Ensure the global-default project exists at startup.
@@ -51,45 +56,29 @@ import { startBackupScheduler } from "../lib/backup-scheduler.js";
  */
 function ensureGlobalProject(): string | null {
   try {
-    const existing = projectsDb.getGlobalProject();
-    if (existing) return existing.id;
-
-    // No global project — create it. This matches docker-entrypoint.sh behavior.
-    const created = projectsDb.createProject("global-default", true);
-    logger.info("api", `Created global-default project (${created.id}) for core functionality`);
-    return created.id;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("api", `Failed to create global-default project: ${msg}. Email engine and cross-project features will be unavailable until one is created via /init-project or the Settings page.`);
+    const global = projectsDb.ensureGlobalProject();
+    const migrations = protectedSettings.migrateLegacyOAuthClientSecrets(global.id);
+    const deferred = migrations.filter((migration) => migration.status === "vault_unavailable").length;
+    const conflicts = migrations.filter((migration) => migration.status === "legacy_conflict").length;
+    if (deferred > 0) {
+      logger.info("api", "OAuth client-secret migration deferred until the vault is unsealed", { deferred });
+    }
+    if (conflicts > 0) {
+      logger.warn("api", "OAuth client-secret migration requires operator review", { conflicts });
+    }
+    return global.id;
+  } catch {
+    logger.warn("api", "Failed to create the global-default project. Email engine and cross-project features will be unavailable until one is created via /init-project or the Settings page.");
     return null;
   }
 }
 
-// 🔴 Log SYNCHRONOUSLY with console.error — async logs die before process.exit(1)
-//    writes, hiding every crash from supervisord. See deep-seek Lessons 9 & 24.
-//    unhandledRejection → log only (transport-layer errors should not crash)
-//    uncaughtException   → log + exit(1) (undefined state, supervisord restarts)
+export const app = express();
 
-process.on("uncaughtException", (err: Error) => {
-  console.error("[api] FATAL uncaughtException — exiting:", err.message);
-  console.error(err.stack || "(no stack)");
-  process.exit(1);
-});
-
-process.on("unhandledRejection", (reason: unknown) => {
-  const msg = reason instanceof Error ? reason.message : String(reason);
-  const stack = reason instanceof Error ? reason.stack : "(no stack)";
-  console.error("[api] FATAL unhandledRejection:", msg);
-  console.error(stack);
-  // Do NOT call process.exit for unhandledRejection — just log.
-  // The process may recover; exiting turns transport-layer issues into outages.
-});
-
-const app = express();
-
-// Do not trust X-Forwarded-For by default. This API is directly exposed in local
-// development and Docker; deployments behind a proxy must configure a trusted
-// proxy explicitly rather than allowing clients to choose their rate-limit IP.
+// Do not trust X-Forwarded-For by default. Docker sends host and dashboard
+// traffic through the credential boundary proxy; deployments behind another
+// proxy must configure a trusted proxy explicitly rather than allowing clients
+// to choose their rate-limit IP.
 app.set("trust proxy", false);
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -98,13 +87,16 @@ app.set("trust proxy", false);
 //   2. CORS              (must be early; preflight OPTIONS won't reach auth)
 //   3. Body parsing      (JSON → urlencoded)
 //   4. Rate limiting     (before auth: throttles brute-force token attempts)
-//   5. Auth              (after rate-limit: limited IPs never pay token cmp cost)
+//   5. Auth              (after rate-limit: limited IPs never pay token cmp cost;
+//                          exact OAuth callback is the only allowlisted route)
 // ════════════════════════════════════════════════════════════════════════════
 
 app.use(helmet());
-// SECURITY: corsOrigin defaults to "http://localhost:3000". Override via the
-// CORS_ORIGIN env var for deployments needing another origin.
-app.use(cors({ origin: config.corsOrigin }));
+// SECURITY: CORS and CSRF consume the same exact, credential-free dashboard
+// allowlist. Same-origin dashboard calls do not need CORS preflight.
+// Preflight requests continue to auth instead of becoming an implicit public
+// API allowlist. Same-origin dashboard calls do not need CORS preflight.
+app.use(cors({ origin: [...config.dashboardOrigins], preflightContinue: true }));
 // 2mb JSON limit accommodates skill content, email bodies, and plugin source files
 // without opening the door to oversized payload attacks. The attachment endpoint
 // uses a separate, larger limit via MAX_ATTACHMENT_SIZE.
@@ -112,11 +104,15 @@ app.use(express.json({ limit: "2mb" }));
 // MAX_ATTACHMENT_SIZE (from ingenium-core) sets the body parser limit for file uploads;
 // converting bytes → MB for the human-readable `limit` string passed to urlencoded.
 app.use(express.urlencoded({ limit: `${Math.round(MAX_ATTACHMENT_SIZE / (1024 * 1024))}mb`, extended: true }));
-// OpenAI redirects the browser to localhost:1455/auth/callback. Docker maps that
-// fixed port to this API; state is validated by the handler before completion.
-app.get("/auth/callback", createOAuthCallbackRateLimiter(), handleOAuthCallback);
 app.use(rateLimit);
 app.use(authMiddleware);
+app.use(csrfMiddleware);
+
+// OpenAI redirects the browser to localhost:1455/auth/callback. The Nginx
+// listener on that port proxies only this exact GET path. authMiddleware owns
+// the matching public allowlist; state validation and a dedicated rate limiter
+// remain mandatory before the callback can complete.
+app.get("/auth/callback", createOAuthCallbackRateLimiter(), handleOAuthCallback);
 
 // Health check
 app.get("/api/v1/health", (_req, res) => {
@@ -161,43 +157,36 @@ app.use("/api/v1/rag", ragRouter);
 // from middleware registered below the error handler.
 app.use(errorHandler);
 
-// Start server + scheduler
-app.listen(config.port, () => {
-  logger.info("api", `ingenium-api listening on port ${config.port}`);
+function runStartupMaintenance(lifecycle: ApiLifecycle): void {
+  logger.info("api", `ingenium-api listening privately on 127.0.0.1:${config.port}`);
 
-  // 🔴 Ensure global-default project exists before starting the scheduler,
-  //    which depends on it for synthesis interval resolution and email engine.
-  //    This is idempotent — if the project already exists, it's a no-op.
-  ensureGlobalProject();
+  // Ensure global-default exists before schedulers or mail maintenance use it.
+  const globalProjectId = ensureGlobalProject();
 
-  startScheduler(config.port);
-  startBackupScheduler();
+  if (shouldStartBackgroundSchedulers()) {
+    startScheduler(config.port);
+    startBackupScheduler();
+  } else {
+    logger.info("api", "Background schedulers disabled by API test/maintenance mode");
+  }
 
-  // 🔴 Email: migrate any project-scoped accounts to global, start sync engine
-  // Defer 10s to let the DB fully initialize (WAL recovery, migration locks settle)
-  // before touching email accounts. The email engine manages all IMAP I/O in-process. 
-  setTimeout(() => {
-    migrateEmailAccountsToGlobal().then((migrated) => {
-      if (migrated > 0) {
-        logger.info("api", `Migrated ${migrated} email settings to global project`);
-      }
-      // Start the sync engine instead of prefetch (engine owns all IMAP I/O now)
-      startEngine(getGlobalProjectId());
-      logger.info("api", "Email sync engine started for all connected accounts");
-    }).catch((err) => { logger.warn("api", `Email engine start deferred: ${err.message}`); });
-  }, 10_000); // Delay to ensure DB is fully initialized
+  if (shouldStartMailMaintenance()) {
+    startMailMaintenance(lifecycle, globalProjectId);
+  } else {
+    logger.info("api", "Mail maintenance disabled by API test/maintenance mode");
+  }
 
   // 🔴 Durability: run WAL checkpoint + integrity check at startup.
   // Ensures the WAL is truncated before the scheduler starts writing; integrity_check
   // catches corruption early (disk-full or unclean shutdown) before any data is processed.
-  const dbPath = process.env.INGENIUM_CORE_DB_PATH || "/app/.ingenium/data.db";
+  const dbPath = resolveCoreDbPath();
   try {
     const db = getDb(dbPath);
     const checkpoint = db.pragma("wal_checkpoint(TRUNCATE)");
     const integrity = db.pragma("integrity_check");
     logger.info("api", "DB startup check", { checkpoint, integrity });
-  } catch (e: any) {
-    logger.error("api", `DB startup check failed: ${e.message}`, { stack: e.stack });
+  } catch {
+    logger.error("api", "DB startup check failed");
   }
 
   // Register the default Ingenium MCP server in the DB (idempotent — skips if exists).
@@ -218,30 +207,79 @@ app.listen(config.port, () => {
       servers.updateServer(globalProjectRec.id, "ingenium", { running: 1 });
       logger.info("api", "Registered default Ingenium MCP server");
     }
-  } catch (err: unknown) {
-    logger.warn("api", `MCP server registration skipped: ${(err as Error).message}`);
+  } catch {
+    logger.warn("api", "MCP server registration skipped");
   }
-});
+}
 
-// Dynamic import to avoid circular dependency — ingenium-core is imported at the top of this
-// file, but by the time SIGTERM fires, the module graph may be partially torn down.
-// A fresh dynamic import ensures the logger module is still live.
-process.on("SIGTERM", () => {
-  import("ingenium-core").then(({ logger: crashLogger }) => {
-    crashLogger.info("api", "SIGTERM received — shutting down gracefully");
-  }).catch(() => {
-    console.log("[api] SIGTERM received — shutting down");
-  });
-  process.exit(0);
-});
+function installFatalErrorHandlers(lifecycle: ApiLifecycle): () => void {
+  const onUncaughtException = (error: Error) => {
+    // Provider errors can include OAuth codes, Authorization headers, URLs, or
+    // upstream bodies. Log only a stable operational message.
+    void error;
+    console.error("[api] FATAL unexpected exception — beginning graceful shutdown");
+    void lifecycle.shutdown("uncaughtException").finally(() => {
+      process.exitCode = 1;
+    });
+  };
+  const onUnhandledRejection = (reason: unknown) => {
+    void reason;
+    console.error("[api] FATAL unhandled rejection");
+  };
 
-process.on("SIGINT", () => {
-  import("ingenium-core").then(({ logger: crashLogger }) => {
-    crashLogger.info("api", "SIGINT received — shutting down gracefully");
-  }).catch(() => {
-    console.log("[api] SIGINT received — shutting down");
+  process.on("uncaughtException", onUncaughtException);
+  process.on("unhandledRejection", onUnhandledRejection);
+  return () => {
+    process.removeListener("uncaughtException", onUncaughtException);
+    process.removeListener("unhandledRejection", onUnhandledRejection);
+  };
+}
+
+export interface ApiServerHandle {
+  app: express.Express;
+  server: Server;
+  lifecycle: ApiLifecycle;
+  disposeSignalHandlers: () => void;
+}
+
+/** Start the private HTTP listener and attach graceful lifecycle ownership. */
+export function startApiServer(): ApiServerHandle | null {
+  // Refuse to bind when the credential is absent, malformed, or stored in an
+  // unsafe token file. No explicit hard exit is required: no listener or
+  // timer remains, and the non-zero exitCode is observed by supervisord.
+  try {
+    assertApiTokenConfigured();
+  } catch {
+    console.error("[api] FATAL API authentication configuration is invalid");
+    process.exitCode = 1;
+    return null;
+  }
+
+  const server = app.listen(config.port, "127.0.0.1");
+  const lifecycle = createApiLifecycle(server);
+  const disposeSignals = installShutdownSignalHandlers(lifecycle);
+  const disposeFatalHandlers = installFatalErrorHandlers(lifecycle);
+  lifecycle.registerCleanup("process-handlers", () => {
+    disposeSignals();
+    disposeFatalHandlers();
   });
-  process.exit(0);
-});
+
+  server.once("listening", () => runStartupMaintenance(lifecycle));
+  server.once("error", () => {
+    console.error("[api] FATAL HTTP listener failed — beginning graceful shutdown");
+    void lifecycle.shutdown("server-error").finally(() => {
+      process.exitCode = 1;
+    });
+  });
+
+  return { app, server, lifecycle, disposeSignalHandlers: disposeSignals };
+}
+
+function isMainModule(): boolean {
+  const entrypoint = process.argv[1];
+  return Boolean(entrypoint) && pathToFileURL(entrypoint!).href === import.meta.url;
+}
+
+if (isMainModule()) startApiServer();
 
 export default app;

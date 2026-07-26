@@ -155,9 +155,44 @@ The "New item" button opens a CreateItemModal with fields for name, credential v
 | `/api/v1/vault/items/:id` | PATCH | Update an item |
 | `/api/v1/vault/items/:id` | DELETE | Delete an item |
 
+## Fail-Closed Behavior
+
+The vault is a hard security boundary. When it is sealed, uninitialized,
+unavailable, or cannot decrypt an item, protected credential reads return no
+secret and protected writes fail rather than falling back to plaintext settings
+or environment-derived copies.
+
+OAuth application client secrets (`oauth_gmail_client_secret` and
+`oauth_outlook_client_secret`) are vault-backed protected settings. They are
+global mail infrastructure: reads, writes, and migration resolve only to the
+sole active global project. The selected dashboard or external worktree
+project is not a credential namespace. If more than one active global project
+exists, resolution fails closed instead of choosing one by name or row order.
+
+Settings responses expose only `isSet` and `masked`; they never return the
+secret. The supported actions are:
+
+- `preserve` — keep the saved value unchanged. A blank value from a sanitized
+  settings form is treated as preserve.
+- `replace` — store a new non-empty value in the unsealed vault.
+- `clear` — explicitly remove the saved value. The dashboard requires a
+  confirmed **Clear** action; declining the confirmation sends no clear
+  request.
+
+After a successful vault unseal, the service reconciles both legacy OAuth
+client-secret settings for the active global project. Reconciliation commits
+the unseal first, creates and decrypts/verifies the encrypted destination, and
+only then removes the legacy plaintext row. A sealed/unavailable vault,
+decryptability failure, protected/legacy value conflict, or write failure
+retains the source for retry and operator review; it never overwrites a
+conflicting protected value.
+
 ## Security Notes
 
 - The passphrase is **never stored** on the server. It is used client-side for scrypt key derivation to produce the AES-256-GCM encryption key.
 - There is **no passphrase recovery**. If the passphrase is lost, all secrets are permanently inaccessible.
 - On "Lock Vault", the client clears all decrypted data from memory.
 - On page load, the vault status is checked and the appropriate modal is shown automatically.
+- Losing `INGENIUM_EMAIL_ENCRYPTION_KEY` continuity makes encrypted mail
+  credentials unreadable; the system reports reconnect/decryption failure and
+  does not guess, re-encrypt, or overwrite the source data.

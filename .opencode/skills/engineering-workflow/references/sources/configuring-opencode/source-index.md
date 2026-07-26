@@ -15,6 +15,16 @@ description: "OpenCode agent configuration conventions — frontmatter structure
 - Adding `@skill-name` references to agent files
 - Setting up tool permissions per agent role
 
+## Runtime model parity
+
+Agent model and variant assignments are configured centrally in the repository
+`opencode.json`. The current topology is 12 agents: Orchestrator and Premium
+use GPT-5.6 Terra; Docs, Vision, Fast, and Scout use GPT-5.6 Luna; QA uses
+GPT-5.6 Terra (`xhigh`); Explore uses GPT-5.6 Sol (`medium`); Chat and Browser
+use DeepSeek V4 Flash (Chat has `high`, Browser has no variant); Security uses
+GPT-5.6 Sol (`high`); and the hidden LLM broker is unmapped. Do not add a
+conflicting `model:` declaration to a profile template.
+
 ## 🔴 HARD RULEs
 
 ### 🔴 Every Agent MUST Use `@skill-name` References
@@ -52,7 +62,6 @@ permission:
   bash: allow
   glob: allow
   grep: allow
-  skill: allow
   # Skill permissions — deny all except listed
   skill:
     "@development-conventions": allow
@@ -65,11 +74,12 @@ permission:
 Tool permissions MUST match the agent's role:
 | Role | Allowed tools |
 |------|--------------|
-| **Orchestrator** | read, bash (git only), task, skill, playwright_* |
+| **Orchestrator** | read, bash (git only), task, skill; `playwright_*: deny` |
 | **Software engineer** | read, edit, bash, glob, grep, skill, webfetch |
 | **QA / Reviewer** | read, bash (verify), skill — NO edit, NO write |
 | **Security auditor** | read, grep, glob, skill — NO edit, NO write |
 | **Docs** | read, edit, bash, glob, grep, skill |
+| **Browser** | read, edit, write, bash, glob, grep, browser/MCP tools, skill |
 | **Explore / Search** | read, glob, grep — NO edit, NO write, NO bash |
 | **Researcher** | read, webfetch, websearch, skill — NO edit, NO write |
 
@@ -80,8 +90,8 @@ Use `"*": "deny"` as the catch-all in the `skill:` block and explicitly allow on
 ```yaml
 permission:
   skill:
-    "development-conventions": allow
-    "devops-conventions": allow
+    "@development-conventions": allow
+    "@devops-conventions": allow
     "*": deny
 ```
 
@@ -95,6 +105,6 @@ This prevents agents from loading skills they shouldn't have access to.
 
 ## Cross-References
 
-- **`skill-maintenance`** — For creating, auditing, and retiring skills
-- **`mcp-tooling`** — Browser automation tool patterns
+- **`@skill-maintenance`** — For creating, auditing, and retiring skills
+- **`@mcp-tooling`** — Browser automation tool patterns
 - **OpenCode docs** (`https://opencode.ai/docs/agents/`, `https://opencode.ai/docs/tools/`, `https://opencode.ai/docs/skills/`)

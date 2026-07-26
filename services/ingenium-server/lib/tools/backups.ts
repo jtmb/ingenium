@@ -7,7 +7,7 @@ import { createWriteStream, promises as fs } from "node:fs";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { api } from "../client.js";
-import { config } from "../../config/index.js";
+import { apiRequestHeaders, config } from "../../config/index.js";
 
 /** Validated workspace-bounded path for backup downloads. */
 const WORKSPACE_ROOT = "/workspace";
@@ -76,10 +76,9 @@ export async function backupDownload(project: string, backupId: string, outputPa
   const url = new URL(`backups/${backupId}/download`, apiBase);
   url.searchParams.set("project", project);
 
-  const response = await fetch(url.toString());
+  const response = await fetch(url.toString(), { headers: apiRequestHeaders() });
   if (!response.ok) {
-    const errText = await response.text().catch(() => "Unknown error");
-    return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Download failed: HTTP ${response.status} — ${errText}` }) }] };
+    return { content: [{ type: "text" as const, text: JSON.stringify({ error: `Download failed: HTTP ${response.status}` }) }] };
   }
 
   const mimeType = response.headers.get("content-type") ?? "application/octet-stream";

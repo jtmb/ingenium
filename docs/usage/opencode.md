@@ -7,26 +7,59 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 ## Overview
 
-The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface** for interacting with the Ingenium MCP tools. The browser-facing OpenCode process disables Basic Auth so the iframe opens without a login prompt. Ports 4098 and 4099 are bound to host loopback (`127.0.0.1`) for security; the API proxy retains its separate server-side password guard.
+The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface** for interacting with the Ingenium MCP tools. The dashboard root (`http://localhost:3000/`), Web root (`http://opencode.localhost:3000/`), and CLI root (`http://cli.localhost:3000/`) are local Windows↔WSL gateway roots and do not use HTTP Basic Auth or browser bearer tokens. Direct host ports 4098/4099 are private and are not supported.
 
 For the conversational chat interface, see [Ingenium Chat](/chat).
 
 ## OpenCode Web/CLI Mode Switch
 
-- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts`: loopback HTTP (localhost/127.0.0.1) uses the direct port (`http://localhost:4098/`); LAN HTTP and HTTPS deployments use a same-origin reverse-proxy path (`/opencode-web/`) to avoid mixed-content and cross-origin issues. Overridable via `NEXT_PUBLIC_OPENCODE_WEB_URL` (relative same-origin paths only). The session persists across tab navigation with a hidden iframe technique.
-- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. URL resolution follows the same pattern: loopback HTTP → `http://localhost:4099/`, LAN HTTP / HTTPS → `/opencode-cli/` (overridable via `NEXT_PUBLIC_OPENCODE_CLI_URL`, relative same-origin paths only). The xterm.js terminal connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing the same session state as the Web UI.
+- **Web mode** — Embeds the root `opencode.localhost:3000` gateway. It is not served under `/opencode-web/`; root-relative assets and WebSockets make a subpath proxy unreliable.
+- **CLI mode** — Embeds the root `cli.localhost:3000` gateway. It is not served under `/opencode-cli/`; the terminal shares backend session state with Web mode.
 - **Mode switch** — A right-edge glass tab toggles between modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` switches between modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
 - **Toolbar**: The /opencode page toolbar contains only the Web/CLI mode toggle. Chat navigation is handled through the main navigation bar (not duplicated in the toolbar).
 
-## Terminal Attachment (Direct)
+## Terminal Attachment
 
-```bash
-opencode attach http://localhost:4098 --dir /workspace
-```
+Direct attachment to host ports 4098 and 4099 is intentionally unavailable; those listeners remain private. Use the local roots on gateway port `3000` (`opencode.localhost:3000` and `cli.localhost:3000`), which Windows reaches through WSL localhost forwarding. For LAN or remote deployments, an operator must provide a separate TLS-authenticated operator profile protecting the dashboard and both dedicated root HTTPS origins, then configure `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL` before rebuilding. The Windows helper only verifies existing gateway reachability and does not configure transport automatically.
 
-All sessions (Web iframe, CLI ttyd, direct terminal) share the same backend process state.
+The API also requires `INGENIUM_API_TOKEN`. Do not put it in tracked
+`opencode.json`/`opencode.jsonc`. The OpenCode MCP extension can use the
+ignored, owner-only `.opencode/.ingenium-api-token` fallback (mode `0600`) when
+the environment variable is unavailable. Dashboard API calls use a server-side
+proxy that injects the token; browser code never receives it. The loopback API
+boundary is `127.0.0.1:4097`. OAuth on `127.0.0.1:1455` reaches Nginx and then
+private Express `4096`; the auth middleware allowlists only the exact
+unauthenticated `GET /auth/callback` path.
+
+Web and CLI sessions share the same backend process state.
+
+## Gateway boundaries
+
+- **Rate limits are separate**: dashboard traffic uses its own `30r/s` bucket
+  with a `60` request burst; OpenCode Web/CLI traffic uses a separate bucket
+  with the same limits. Build assets and WebSocket upgrade handshakes use an
+  empty rate-limit key, so normal iframe startup traffic does not consume the
+  dynamic OpenCode request budget. Each surface still has a shared gateway
+  connection cap of 16.
+- **Loopback canonicalization**: supported dashboard origins are
+  `http://localhost:3000/` and `http://127.0.0.1:3000/`. Direct IPv6 loopback
+  navigation (`::1` or `[::1]`) is redirected with `308` to
+  `http://localhost:3000/`; this keeps the iframe CSP origin valid because CSP
+  does not accept the IPv6 literal form used here. The iframe roots remain
+  `opencode.localhost:3000` and `cli.localhost:3000`.
+- **Private upstreams**: ports `4098` and `4099` are container-internal only.
+  The gateway clears browser authorization, identity, and proxy-chain headers
+  before proxying; ttyd receives only the gateway-injected fixed identity.
+  The gateway owns the iframe CSP and permits framing only from the supported
+  dashboard loopback origins. Never publish the upstream ports as a workaround.
+- **CLI WebSocket origin check**: the `/ws` gateway route allows only the
+  explicit trusted local origins `http://localhost:3000`,
+  `http://127.0.0.1:3000`, and `http://cli.localhost:3000`. Nginx preserves the
+  browser `Origin` and derives a matching upstream `Host` before proxying, so
+  ttyd's `--check-origin` validation remains enabled. Arbitrary origins are
+  rejected with `403`; do not disable origin checking or bypass the gateway.
 
 ## Related Features
 

@@ -33,7 +33,11 @@ Projects can be either **regular** (default) or **global**.
 - Marked with `is_global = true`
 - Skills, plugins, and commands are written to `/home/appuser/.config/opencode/` (configurable via `INGENIUM_GLOBAL_CONFIG_PATH`)
 - Resources are shared across **all** projects via shared skill resolution
-- The `global-default` project is the primary global project
+- The active global namespace is singular: the database permits at most one
+  non-archived `is_global` project, normally `global-default`
+- If legacy data contains multiple active globals, runtime resolution fails
+  closed instead of selecting one arbitrarily; repair the designation before
+  using shared settings or mail
 - Global servers appear with "Enabled" badge on the Servers page
 
 ### Making a Project Global
@@ -55,6 +59,11 @@ await ingenium_project_set_global({
   isGlobal: false
 });
 ```
+
+Changing the global designation is a controlled data operation. Do not perform
+live migration or cleanup before deploying the release containing the
+integrity schema and runtime checks. First deploy, then run migration
+preflight and resolve duplicate-global or archived-project conflicts.
 
 ## Cross-Project Synthesis
 

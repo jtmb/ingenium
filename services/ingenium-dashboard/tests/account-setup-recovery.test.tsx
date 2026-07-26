@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 
-vi.mock("../src/lib/api", () => ({ getApiBase: () => "/api/v1" }));
+vi.mock("../src/lib/api", () => ({
+  getApiBase: () => "/api/v1",
+  dashboardFetch: (...args: Parameters<typeof globalThis.fetch>) => globalThis.fetch(...args),
+}));
 
 import AccountSetup from "../src/app/mail/components/AccountSetup";
 

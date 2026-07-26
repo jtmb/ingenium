@@ -2,7 +2,6 @@
 name: ingenium-llm-broker
 description: "Internal agent for Ingenium LLM broker — never invoke directly"
 mode: subagent
-model: deepseek/deepseek-v4-flash
 hidden: true
 permission:
   read: deny

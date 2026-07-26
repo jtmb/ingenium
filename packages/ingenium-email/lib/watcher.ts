@@ -22,7 +22,9 @@ import { triageEmails } from "./triage.js";
 import { suggestResponse } from "./responder.js";
 import { saveDraft } from "./smtp.js";
 import { getAccount, getCredentials } from "./accounts.js";
+import { apiRequestHeaders } from "./api-auth.js";
 import type { EmailAccount, OAuthToken } from "./types.js";
+import { ProviderOperationError } from "./provider-errors.js";
 
 interface WatcherEntry {
   projectId: string;
@@ -56,12 +58,12 @@ export async function startWatcher(
 
   const account = getAccount(projectId, accountId);
   if (!account) {
-    throw new Error(`Account ${accountId} not found in project ${projectId}`);
+    throw new ProviderOperationError("PROVIDER_NOT_FOUND", "imap", false);
   }
 
   const creds = getCredentials(projectId, accountId);
   if (!creds) {
-    throw new Error(`No credentials found for account ${accountId}`);
+    throw new ProviderOperationError("CREDENTIALS_UNAVAILABLE", "imap", false);
   }
 
   const auth = { password: creds.password, tokens: creds.tokens };
@@ -124,7 +126,7 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
 
     for (const triage of results) {
       // Log observation for self-learning pipeline
-      await logObservation(entry.projectId, {
+      await logWatcherObservation(entry.projectId, {
         observation_type: "pattern",
         content: `Email triaged: uid=${triage.emailUid} category=${triage.category} priority=${triage.priority} action=${triage.suggestedAction} skills=${triage.matchedSkills.join(",")} confidence=${triage.confidence}`,
         importance: triage.priority === "high" ? 8 : 5,
@@ -151,25 +153,28 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
               text: suggestion.body.replace(/<[^>]+>/g, ""),
             });
 
-            await logObservation(entry.projectId, {
+            await logWatcherObservation(entry.projectId, {
               observation_type: "insight",
               content: `Auto-draft saved for uid=${triage.emailUid} using skill=${suggestion.matchedSkill} confidence=${suggestion.confidence}`,
               importance: 7,
             });
-          } catch (err: unknown) {
-            await logObservation(entry.projectId, {
+          } catch {
+            await logWatcherObservation(entry.projectId, {
               observation_type: "error",
-              content: `Failed to save draft for uid=${triage.emailUid}: ${err instanceof Error ? err.message : String(err)}`,
+              // Transport/provider diagnostics can include credentials. Store a
+              // stable operational summary instead of propagating raw error text.
+              content: `Failed to save draft for uid=${triage.emailUid}: operation failed`,
               importance: 5,
             });
           }
         }
       }
     }
-  } catch (err: unknown) {
-    await logObservation(entry.projectId, {
+  } catch {
+    await logWatcherObservation(entry.projectId, {
       observation_type: "error",
-      content: `Watcher error for account ${entry.accountId}: ${err instanceof Error ? err.message : String(err)}`,
+      // Do not persist raw error text: it can contain provider diagnostics or tokens.
+      content: `Watcher error for account ${entry.accountId}: processing failed`,
       importance: 7,
     });
   }
@@ -179,7 +184,7 @@ async function handleNewEmail(entry: WatcherEntry): Promise<void> {
  * Log an observation to the Ingenium API for the self-learning pipeline.
  * Best-effort: failures are silent (non-critical path).
  */
-async function logObservation(
+export async function logWatcherObservation(
   projectId: string,
   data: {
     observation_type: string;
@@ -191,7 +196,7 @@ async function logObservation(
     const apiUrl = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
     await fetch(`${apiUrl}/observations?project=${projectId}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiRequestHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         ...data,
         source: "email_watcher",

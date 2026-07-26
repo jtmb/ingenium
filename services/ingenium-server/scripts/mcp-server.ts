@@ -8,7 +8,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { config } from "../config/index.js";
+import { apiRequestHeaders, config } from "../config/index.js";
 import { logger } from "../lib/logger.js";
 import { stopAll } from "../lib/proxy.js";
 
@@ -41,9 +41,6 @@ import * as vaultTools from "../lib/tools/vault.js";
 import * as backupTools from "../lib/tools/backups.js";
 
 // ── Tool State Check Wrapper ──────────────────────────────
-// NOTE: Duplicates config.apiUrl because this is evaluated at module load time before config is imported.
-const API_CLIENT = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1";
-
 /**
  * Checks whether a tool is enabled for the given project via the API.
  * Fail-open on error (network blip, API down) — a disabled tool is a nuisance,
@@ -51,7 +48,9 @@ const API_CLIENT = process.env.INGENIUM_API_URL ?? "http://localhost:4097/api/v1
  */
 async function checkToolEnabled(toolName: string, project: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_CLIENT}/mcp-tools/${encodeURIComponent(toolName)}/state?project=${encodeURIComponent(project)}`);
+    const res = await fetch(`${config.apiUrl}/mcp-tools/${encodeURIComponent(toolName)}/state?project=${encodeURIComponent(project)}`, {
+      headers: apiRequestHeaders(),
+    });
     if (!res.ok) return true;
     const data = await res.json();
     return data.data?.enabled !== false;
@@ -1670,7 +1669,7 @@ server.registerTool(
     const apiBase = config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/";
     const url = new URL("dashboard/summary", apiBase);
     url.searchParams.set("project", project);
-    const res = await fetch(url.toString());
+    const res = await fetch(url.toString(), { headers: apiRequestHeaders() });
     const data = await res.json();
     return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
   }),

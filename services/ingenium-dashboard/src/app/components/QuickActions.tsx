@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase } from "@/lib/api";
 
 /**
  * Quick action buttons for the operational cockpit.
@@ -21,9 +21,8 @@ export default function QuickActions() {
   const runSynthesis = async () => {
     setSynthesisLoading(true);
     try {
-      const res = await fetch(`${getApiBase()}/synthesis/run`, {
+      const res = await dashboardFetch(`${getApiBase()}/synthesis/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project: "global-default" }),
       });
       if (res.ok) {

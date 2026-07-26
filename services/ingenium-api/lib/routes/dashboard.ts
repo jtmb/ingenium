@@ -2,6 +2,7 @@ import { Router } from "express";
 import { synthesis, personality, tasks, jobs, settings, pipelineEvents, observations, getDb, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import type { EngineStatus } from "ingenium-email";
+import { getEmailClientStatus, getSynthesisStatus } from "../application-health.js";
 
 export const dashboardRouter = Router();
 
@@ -74,8 +75,9 @@ interface ActivityItem {
 
 interface HealthService {
   name: string;
-  status: 'running' | 'stopped' | 'error';
+  status: 'running' | 'healthy' | 'degraded' | 'stopped' | 'starting' | 'idle' | 'disabled' | 'error' | 'unknown';
   uptime?: number;
+  required?: boolean;
 }
 
 interface HealthData {
@@ -621,7 +623,7 @@ function mapEventToActivity(evt: {
  * Health strip — compact status indicators for services.
  * Queries supervisord for process states, and checks application health.
  */
-async function fetchHealth(projectId: string): Promise<{
+async function fetchHealth(): Promise<{
   health: HealthData | null;
   unavailable: string[];
 }> {
@@ -716,53 +718,22 @@ async function fetchHealth(projectId: string): Promise<{
 
   // ── In-process application checks ──────────────────────────────────────
   try {
-    // Synthesis engine — status based on interval config vs last-run age
-    // interval=0 means disabled; >3x interval = error; >1.5x = still running (may catch up)
-    try {
-      const intervalMs = parseInt(
-        settings.getSetting("global-default", "synthesis_interval_ms") ?? "900000",
-        10,
-      );
-      const synthStatus = synthesis.getSynthesisStatus(projectId);
-      const lastRun = synthStatus.last_synthesis_at
-        ? new Date(synthStatus.last_synthesis_at).getTime()
-        : null;
-
-      let synthState: HealthService["status"] = "running";
-      if (intervalMs === 0) {
-        synthState = "stopped";
-      } else if (lastRun) {
-        const age = Date.now() - lastRun;
-        if (age > intervalMs * 3) synthState = "error";
-        else if (age > intervalMs * 1.5) synthState = "running";
-      }
-
-      health.services.push({
+    const [synthesisStatus, emailStatus] = await Promise.all([
+      getSynthesisStatus(),
+      getEmailClientStatus(),
+    ]);
+    health.services.push(
+      {
         name: "Synthesis Engine",
-        status: synthState,
-      });
-    } catch {
-      health.services.push({ name: "Synthesis Engine", status: "stopped" });
-    }
-
-    // Email client
-    try {
-      const engineModule = await import("ingenium-email");
-      const engine = engineModule.getEngineStatus();
-      let emailState: HealthService["status"] = "stopped";
-      if (engine.running) {
-        const hbAge = engine.heartbeatAt
-          ? Date.now() - new Date(engine.heartbeatAt).getTime()
-          : null;
-        emailState = hbAge !== null && hbAge < 120_000 ? "running" : "error";
-      }
-      health.services.push({
+        status: synthesisStatus.state,
+        required: synthesisStatus.required,
+      },
+      {
         name: "Email Client",
-        status: emailState,
-      });
-    } catch {
-      health.services.push({ name: "Email Client", status: "stopped" });
-    }
+        status: emailStatus.state,
+        required: emailStatus.required,
+      },
+    );
   } catch (err: any) {
     logger.error("dashboard", `Failed to check application health: ${err.message}`);
     unavailable.push("health.applications");
@@ -838,7 +809,7 @@ dashboardRouter.get("/summary", async (req, res) => {
   allUnavailable.push(...activityResult.unavailable);
 
   // Health strip (async — queries supervisord)
-  const healthResult = await fetchHealth(projectId);
+  const healthResult = await fetchHealth();
   data.health = healthResult.health;
   allUnavailable.push(...healthResult.unavailable);
 

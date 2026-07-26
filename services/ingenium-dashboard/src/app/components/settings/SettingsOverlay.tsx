@@ -4,31 +4,102 @@ import { useEffect, useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ALL_TABS, tabForPathname } from "./tabs";
-import type { SettingsTab } from "./tabs";
+import type { SettingsTab, SettingsTabId } from "./tabs";
 import SettingsSidebar from "./SettingsSidebar";
-import PlaceholderPanel from "./PlaceholderPanel";
 import { GeneralPanel, MailPanel, PipelinePanel, ConfigPanel } from "./panels";
 import type { ComponentType } from "react";
+import RouteLinkedPanel from "./RouteLinkedPanel";
 
 /**
- * Registry mapping tab IDs to their real panel components.
- * Tabs without a registered component fall back to PlaceholderPanel.
- * Extend this record when adding a new settings panel.
+ * A settings section rendered in the overlay as a link to its dedicated
+ * management workspace. The destination owns all API access and mutations.
  */
-const TAB_PANELS: Record<string, ComponentType> = {
+interface RouteLinkedPanelDefinition {
+  destination: string;
+  description: string;
+}
+
+type SettingsPanelDefinition = ComponentType | RouteLinkedPanelDefinition;
+
+/**
+ * Registry mapping every declared Settings tab to a functional panel.
+ *
+ * The four compact settings forms live directly in the overlay. The remaining
+ * categories deliberately link to their existing full dashboard workspaces so
+ * the established API authorization, mutation flows, and responsive views are
+ * reused rather than reimplemented in a modal.
+ */
+const TAB_PANELS: Record<SettingsTabId, SettingsPanelDefinition> = {
   general: GeneralPanel,
+  projects: {
+    destination: "/projects",
+    description: "Create, switch, archive, restore, and purge projects in the Projects workspace.",
+  },
+  skills: {
+    destination: "/skills",
+    description: "Manage skills, governance proposals, versions, and synchronization in the Skills workspace.",
+  },
+  tasks: {
+    destination: "/tasks",
+    description: "Create, prioritize, and track work on the Tasks board.",
+  },
+  jobs: {
+    destination: "/jobs",
+    description: "Create scheduled jobs, inspect runs, and review execution logs in the Jobs workspace.",
+  },
+  plugins: {
+    destination: "/plugins",
+    description: "Create, edit, enable, and disable OpenCode plugins in the Plugins workspace.",
+  },
   mail: MailPanel,
+  agents: {
+    destination: "/agents",
+    description: "Manage agent profiles, categories, content, and availability in the Agents workspace.",
+  },
+  "mcp-servers": {
+    destination: "/mcp-servers",
+    description: "Manage MCP servers and the enabled tool catalog in the MCP workspace.",
+  },
+  observations: {
+    destination: "/observations",
+    description: "Browse and filter the observations collected by the self-learning pipeline.",
+  },
+  personality: {
+    destination: "/personality",
+    description: "Review and manage learned personality traits in the Personality workspace.",
+  },
   providers: PipelinePanel,
   config: ConfigPanel,
+  logs: {
+    destination: "/logs",
+    description: "Inspect the live system log stream, filters, and diagnostics in the Logs workspace.",
+  },
 };
 
-/** Only tabs that have real panel components registered — hides tabs with PlaceholderPanel fallback. */
-const VISIBLE_TABS = ALL_TABS.filter((t) => TAB_PANELS[t.id] !== undefined);
+function isRouteLinkedPanel(
+  panel: SettingsPanelDefinition,
+): panel is RouteLinkedPanelDefinition {
+  return typeof panel === "object";
+}
 
-/** Resolves a tab ID to either a registered panel component or the generic placeholder. */
-function TabPanel({ tabId, activeTab }: { tabId: string; activeTab: SettingsTab }) {
-  const Panel = TAB_PANELS[tabId];
-  return Panel ? <Panel /> : <PlaceholderPanel tab={activeTab} />;
+/** Resolves every supported tab ID to its concrete or route-linked panel. */
+function TabPanel({ tab }: { tab: SettingsTab }) {
+  const panel = TAB_PANELS[tab.id];
+  if (isRouteLinkedPanel(panel)) {
+    return (
+      <section aria-label={`${tab.label} settings panel`} data-testid={`settings-panel-${tab.id}`}>
+        <RouteLinkedPanel tab={tab} {...panel} />
+      </section>
+    );
+  }
+
+  const Panel = panel;
+
+  return (
+    <section aria-label={`${tab.label} settings panel`} data-testid={`settings-panel-${tab.id}`}>
+      <Panel />
+    </section>
+  );
 }
 
 /**
@@ -56,13 +127,13 @@ export default function SettingsOverlay() {
   const settingsParam = searchParams.get("settings");
   const isOpen = settingsParam !== null;
 
-  const currentTabId = settingsParam && VISIBLE_TABS.some((t) => t.id === settingsParam)
+  const currentTabId = settingsParam && ALL_TABS.some((t) => t.id === settingsParam)
     ? settingsParam
-    : VISIBLE_TABS.some((t) => t.id === tabForPathname(pathname))
+    : ALL_TABS.some((t) => t.id === tabForPathname(pathname))
       ? tabForPathname(pathname)
-      : VISIBLE_TABS[0]?.id ?? "general";
+      : ALL_TABS[0]?.id ?? "general";
 
-  const activeTab: SettingsTab = VISIBLE_TABS.find((t) => t.id === currentTabId) ?? VISIBLE_TABS[0]!;
+  const activeTab: SettingsTab = ALL_TABS.find((t) => t.id === currentTabId) ?? ALL_TABS[0]!;
 
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -140,7 +211,7 @@ export default function SettingsOverlay() {
         aria-labelledby="settings-title"
       >
         <SettingsSidebar
-          tabs={VISIBLE_TABS}
+          tabs={ALL_TABS}
           activeTab={currentTabId}
           onSelect={selectTab}
         />
@@ -164,18 +235,18 @@ export default function SettingsOverlay() {
           <select
             value={activeTab.id}
             onChange={(e) => selectTab(e.target.value)}
-            className="md:hidden mx-6 mt-3 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)]"
+            className="md:hidden mx-6 mt-3 border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
             aria-label="Settings category"
           >
-            {VISIBLE_TABS.map(tab => (
+            {ALL_TABS.map(tab => (
               <option key={tab.id} value={tab.id}>{tab.label}</option>
             ))}
           </select>
 
           <div className="flex-1 overflow-y-auto">
-            {VISIBLE_TABS.map((tab) => (
+            {ALL_TABS.map((tab) => (
               <div key={tab.id} hidden={tab.id !== activeTab.id} inert={tab.id !== activeTab.id || undefined}>
-                <TabPanel tabId={tab.id} activeTab={tab} />
+                <TabPanel tab={tab} />
               </div>
             ))}
           </div>

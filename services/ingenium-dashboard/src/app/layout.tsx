@@ -34,7 +34,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const htmlClass = themeCookie === "dark" ? "dark" : "";
 
   return (
-    <html lang="en" className={htmlClass} suppressHydrationWarning>
+    <html lang="en" className={`${htmlClass} h-full`} suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -42,7 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           }}
         />
       </head>
-      <body className="min-h-screen bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] overflow-x-hidden flex flex-col">
+      <body className="h-dvh bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] overflow-x-hidden flex flex-col">
         <ThemeProvider>
         <NavigationProvider>
           <nav className="shrink-0 bg-[var(--color-surface)] border-b border-[var(--color-border)] px-6 py-3 flex items-center gap-4">
@@ -57,7 +57,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <div className="flex flex-1 min-h-0">
             <Navigation />
             <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-auto">
-              <div className="flex-1 min-h-0 grid grid-rows-[1fr]">
+              <div className="flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)]">
                 <MainContainer>
                   <Suspense>{children}</Suspense>
                 </MainContainer>

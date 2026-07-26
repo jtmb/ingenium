@@ -1,28 +1,43 @@
 import { Request, Response, NextFunction } from "express";
-import { timingSafeEqual } from "node:crypto";
 import { AppError } from "./errors.js";
+import { apiTokensEqual, loadApiToken } from "./api-token.js";
 
 /**
- * Optional token-based auth middleware.
+ * The sole unauthenticated API route is the OAuth provider redirect. It must
+ * remain an exact GET match: query parameters carry the provider state, while
+ * all management endpoints (including health) require a Bearer token.
+ */
+export function isPublicOAuthCallbackRequest(req: Request): boolean {
+  return req.method === "GET" && req.path === "/auth/callback";
+}
+
+/**
+ * Token-based authentication for every API management request.
  *
- * If INGENIUM_API_TOKEN is not set, all requests pass through unauthenticated
- * (development-friendly default). When configured, every request must include a
- * valid `Authorization: Bearer <token>` header.
+ * INGENIUM_API_TOKEN is mandatory in normal operation. A missing server token
+ * is a deployment error, never a development-mode bypass. The OAuth callback
+ * is the narrowly scoped exception because an OAuth provider cannot attach the
+ * local API credential to its browser redirect.
  *
  * Placement in the middleware chain matters: auth sits AFTER rate limiting so
  * brute-force attempts are throttled before the constant-time comparison runs.
  * 401 vs 403 distinguishes "missing/invalid header" from "wrong token provided".
  *
- * 🔴 Timing-safe comparison: uses crypto.timingSafeEqual with length-safe padding
- * to prevent timing side-channel leakage of the correct token length and content.
+ * 🔴 Token loading and comparison are centralized in api-token.ts so runtime-file
+ * and inline configuration have the same strength and timing-safe guarantees.
  */
 export function authMiddleware(req: Request, _res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-  const token = process.env.INGENIUM_API_TOKEN;
-
-  if (!token) {
+  if (isPublicOAuthCallbackRequest(req)) {
     next();
     return;
+  }
+
+  const authHeader = req.headers.authorization;
+  let token: string;
+  try {
+    token = loadApiToken();
+  } catch {
+    throw new AppError("API authentication is not configured", "API_AUTH_NOT_CONFIGURED", 503);
   }
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -30,18 +45,7 @@ export function authMiddleware(req: Request, _res: Response, next: NextFunction)
   }
 
   const provided = authHeader.slice(7);
-
-  // Timing-safe comparison — pad both inputs to equal length so
-  // timingSafeEqual never throws on differing buffer lengths.
-  const providedBuf = Buffer.from(provided, "utf8");
-  const tokenBuf = Buffer.from(token, "utf8");
-  const maxLen = Math.max(providedBuf.length, tokenBuf.length);
-  const paddedProvided = Buffer.alloc(maxLen, 0);
-  const paddedToken = Buffer.alloc(maxLen, 0);
-  providedBuf.copy(paddedProvided);
-  tokenBuf.copy(paddedToken);
-
-  if (!timingSafeEqual(paddedProvided, paddedToken)) {
+  if (!apiTokensEqual(provided, token)) {
     throw new AppError("Invalid authorization token", "FORBIDDEN", 403);
   }
 

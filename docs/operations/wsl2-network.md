@@ -1,134 +1,99 @@
-# WSL2 Network Access
+# WSL2 and Windows Transport
 
-When running `opencode web --hostname 0.0.0.0` inside WSL2, the server binds to the
-WSL2 VM's interfaces (`127.0.0.1` + internal `172.x.x.x`) — **not** the Windows
-host's LAN IP. WSL2 uses NAT, so other devices on your local network cannot reach it
-directly.
+The default deployment supports Windows access to the Docker gateway through
+WSL's normal localhost forwarding. **Port `3000` is the only gateway-reachable
+host port** for the dashboard and the local OpenCode roots:
 
-## Solution: Windows Port Proxy
+- Dashboard: `http://localhost:3000/`, published by Compose as `3000:3000` with no HTTP Basic Auth.
+- OpenCode Web: local root `http://opencode.localhost:3000/` with no HTTP Basic Auth.
+- OpenCode CLI: local root `http://cli.localhost:3000/` with no HTTP Basic Auth.
+- API boundary: `127.0.0.1:4097`, a bearer-authenticated host-loopback endpoint
+  for MCP clients only. It is not the browser gateway; browser traffic must use
+  port `3000` and the same-origin dashboard proxy.
+- OpenCode and ttyd listeners on `4098` and `4099`: private container upstreams;
+  never publish, forward, or open them in Windows Firewall.
 
-### 1. Find WSL2's Internal IP
+All three browser-facing roots are intentionally credential-free for the normal
+local Windows↔WSL path. The dashboard same-origin proxy injects the API token
+server-side; it never exposes or sends a browser bearer token. This plain-HTTP
+gateway is not a LAN or remote security profile.
 
-```powershell
-wsl -- ip addr show eth0 | findstr inet
-# → inet 172.25.205.181/20 brd ...
-```
+## Gateway rate limits and loopback canonicalization
 
-### 2. Add Port Forward (Windows PowerShell as Admin)
+The Nginx gateway separates dashboard and OpenCode rate-limit buckets. Both
+dynamic surfaces allow `30r/s` with a burst of `60`; assets and WebSocket
+upgrade handshakes do not consume the dynamic OpenCode bucket. A shared
+connection limit of 16 still applies to each gateway client address.
 
-```powershell
-netsh interface portproxy add v4tov4 `
-    listenaddress=0.0.0.0 listenport=4096 `
-    connectaddress=172.25.205.181 connectport=4096
-```
+Use `http://localhost:3000/` or `http://127.0.0.1:3000/` for the dashboard.
+If a browser reaches the gateway directly as IPv6 loopback (`::1` or
+`[::1]`), Nginx canonicalizes it with a `308` redirect to the `localhost`
+origin. This is intentional: the iframe CSP allowlist uses the valid
+`localhost`/`127.0.0.1` forms, while the OpenCode iframes use the separate
+`http://opencode.localhost:3000/` and `http://cli.localhost:3000/` roots.
 
-### 3. Open Windows Firewall
+The gateway is the only browser path to OpenCode. Its upstream listeners are
+container-private, and the proxy strips browser authorization, identity, and
+forwarding headers before forwarding. The CLI identity is injected only by the
+gateway. Never add a Windows port-proxy or firewall rule for 4098/4099.
 
-```powershell
-New-NetFirewallRule -DisplayName "OpenCode Web" `
-    -Direction Inbound -Protocol TCP -LocalPort 4096 -Action Allow
-```
+## Windows loopback verification
 
-### Verify
-
-```powershell
-netsh interface portproxy show all
-```
-
-Access from LAN at `http://<windows-host-ip>:4096`.
-
-### Teardown
-
-```powershell
-netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=4096
-```
-
-### Batch Forwarding Port Ranges
-
-To forward multiple ports (e.g., Dashboard 3000-3009 and API/services 4090-4099):
+The repository helper is deliberately a verifier, not a transport installer:
 
 ```powershell
-for ($i=3000; $i -le 3009; $i++) { netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=$i connectaddress=172.25.205.181 connectport=$i }
-for ($i=4090; $i -le 4099; $i++) { netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=$i connectaddress=172.25.205.181 connectport=$i }
+pwsh -File .\scripts\windows-loopback-transport.ps1
 ```
 
-Firewall rule for the same ranges:
+It verifies IPv4 and IPv6 loopback, a forwarded-host fallback, the exact
+same-origin dashboard API path, and both OpenCode gateway roots. Every browser
+gateway probe must receive `200` without a `WWW-Authenticate` challenge; the
+verifier also confirms that the bearer-less API boundary returns `401`. If the
+Windows↔WSL transport deliberately leaves Linux loopback port `4097`
+check the same loopback boundary inside its owning network namespace. It does
+not create a listener, Windows port-proxy rule, firewall exception, or any
+other host-network mutation.
+
+## Secure Windows, LAN, and remote access
+
+The unqualified Docker publication is required for WSL localhost forwarding.
+Plaintext HTTP is not an appropriate LAN or remote security boundary. If access
+must leave the local machine, provide a separate operator-managed TLS-authenticated profile
+(reverse proxy, VPN, or equivalent) that terminates TLS and protects the
+dashboard and both OpenCode root origins. Do not replace this with a raw `netsh
+interface portproxy` rule or a firewall exception for 4098/4099.
+
+Before building that profile, set **both** public origin variables:
 
 ```powershell
-New-NetFirewallRule -DisplayName "Ingenium Dev Ports" -Direction Inbound -Protocol TCP -LocalPort 3000-3009,4090-4099 -Action Allow
+$env:NEXT_PUBLIC_OPENCODE_WEB_URL = "https://opencode.example.com/"
+$env:NEXT_PUBLIC_OPENCODE_CLI_URL = "https://cli.example.com/"
+docker compose up --build -d
 ```
 
-### Batch Teardown
+The origins must be dedicated root HTTPS origins: no path, query, fragment,
+embedded credentials, or dashboard subpath. The TLS profile must authenticate
+the request before forwarding to the private services. Plain LAN HTTP and direct
+4098/4099 exposure are unsupported.
 
-```powershell
-for ($i=3000; $i -le 3009; $i++) { netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$i }
-for ($i=4090; $i -le 4099; $i++) { netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=$i }
+## Build, restart, and rollback
+
+`NEXT_PUBLIC_*` values are embedded into the Next.js bundle at image build time.
+Changing them in `.env` or the running container without rebuilding does not
+change iframe targets. After changing public origins, gateway configuration, or
+the image, rebuild and restart, then verify the dashboard and both local root
+origins from the real browser path:
+
+```bash
+docker compose up --build -d
 ```
 
-> **Caveat:** WSL2's IP changes on reboot. Re-run the `add` commands with the new IP if it changes.
+If the new profile cannot be verified, roll back the image and build-time
+configuration to the last known-good deployment. Do not work around a failed
+transport by exposing the private upstream ports.
 
-## Alternative: Mirrored Networking Mode
+## No subpath proxy
 
-Edit `%USERPROFILE%\.wslconfig`:
-
-```
-[wsl2]
-networkingMode=mirrored
-```
-
-Then `wsl --shutdown` and restart WSL. WSL2 shares the Windows host IP directly,
-so `opencode web --hostname 0.0.0.0` shows the "Network access" line automatically.
-
-## Dashboard LAN / Proxy — OpenCode Web/CLI URL Derivation
-
-The embedded OpenCode Web and CLI iframes derive their backend URL from the
-dashboard's own URL after client hydration (`services/ingenium-dashboard/src/lib/runtime-urls.ts`).
-Resolution is deferred from SSR to post-hydration via `useState`/`useEffect` so that
-loopback clients never first navigate to the SSR-generated proxy fallback URL.
-The logic uses `window.location` to decide between a direct port or a same-origin
-proxy path:
-
-| Dashboard URL | OpenCode Web iframe src | Mechanism |
-|---|---|---|
-| `http://localhost:3000/` (loopback) | `http://localhost:4098/` | Direct port — port 4098 substituted in-place |
-| `http://127.0.0.1:3000/` (loopback) | `http://127.0.0.1:4098/` | Direct port |
-| `http://192.168.1.50:3000/` (LAN HTTP) | `http://192.168.1.50:3000/opencode-web/` | Same-origin proxy via Next.js rewrite |
-| `http://ingenium.internal:3000/` (LAN HTTP) | `http://ingenium.internal:3000/opencode-web/` | Same-origin proxy |
-| `https://dashboard.example.com/` (HTTPS) | `https://dashboard.example.com/opencode-web/` | Same-origin proxy (avoids mixed content) |
-
-The CLI (ttyd) iframe follows the identical pattern with port 4099 / `/opencode-cli/`.
-
-### How it works
-
-1. **`runtime-urls.ts`** (`services/ingenium-dashboard/src/lib/runtime-urls.ts`):
-   - Calls `openCodeUrl(port, proxyPath, configuredOverride)` using the browser's `window.location`
-   - If protocol is `https:` or hostname is NOT loopback (`localhost`, `127.0.0.1`, `[::1]`), returns a same-origin proxy URL built by appending the proxy path to `window.location.origin`
-   - Otherwise (loopback HTTP), substitutes the port in-place — e.g. `http://localhost:3000/` → `http://localhost:4098/`
-
-2. **Next.js rewrites** (`next.config.js`):
-   - `/opencode-web/:path*` → `http://127.0.0.1:4098/:path*`
-   - `/opencode-cli/:path*` → `http://127.0.0.1:4099/:path*`
-   - Same-proxy pattern as `/api/v1/:path*` → `http://127.0.0.1:4097/:path*`
-
-3. **CSP headers** (same `next.config.js`):
-   - `frame-src 'self' http://localhost:4098 http://localhost:4099` — allows same-origin proxy URLs and direct loopback ports for local development
-   - `connect-src 'self' http://localhost:4097` — allows same-origin and direct loopback API access
-
-4. **Docker Compose port binding** (only port 3000 is LAN-accessible):
-   - Port `3000` is published without a host prefix → accessible from LAN
-   - Ports `4097`, `4098`, `4099`, `1455` are all `127.0.0.1:`-bound → host loopback only
-   - The dashboard is the single public entry point; OpenCode/ttyd/API/OAuth are reached through it via the same-origin proxy
-
-5. **Environment overrides** (optional):
-   - `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL`
-   - Only **relative same-origin paths** are accepted (must start with `/`). Direct service origins like `http://opencode.example.com/` are rejected and fall back to the default proxy path. This is enforced by `configuredPath()` in `runtime-urls.ts`.
-
-### WSL2 + LAN access
-
-When the dashboard is accessed from a LAN device via WSL2's Windows IP:
-
-1. WSL2 port proxy forwards the LAN-port 3000 to WSL2's internal IP
-2. The browser at `http://<windows-ip>:3000/` triggers the LAN HTTP branch in `runtime-urls.ts`
-3. Both OpenCode Web and CLI iframes load via `/opencode-web/` and `/opencode-cli/` same-origin proxy paths
-4. The Next.js rewrites forward these requests to the loopback-bound OpenCode/ttyd processes inside the container
-5. No additional CORS/CSP widening or port-range exposure is needed — the proxy handles it all through a single published port (3000)
+OpenCode is served only from a root origin. `/opencode-web/` and
+`/opencode-cli/` subpath proxies are not supported because root-relative assets
+and WebSockets do not remain functional through that rewrite.

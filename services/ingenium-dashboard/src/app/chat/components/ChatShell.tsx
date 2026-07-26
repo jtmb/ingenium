@@ -516,7 +516,7 @@ export default function ChatShell() {
       )}
 
       {/* Main chat area */}
-      <div className="flex-1 flex-col min-w-0 flex">
+      <div className="flex-1 flex-col min-w-0 min-h-0 flex">
         <ChatHeader
           sessionTitle={activeSession?.title ?? "Chat"}
           onRename={handleRename}

@@ -47,9 +47,9 @@ export default function HealthStrip({ data, loading }: HealthStripProps) {
   // - All green  → "All systems operational"
   // - Partial    → "N service(s) degraded" (counts API + OpenCode + individual services)
   // - Total      → "Multiple services down" (API + OpenCode + ALL services non-running)
-  const allServicesOk = data.services.every(
-    (s) => s.status === "running" || s.status === "healthy"
-  );
+  const serviceNeedsAttention = (service: HealthData["services"][number]) =>
+    service.required !== false && service.status !== "running" && service.status !== "healthy";
+  const allServicesOk = data.services.every((service) => !serviceNeedsAttention(service));
   const apiOk = data.api.status === "ok";
   const ocOk = data.opencode.status === "ok";
 
@@ -59,12 +59,12 @@ export default function HealthStrip({ data, loading }: HealthStripProps) {
     const downCount = [
       apiOk ? 0 : 1,
       ocOk ? 0 : 1,
-      ...data.services.map((s) => (s.status === "running" || s.status === "healthy" ? 0 : 1)),
+      ...data.services.map((service) => (serviceNeedsAttention(service) ? 1 : 0)),
     ].reduce((a, b) => a + b, 0);
     summary = `${downCount} service${downCount !== 1 ? "s" : ""} degraded`;
     summaryClass = "text-[var(--color-warning-text)]";
   }
-  if (!apiOk && !ocOk && data.services.every((s) => s.status !== "running")) {
+  if (!apiOk && !ocOk && data.services.filter((service) => service.required !== false).every(serviceNeedsAttention)) {
     summary = "Multiple services down";
     summaryClass = "text-[var(--color-error-text)]";
   }

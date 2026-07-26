@@ -87,6 +87,12 @@ Access-Control-Allow-Origin: *
 credentials.json
 ```
 
+## Reference Files
+
+| File | Content |
+|------|---------|
+| [`references/trusted-first-party-iframe-rule.md`](references/trusted-first-party-iframe-rule.md) | Origin-based iframe sandbox decisions: trusted cross-origin embeds (no sandbox), untrusted same-origin (sandbox required), danger of `allow-scripts`+`allow-same-origin`, and Permissions Policy for scoped capabilities |
+
 ## Migrated Sources (Phase 3 Taxonomy)
 
 | Source | Content Preserved At |

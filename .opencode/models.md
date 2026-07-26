@@ -1,25 +1,19 @@
-# Available Models
+# Active Agent Models
 
-Agent YAML format: `model: {provider-id}/{model-key}`
+> Agent model mappings are centralized in [`opencode.json`](../opencode.json) under the `"agent"` key. This table is intentionally limited to the active mappings in that file; Markdown agent profiles do not define runtime models.
 
----
+| Agent | Model | Variant |
+|---|---|---|
+| `browser-agent` | `deepseek/deepseek-v4-flash` | — |
+| `ingenium-docs` | `openai/gpt-5.6-luna` | `medium` |
+| `ingenium-qa` | `openai/gpt-5.6-terra` | `xhigh` |
+| `ingenium-qa-vision` | `openai/gpt-5.6-luna` | `high` |
+| `ingenium-software-engineer-fast` | `openai/gpt-5.6-luna` | `xhigh` |
+| `ingenium-software-engineer-premium` | `openai/gpt-5.6-terra` | `xhigh` |
+| `ingenium-orchestrator` | `openai/gpt-5.6-terra` | `high` |
+| `ingenium-explore` | `openai/gpt-5.6-sol` | `medium` |
+| `ingenium-scout` | `openai/gpt-5.6-luna` | `high` |
+| `ingenium-chat` | `deepseek/deepseek-v4-flash` | `high` |
+| `ingenium-security-auditor` | `openai/gpt-5.6-sol` | `high` |
 
-## DeepSeek
-
-- **deepseek-chat** -> `model: deepseek/deepseek-chat`
-- **deepseek-reasoner** -> `model: deepseek/deepseek-reasoner`
-- **deepseek-v4-flash** -> `model: deepseek/deepseek-v4-flash`
-- **deepseek-v4-pro** -> `model: deepseek/deepseek-v4-pro`
-
-## OpenCode Zen
-
-- **big-pickle** -> `model: opencode/big-pickle`
-- **deepseek-v4-flash-free** -> `model: opencode/deepseek-v4-flash-free`
-- **hy3-free** -> `model: opencode/hy3-free`
-- **mimo-v2.5-free** -> `model: opencode/mimo-v2.5-free`
-- **nemotron-3-ultra-free** -> `model: opencode/nemotron-3-ultra-free`
-- **north-mini-code-free** -> `model: opencode/north-mini-code-free`
-
-## LMStudio (local)
-
-- **qwen/qwen3.5-9b** -> `model: qwen/qwen3.5-9b`
+The hidden `ingenium-llm-broker` is system-internal and has no entry in the root configuration's `"agent"` mapping.

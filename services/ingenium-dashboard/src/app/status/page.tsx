@@ -7,10 +7,22 @@ import { getApiBase } from "@/lib/api";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type ServiceState = "running" | "starting" | "error" | "stopped";
+type ApplicationState =
+  | "healthy"
+  | "degraded"
+  | "unhealthy"
+  | "stopped"
+  | "starting"
+  | "idle"
+  | "disabled"
+  | "error"
+  | "unknown";
 
 interface Service {
   name: string;
   state: ServiceState;
+  /** Processes are required unless the API explicitly marks them optional. */
+  required?: boolean;
   uptime: number; // seconds
   restartCount: number;
   port: number;
@@ -23,9 +35,11 @@ interface Service {
 
 interface ApplicationInfo {
   name: string;
-  state: "healthy" | "degraded" | "stopped" | "starting" | "idle" | "disabled" | "error" | "unknown";
+  state: ApplicationState;
   description: string;
   detail?: string;
+  /** Optional applications (for example, unconfigured email) do not degrade aggregate health. */
+  required?: boolean;
 }
 
 interface ServiceDetail {
@@ -134,6 +148,13 @@ function appStateBadge(state: ApplicationInfo["state"]): {
         text: "text-[var(--color-warning-text)]",
         dotClass: "status-dot-amber",
       };
+    case "unhealthy":
+      return {
+        label: "Unhealthy",
+        bg: badgeTones('error'),
+        text: "",
+        dotClass: "status-dot-red",
+      };
     case "stopped":
       return {
         label: "Stopped",
@@ -213,9 +234,10 @@ function healthBanner(
  *   1. supervisord-managed processes (API, Dashboard, opencode-web, ttyd)
  *   2. In-process application services (synthesis-engine, email-client)
  *
- * `effectiveOverall` flags degradation when application services are in
- * error/stopped state even if supervisord reports "healthy" — this matters
- * because the in-process services are not tracked by supervisord.
+ * `effectiveOverall` defends against stale API responses by also considering
+ * required process and in-process application states. The API is the
+ * authoritative aggregate-health source and normally supplies this
+ * degradation itself.
  *
  * The ServiceOverlay component (lazy-loaded) provides PID, exit status,
  * spawn error details, and recent log tail.
@@ -263,12 +285,16 @@ export default function StatusPage() {
   const services = status?.data?.services ?? [];
   const applications = status?.data?.applications ?? [];
   const overall = status?.data?.overall ?? "down";
-  const degradedServiceCount = services.filter((s) => s.state !== "running").length;
+  const degradedServiceCount = services.filter(
+    (service) => service.required !== false && service.state !== "running"
+  ).length;
   const degradedAppCount = applications.filter(
-    (a) => a.state === "error" || a.state === "stopped"
+    (a) => a.required !== false && a.state !== "healthy"
   ).length;
   const effectiveOverall =
-    degradedAppCount > 0 && overall === "healthy" ? "degraded" : overall;
+    overall === "healthy" && (degradedServiceCount > 0 || degradedAppCount > 0)
+      ? "degraded"
+      : overall;
   const banner = healthBanner(effectiveOverall, degradedServiceCount + degradedAppCount);
 
   // Show error banner if API itself is unreachable

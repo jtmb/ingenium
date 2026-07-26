@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useProject } from "../../lib/ProjectContext";
 import Overlay from "../components/Overlay";
-import { api, Job, JobRun, JobRunLog, Agent, getApiBase } from "../../lib/api";
+import { api, dashboardFetch, Job, JobRun, JobRunLog, Agent, getApiBase } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
 const API_BASE = getApiBase();
@@ -312,9 +312,8 @@ function JobFormOverlay({
                       setWandLoading(true);
                       setWandError(null);
                       try {
-                        const res = await fetch(`${API_BASE}/jobs/suggest?project=${project}`, {
+                        const res = await dashboardFetch(`${API_BASE}/jobs/suggest?project=${project}`, {
                           method: "POST",
-                          headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ description: form.description.trim() }),
                         });
                         if (!res.ok) {

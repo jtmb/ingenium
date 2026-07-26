@@ -4,6 +4,52 @@ import { resolve, dirname } from "node:path";
 import { logger } from "./logger.js";
 
 /**
+ * The database file used by deployed Ingenium instances. Do not change this
+ * default to a `.db` sibling: existing containers persist this exact path in
+ * the `/app/.ingenium` volume.
+ */
+export const DEPLOYED_CORE_DB_PATH = "/app/.ingenium/data";
+
+const LEGACY_DEFAULT_DB_PATHS = new Set([
+  "./data",
+  "./.ingenium/data.db",
+  "/app/.ingenium/data.db",
+]);
+
+/**
+ * Resolve the single database path used by production code.
+ *
+ * Callers may still supply an explicit path for isolated tests. Historical
+ * production fallback spellings are normalized here rather than being allowed
+ * to create a second database beside the deployed `/app/.ingenium/data` file.
+ * This resolver never moves, creates, or rewrites an existing database.
+ */
+export function resolveCoreDbPath(requestedPath?: string): string {
+  const requested = requestedPath?.trim();
+  if (requested && !LEGACY_DEFAULT_DB_PATHS.has(requested)) {
+    return resolve(requested);
+  }
+
+  const configured = process.env.INGENIUM_CORE_DB_PATH?.trim();
+  if (configured && !LEGACY_DEFAULT_DB_PATHS.has(configured)) return resolve(configured);
+
+  const configuredHome = process.env.INGENIUM_HOME?.trim();
+  if (configuredHome) return resolve(configuredHome, "data");
+
+  // A container normally has /app as its working directory before the volume
+  // exists, so check both the data file and its mounted parent.
+  if (
+    existsSync(DEPLOYED_CORE_DB_PATH) ||
+    existsSync(dirname(DEPLOYED_CORE_DB_PATH)) ||
+    resolve(process.cwd()) === "/app"
+  ) {
+    return DEPLOYED_CORE_DB_PATH;
+  }
+
+  return resolve(process.cwd(), ".ingenium", "data");
+}
+
+/**
  * Retry budget for `execTransaction` when SQLite reports contention.
  *
  * WRITE_MAX_RETRIES = 15 — chosen so that with typical backoff durations
@@ -40,15 +86,17 @@ let db: Database.Database | null = null;
  * - `foreign_keys = ON` — SQLite defaults to OFF for backward compatibility.
  *   Must be re-enabled every connection because it is not persisted in the DB file.
  */
-export function getDb(dbPath: string): Database.Database {
+export function getDb(dbPath?: string): Database.Database {
   if (db) return db;
 
-  const dir = dirname(dbPath);
+  const resolvedDbPath = resolveCoreDbPath(dbPath);
+
+  const dir = dirname(resolvedDbPath);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
 
-  db = new Database(dbPath);
+  db = new Database(resolvedDbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("busy_timeout = 5000");
   db.pragma("foreign_keys = ON");
@@ -81,7 +129,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh database — apply every migration in dependency order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -706,7 +754,73 @@ function runMigrations(db: Database.Database): void {
       }
       logger.info("db", "Applied migration 051_thread_retirement.sql");
     }
+
+    // Migration 052: normalize historical category values and enforce the
+    // canonical agent-category allowlist at the database boundary.
+    const agentsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='agents'").get() as { sql: string } | undefined;
+    if (agentsSql && !agentsSql.sql.includes("'chat'")) {
+      db.pragma("foreign_keys = OFF");
+      try {
+        db.exec(readFileSync(resolve(migrationsDir, "052_agent_category_integrity.sql"), "utf-8"));
+      } finally {
+        db.pragma("foreign_keys = ON");
+      }
+      logger.info("db", "Applied migration 052_agent_category_integrity.sql");
+    }
+
+    // Migration 053: enforce one active global project and map OAuth application
+    // secrets to encrypted vault items. Older databases could have duplicate
+    // global rows; only the explicitly canonical global-default row is safe to
+    // reconcile automatically. Any other duplicate set must be resolved by an
+    // operator before the uniqueness constraint is installed.
+    const globalIndexCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='index' AND name='idx_projects_one_active_global'",
+    ).get() as { count: number };
+    const protectedSettingsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type='table' AND name='protected_settings'",
+    ).get() as { count: number };
+    if (globalIndexCheck.count === 0 || protectedSettingsCheck.count === 0) {
+      if (globalIndexCheck.count === 0) reconcileDuplicateActiveGlobals(db);
+      db.exec(readFileSync(resolve(migrationsDir, "053_global_project_integrity_and_protected_settings.sql"), "utf-8"));
+      logger.info("db", "Applied migration 053_global_project_integrity_and_protected_settings.sql");
+    }
+
+    if (protectedSettingsCheck.count > 0) {
+      const requiredColumns = ["project_id", "key", "vault_item_id", "created_at", "updated_at"];
+      const missingColumns = requiredColumns.filter((column) => {
+        const found = db.prepare("SELECT count(*) as count FROM pragma_table_info('protected_settings') WHERE name = ?")
+          .get(column) as { count: number };
+        return found.count === 0;
+      });
+      if (missingColumns.length > 0) {
+        throw new Error(`Migration 053 is in a PARTIAL state: protected_settings is missing required columns: ${missingColumns.join(", ")}`);
+      }
+    }
   }
+}
+
+function reconcileDuplicateActiveGlobals(db: Database.Database): void {
+  const activeGlobals = db.prepare(
+    "SELECT id, name FROM projects WHERE is_global = 1 AND archived_at IS NULL ORDER BY name, created_at, id",
+  ).all() as Array<{ id: string; name: string }>;
+  if (activeGlobals.length <= 1) return;
+
+  const canonical = activeGlobals.filter((project) => project.name === "global-default");
+  if (canonical.length !== 1) {
+    throw new Error(
+      "Migration 053 refused: multiple active global projects exist without an unambiguous global-default canonical project. Resolve the duplicate global designation before retrying.",
+    );
+  }
+
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare(
+      "UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
+    ).run(now, canonical[0]!.id);
+  })();
+  logger.warn("db", "Reconciled duplicate active global projects using global-default as canonical", {
+    demotedCount: activeGlobals.length - 1,
+  });
 }
 
 /**
@@ -765,7 +879,7 @@ export function verifyAndRebuildSkillsFts(db: Database.Database): void {
  */
 export function execTransaction<T>(fn: () => T, retries = WRITE_MAX_RETRIES): T {
   if (!db) {
-    db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
+    db = getDb();
   }
   for (let attempt = 0; attempt < retries; attempt++) {
     try {

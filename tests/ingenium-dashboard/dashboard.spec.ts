@@ -3,9 +3,9 @@ import { test, expect } from "@playwright/test";
 /**
  * E2E tests for the Ingenium Dashboard.
  *
- * These tests run against a live Next.js dev server (port 3000) and real API
- * server (port 4097). Each test navigates to a management page and verifies
- * that interactions (creating, moving, listing) work end-to-end.
+ * These tests run against the manifest-owned dashboard and API fixture. Each
+ * test navigates to a management page and verifies that interactions
+ * (creating, moving, listing) work end-to-end.
  *
  * Selectors use roles, labels, and text content since the pages currently
  * don't have data-testid attributes. If refactoring later, prefer
@@ -187,8 +187,13 @@ test.describe("Ingenium Dashboard", () => {
 
     // Click the Advance → button through all 4 columns (todo → in_progress → review → done)
     for (let i = 0; i < 4; i++) {
+      const moveResponse = page.waitForResponse(
+        (response) => response.url().includes("/api/v1/tasks/") &&
+          response.request().method() === "PATCH" &&
+          response.status() === 200,
+      );
       await page.getByRole("button", { name: /Advance/ }).first().click();
-      await page.waitForTimeout(300);
+      await moveResponse;
     }
 
     // The task should still be visible after cycling through all columns
@@ -199,7 +204,7 @@ test.describe("Ingenium Dashboard", () => {
     await page.goto("/archive");
     await expect(page.getByRole("heading", { name: "Archive" })).toBeVisible();
     // Either shows "No archived projects" or lists archived projects
-    await expect(page.getByText(/No archived|Restore/)).toBeVisible({ timeout: 5000 }).catch(() => {});
+    await expect(page.getByText(/No archived|Restore/)).toBeVisible({ timeout: 5000 });
   });
 
   test("settings page loads with archive retention setting", async ({ page }) => {

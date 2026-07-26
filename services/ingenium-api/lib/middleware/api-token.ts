@@ -43,6 +43,9 @@ export function readApiTokenFile(tokenFile: string): string {
     if ((metadata.mode & 0o077) !== 0) {
       throw new ApiTokenConfigurationError("API token file must not be group- or world-readable");
     }
+    if (process.platform !== "win32" && typeof process.getuid === "function" && metadata.uid !== process.getuid()) {
+      throw new ApiTokenConfigurationError("API token file must be owned by the current process user");
+    }
 
     const token = normalizedTokenFileContents(readFileSync(descriptor, "utf8"));
     if (!isValidApiToken(token)) {

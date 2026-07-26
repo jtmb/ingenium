@@ -1,0 +1,57 @@
+{
+  "task": "Reproduce UX-002: Measure /chat overflow at 390×844 viewport",
+  "site": "localhost:3000/chat (Ingenium Dashboard)",
+  "status": "success",
+  "ux002_reproducible": true,
+  "results": {
+    "viewport": { "width": 390, "height": 844 },
+    "main_element_width": 435,
+    "grid_container_width": 390,
+    "overflow_px": 45,
+    "root_cause": "<main> grid child has min-width: auto (CSS Grid default). Missing min-width: 0 — the `class=\"p-0\"` lacks `min-w-0`. Content intrinsic width > 390px forces grid item expansion.",
+    "overflow_children_count": 19,
+    "clipped_actionable_elements": [
+      {
+        "element": "Compact conversation button (header toolbar)",
+        "position": "x=391, right=419",
+        "status": "CLIPPED — 28px wide button starting 1px off-screen"
+      },
+      {
+        "element": "Share conversation button (header toolbar)",
+        "position": "x=359, right=387",
+        "status": "MARGINAL — fits but has no breathing room"
+      },
+      {
+        "element": "Select agent dropdown (mobile select row)",
+        "position": "x=292, width=127, right=419",
+        "status": "CLIPPED — ~29px of dropdown past viewport"
+      },
+      {
+        "element": "Chat input container (max-w-3xl wrapper)",
+        "position": "width=403, right=419",
+        "status": "OVERFLOWING — textarea visible but container overflows"
+      },
+      {
+        "element": "Send message button (chat input)",
+        "position": "x=374, right=406",
+        "status": "PARTIALLY CLIPPED — 16px past viewport"
+      },
+      {
+        "element": "Ingenium Chat footer text",
+        "position": "width=403, right=419",
+        "status": "OVERFLOWING — clipped on right"
+      }
+    ],
+    "masking": "body { overflow-x: hidden } prevents scrollbar but content is visually cropped",
+    "console_errors": 0,
+    "screenshots": [
+      "chat-390x844-ux002.png",
+      "chat-390x844-final.png"
+    ]
+  },
+  "fix_recommendation": "Add `min-w-0` Tailwind class to `<main>` element (change `class=\"p-0\"` to `class=\"p-0 min-w-0\"`). Grid parent already has correct width (390px); `min-width: 0` on the grid item prevents expansion beyond the grid column.",
+  "errors_encountered": 1,
+  "errors_resolved": 0,
+  "recipe_updated": false,
+  "errors_file": "kept"
+}

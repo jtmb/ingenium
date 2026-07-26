@@ -1,4 +1,7 @@
 import { test, expect } from "@playwright/test";
+import { getDefaultSuiteRuntime } from "./default-suite-runtime";
+
+const { dashboardUrl } = getDefaultSuiteRuntime();
 
 test.describe("Theme flash prevention", () => {
   test("light-theme user on dark OS — class never flips to dark during load", async ({ page }) => {
@@ -29,7 +32,7 @@ test.describe("Theme flash prevention", () => {
     });
 
     // Set the cookie so the server renders light
-    await page.context().addCookies([{ name: "theme", value: "light", path: "/", domain: "localhost" }]);
+    await page.context().addCookies([{ name: "theme", value: "light", path: "/", url: dashboardUrl }]);
 
     // Navigate to several pages (each is a full load — simulating real nav)
     for (const path of ["/", "/mail", "/skills", "/observations"]) {
@@ -50,7 +53,7 @@ test.describe("Theme flash prevention", () => {
 
   test("dark-theme user on dark OS — no white flash, dark class present from server render", async ({ page, request }) => {
     await page.emulateMedia({ colorScheme: "dark" });
-    await page.context().addCookies([{ name: "theme", value: "dark", path: "/", domain: "localhost" }]);
+    await page.context().addCookies([{ name: "theme", value: "dark", path: "/", url: dashboardUrl }]);
 
     // Check server HTML directly — dark class must be present in the first byte
     const resp = await page.request.get("/");
@@ -100,9 +103,7 @@ test.describe("Dark-mode computed style assertions", () => {
       localStorage.setItem("theme", "dark");
     });
 
-    await page.context().addCookies([{
-      name: "theme", value: "dark", domain: "localhost", path: "/"
-    }]);
+    await page.context().addCookies([{ name: "theme", value: "dark", url: dashboardUrl }]);
     await page.goto("/skills");
 
     // Body background = --color-surface-muted
@@ -136,9 +137,7 @@ test.describe("Dark-mode computed style assertions", () => {
       localStorage.setItem("theme", "dark");
     });
 
-    await page.context().addCookies([{
-      name: "theme", value: "dark", domain: "localhost", path: "/"
-    }]);
+    await page.context().addCookies([{ name: "theme", value: "dark", url: dashboardUrl }]);
     await page.goto("/skills");
 
     const navBg = await page.evaluate(() => {

@@ -12,10 +12,23 @@ import { requireProject } from "../helpers.js";
  */
 export const agentsRouter = Router();
 
+function invalidAgentInput(res: import("express").Response, message: string): void {
+  res.status(400).json({ error: { code: "VALIDATION_ERROR", message } });
+}
+
+function validName(name: unknown): name is string {
+  return agents.isSafeAgentName(name);
+}
+
+function validCategory(category: unknown): boolean {
+  return category === undefined || agents.isAgentCategory(category);
+}
+
 agentsRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const category = req.query.category as string | undefined;
+  if (!validCategory(category)) { invalidAgentInput(res, "Invalid agent category"); return; }
   // Optional category filter — when omitted returns all agents for the project
   const list = category ? agents.listAgents(projectId, category) : agents.listAgents(projectId);
   res.json({ data: list, total: list.length });
@@ -24,6 +37,7 @@ agentsRouter.get("/", (req, res) => {
 agentsRouter.get("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!validName(req.params.name)) { invalidAgentInput(res, "Invalid agent name"); return; }
   const agent = agents.getAgent(projectId, req.params.name);
   if (!agent) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
   res.json({ data: agent });
@@ -32,18 +46,19 @@ agentsRouter.get("/:name", (req, res) => {
 agentsRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const { name, content, description, category, mode, model } = req.body;
-  if (!name || !content) {
+  const { name, content, description, category, mode, model, enabled } = req.body;
+  if (!validName(name) || !content || !validCategory(category)) {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "name and content are required" } });
     return;
   }
-  const agent = agents.createAgent(projectId, name, content, description, category, mode, model);
+  const agent = agents.createAgent(projectId, name, content, description, category, mode, model, enabled !== false);
   res.status(201).json({ data: agent });
 });
 
 agentsRouter.put("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!validName(req.params.name) || !validCategory(req.body.category)) { invalidAgentInput(res, "Invalid agent name or category"); return; }
   // Accepts partial body — only provided fields are updated
   const agent = agents.updateAgent(projectId, req.params.name, req.body);
   if (!agent) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
@@ -53,6 +68,7 @@ agentsRouter.put("/:name", (req, res) => {
 agentsRouter.delete("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!validName(req.params.name)) { invalidAgentInput(res, "Invalid agent name"); return; }
   const deleted = agents.deleteAgent(projectId, req.params.name);
   if (!deleted) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
   res.status(204).send();
@@ -61,6 +77,7 @@ agentsRouter.delete("/:name", (req, res) => {
 agentsRouter.post("/:name/enable", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!validName(req.params.name)) { invalidAgentInput(res, "Invalid agent name"); return; }
   const agent = agents.enableAgent(projectId, req.params.name);
   if (!agent) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
   res.json({ data: agent });
@@ -69,6 +86,7 @@ agentsRouter.post("/:name/enable", (req, res) => {
 agentsRouter.post("/:name/disable", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!validName(req.params.name)) { invalidAgentInput(res, "Invalid agent name"); return; }
   const agent = agents.disableAgent(projectId, req.params.name);
   if (!agent) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
   res.json({ data: agent });
@@ -78,6 +96,7 @@ agentsRouter.post("/:name/disable", (req, res) => {
 agentsRouter.post("/:name/sync", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
+  if (!validName(req.params.name)) { invalidAgentInput(res, "Invalid agent name"); return; }
   const agent = agents.syncAgentFromDisk(projectId, req.params.name);
   if (!agent) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found on disk` } }); return; }
   res.json({ data: agent });

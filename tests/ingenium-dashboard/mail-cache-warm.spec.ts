@@ -205,7 +205,7 @@ test.describe("Mail — Cache Warming", () => {
     await expect(emailRows.first()).toBeVisible({ timeout: 15_000 });
 
     const rowCount = await emailRows.count();
-    test.skip(rowCount === 0, "No cached emails in Starred folder — skipping timing test");
+    expect(rowCount, "Starred must contain at least one cached email").toBeGreaterThan(0);
 
     // Click the first email and measure timing
     const start = Date.now();
@@ -237,8 +237,8 @@ test.describe("Mail — Cache Warming", () => {
   test("4 - no [Gmail] bare container in sidebar", async ({ page }) => {
     await page.goto("/mail", { waitUntil: "load" });
 
-    // Wait for folders to load from the API
-    await page.waitForTimeout(3000);
+    // Wait for the sidebar state instead of sleeping through the poll interval.
+    await expect(page.locator("button").filter({ hasText: /INBOX/ }).first()).toBeVisible({ timeout: 15_000 });
 
     // The mail page (page.tsx) filters the bare "[Gmail]" container from
     // the folder list (f.name !== "[Gmail]"). Verify no button shows
@@ -324,7 +324,6 @@ test.describe("Mail — Cache Warming", () => {
     );
 
     await page.goto("/mail", { waitUntil: "load" });
-    await page.waitForTimeout(2000);
 
     // The "h1 Mail" heading should always be present
     const mailHeading = page.locator("h1").filter({ hasText: "Mail" });

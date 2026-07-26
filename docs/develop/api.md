@@ -7,11 +7,17 @@ description: REST API design reference for the Ingenium system — endpoint cata
 
 ## Overview
 
-The Ingenium REST API runs on port 4097 and is the sole database authority. All data flows through HTTP to this API. Port 1455 is mapped from host loopback (`127.0.0.1:1455`) to the API's port 4097 inside the container, serving as the OAuth callback proxy for native OpenCode provider integrations.
+The published Ingenium API boundary is `127.0.0.1:4097`; it validates a
+mandatory bearer token and forwards to the private Express listener on
+container port `4096`, which is the sole database authority. Host port `1455`
+reaches the Nginx callback listener, which forwards only the exact
+`GET /auth/callback` path to private Express `4096`.
 
-## Public Endpoints (Before Auth Middleware)
+## Public Endpoint (Auth Allowlist)
 
-The following endpoint is registered **before** the auth middleware and rate limiter, allowing it to receive browser redirects without authentication:
+The following endpoint is the sole exact unauthenticated exception. The auth
+middleware explicitly allowlists this method/path so provider redirects can
+arrive without a local bearer credential:
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -21,17 +27,18 @@ The following endpoint is registered **before** the auth middleware and rate lim
 
 The API performs the following at startup (in order):
 
-1. **Listen on port** — The Express server starts accepting connections immediately
-2. **Ensure global project** — `ensureGlobalProject()` idempotently creates the `global-default` project if it does not exist. This is required by the scheduler (synthesis interval resolution) and the email engine (account storage). Local development benefits from the same auto-bootstrap as Docker deployments.
-3. **Start scheduler** — The synthesis, mail sync, job cron, and lock cleanup schedulers begin their cycles after a staggered delay.
-4. **WAL checkpoint + integrity check** — Runs `wal_checkpoint(TRUNCATE)` and `integrity_check` to ensure the DB is healthy before the scheduler writes data.
-5. **Start email engine** — Deferred by 10 seconds to let the DB fully initialize. If `getGlobalProjectId()` fails (no global project), the engine start is skipped with a warning.
+1. **Validate API token** — Startup fails closed if the mandatory token or protected token file is missing or invalid
+2. **Listen on private port** — The Express server starts on container port `4096`; the public boundary is `4097`
+3. **Ensure global project** — `ensureGlobalProject()` idempotently creates the `global-default` project if it does not exist. This is required by the scheduler (synthesis interval resolution) and the email engine (account storage). Local development benefits from the same auto-bootstrap as Docker deployments.
+4. **Start scheduler** — The synthesis, mail sync, job cron, and lock cleanup schedulers begin their cycles after a staggered delay.
+5. **WAL checkpoint + integrity check** — Runs `wal_checkpoint(TRUNCATE)` and `integrity_check` to ensure the DB is healthy before the scheduler writes data.
+6. **Start email engine** — Deferred by 10 seconds to let the DB fully initialize. If `getGlobalProjectId()` fails (no global project), the engine start is skipped with a warning.
 
 ### Graceful Degradation
 
 If the global project is unavailable:
 
-- **Health endpoint** (`GET /api/v1/health`) — responds with `200 OK` even with zero projects
+- **Health endpoint** (`GET /api/v1/health`) — responds with `200 OK` with a valid bearer even with zero projects; it is not unauthenticated
 - **Mail sync** — skips silently with a `debug`-level log: `"Skipping mail sync — no global project configured"`
 - **Synthesis** — reads interval from the env var default (15 min) and logs that no global project is configured
 - **All other routes** — operate normally on a per-project basis
@@ -40,9 +47,9 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 
 ## Configuration
 
-- **Port**: 4097 (configurable via `INGENIUM_API_PORT`)
+- **Ports**: public bearer boundary `4097`; private Express listener `4096` in Docker (configurable via `INGENIUM_API_PORT`)
 - **Body limit**: `express.json({ limit: "2mb" })` for large skill/plugin uploads
-- **Security**: helmet for security headers (default configuration — no custom CSP), CORS (configurable via `CORS_ORIGIN`), optional bearer token auth
+- **Security**: helmet for security headers (default configuration — no custom CSP), CORS and browser mutation CSRF share the exact `DASHBOARD_ALLOWED_ORIGINS` allowlist, mandatory bearer auth; browser mutations also require the dashboard marker contract
 - **Rate limits**: Three independent in-memory sliding-window rate limiters:
 
   | Limiter | Default | Applies To | Location |
@@ -172,6 +179,8 @@ All email routes are prefixed with `/api/v1/emails`. All email data is global (p
 | GET | `/api/v1/settings/provider-configs` | Read the ordered managed provider collection. Each provider block returns: `id`, `name`, `npm`, `baseURL`, `models`, `defaultModel`, `roles: ("available"\|"primary"\|"backup")[]`, `enabled`, `allowPrivateNetwork: boolean`, and `apiKeySet: boolean` — **the actual API key is never returned**. Falls back to legacy primary/backup settings until the collection is first saved. At most one provider may have `primary` in its roles array and at most one may have `backup`. Also returns `synthesis` object with `{ primary: { providerId, modelId }, secondary: { providerId, modelId } }` — the explicit synthesis provider+model selection, which may differ from the role-derived defaults. |
 | PUT | `/api/v1/settings/provider-configs` | Atomically save any number of provider blocks. Accepts `roles` array and/or legacy `role` scalar (`available`\|`primary`\|`backup`) for backwards compatibility. `roles` supports multi-role: `["available", "primary"]` or `["available", "backup"]`. Also accepts an optional `synthesis` body field with `{ primary?: SynthesisSelection, secondary?: SynthesisSelection }` to override the role-derived synthesis provider selections — enabling same-provider different-model configurations. Validates exclusivity (at most one primary, at most one backup), synthesis selection constraints (cannot select the same provider+model for both primary and secondary), endpoint SSRF policy via `validateEndpointUrl`, and `allowPrivateNetwork` flag. Projects into OpenCode global config and mirrors synthesis selections into synthesis settings. API keys are stored in the encrypted vault (`vault_items` table, AES-256-GCM). |
 | GET | `/api/v1/settings/llm-config` | Read atomic primary+backup LLM config. Returns provider, model, endpoint, `allowPrivateNetwork`, and `apiKeySet: boolean` — **the actual API key is never exposed**. API keys are stored in the vault, never in plaintext settings. Legacy `synthesis_api_key`/`synthesis_backup_api_key`/`llm_provider_api_keys` settings are auto-migrated into the vault on first read and then deleted from the settings table. |
+| GET | `/api/v1/settings?key=oauth_gmail_client_secret` (or Outlook) | Return only `{ key, isSet, masked }` for a protected OAuth client secret. The value is never returned. The key is resolved against the sole active global project, regardless of the selected `project` query parameter. Sealed/unavailable vaults fail closed; unresolved legacy conflicts return `409 SECRET_MIGRATION_CONFLICT`. Duplicate active globals return `503 GLOBAL_PROJECT_UNAVAILABLE`. |
+| POST | `/api/v1/settings` with `key` plus `action: preserve\|replace\|clear` | Manage a protected OAuth client secret in the active global project. `replace` requires a non-empty `value`; `clear` is explicit; `preserve` leaves the saved value unchanged. A blank implicit value is preserve. The vault must be initialized and unsealed for writes. |
 | POST | `/api/v1/settings/llm-config` | Legacy primary+backup save contract retained for existing clients. New clients should use `PUT /provider-configs`. Accepts `allowPrivateNetwork` on primary and backup blocks. API keys are stored in the vault. |
 | POST | `/api/v1/settings/test-llm` | Test an LLM connection. Accepts `allowPrivateNetwork` boolean body field. Rejects unsafe/internal endpoint addresses (same `validateEndpointUrl` guard as provider-configs save). On transport failure, returns `{ ok: false, status: 0, message: "Unable to reach LLM endpoint" }` — the endpoint URL is never reflected in error messages. |
 
@@ -284,7 +293,9 @@ All routes prefixed with `/api/v1/services`. Two distinct card types rendered on
 
 ### OpenCode Integration Routes
 
-Provider integration routes prefixed with `/api/v1/opencode`. The `GET /auth/callback` endpoint is a public route (before auth middleware) — see [Public Endpoints](#public-endpoints-before-auth-middleware).
+Provider integration routes are prefixed with `/api/v1/opencode`. The exact
+`GET /auth/callback` endpoint is the sole unauthenticated auth-middleware
+allowlist — see [Public Endpoint (Auth Allowlist)](#public-endpoint-auth-allowlist).
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -300,7 +311,13 @@ Provider integration routes prefixed with `/api/v1/opencode`. The `GET /auth/cal
 
 ## OpenCode Proxy Routes
 
-The API proxies requests to the OpenCode server at :4098. HTTP Basic Auth credentials are injected server-side (never exposed to the browser). All proxy routes require `OPENCODE_SERVER_PASSWORD` to be set (returns 503 otherwise). SSE routes stream `text/event-stream` with proper caching and buffering headers.
+The API proxies requests to the OpenCode server at :4098. The API-to-OpenCode
+upstream request uses HTTP Basic Auth credentials injected server-side (never
+exposed to the browser); this is separate from the local port-3000 gateway,
+which does not show a browser password prompt. All proxy routes require
+`OPENCODE_SERVER_PASSWORD` to be set (returns 503 otherwise). The API boundary
+itself remains private and bearer-protected. SSE routes stream
+`text/event-stream` with proper caching and buffering headers.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|

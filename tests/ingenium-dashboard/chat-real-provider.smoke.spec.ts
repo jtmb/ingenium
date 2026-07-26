@@ -1,6 +1,12 @@
 import { test, expect } from "@playwright/test";
+import { requireSuiteOptIn } from "./suite-containment";
 
-test.describe("Chat — real-provider smoke", () => {
+test.describe("@integration Chat — real-provider smoke", () => {
+  test.beforeAll(() => {
+    // Keep direct file execution fail-fast as well as config-based execution.
+    requireSuiteOptIn("provider");
+  });
+
   test("full send/receive with real OpenCode LLM", async ({ page }) => {
     // 1. Navigate to /chat
     await page.goto("/chat", { waitUntil: "domcontentloaded" });

@@ -111,15 +111,40 @@ If count > 100, narrow the search or use a different approach.
 | [`references/model-profiles.md`](references/model-profiles.md) | Qwen model profiles: 2.5, 3.5, 3.6 — strengths, weaknesses, Model-Aware Hints |
 | [`references/lm-studio-api.md`](references/lm-studio-api.md) | LM Studio server info, API endpoints, provider configuration, common issues |
 | [`references/cross-model-strategy.md`](references/cross-model-strategy.md) | Comparison tables, which model for which task, prompt adaptation by model size, skill adaptation guide |
-| [`references/qwen-3.5-9b.md`](references/qwen-3.5-9b.md) | 🔴 qwen-3.5-9b subagent safety protocol — phase limits, anti-loop, anti-hallucination, file write verification |
-| [`references/deep-seek.md`](references/deep-seek.md) | 🔴 DeepSeek V4 (Pro/Flash) orchestrator reasoning protocol — dependency blame, mock blindness, scope reclassification, deploy loop, namespace misassignment, end-to-end validation, count-worship |
+| [`references/qwen-3.5-9b.md`](references/qwen-3.5-9b.md) | 🔴 Historical/local qwen-3.5-9b safety protocol — phase limits, anti-loop, anti-hallucination, file write verification |
+| [`references/deep-seek.md`](references/deep-seek.md) | 🔴 DeepSeek V4 (Pro/Flash) verification protocol — dependency blame, mock blindness, scope reclassification, deploy loop, namespace misassignment, end-to-end validation, count-worship |
 
 ## Model-Specific Protocols
 
+### Active OpenCode agent assignments
+
+Runtime model selection is centralized in the repository `opencode.json`; agent
+profiles must not be used as a second source of truth. The active parity map is:
+
+The following table is verified against the current root `opencode.json`. It is a
+runtime assignment map, not a recommendation list. Qwen is retained in the
+references as historical/local-model guidance and is not assigned to an active
+agent in the current root configuration.
+
+| Agent | Model | Variant |
+|---|---|---|
+| `ingenium-orchestrator` | OpenAI GPT-5.6 Terra | `high` |
+| `ingenium-software-engineer-premium` | OpenAI GPT-5.6 Terra | `xhigh` |
+| `ingenium-docs` | OpenAI GPT-5.6 Luna | `medium` |
+| `ingenium-qa` | OpenAI GPT-5.6 Terra | `xhigh` |
+| `ingenium-qa-vision` | OpenAI GPT-5.6 Luna | `high` |
+| `ingenium-software-engineer-fast` | OpenAI GPT-5.6 Luna | `xhigh` |
+| `ingenium-explore` | OpenAI GPT-5.6 Sol | `medium` |
+| `ingenium-scout` | OpenAI GPT-5.6 Luna | `high` |
+| `ingenium-chat` | DeepSeek V4 Flash | `high` |
+| `ingenium-security-auditor` | OpenAI GPT-5.6 Sol | `high` |
+| `browser-agent` | DeepSeek V4 Flash | none |
+| `ingenium-llm-broker` | unmapped (hidden system agent) | — |
+
 For model-specific subagent safety rules (phase limits, anti-loop constraints), see:
 
-- **[qwen-3.5-9b.md](references/qwen-3.5-9b.md)** — Required reading for all qwen-3.5-9b subagents (ingenium-docs, ingenium-explore, ingenium-scout)
-- **[deep-seek.md](references/deep-seek.md)** — Required reading for DeepSeek V4 Pro/Flash (ingenium-orchestrator, ingenium-qa, ingenium-docs) — 7 reasoning failure patterns with detection prompts
+- **[qwen-3.5-9b.md](references/qwen-3.5-9b.md)** — Historical Qwen 3.5 9B protocol; it is not the active runtime protocol for the current agent assignments.
+- **[deep-seek.md](references/deep-seek.md)** — DeepSeek V4 Flash protocol used by the currently assigned `browser-agent` and `ingenium-chat`; it also documents general verification patterns used when auditing orchestration.
 
 ## Cross-References
 

@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
-import { getOpenCodeWebUrl, getOpenCodeCliUrl, getOpenCodeAvailability } from "@/lib/runtime-urls";
+import {
+  getOpenCodeWebUrl,
+  getOpenCodeCliUrl,
+  getOpenCodeAvailability,
+  OPENCODE_WEB_GATEWAY_URL,
+  OPENCODE_CLI_GATEWAY_URL,
+} from "@/lib/runtime-urls";
 
 /**
  * Runtime URL behavior tests against the real implementation
@@ -57,26 +63,47 @@ describe("getOpenCodeAvailability", () => {
     expect(getOpenCodeAvailability()).toBe("ok-loopback");
   });
 
-  it("returns ok-https-origin on HTTPS", () => {
+  it("returns ok-loopback on IPv6 loopback", () => {
+    setLocation("http://[::1]:3000/");
+    expect(getOpenCodeAvailability()).toBe("ok-loopback");
+  });
+
+  it("rejects an HTTPS dashboard without a configured iframe root", () => {
     setLocation("https://dashboard.example.com/");
-    expect(getOpenCodeAvailability()).toBe("ok-https-origin");
+    expect(getOpenCodeAvailability("web")).toBe("unavailable");
+    expect(getOpenCodeAvailability("cli")).toBe("unavailable");
   });
 
   it("returns ok-https-origin when HTTPS override is configured on LAN HTTP", () => {
     process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "https://opencode.example.com/";
     setLocation("http://192.168.1.50:3000/");
-    expect(getOpenCodeAvailability()).toBe("ok-https-origin");
+    expect(getOpenCodeAvailability("web")).toBe("ok-https-origin");
+  });
+
+  it("accepts only the dedicated authenticated Web host gateway root", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = OPENCODE_WEB_GATEWAY_URL;
+    setLocation("http://192.168.1.50:3000/");
+    expect(getOpenCodeAvailability("web")).toBe("ok-host-gateway");
+    expect(getOpenCodeWebUrl()).toBe(OPENCODE_WEB_GATEWAY_URL);
+  });
+
+  it("accepts only the dedicated authenticated CLI host gateway root", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = OPENCODE_CLI_GATEWAY_URL;
+    setLocation("http://192.168.1.50:3000/");
+    expect(getOpenCodeAvailability("cli")).toBe("ok-host-gateway");
+    expect(getOpenCodeCliUrl()).toBe(OPENCODE_CLI_GATEWAY_URL);
   });
 
   it("returns unavailable for LAN HTTP without HTTPS override", () => {
     delete process.env.NEXT_PUBLIC_OPENCODE_WEB_URL;
     setLocation("http://192.168.1.50:3000/");
-    expect(getOpenCodeAvailability()).toBe("unavailable");
+    expect(getOpenCodeAvailability("web")).toBe("unavailable");
+    expect(getOpenCodeAvailability("cli")).toBe("unavailable");
   });
 
   it("returns unavailable for internal HTTP hostnames without override", () => {
     setLocation("http://ingenium.internal:3000/");
-    expect(getOpenCodeAvailability()).toBe("unavailable");
+    expect(getOpenCodeAvailability("web")).toBe("unavailable");
   });
 });
 
@@ -100,6 +127,12 @@ describe("getOpenCodeWebUrl — runtime URL derivation", () => {
     expect(getOpenCodeWebUrl()).toBe("https://opencode.example.com/");
   });
 
+  it("normalizes whitespace and a missing trailing slash on a dedicated root", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "  https://opencode.example.com  ";
+    setLocation("http://192.168.1.50:3000/");
+    expect(getOpenCodeWebUrl()).toBe("https://opencode.example.com/");
+  });
+
   it("returns configured HTTPS origin on loopback too", () => {
     process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "https://opencode.example.com/";
     setLocation("http://localhost:3000/");
@@ -112,6 +145,16 @@ describe("getOpenCodeWebUrl — runtime URL derivation", () => {
     expect(getOpenCodeWebUrl()).toBeNull();
   });
 
+  it.each([
+    "http://opencode.example.com/",
+    "https://opencode.example.com/path?mode=web",
+    "https://opencode.example.com/#fragment",
+  ])("rejects non-root configured origin %s", (configured) => {
+    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = configured;
+    setLocation("https://dashboard.example.com/");
+    expect(getOpenCodeWebUrl()).toBeNull();
+  });
+
   it("returns null for LAN HTTP without override", () => {
     setLocation("http://192.168.1.50:3000/");
     expect(getOpenCodeWebUrl()).toBeNull();
@@ -120,6 +163,13 @@ describe("getOpenCodeWebUrl — runtime URL derivation", () => {
   it("returns null for internal HTTP hostnames", () => {
     setLocation("http://ingenium.internal:3000/");
     expect(getOpenCodeWebUrl()).toBeNull();
+  });
+
+  it("rejects an arbitrary HTTP host even when it resembles a gateway", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "http://dashboard.example.com:3000/";
+    setLocation("http://192.168.1.50:3000/");
+    expect(getOpenCodeWebUrl()).toBeNull();
+    expect(getOpenCodeAvailability("web")).toBe("unavailable");
   });
 
   it("strips the pathname, returning only origin", () => {
@@ -141,6 +191,11 @@ describe("getOpenCodeCliUrl — CLI URL derivation", () => {
     expect(getOpenCodeCliUrl()).toBe("http://localhost:4099/");
   });
 
+  it("uses the direct CLI port for IPv6 loopback development", () => {
+    setLocation("http://[::1]:3000/");
+    expect(getOpenCodeCliUrl()).toBe("http://localhost:4099/");
+  });
+
   it("returns null for LAN HTTP", () => {
     setLocation("http://192.168.1.50:3000/");
     expect(getOpenCodeCliUrl()).toBeNull();
@@ -155,6 +210,22 @@ describe("getOpenCodeCliUrl — CLI URL derivation", () => {
     process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = "https://cli.example.com/";
     setLocation("https://dashboard.example.com/");
     expect(getOpenCodeCliUrl()).toBe("https://cli.example.com/");
+  });
+
+  it("normalizes a dedicated CLI root origin", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = " https://cli.example.com ";
+    setLocation("http://192.168.1.50:3000/");
+    expect(getOpenCodeCliUrl()).toBe("https://cli.example.com/");
+  });
+
+  it.each([
+    "http://cli.example.com/",
+    "https://cli.example.com/terminal/",
+    "https://cli.example.com/?mode=cli",
+  ])("rejects non-root configured CLI origin %s", (configured) => {
+    process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = configured;
+    setLocation("https://dashboard.example.com/");
+    expect(getOpenCodeCliUrl()).toBeNull();
   });
 });
 

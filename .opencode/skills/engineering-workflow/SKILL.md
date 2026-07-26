@@ -41,6 +41,12 @@ In Required Skills sections and inline prose, use the `@` prefix so OpenCode can
 
 Every agent definition must include a `permission` block explicitly allowing the tools and skills it needs. No implicit permissions.
 
+### 🔴 Writer Accounting Is Permission-Derived
+
+An agent is a writer when its permission block grants `edit: allow` or `write: allow`, regardless of whether the task is code, documentation, or browser automation. In the current topology, `@ingenium-software-engineer-fast`, `@ingenium-software-engineer-premium`, `@ingenium-docs`, and `@browser-agent` are writers. Docs and Browser therefore count toward the maximum of three concurrent writers, and Browser is dispatchable. Every phase must stay at **≤6 active subagents and ≤3 permission-derived writers**; reserve exclusive territories and serialize overlaps.
+
+Valid example: one phase with Fast, Docs, and Browser writers plus QA, Explore, and QA Vision read-only agents is **6 active / 3 writers**. A phase declaration must state those counts before dispatch.
+
 ### 🔴 Agent Output Must Be Direct and Uncensored
 
 No sugarcoating, no evasion, no refusal-to-answer patterns. Deliver direct, technically precise responses.

@@ -17,7 +17,7 @@
  *
  * DB isolation: Does NOT import ingenium-core or any SQLite library — all data goes through HTTP.
  */
-import { config } from "../config/index.js";
+import { apiRequestHeaders, config } from "../config/index.js";
 
 /** Maximum retry attempts per request before giving up. */
 const MAX_RETRIES = 3;
@@ -60,7 +60,7 @@ async function request(path: string, opts: RequestOptions, retries = MAX_RETRIES
     const init: RequestInit = {
       method: opts.method,
       signal: controller.signal,
-      headers: { "Content-Type": "application/json" },
+      headers: apiRequestHeaders({ "Content-Type": "application/json" }),
     };
     if (opts.body) init.body = JSON.stringify(opts.body);
 

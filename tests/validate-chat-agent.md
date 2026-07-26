@@ -20,7 +20,7 @@ The chat agent is automatically discovered (as a new `.md` file under
 |---|------|--------|
 | 1 | `name: ingenium-chat` matches filename stem | ✅ |
 | 2 | `mode: primary` | ✅ |
-| 3 | `model: deepseek/deepseek-v4-flash` | ✅ |
+| 3 | No `model:` field in frontmatter (model is in `opencode.json` `"agent"` key) | ✅ |
 | 4 | `description` present and accurate | ✅ |
 | 5 | `read: allow` — can read file contents | ✅ |
 | 6 | `edit: deny` — cannot edit files | ✅ |

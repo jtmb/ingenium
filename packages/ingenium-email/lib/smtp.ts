@@ -14,6 +14,7 @@ import nodemailer from "nodemailer";
 import type { EmailAccount, OAuthToken, EmailAddress } from "./types.js";
 import { PROVIDERS } from "./providers.js";
 import { connectAccount } from "./imap.js";
+import { ProviderOperationError, sanitizeProviderError } from "./provider-errors.js";
 
 /** Options for composing and sending an email.
  *
@@ -68,10 +69,7 @@ export async function createTransport(
   if (account.authType === "oauth2") {
     const accessToken = auth.tokens?.accessToken;
     if (!accessToken) {
-      throw new Error(
-        `OAuth2 account "${account.email}" has no access token for SMTP. ` +
-        `Tokens may be expired or not yet provisioned. Re-authenticate the account.`,
-      );
+      throw new ProviderOperationError("AUTH_REQUIRED", "smtp", false);
     }
     smtpOptions.auth = {
       type: "OAuth2",
@@ -81,10 +79,7 @@ export async function createTransport(
   } else {
     const pass = auth.password ?? "";
     if (!pass) {
-      throw new Error(
-        `Account "${account.email}" has no password configured for SMTP. ` +
-        `Provide appPassword credentials or switch to OAuth2.`,
-      );
+      throw new ProviderOperationError("AUTH_REQUIRED", "smtp", false);
     }
     smtpOptions.auth = {
       user: account.email,
@@ -105,22 +100,24 @@ export async function sendEmail(
   auth: { password?: string; tokens?: OAuthToken },
   options: SendOptions,
 ): Promise<string> {
-  const transport = await createTransport(account, auth);
-
-  const result = await transport.sendMail({
-    from: `"${account.name}" <${account.email}>`,
-    to: options.to.map((a) => addressString(a)),
-    cc: options.cc?.map((a) => addressString(a)),
-    bcc: options.bcc?.map((a) => addressString(a)),
-    subject: options.subject,
-    html: options.html,
-    text: options.text,
-    attachments: options.attachments,
-    inReplyTo: options.inReplyTo,
-    references: options.references,
-  });
-
-  return result.messageId;
+  try {
+    const transport = await createTransport(account, auth);
+    const result = await transport.sendMail({
+      from: `"${account.name}" <${account.email}>`,
+      to: options.to.map((a) => addressString(a)),
+      cc: options.cc?.map((a) => addressString(a)),
+      bcc: options.bcc?.map((a) => addressString(a)),
+      subject: options.subject,
+      html: options.html,
+      text: options.text,
+      attachments: options.attachments,
+      inReplyTo: options.inReplyTo,
+      references: options.references,
+    });
+    return result.messageId;
+  } catch (error: unknown) {
+    throw sanitizeProviderError(error, "smtp");
+  }
 }
 
 /**

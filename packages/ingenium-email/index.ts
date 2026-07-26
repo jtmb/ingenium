@@ -20,6 +20,7 @@
  */
 
 export * from "./lib/types.js";
+export * from "./lib/provider-errors.js";
 export * from "./lib/providers.js";
 export * from "./lib/providers/mail-provider.js";
 export * from "./lib/providers/gmail.js";

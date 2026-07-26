@@ -1,6 +1,6 @@
 import { test, expect, Page } from "@playwright/test";
 import path from "path";
-import fs from "fs";
+import { visualQaArtifactDirectory } from "./visual-qa-artifacts";
 
 /**
  * Comprehensive E2E tests for the Mail client — 3-pane email interface.
@@ -23,12 +23,9 @@ import fs from "fs";
  */
 
 const BASE = "http://localhost:3000";
-const SCREENSHOTS_DIR = "tests/artifacts/visual-qa";
+const SCREENSHOTS_DIR = visualQaArtifactDirectory("mail");
 const GMAIL_EMAIL = "james.branco@gmail.com";
 const ACCOUNT_ID = "5a214d5b-1d89-4e89-9bd9-7a857495efa7";
-
-// Ensure screenshot directory exists
-fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
 /* ------------------------------------------------------------------ */
 /*  Mock data — realistic email responses                              */
@@ -115,7 +112,7 @@ async function setupMocks(page: Page) {
   forceEmailError = false;
 
   // Clear any previously registered routes to prevent accumulation across tests
-  await page.unroute();
+  await page.unrouteAll();
 
   // 1. Accounts (most specific)
   await page.route("**/api/v1/emails/accounts*", async (route) => {

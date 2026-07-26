@@ -17,7 +17,7 @@ import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
  * logical hierarchy: orchestrator agents first, then support roles.
  *
  * Each agent maps to a `.opencode/agents/<name>.md` file on disk.
- * Enable/disable toggles the agent's presence in the global opencode config.
+ * Models and enablement are runtime settings in centralized opencode.json.
  */
 export default function AgentsPage() {
   const project = useProject();
@@ -167,7 +167,7 @@ export default function AgentsPage() {
           </div>
           <input
             className="border p-2 rounded w-full"
-            placeholder="Model (optional, e.g., deepseek/deepseek-v4-flash)"
+            placeholder="Runtime model (opencode.json; optional)"
             value={newModel}
             onChange={e => setNewModel(e.target.value)}
           />
@@ -219,7 +219,7 @@ export default function AgentsPage() {
                       </select>
                       <input
                         className="border p-2 rounded flex-1"
-                        placeholder="Model"
+                        placeholder="Runtime model (opencode.json)"
                         value={editModel}
                         onChange={e => setEditModel(e.target.value)}
                       />
@@ -279,7 +279,7 @@ export default function AgentsPage() {
                       </div>
                     </div>
                     {agent.description && <p className="text-sm text-[var(--color-text-secondary)] mb-2">{agent.description}</p>}
-                    {agent.model && <p className="text-xs text-[var(--color-text-muted)]">Model: {agent.model}</p>}
+                    {agent.model && <p className="text-xs text-[var(--color-text-muted)]">Runtime model: {agent.model}</p>}
                     <details className="mt-2">
                       <summary className="text-xs text-[var(--color-text-muted)] cursor-pointer hover:text-[var(--color-text-primary)]">Preview content</summary>
                       <pre className="mt-2 text-xs bg-[var(--color-surface-muted)] p-2 rounded overflow-x-auto max-h-32 overflow-y-auto">
@@ -305,7 +305,7 @@ export default function AgentsPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div><span className="font-semibold">Category:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.category}</span></div>
               <div><span className="font-semibold">Mode:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.mode}</span></div>
-              {selectedAgent.model && <div><span className="font-semibold">Model:</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.model}</span></div>}
+               {selectedAgent.model && <div><span className="font-semibold">Runtime model (opencode.json):</span> <span className="text-[var(--color-text-secondary)]">{selectedAgent.model}</span></div>}
               <div><span className="font-semibold">Enabled:</span> <span className={selectedAgent.enabled ? "text-[var(--color-success-text)]" : "text-[var(--color-error-text)]"}>{selectedAgent.enabled ? "Yes" : "No"}</span></div>
             </div>
             <MarkdownViewer content={selectedAgent.content} isMarkdown={true} />

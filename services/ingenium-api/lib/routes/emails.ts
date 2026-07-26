@@ -1,17 +1,22 @@
 import { createHash } from "node:crypto";
-import { Router, Response } from "express";
-import { logger, emailCache, synthesisLlm, settings } from "ingenium-core";
+import { NextFunction, Request, Router, Response } from "express";
+import { checkpointAfterWrite, emailCache, execTransaction, getDb, logger, settings, synthesisLlm } from "ingenium-core";
+import { registerMailWatcher, unregisterMailWatcher } from "../mail-watchers.js";
+import { decryptCredentialValue } from "ingenium-email/lib/credential-crypto";
 import {
   // Account CRUD
   listAccounts,
   getAccount,
   addAccount,
+  createAccountWithCredentials,
+  createOAuthAccountWithTokens,
   removeAccount,
   storeAccount,
   getCredentials,
   storeCredentials,
   storeTokens,
   getGlobalProjectId,
+  getEmailEncryptionDiagnostics,
   // IMAP (write ops only — move, flags, delete)
   connectAccount,
   disconnectAccount,
@@ -51,6 +56,7 @@ import {
   // Providers
   GmailProvider,
 } from "ingenium-email";
+import * as emailSecurity from "ingenium-email";
 import type {
   EmailAccount,
   EmailAttachment,
@@ -77,6 +83,54 @@ const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, m
 export const emailsRouter = Router();
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+
+type SafeMailFailure = {
+  code: string;
+  message: string;
+  retryable?: boolean;
+};
+
+type MailOperation = "oauth" | "imap" | "smtp" | "sync" | "api";
+
+/**
+ * The mail package is the one sanitization boundary for provider failures.
+ * The fallback preserves safe behavior in focused route tests that mock only
+ * the legacy mail exports; production always uses the centralized sanitizer.
+ */
+function safeMailFailure(error: unknown, operation: MailOperation): SafeMailFailure {
+  if (Object.prototype.hasOwnProperty.call(emailSecurity, "sanitizeProviderError")) {
+    const sanitize = Reflect.get(emailSecurity, "sanitizeProviderError") as
+      | ((value: unknown, source: MailOperation) => SafeMailFailure)
+      | undefined;
+    if (sanitize) return sanitize(error, operation);
+  }
+  return {
+    code: "PROVIDER_ERROR",
+    message: "The email operation could not be completed. Try again later.",
+    retryable: true,
+  };
+}
+
+function safeMailDiagnostic(error: unknown, operation: MailOperation): Record<string, unknown> {
+  const safe = safeMailFailure(error, operation);
+  return {
+    operation,
+    code: safe.code,
+    message: safe.message,
+    retryable: safe.retryable ?? false,
+  };
+}
+
+function respondWithSafeMailError(
+  res: Response,
+  error: unknown,
+  operation: MailOperation,
+  status = 502,
+): void {
+  const safe = safeMailFailure(error, operation);
+  logger.warn("email", "Mail provider operation failed", safeMailDiagnostic(safe, operation));
+  res.status(status).json({ error: { code: safe.code, message: safe.message } });
+}
 
 /**
  * Resolve the global project ID for all email operations.
@@ -142,12 +196,15 @@ async function withImapConnection<T>(
       setAccountConnected(projectId, account.id, true);
     } catch { /* non-fatal */ }
     return result;
-  } catch (err) {
+  } catch (error: unknown) {
     // DO NOT disconnect — the error handler on ImapFlow cleans up dead connections.
     // Disconnecting here kills the shared pool for all concurrent requests.
     const accountHash = createHash("sha256").update(account.email).digest("hex").slice(0, 16);
-    logger.error("email", `IMAP operation failed: ${(err as Error).message}`, { accountHash });
-    throw err;
+    logger.warn("email", "IMAP operation failed", {
+      accountHash,
+      ...safeMailDiagnostic(error, "imap"),
+    });
+    throw safeMailFailure(error, "imap");
   }
 }
 
@@ -166,9 +223,8 @@ emailsRouter.get("/accounts/oauth/url", (_req, res) => {
 
   getOAuthUrl(provider as EmailProvider)
     .then((result) => res.json({ data: result }))
-    .catch((err: any) => {
-      logger.error("email", `Failed to generate OAuth URL for ${provider}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: _req.method, path: _req.originalUrl });
-      res.status(500).json({ error: { code: "OAUTH_ERROR", message: err.message } });
+    .catch((error: unknown) => {
+      respondWithSafeMailError(res, error, "oauth");
     });
 });
 
@@ -188,31 +244,34 @@ emailsRouter.post("/accounts/oauth", async (req, res) => {
 
     // Create the account if it doesn't exist yet
     let acctId = accountId;
+    let createdAccountWithTokens = false;
     if (!acctId) {
       const existingAccounts = listAccounts(projectId);
       const existing = existingAccounts.find(a => a.email === tokens.email);
       if (existing) {
         acctId = existing.id;
       } else {
-        const account = addAccount(projectId, {
+        const account = createOAuthAccountWithTokens(projectId, {
           email: tokens.email || `${provider}-${Date.now()}@unknown`,
           provider: provider as EmailProvider,
           authType: "oauth2",
           name: tokens.email || `${provider} account`,
-        });
+        }, tokens);
         acctId = account.id;
+        createdAccountWithTokens = true;
       }
     }
 
-    // Store tokens server-side — never return them to the client
-    storeTokens(projectId, acctId, tokens);
+    // Existing accounts keep their metadata; only their encrypted token record changes.
+    if (!createdAccountWithTokens) {
+      storeTokens(projectId, acctId, tokens);
+    }
     // Replace a parked credential-error worker so OAuth reconnect resumes sync.
     stopAccountWorker(acctId);
     startEngine(projectId);
     res.json({ data: { success: true, accountId: acctId } });
-  } catch (err: any) {
-    logger.error("email", "OAuth code exchange failed", { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "OAUTH_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "oauth");
   }
 });
 
@@ -241,7 +300,7 @@ emailsRouter.post("/accounts", (req, res) => {
     return;
   }
 
-  const account = addAccount(projectId, {
+  const accountInput = {
     email,
     provider,
     authType,
@@ -250,22 +309,20 @@ emailsRouter.post("/accounts", (req, res) => {
     imapPort,
     smtpHost,
     smtpPort,
-  });
-
-  // Store credentials if provided
-  if (appPassword) {
-    storeCredentials(projectId, account.id, {
+  } as Omit<EmailAccount, "id" | "connected">;
+  const account = appPassword
+    ? createAccountWithCredentials(projectId, accountInput, {
       imapPass: appPassword,
       smtpPass: appPassword,
-    });
-  }
+    })
+    : addAccount(projectId, accountInput);
 
   startEngine(projectId);
   res.status(201).json({ data: account });
 });
 
 /** DELETE /accounts/:id?project= — Remove an email account. */
-emailsRouter.delete("/accounts/:id", (req, res) => {
+emailsRouter.delete("/accounts/:id", async (req, res) => {
   const projectId = resolveEmailProject();
   const accountId = req.params.id!;
   const account = getAccount(projectId, accountId);
@@ -278,6 +335,8 @@ emailsRouter.delete("/accounts/:id", (req, res) => {
 
   // Stop the account's sync engine worker BEFORE deleting data
   stopAccountWorker(accountId);
+  await stopWatcher(accountId).catch(() => undefined);
+  unregisterMailWatcher(accountId);
 
   removeAccount(projectId, accountId);
   // Also clear all cached emails, bodies, suggestions, summaries, and sync state for this account
@@ -331,8 +390,11 @@ emailsRouter.patch("/accounts/:id/credentials", async (req, res) => {
     startEngine(projectId);
     // Never return the submitted credential or stored encrypted material.
     res.json({ data: { success: true, accountId } });
-  } catch (err: unknown) {
-    logger.warn("email", `Credential update failed for account ${accountId}: ${err instanceof Error ? err.message : String(err)}`);
+  } catch (error: unknown) {
+    logger.warn("email", "Credential update failed", {
+      accountId,
+      ...safeMailDiagnostic(error, "api"),
+    });
     res.status(409).json({ error: { code: "CREDENTIAL_UPDATE_FAILED", message: "Could not update email credentials. Verify the encryption configuration and try again." } });
   }
 });
@@ -350,8 +412,13 @@ emailsRouter.post("/accounts/:id/test", async (req, res) => {
     connected = true;
     const folders = await listFolders(account.id);
     res.json({ data: { success: true, folders } });
-  } catch (err: any) {
-    res.json({ data: { success: false, error: err.message } });
+  } catch (error: unknown) {
+    const safe = safeMailFailure(error, "imap");
+    logger.warn("email", "IMAP connection test failed", {
+      accountId,
+      ...safeMailDiagnostic(safe, "imap"),
+    });
+    res.json({ data: { success: false, error: safe.message } });
   } finally {
     if (connected) {
       await disconnectAccount(account.id).catch(() => {});
@@ -608,9 +675,8 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
         emailCache.upsertEmailSuggestions(account.id, folder, uid, suggestions, null);
       }
       res.json({ suggestions, source: "heuristic", configured: false });
-    } catch (err: any) {
-      logger.error("email", `Suggest response failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-      res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+    } catch (error: unknown) {
+      respondWithSafeMailError(res, error, "api");
     }
     return;
   }
@@ -659,9 +725,8 @@ emailsRouter.get("/suggest/:uid", async (req, res) => {
     }
 
     res.json({ suggestions, source: "generated", configured: true });
-  } catch (err: any) {
-    logger.error("email", `Smart-reply generation failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "LLM_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "api");
   }
 });
 
@@ -750,9 +815,8 @@ emailsRouter.get("/summarize/:uid", async (req, res) => {
     }
 
     res.json({ summary: summary || null, source: summary ? "generated" : "failed", configured: true });
-  } catch (err: any) {
-    logger.error("email", `Email summary generation failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "LLM_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "api");
   }
 });
 
@@ -786,9 +850,8 @@ emailsRouter.post("/review-draft", async (req, res) => {
   try {
     const improved = await reviewDraft(text, subject, llmConfig);
     res.json({ improved: improved || null, configured: true });
-  } catch (err: any) {
-    logger.error("email", `Draft review failed`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "LLM_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "api");
   }
 });
 
@@ -807,10 +870,10 @@ emailsRouter.post("/watch/start", async (req, res) => {
 
   try {
     await startWatcher(projectId, accountId);
+    registerMailWatcher(accountId);
     res.json({ data: { running: true, accountId } });
-  } catch (err: any) {
-    logger.error("email", `Failed to start watcher for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "WATCHER_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "imap");
   }
 });
 
@@ -826,10 +889,10 @@ emailsRouter.post("/watch/stop", async (req, res) => {
 
   try {
     await stopWatcher(accountId);
+    unregisterMailWatcher(accountId);
     res.json({ data: { running: false, accountId } });
-  } catch (err: any) {
-    logger.error("email", `Failed to stop watcher for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "WATCHER_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "imap");
   }
 });
 
@@ -883,9 +946,8 @@ emailsRouter.post("/sync", async (req, res) => {
       }
     }
     res.json({ data: { accepted: true, account: accountId, folder } });
-  } catch (err: any) {
-    logger.error("email", `Sync hint failed for account ${accountId}`, { error: err.message, name: err.name, method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "SYNC_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "sync");
   }
 });
 
@@ -965,9 +1027,8 @@ emailsRouter.get("/sync-status", (req, res) => {
         engine: engineStatus,
       },
     });
-  } catch (err: any) {
-    logger.error("email", `Sync-status query failed for account ${accountId}`, { error: err.message });
-    res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "sync");
   }
 });
 
@@ -1078,9 +1139,12 @@ emailsRouter.get("/", async (req, res) => {
         // Also boost the folder so the engine does deeper backfill
         boostFolder(account.id, folder);
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("email", `Refresh fetch failed for ${account.email}/${folder}: ${msg}`);
+    } catch (error: unknown) {
+      logger.warn("email", "Refresh fetch failed; serving cached mail", {
+        accountId: account.id,
+        folder,
+        ...safeMailDiagnostic(error, "api"),
+      });
       // Fall through to cache — serve stale rather than nothing
     }
   }
@@ -1143,9 +1207,8 @@ emailsRouter.post("/draft", async (req, res) => {
   try {
     const messageId = await saveDraft(account, auth, options);
     res.status(201).json({ data: { messageId } });
-  } catch (err: any) {
-    logger.error("email", `Save draft failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "SMTP_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "smtp");
   }
 });
 
@@ -1175,9 +1238,8 @@ emailsRouter.post("/", async (req, res) => {
   try {
     const messageId = await sendEmail(account, auth, options);
     res.status(201).json({ data: { messageId } });
-  } catch (err: any) {
-    logger.error("email", `Send email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "SMTP_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "smtp");
   }
 });
 
@@ -1233,8 +1295,8 @@ emailsRouter.get("/:id/attachments/:attachmentId", async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', att.data.length);
     res.send(att.data);
-  } catch (err: any) {
-    res.status(500).json({ error: { code: 'ATTACHMENT_ERROR', message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "api");
   }
 });
 
@@ -1327,12 +1389,13 @@ emailsRouter.get("/:uid", async (req, res) => {
       logger.warn("email",
         `On-demand body fetch timed out for ${account.email}/${folder}/${uid} (12s)`,
       );
-    } catch (err: unknown) {
+    } catch (error: unknown) {
       // 🔴 Lesson 14: log before returning error sentinel
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("email",
-        `On-demand body fetch FAILED for ${account.email}/${folder}/${uid}: ${msg}`,
-      );
+      logger.warn("email", "On-demand body fetch failed; scheduling background retry", {
+        accountId: account.id,
+        folder,
+        ...safeMailDiagnostic(error, "api"),
+      });
     }
 
     // Timeout or error — fall back to engine hints + 202
@@ -1386,9 +1449,8 @@ emailsRouter.patch("/:uid/move", async (req, res) => {
       moveEmail(id, uid, fromFolder, toFolder),
     );
     res.json({ data: { moved: true, uid, fromFolder, toFolder } });
-  } catch (err: any) {
-    logger.error("email", `Move email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "imap");
   }
 });
 
@@ -1420,9 +1482,8 @@ emailsRouter.patch("/:uid/flags", async (req, res) => {
       setFlags(id, folder, uid, flags),
     );
     res.json({ data: { flagsSet: true, uid, folder, flags } });
-  } catch (err: any) {
-    logger.error("email", `Set flags failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "imap");
   }
 });
 
@@ -1455,118 +1516,216 @@ emailsRouter.delete("/:uid", async (req, res) => {
       deleteEmail(id, folder, uid),
     );
     res.status(204).send();
-  } catch (err: any) {
-    logger.error("email", `Delete email failed for account ${accountId}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n"), method: req.method, path: req.originalUrl });
-    res.status(500).json({ error: { code: "IMAP_ERROR", message: err.message } });
+  } catch (error: unknown) {
+    respondWithSafeMailError(res, error, "imap");
   }
+});
+
+// The mail router must never fall through to the API-wide error handler, which
+// intentionally records generic diagnostics for non-provider routes. Provider
+// errors may contain authorization headers, URLs, response bodies, or canaries.
+emailsRouter.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (res.headersSent) return;
+  respondWithSafeMailError(res, error, "api");
 });
 
 // ── Startup: account migration & engine initialization ──────────────────────
 
-/**
- * 🔴 Migration: copy email accounts from any non-global project to global-default.
- * Runs once at first import (lazy, triggered from api-server.ts startup).
- *
- * Email accounts used to be project-scoped (pre-v2.3). This migration coalesces
- * them into the global-default project so accounts are available across sessions.
- * Source rows are DELETED (not kept) to prevent resurrection on container rebuilds.
- */
-export async function migrateEmailAccountsToGlobal(): Promise<number> {
+export interface MailAccountMigrationResult {
+  migratedSettings: number;
+  migratedAccounts: number;
+  collisions: number;
+  skippedForEncryption: boolean;
+}
+
+interface MailSettingRow {
+  project_id: string;
+  key: string;
+  value: string;
+}
+
+function emptyMailMigrationResult(): MailAccountMigrationResult {
+  return { migratedSettings: 0, migratedAccounts: 0, collisions: 0, skippedForEncryption: false };
+}
+
+function validateMailMigrationGroup(group: MailSettingRow[]): boolean {
+  const accounts = group.filter((row) => row.key.startsWith("email_account_"));
+  const oauth = group.filter((row) => row.key.startsWith("email_oauth_"));
+  if (accounts.length !== 1 || oauth.length > 1) return false;
+
+  const account = accounts[0]!;
+  const accountId = account.key.slice("email_account_".length);
+  if (Object.prototype.hasOwnProperty.call(emailSecurity, "validateEmailAccountMigrationCredentials")) {
+    const validate = Reflect.get(emailSecurity, "validateEmailAccountMigrationCredentials") as
+      | ((id: string, raw: string, oauthRaw?: string) => { valid: boolean })
+      | undefined;
+    return Boolean(validate?.(accountId, account.value, oauth[0]?.value).valid);
+  }
+
+  // Compatibility only for focused route tests that replace the package root
+  // with a narrow mock. It uses the same AES-GCM decryptor and fails closed;
+  // it is not a blind-copy fallback.
+  return validateMailMigrationGroupWithActiveKey(accountId, account.value, oauth[0]?.value);
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function decryptMigrationValue(value: unknown, requireNonEmpty: boolean): string | undefined {
+  if (typeof value !== "string" || !value) return undefined;
   try {
-    const globalId = resolveEmailProject();
-    const { getDb } = await import("ingenium-core");
-    const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
+    const decrypted = decryptCredentialValue(value);
+    return requireNonEmpty && !decrypted ? undefined : decrypted;
+  } catch {
+    return undefined;
+  }
+}
 
-    // Find all settings keys that look like email accounts in non-global projects
-    const rows = db.prepare(
-      `SELECT s.project_id, s.key, s.value
-       FROM settings s
-       JOIN projects p ON s.project_id = p.id
-       WHERE s.key LIKE 'email_account_%'
-         AND p.is_global = 0
-         AND p.archived_at IS NULL`,
-    ).all() as Array<{ project_id: string; key: string; value: string }>;
+function validateMailMigrationTokens(value: unknown, email: string): { accessToken: string; refreshToken: string } | undefined {
+  if (!isObjectRecord(value) || typeof value.accessToken !== "string" || typeof value.refreshToken !== "string") {
+    return undefined;
+  }
+  if (typeof value.email === "string" && value.email
+    && value.email.trim().toLowerCase() !== email.trim().toLowerCase()) {
+    return undefined;
+  }
+  const accessToken = decryptMigrationValue(value.accessToken, true);
+  const refreshToken = decryptMigrationValue(value.refreshToken, false);
+  return accessToken === undefined || refreshToken === undefined ? undefined : { accessToken, refreshToken };
+}
 
-    let migrated = 0;
-    for (const row of rows) {
-      // Check if this account already exists in global
-      const existing = db.prepare(
-        "SELECT key FROM settings WHERE project_id = ? AND key = ?",
-      ).get(globalId, row.key) as { key: string } | undefined;
+function validateMailMigrationGroupWithActiveKey(accountId: string, accountRaw: string, oauthRaw?: string): boolean {
+  let account: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(accountRaw);
+    if (!isObjectRecord(parsed)) return false;
+    account = parsed;
+  } catch {
+    return false;
+  }
+  if (account.id !== accountId || typeof account.email !== "string" || !account.email
+    || (account.provider !== undefined && typeof account.provider !== "string")
+    || (account.authType !== undefined && typeof account.authType !== "string")) {
+    return false;
+  }
 
-      if (!existing) {
-        db.prepare(
-          `INSERT INTO settings (project_id, key, value)
-           VALUES (?, ?, ?)
-           ON CONFLICT(project_id, key) DO NOTHING`,
-        ).run(globalId, row.key, row.value);
-        // Delete from source so the account only lives in global — prevents
-        // resurrection on next rebuild if user deleted it from global.
-        db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?").run(row.project_id, row.key);
-        migrated++;
+  for (const credential of [account.imapPass, account.smtpPass]) {
+    if (credential !== undefined && decryptMigrationValue(credential, true) === undefined) return false;
+  }
+
+  const tokens: Array<{ accessToken: string; refreshToken: string }> = [];
+  if (account.tokens !== undefined) {
+    const value = validateMailMigrationTokens(account.tokens, account.email);
+    if (!value) return false;
+    tokens.push(value);
+  }
+  if (oauthRaw !== undefined) {
+    try {
+      const value = validateMailMigrationTokens(JSON.parse(oauthRaw) as unknown, account.email);
+      if (!value) return false;
+      tokens.push(value);
+    } catch {
+      return false;
+    }
+  }
+  if (tokens.length === 2 && (tokens[0]!.accessToken !== tokens[1]!.accessToken
+    || tokens[0]!.refreshToken !== tokens[1]!.refreshToken)) return false;
+  return account.authType !== "oauth2" || tokens.length > 0;
+}
+
+/**
+ * Migrate project-scoped accounts as all-or-nothing verified setting groups.
+ * Every source credential is decrypted with the active key before any setting is
+ * copied or deleted. OAuth CSRF state is deliberately excluded: it is transient
+ * authorization state, never a durable account credential.
+ */
+export async function migrateEmailAccountsToGlobal(): Promise<MailAccountMigrationResult> {
+  let committedWrites = false;
+  try {
+    const result = execTransaction(() => {
+      const db = getDb();
+      const globalId = resolveEmailProject();
+      const encryption = getEmailEncryptionDiagnostics();
+      if (encryption.status !== "ready") {
+        return { ...emptyMailMigrationResult(), skippedForEncryption: true };
       }
-    }
 
-    // Also migrate OAuth tokens
-    const oauthRows = db.prepare(
-      `SELECT s.project_id, s.key, s.value
-       FROM settings s
-       JOIN projects p ON s.project_id = p.id
-       WHERE s.key LIKE 'email_oauth_%'
-         AND p.is_global = 0
-         AND p.archived_at IS NULL`,
-    ).all() as Array<{ project_id: string; key: string; value: string }>;
+      const rows = db.prepare(
+        `SELECT s.project_id, s.key, s.value
+         FROM settings s
+         JOIN projects p ON s.project_id = p.id
+         WHERE p.is_global = 0
+           AND p.archived_at IS NULL
+            AND (s.key LIKE 'email_account_%' OR s.key LIKE 'email_oauth_%')
+         ORDER BY s.project_id, s.key`,
+      ).all() as MailSettingRow[];
 
-    for (const row of oauthRows) {
-      const existing = db.prepare(
-        "SELECT key FROM settings WHERE project_id = ? AND key = ?",
-      ).get(globalId, row.key) as { key: string } | undefined;
-
-      if (!existing) {
-        db.prepare(
-          `INSERT INTO settings (project_id, key, value)
-           VALUES (?, ?, ?)
-           ON CONFLICT(project_id, key) DO NOTHING`,
-        ).run(globalId, row.key, row.value);
-        db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?").run(row.project_id, row.key);
-        migrated++;
+      const result = emptyMailMigrationResult();
+      const groups = new Map<string, MailSettingRow[]>();
+      for (const row of rows) {
+        const accountId = row.key.startsWith("email_account_")
+          ? row.key.slice("email_account_".length)
+          : row.key.slice("email_oauth_".length);
+        const groupKey = `${row.project_id}\u0000${accountId}`;
+        const group = groups.get(groupKey) ?? [];
+        group.push(row);
+        groups.set(groupKey, group);
       }
-    }
 
-    // Also migrate OAuth state keys
-    const stateRows = db.prepare(
-      `SELECT s.project_id, s.key, s.value
-       FROM settings s
-       JOIN projects p ON s.project_id = p.id
-       WHERE s.key LIKE 'oauth_state_%'
-         AND p.is_global = 0
-         AND p.archived_at IS NULL`,
-    ).all() as Array<{ project_id: string; key: string; value: string }>;
-
-    for (const row of stateRows) {
-      const existing = db.prepare(
-        "SELECT key FROM settings WHERE project_id = ? AND key = ?",
-      ).get(globalId, row.key) as { key: string } | undefined;
-
-      if (!existing) {
-        db.prepare(
-          `INSERT INTO settings (project_id, key, value)
-           VALUES (?, ?, ?)
-           ON CONFLICT(project_id, key) DO NOTHING`,
-        ).run(globalId, row.key, row.value);
-        db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?").run(row.project_id, row.key);
-        migrated++;
+      // Validate the complete source set before any destination write or source
+      // deletion. A legacy plaintext, malformed, orphaned, or key-mismatched
+      // entry leaves every source row untouched for operator recovery.
+      for (const group of groups.values()) {
+        if (!validateMailMigrationGroup(group)) {
+          return { ...emptyMailMigrationResult(), skippedForEncryption: true };
+        }
       }
-    }
 
-    if (migrated > 0) {
-      logger.info("email", `Migrated ${migrated} email settings from project-scoped to global`);
+      for (const group of groups.values()) {
+        const collision = group.some((row) => {
+          const destination = db.prepare(
+            "SELECT value FROM settings WHERE project_id = ? AND key = ?",
+          ).get(globalId, row.key) as { value: string } | undefined;
+          return destination !== undefined && destination.value !== row.value;
+        });
+        if (collision) {
+          result.collisions++;
+          continue;
+        }
+
+        for (const row of group) {
+          db.prepare(
+            `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)
+             ON CONFLICT(project_id, key) DO NOTHING`,
+          ).run(globalId, row.key, row.value);
+        }
+        for (const row of group) {
+          const destination = db.prepare(
+            "SELECT value FROM settings WHERE project_id = ? AND key = ?",
+          ).get(globalId, row.key) as { value: string } | undefined;
+          if (!destination || destination.value !== row.value) {
+            throw new Error("Mail account migration destination verification failed");
+          }
+        }
+        for (const row of group) {
+          db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
+            .run(row.project_id, row.key);
+          result.migratedSettings++;
+          if (row.key.startsWith("email_account_")) result.migratedAccounts++;
+        }
+      }
+      committedWrites = result.migratedSettings > 0;
+      return result;
+    });
+    if (committedWrites) checkpointAfterWrite();
+    if (result.migratedSettings > 0 || result.collisions > 0 || result.skippedForEncryption) {
+      logger.info("email", "Mail account migration completed", result);
     }
-    return migrated;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("email", `Email account migration failed (non-fatal): ${msg}`);
-    return 0;
+    return result;
+  } catch {
+    logger.warn("email", "Mail account migration failed; source settings were retained");
+    return emptyMailMigrationResult();
   }
 }
 

@@ -363,7 +363,7 @@ export const AgentSchema = z.object({
   project_id: z.string(),
   name: z.string().min(1).max(64),
   description: z.string().default(""),
-  category: z.enum(["primary", "execution", "research", "security"]).default("execution"),
+  category: z.enum(["primary", "execution", "research", "security", "chat"]).default("execution"),
   mode: z.enum(["primary", "subagent"]).default("subagent"),
   model: z.string().optional(),
   reasoning_effort: z.string().optional(),

@@ -1,22 +1,119 @@
-# Secrets
+# Version control and local editor state
+.git/
+.git
+**/.git/
+.gitattributes
+.gitmodules
+.github/
+.vscode/
+.idea/
+
+# Secrets and credentials
 .env
 .env.*
+!.env.example
+.opencode/.ingenium-api-token
 *.key
+**/*.key
 *.pem
+**/*.pem
+*.p12
+**/*.p12
+*.pfx
+**/*.pfx
+*.jks
+**/*.jks
+*.keystore
+**/*.keystore
+*.kdbx
+**/*.kdbx
+id_rsa
+id_ed25519
+credentials.json
+**/credentials.json
+*credentials*.json
+**/*credentials*.json
+*service-account*.json
+**/*service-account*.json
+.ssh/
+**/.ssh/
+.aws/
+**/.aws/
+.npmrc
+**/.npmrc
+.netrc
+**/.netrc
+.pypirc
+**/.pypirc
 secrets/
-# Version control
-.git .gitignore .gitmodules
-# Dependencies (installed inside build)
-node_modules/ .opencode/node_modules/ vendor/ __pycache__/ .venv/
-# Build artifacts
-dist/ build/ .next/ target/ *.tsbuildinfo
-# Docs
-*.md AGENTS.md docs/ ARCHITECTURE.md CONVENTIONS.md
-# Config
-.dockerignore docker-compose*.yml Dockerfile* supervisord.conf .editorconfig
-# Test artifacts
-coverage/ .nyc_output/ test-results/
-# Archive
+**/secrets/
+# The dashboard's vault route is source code, not secret material. Re-include
+# its route module and components after the broad secret-directory exclusions.
+!services/ingenium-dashboard/src/app/secrets/
+!services/ingenium-dashboard/src/app/secrets/page.tsx
+!services/ingenium-dashboard/src/app/secrets/components/
+!services/ingenium-dashboard/src/app/secrets/components/**
+
+# Local databases and application state
+.ingenium/
+**/.ingenium/
+*.db
+**/*.db
+*.db-*
+**/*.db-*
+*.sqlite
+**/*.sqlite
+*.sqlite3
+**/*.sqlite3
+*.sqlite-wal
+**/*.sqlite-wal
+*.sqlite-shm
+**/*.sqlite-shm
+
+# Dependencies installed in the builder image
+node_modules/
+**/node_modules/
+.opencode/node_modules/
+vendor/
+**/vendor/
+__pycache__/
+**/__pycache__/
+.venv/
+**/.venv/
+venv/
+**/venv/
+
+# Generated build output, test output, and caches
+dist/
+**/dist/
+build/
+**/build/
+.next/
+**/.next/
+target/
+**/target/
+*.tsbuildinfo
+**/*.tsbuildinfo
+coverage/
+**/coverage/
+.nyc_output/
+**/.nyc_output/
+test-results/
+**/test-results/
+playwright-report/
+**/playwright-report/
+tests/artifacts/
+.turbo/
+**/.turbo/
+.cache/
+**/.cache/
+.eslintcache
+**/.eslintcache
+.stylelintcache
+**/.stylelintcache
+.DS_Store
+
+# Local archives and runtime logs
 .agents.old/
-# Misc
-.turbo/ .cache/ .DS_Store
+*.log
+**/*.log

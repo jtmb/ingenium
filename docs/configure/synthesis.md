@@ -123,15 +123,20 @@ const status = await ingenium_synthesis_status();
 
 ### Via API
 ```bash
+API_CURL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ingenium/api-curl.conf"
+
 # Trigger synthesis
-curl -X POST http://localhost:4097/api/v1/synthesis/run
+curl --config "$API_CURL_CONFIG" -X POST http://localhost:4097/api/v1/synthesis/run
 
 # Check status
-curl http://localhost:4097/api/v1/synthesis/status
+curl --config "$API_CURL_CONFIG" http://localhost:4097/api/v1/synthesis/status
 
 # Get observation pipeline stats
-curl http://localhost:4097/api/v1/observations/stats
+curl --config "$API_CURL_CONFIG" http://localhost:4097/api/v1/observations/stats
 ```
+
+Use an owner-only (`0600`) curl config provisioned by your secret store; do
+not place the bearer token in shell arguments or history.
 
 ### Via OpenCode Command
 ```

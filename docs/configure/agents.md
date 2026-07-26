@@ -1,23 +1,25 @@
 ---
 title: Agent Architecture
-description: Agent profiles, pipeline lifecycle, and subagent invocation for the Ingenium agent system.
+description: Agent profiles, model configuration, and invocation for the Ingenium agent system.
 ---
 
 # Agent Architecture
 
 ## Overview
 
-12 agents total: 2 primary, 10 subagents. The **orchestrator** (`@ingenium-orchestrator`) coordinates execution — it NEVER writes code directly, always delegating to subagents. Planning is done via OpenCode's built-in Plan mode (not a custom agent), which generates the plan as conversation text. The orchestrator reads that plan from the conversation context and decomposes it into parallel subagent tasks. A dedicated **chat agent** (`ingenium-chat`) handles conversational interactions with read-only access. Ten specialized subagents handle search, context, prompt engineering, implementation (3 tiers), review, documentation, security, vision analysis, and terra-throughput.
+**12 agents total: 2 primary + 10 subagents (2 hidden).** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it reads plans from conversation context, decomposes work into parallel subagent tasks, verifies output, and encodes patterns into skills. It never writes code directly. A dedicated **chat agent** (`ingenium-chat`, hidden) handles conversational interactions with read-only access. Ten subagents handle exploration, QA, documentation, engineering, security, web automation, and the system-internal LLM broker. The hidden `ingenium-llm-broker` is reserved for system use (never invoked directly).
 
-### Chat Agent Model Inheritance
+### Orchestrator Agent Model
 
-The `ingenium-chat` agent uses a default model that the Chat request can override:
+The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents have model mappings defined centrally in `opencode.json` under the `"agent"` key:
 
-- **Default model** — The profile's default model is `deepseek/deepseek-v4-flash`; the Chat request's `modelID` parameter overrides it at send time.
-- **`hidden: true`** — Prevents the agent from appearing in OpenCode's non-Chat agent selectors (e.g., the OpenCode Web/CLI agent dropdown). It is only visible in the Chat page's agent selector.
-- **Provider from Settings** — The available providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
+- **Model** — Defined in `opencode.json` (not the Markdown profile). The orchestrator routes writer tasks to Fast and Premium tiers based on task complexity and risk, with Premium handling critical/high-risk work.
+- **`hidden: true`** — Prevents agents from appearing in non-Chat selectors where appropriate.
+- **Provider from Settings** — Providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
 
-This design means the Chat page always uses the same LLM that the self-learning pipeline is configured with, avoiding confusion about which model is in use.
+The diagram below is **serialized**: Wave 2 starts only after Wave 1 has
+returned and its verification has completed. The waves are not simultaneous;
+each wave is independently bounded by the 6-active/3-writer policy.
 
 ```mermaid
 flowchart TB
@@ -25,54 +27,49 @@ flowchart TB
         REQ["💬 User Request"]
     end
 
-    REQ --> PLAN["📋 OpenCode Plan mode<br/>generates plan in conversation context"]
+    REQ --> ORCH["⚡ @ingenium-orchestrator<br/><i>Coordination Agent</i><br/>Delegates, never writes directly"]
 
-    PLAN -.->|"User switches to Orchestrator tab"| O
-
-    O["⚡ @ingenium-orchestrator<br/><i>DeepSeek V4 Flash</i><br/>Full R/W | Coordinator"]
-
-    subgraph Orchestrator["⚡ Orchestrator — Execution Phase"]
-        O -->|"Read plan from context"| READPLAN["📖 Parse plan → decompose into tasks"]
-        READPLAN -->|"⚡ PRE-ACTION GATE<br/>Should a subagent do this?"| GATE{ }
-        GATE -->|"🔎 SEARCH"| EXP["@ingenium-explore"]
-        GATE -->|"📝 IMPLEMENT"| SE["@ingenium-software-engineer"]
-        GATE -->|"🔍 REVIEW/TEST"| QA["@ingenium-qa"]
-        GATE -->|"📄 DOCS"| DOCS["@ingenium-docs"]
-        GATE -->|"🛡️ AUDIT"| AUDITOR["@ingenium-security-auditor"]
-        GATE -->|"🧠 CONTEXT"| SCOUT["@ingenium-scout"]
-        EXP --> MERGE["Merge results"]
-        SE --> MERGE
-        QA --> MERGE
-        SCOUT --> MERGE
-        AUDITOR --> MERGE
-        MERGE --> VERIFY["✅ Verify · tests · type-check"]
-        VERIFY --> HEALTH["🚀 Deploy + health verification"]
-        HEALTH --> VISION["@ingenium-qa-vision<br/>passive evidence only"]
-        VISION --> VISION_GATE["👁️ Changed-route visual gate"]
-        VISION_GATE --> DOC["🔴 Spawn @ingenium-docs after EVERY change"]
-        DOC --> OBSERVE["📋 Observations (auto-extracted)"]
-        OBSERVE --> COMMIT["git add/commit/push"]
+    subgraph Wave1["Dispatch Wave 1 — 5 active, 2 writers (first)"]
+        FAST["⚡ ingenium-software-engineer-fast<br/>Routine isolated work · writer"]
+        PREM["💎 ingenium-software-engineer-premium<br/>Critical and complex work · writer"]
+        EXPLORE["🔬 ingenium-explore · research"]
+        SCOUT["🔎 ingenium-scout · docs RAG"]
+        QA["🔍 ingenium-qa · reviews changes"]
     end
 
-    COMMIT --> DONE["✅ Done"]
+    subgraph Wave2["Dispatch Wave 2 — 3 active, 2 writers (after Wave 1)"]
+        DOCS["📝 ingenium-docs · updates docs · writer"]
+        BROWSER["🌐 browser-agent · browser automation · writer"]
+        VISION["👁️ ingenium-qa-vision · visual QA"]
+    end
+
+    ORCH --> Wave1
+    Wave1 --> ORCH
+    ORCH --> Wave2
+    Wave2 --> ORCH
+    ORCH --> DONE["✅ Done"]
 ```
 
 ## Agent Table
 
-| Agent | Type | Model | Provider | Access | Skills Allowed | Purpose |
-|-------|------|-------|----------|--------|---------------|---------|
-| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only + bash (`edit/write` denied) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` | Coordinator — reads plans from OpenCode's Plan mode, delegates ALL work to subagents, never writes code directly |
-| **ingenium-chat** | Primary | Settings-backed (inherited) | Settings → Providers | Read-only (`hidden: true`) | — | Conversational Chat agent — inherits the request `modelID`; hidden from non-Chat selectors |
-| **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read-only | — | Prompt Engineer — analyzes and improves prompts using a structured evaluation framework |
-| **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `local-models` | Codebase search — grep, glob, file discovery, pattern analysis |
-| **ingenium-scout** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `local-models` | Docs RAG persistent memory — past decisions, preferences |
-| **ingenium-qa-vision** | Subagent | `openai/gpt-5.6-luna` | OpenAI OAuth | Read-only passive evidence (`read/glob/grep`; constrained Playwright) | `development-conventions`, `engineering-workflow`, `mcp-tooling` | Visual QA only — passively captures screenshots/snapshots, network, and console evidence; never evaluates, interacts, fixes, or mutates data |
-| **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Standard bug fixes, simple refactors, test authoring, straightforward tasks |
-| **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | DeepSeek API | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Complex multi-file refactoring, architectural changes, performance-critical code |
-| **ingenium-software-engineer-terra** | Subagent | `openai/gpt-5.6-terra` | OpenAI OAuth | Read/Write (`edit: allow, write: allow`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` | Standard fixes, test authoring, routine refactors leveraging GPT-5.6 Terra OAuth |
-| **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Read-only | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` | Code review + test verification. Reviews tests, does NOT write production code or author tests |
-| **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Edit + Write + bash (`edit/write: allow; bash: allow with exclusions`) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` | Documentation + skill updates — observations are auto-extracted by the server-side engine |
-| **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | DeepSeek API | Bash + read-only (`write: deny`) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` | Security audit + git-history leak scanning |
+| Agent | Type | Mode | Skills Allowed |
+|-------|------|------|----------------|
+| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` |
+| **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | — |
+| **ingenium-explore** | Subagent | Research and exploration | `local-models` |
+| **ingenium-scout** | Subagent | Research + Docs RAG | `local-models` |
+| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling` |
+| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
+| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
+| **ingenium-qa** | Subagent | Quality assurance — reviews changes, runs tests, verifies quality | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
+| **ingenium-docs** | Subagent | **Writer** — documentation updates (AGENTS.md, SKILL-INDEX.md, docs workspace) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
+| **ingenium-security-auditor** | Subagent | Security audit — git history leak scanning, dependency review | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
+| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `mcp-tooling`, `engineering-workflow` |
+| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`) | — |
+
+> **Model configuration**: Agent model mappings are defined centrally in `opencode.json` under the `"agent"` key. Markdown profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment.
+>
+> > **Note on `ingenium-chat`**: A legacy root-level duplicate at `.opencode/agents/ingenium-chat.md` exists alongside the canonical `.opencode/agents/chat/ingenium-chat.md`. This is a **compatibility mirror** — both files represent the same logical agent. The root duplicate is preserved for backward compatibility and does **not** count as a separate agent in the 12-agent total.
 
 ---
 
@@ -84,137 +81,103 @@ The 13 email MCP tools (`ingenium_email_list` through `ingenium_email_watch_stat
 
 ## Lifecycle: What Triggers What
 
-| # | Phase | Trigger | Agent | Action |
-|-------|-------|---------|-------|--------|
-| 1 | **Plan** | User enters Plan mode | OpenCode Plan mode | Generates plan as conversation text — research, scope, and task decomposition |
-| 2 | **Handoff** | Plan complete | User | Switches to orchestrator tab |
-| 3 | **Read plan** | Tab switch | Orchestrator | Reads plan from conversation context, decomposes into subagent tasks |
-| 4 | **Pre-Action Gate** | EVERY tool use | Orchestrator | ⚡ Checks: "Should a subagent do this?" before any tool call |
-| 5 | **Code writing** | Implementation needed | Orchestrator → **Software-Engineer** | Implements code, self-verifies (tests/type-check), returns results |
-| 6 | **Normal QA + test** | Code written | Orchestrator → **QA** | Reviews quality and verifies tests; visual QA is a separate gate |
-| 7 | **Deploy + health verification** | Normal QA/test complete | Orchestrator | Completes deployment and health verification before visual QA is spawned |
-| 8 | **Changed-route visual gate** | UI implementation + normal QA/test/deployment/health verification | Orchestrator → **QA Vision** | Passively checks changed non-sensitive UI routes at 1440x900 and 390x844; confirms browser cleanup; FAIL/BLOCKED routes to a writer, then rechecks. All screenshots saved under `tests/artifacts/visual-qa/<run-id>/` |
-| 9 | **Security audit** | Sensitive changes | Orchestrator → **Security-Auditor** | Scans for secrets, auth issues, CI vulnerabilities |
-| 10 | **Documentation** | After EVERY change | Orchestrator → **Docs** | Updates docs/ — observations automatically captured by server-side extraction engine |
-| 11 | **Final visual sweep** | Before final completion/commit | Orchestrator → **QA Vision** | After deployment/health verification, passively sweeps non-sensitive primary routes at both viewports; PASS and cleanup confirmation required |
-| 12 | **Commit** | All gates pass | Orchestrator (bash) | `git add/commit/push` — the ONLY bash the orchestrator runs |
-| 13 | **Observations** | After commit | Extraction engine | Observations automatically captured by server-side extraction engine scanning OpenCode messages |
+Orchestrator phases follow a **behavioral** concurrency policy — 6 active
+subagents max, 3 concurrent writers max per wave. Any wave examples in this
+document are serialized unless explicitly stated otherwise: Wave N must finish
+and be verified before Wave N+1 starts. Never read the examples as one combined
+simultaneous dispatch exceeding either limit.
+
+Writer classification follows the actual permission blocks: `ingenium-software-engineer-fast`, `ingenium-software-engineer-premium`, `ingenium-docs`, and `browser-agent` have `edit: allow` or `write: allow`. `ingenium-explore`, `ingenium-scout`, `ingenium-qa`, `ingenium-qa-vision`, and `ingenium-security-auditor` are non-writers. Writers still count toward the six-active limit, and no wave may contain more than three writers.
+
+This classification is permission-derived rather than based on task type: Docs and Browser count as writers even when handling documentation or browser automation. `browser-agent` is dispatchable by `@ingenium-orchestrator` and must be included in the writer count whenever it is active.
+
+| # | Phase | Agent | Action |
+|---|-------|-------|--------|
+| 1 | **Plan** | User / Plan mode | Define the task or generate plan |
+| 2 | **Route** | `@ingenium-orchestrator` | Decompose task, select writer tier, declare phase (counts, territories, dependencies, verification owners) |
+| 3 | **Fast** | `ingenium-software-engineer-fast` | Routine isolated work — single-package scope |
+| 4 | **Premium** | `ingenium-software-engineer-premium` | 🔴 Critical and complex work — auth, migrations, Docker, multi-service, cross-package, high-risk |
+| 5 | **Verify** | `@ingenium-qa` | Review changes, run tests, verify quality |
+| 6 | **Visual QA** | `@ingenium-qa-vision` | Playwright screenshots at 1440x900 and 390x844 |
+| 7 | **Document** | `@ingenium-docs` | Update AGENTS.md, SKILL-INDEX.md, docs workspace |
+| 8 | **Browser** | `@browser-agent` | Browser automation and self-healing site interaction; counts as a writer |
+| 9 | **Audit** | `@ingenium-security-auditor` | Git history leak scanning, dependency review |
+| 10 | **Encode** | `@ingenium-orchestrator` | Detect + encode patterns into skills |
+| 11 | **Observations** | Extraction engine (automatic) | Observations captured automatically from OpenCode messages |
 
 ---
 
 ## Task Board Integration
 
-The task board (via `ingenium_task_*` MCP tools) is the authoritative work tracking system for the agent pipeline. Tasks flow through a structured lifecycle managed by the orchestrator. The tools map as follows: `kaban_add_task_checked` → `ingenium_task_create`, `kaban_get_next_task` → `ingenium_task_next`, `kaban_move_task` → `ingenium_task_move`, `kaban_complete_task` → `ingenium_task_complete`.
+The task board (via `ingenium_task_*` MCP tools) can be used to track work items. Tasks flow through a standard todo → in_progress → review → done lifecycle.
 
 ```mermaid
 flowchart LR
-    subgraph Orchestrator["Orchestrator — Plan, Populate & Execute"]
-        REQ["Plan from conversation context"] --> CREATE["ingenium_task_create<br/>todo column"]
-        CREATE --> ASSIGN["assignedTo subagent<br/>dependencies set"]
-        ASSIGN --> NEXT["ingenium_task_next"]
-        NEXT --> INPROG["ingenium_task_move<br/>in-progress"]
-        INPROG --> SE["@ingenium-software-engineer"]
-        INPROG --> QA["@ingenium-qa"]
-        SE --> REVIEW["ingenium_task_move<br/>review"]
-        QA --> REVIEW
-        REVIEW --> DONE["ingenium_task_complete<br/>done"]
-    end
-    
-    subgraph Closure["Closure — Archive"]
-        DONE --> ARCHIVE["ingenium_task_list<br/>done column"]
-        ARCHIVE --> CLEAR["Clear plan.md"]
+    subgraph Workflow["Work Tracking"]
+        REQ["Task defined"] --> CREATE["ingenium_task_create<br/>todo column"]
+        CREATE --> INPROG["ingenium_task_move<br/>in-progress"]
+        INPROG --> DONE["ingenium_task_complete<br/>done"]
     end
 ```
 
-### Lifecycle Steps
-
-| Step | Agent | Action | MCP Tool | Todowrite Mirror |
-|------|-------|--------|----------|-----------------|
-| 1 | Orchestrator | Decomposes plan from conversation context, creates tasks with subagent assignments and dependencies | `ingenium_task_create`, `ingenium_task_move` | — |
-| 2 | Orchestrator | Reads next high-priority work item from todo column | `ingenium_task_next` | Mark `in_progress` |
-| 3 | Orchestrator | Claims task, marks as active, spawns subagent | `ingenium_task_move <id> in-progress` | Mark `in_progress` |
-| 4 | Subagent | Implements, reviews, or documents the work | — | — |
-| 5 | Orchestrator | Moves task to review column after subagent completes | `ingenium_task_move <id> review` | Mark `pending` (for QA) |
-| 6 | Orchestrator | Marks task complete after QA approval | `ingenium_task_complete <id>` | Mark `completed` |
-| 7 | Orchestrator | Lists completed tasks and clears plan | `ingenium_task_list <done>` | — |
-
 ---
 
-## Orchestration Policy — 12-Active / 6-Writer Phase Scheduler
+## 🔴 Orchestration Policy
 
-The orchestrator (`@ingenium-orchestrator`) follows a **behavioral** concurrency policy for parallel subagent execution. This is **not an OpenCode configuration field** — it is a documented scheduling discipline enforced by the orchestrator's own phase-scheduling logic.
+The orchestrator follows a **behavioral** concurrency policy — 6 active
+subagents max, 3 concurrent writers max per phase. Writer tiers below describe
+roles, not an instruction to dispatch every tier together. Each declared phase
+is bounded independently, and any subsequent phase starts only after the prior
+phase has completed and been verified. Writer tiers:
 
-### Concurrency Limits
-
-| Limit | Value | Scope |
-|-------|-------|-------|
-| **Active subagents per phase** | 12 | Total simultaneous subagents (writers + read-only) in a single orchestration phase |
-| **Concurrent writers per wave** | 6 | Subagents with `edit: allow` or `write: allow` permissions |
-| **Remaining capacity** | 6 | Reserved for read-only agents (explore, QA, docs, security, scout, vision) |
-| **Write territory overlap** | 0 | No two writers may touch the same file/directory path concurrently |
-
-### Writer Tiers and Routing
-
-| Tier | Model | When to route |
+| Tier | Agent | When to route |
 |------|-------|---------------|
-| **Fast** | `deepseek/deepseek-v4-flash` | Routine isolated work: bug fixes, simple refactors, test authoring, single-package scope |
-| **Premium** | `deepseek/deepseek-v4-pro` | Complex architecture-wide / cross-cutting work: multi-file refactoring, architectural changes, performance-critical code |
-| **Terra** | `openai/gpt-5.6-terra` | 🔴 **First choice for critical work**: auth/secrets/permissions; migrations/data integrity; Docker/runtime outages; multi-service contracts; cross-package refactors; persistent high-risk failures. Higher reasoning throughput via GPT-5.6 Terra OAuth. |
+| **Fast** | `ingenium-software-engineer-fast` | Routine isolated work, single-package scope |
+| **Premium** | `ingenium-software-engineer-premium` | 🔴 Critical and complex work: auth, migrations, Docker, multi-service, high-risk, cross-package |
+| **Docs** | `ingenium-docs` | Documentation and skill-system work |
+| **Browser** | `browser-agent` | Browser automation and self-healing site interaction |
 
-### Phase Declaration Protocol
+Example phase: **6 active, 3 writers** — Fast owns `dashboard/`, Docs owns `docs/`, Browser owns browser recipes; QA, Explore, and QA Vision are the three non-writers. This is valid because writer status follows `edit: allow`/`write: allow`, and no more than three such agents run concurrently.
 
-Every orchestration phase MUST declare before dispatch:
+### Phase Declaration
 
-1. **Active count** — total subagents to spawn (max 12)
-2. **Writer count** — total writers among them (max 6)
-3. **Exclusive territories** — file/directory ownership per writer; zero overlap
-4. **Dependencies** — serialization order for writers sharing territories across waves
-5. **Verification owners** — which QA/docs agent reviews which writer's output
-
-Conflicting writers (touching the same file) MUST be serialized across waves — never dispatched simultaneously.
+Every orchestration phase MUST declare: active count (max 6), writer count (max 3), exclusive territories (zero overlap), dependencies (serialization order), and verification owners.
 
 ### Restart Required for New Agent Profiles
 
 Adding a new agent profile (`.opencode/agents/*.md`) requires restarting OpenCode before the auto-discovered agent becomes invocable by `@` mention.
 
-After an OpenCode restart, invoke `@ingenium-qa-vision` on a known non-sensitive dashboard state. A **BLOCKED** result means stop and reconfigure the visual-QA path; it is not a pass.
-
-> See the [orchestrator agent profile](../../.opencode/agents/primary/ingenium-orchestrator.md) for the full policy specification, dispatch examples, and collision resolution rules.
+> See the [orchestrator agent profile](../../.opencode/agents/primary/ingenium-orchestrator.md) for the full policy specification.
 
 ---
 
 ## Per-Agent Profiles
 
-Full details for each agent are available in the agent definition files at `.opencode/agents/`. See also the [INGENIUM orchestrator agent](../../.opencode/agents/primary/ingenium-orchestrator.md) for orchestrator-specific controls and the full pipeline flow.
+Full details for each agent are available in the agent definition files at `.opencode/agents/`.
 
 ### Compute Split
 
 | Resource | Agents | Count | Cost |
 |----------|--------|-------|------|
-| DeepSeek V4 Pro (API) | `ingenium-software-engineer-premium`, `ingenium-orchestrator`, `ingenium-prompt-engineer` | 3 | Paid |
-| DeepSeek V4 Flash (API) | `ingenium-chat`, `ingenium-explore`, `ingenium-scout`, `ingenium-software-engineer-fast`, `ingenium-qa`, `ingenium-docs`, `ingenium-security-auditor`; `ingenium-llm-broker` (internal/hidden) | 7 public + 1 internal | Paid |
-| OpenAI GPT-5.6 Terra (OAuth) | `ingenium-software-engineer-terra` | 1 | Paid (user OpenAI subscription) |
-| OpenAI GPT-5.6 Luna (OAuth) | `ingenium-qa-vision` | 1 | Paid (user OpenAI subscription) |
-| qwen3.5-9b (LM Studio) | None | 0 | Local |
+| Model-dependent (configurable) | All agents | 12 | Configurable via `opencode.json` agent mappings |
 
-**Model configuration**: Model assignments are defined per-agent in their `.md` agent profile files (stored in `.opencode/agents/` and the DB `agents` table).
+**Model configuration**: Agent model mappings live in `opencode.json` under the `"agent"` key. The Markdown profiles intentionally omit `model:` — the root config is the sole source of runtime model assignment. When agents are created or updated via MCP tools, the model field is persisted to `opencode.json`, not the `.md` file.
 
 ---
 
-### Subagent Invocation
+### Agent Invocation
 
-Primary agents invoke subagents via the Task tool automatically. All subagents can also be invoked directly via `@` mention.
-
-| Subagent | `@` mention | Access | Invokable by |
-|----------|-------------|--------|--------------|
-| ingenium-explore | `@ingenium-explore` | Read-only | orchestrator + user |
-| ingenium-scout | `@ingenium-scout` | Read-only | orchestrator + user |
-| ingenium-prompt-engineer | `@ingenium-prompt-engineer` | Read-only | orchestrator + user |
-| ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | orchestrator + user |
-| ingenium-qa-vision | `@ingenium-qa-vision` | Visual QA only | orchestrator only |
-| ingenium-software-engineer | `@ingenium-software-engineer` | Read/Write | orchestrator only |
-| ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Read/Write | orchestrator only |
-| ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Read/Write | orchestrator only |
-| ingenium-software-engineer-terra | `@ingenium-software-engineer-terra` | Read/Write | orchestrator only |
-| ingenium-qa | `@ingenium-qa` | Read-only | orchestrator only |
-| ingenium-docs | `@ingenium-docs` | Edit + Write (`edit: allow, write: allow, bash: deny`) | orchestrator only |
+| Agent | `@` mention | Access | Mode |
+|-------|-------------|--------|------|
+| ingenium-orchestrator | `@ingenium-orchestrator` | Read; restricted Bash (tests/git only); no write | Primary — coordination, delegates to subagents |
+| ingenium-chat | `@ingenium-chat` | Read-only | Primary — invoked from Chat page |
+| ingenium-explore | `@ingenium-explore` | Read-only | Subagent — research and exploration |
+| ingenium-scout | `@ingenium-scout` | Read-only | Subagent — research + Docs RAG |
+| ingenium-qa-vision | `@ingenium-qa-vision` | Read/glob/grep + Playwright; no Bash, no writes | Subagent — passive visual QA |
+| ingenium-software-engineer-fast | `@ingenium-software-engineer-fast` | Full R/W/Bash | Subagent — writer tier Fast |
+| ingenium-software-engineer-premium | `@ingenium-software-engineer-premium` | Full R/W/Bash | Subagent — writer tier Premium |
+| ingenium-qa | `@ingenium-qa` | Bash + read-only | Subagent — quality assurance |
+| ingenium-docs | `@ingenium-docs` | Full R/W/Bash | Subagent — writer for documentation |
+| ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | Subagent — security audit |
+| browser-agent | `@browser-agent` | Full R/W/Bash | Subagent — writer for web automation and self-healing site interaction |
+| ingenium-llm-broker | `@ingenium-llm-broker` | All denied | Subagent — system-internal (`hidden: true`, never invoke directly) |

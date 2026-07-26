@@ -13,7 +13,15 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 
 **Dockerfile note:** The Dockerfile runtime stage does not copy `data/migrations/`. New migration `.sql` files must be manually placed (bind-mounted or copied) into the container for incremental DBs.
 
-## Migration File List (001–048)
+## Canonical deployed database path
+
+Production Compose sets `INGENIUM_CORE_DB_PATH=/app/.ingenium/data`. This file
+is on the `ingenium-data` named volume and uses WAL mode. The resolver normalizes
+historical fallback spellings instead of creating a sibling `data.db`; operators
+must not manually introduce a second database under `/app/.ingenium/data.db` or
+another Compose project volume.
+
+## Migration File List
 
 ### Foundation (001–014)
 
@@ -76,7 +84,7 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 
 ---
 
-### Feature Migrations (045–051)
+### Feature Migrations (045–052)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -87,6 +95,7 @@ Migrations live at `packages/ingenium-core/data/migrations/` as numbered `.sql` 
 | 049 | `049_workspace_project_migration.sql` | Creates `project_migration_manifests` audit table — transactional DB-only migration of historical `/workspace` project into `global-default` with hash verification, child row protection, and rollback safety |
 | 050 | `050_context_rag_phase3.sql` | Adds `source`, `metadata`, `updated_at` to `context_entries` with source CHECK constraint and index; adds unique index `idx_rag_sources_project_path` for canonical path-based idempotency in `rag_sources` — Phase 3 context/RAG ingestion and validation |
 | 051 | `051_thread_retirement.sql` | Removes the verified-empty legacy checkpoint table and rebuilds `rag_sources` without the retired source type; the runner refuses non-zero legacy data before schema changes |
+| 052 | `052_agent_category_integrity.sql` | Normalizes historical agent categories and adds a `CHECK(category IN ('primary','execution','research','security','chat'))` constraint via the `RENAME → CREATE → COPY → DROP` safe pattern; adds `chat` to the Zod schema enum; updates `enabled`-aware agents tooling with safe-name validation and `opencode.json`-based runtime model assignment — disabled agents are excluded from disk writes |
 
 *See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
 
@@ -116,6 +125,13 @@ INSERT INTO existing_table (...) SELECT ... FROM existing_table_old;
 DROP TABLE existing_table_old;
 PRAGMA foreign_keys = ON;
 ```
+
+The Phase 4 mail-account migration is all-or-nothing: it resolves the active
+global project, verifies encryption continuity, copies each account's complete
+setting group, byte-verifies the destination, and only then deletes source rows.
+Collisions remain in the source project for review; failed writes retain source
+settings. A key mismatch or unavailable key skips migration without modifying
+encrypted mail data.
 
 ## 🔴 Email FK Defensive Pattern
 

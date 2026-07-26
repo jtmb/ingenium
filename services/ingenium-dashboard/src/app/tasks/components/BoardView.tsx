@@ -695,9 +695,9 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
   }, [columns]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-2 flex-wrap">
+      <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <select
             value={swimlane}
@@ -711,7 +711,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => { setBulkMode(!bulkMode); setSelectedIds(new Set()); }}
             className={`text-sm px-3 py-1.5 border border-[var(--color-border)] rounded cursor-pointer ${
@@ -763,11 +763,19 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        <div className="overflow-x-auto pb-4">
+        <div
+          className="min-w-0 max-w-full overflow-x-auto overscroll-x-contain pb-4"
+          role="region"
+          aria-label="Kanban board"
+          tabIndex={0}
+        >
+          <p className="mb-2 text-xs text-[var(--color-text-muted)] sm:hidden">
+            Swipe horizontally to view all columns.
+          </p>
           {swimlane === "none" ? (
             /* Flat columns — no swimlanes */
             <div
-              className="grid gap-4"
+              className="grid w-max min-w-full gap-4"
               style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(240px, 1fr))` }}
             >
               {columns.map((col) => (
@@ -801,7 +809,7 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
                       </span>
                     </h4>
                     <div
-                      className="grid gap-4"
+                      className="grid w-max min-w-full gap-4"
                       style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(240px, 1fr))` }}
                     >
                       {columns.map((col) => {

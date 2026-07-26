@@ -73,9 +73,9 @@ interface ServiceOverlayProps {
 }
 
 /**
- * Maps a supervisord process state to CSS classes for the state badge.
- * Semantic: error state category is used for both "error" and "stopped"/"disabled"
- * since both indicate an unhealthy condition requiring attention.
+ * Maps process and application states to CSS classes for the state badge.
+ * Semantic: the error category is used for "error", "unhealthy", and
+ * "stopped"/"disabled" states because each requires attention.
  */
 function stateBadgeStyle(state: string) {
   switch (state) {
@@ -94,6 +94,7 @@ function stateBadgeStyle(state: string) {
         dot: "bg-[var(--color-warning-text)]",
       };
     case "error":
+    case "unhealthy":
       return {
         bg: "bg-[var(--color-error-bg)]",
         text: "text-[var(--color-error-text)]",

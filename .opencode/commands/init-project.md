@@ -1,6 +1,6 @@
 ---
 description: "Initialize the Ingenium project — register all skills (with full file tree), agents, and plugins in the DB via MCP tools"
-agent: primary/ingenium-orchestrator
+agent: ingenium-orchestrator
 ---
 
 Initialize this project for Ingenium. Everything is done via MCP tools — no shell, no container access.
@@ -50,7 +50,7 @@ Skip if the skill already exists (error is fine).
 
 ## Step 3 — Register agents
 
-1. `Glob("opencode/agents/**/*.md")` to discover agent files
+1. `Glob("opencode/agents/**/*.md")` to discover active agent files (exclude `.opencode/archive/`)
 2. For each:
    a. Read full content
    b. Extract `category` from directory name (primary/, execution/, research/, security/)

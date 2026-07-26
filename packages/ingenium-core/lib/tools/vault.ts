@@ -10,6 +10,7 @@ import {
   verifyHMAC,
   wrapKey,
 } from "./vault-crypto.js";
+import { migrateLegacyOAuthClientSecretsForActiveGlobalProject } from "./protected-settings.js";
 
 const VERIFY_DATA = Buffer.from("ingenium-vault-v1");
 const DELETED_POLICY = '{"mode":"deleted"}';
@@ -143,6 +144,10 @@ export function unsealVault(projectId: string, passphrase: string): { ok: boolea
     insertAudit(projectId, "vault_unsealed", null, "system", {});
   });
   checkpointAfterWrite();
+  // This is deliberately post-commit: legacy values are migrated only after
+  // the vault is durably unsealed, and a safe migration failure never changes
+  // a successful vault-unseal response.
+  migrateLegacyOAuthClientSecretsForActiveGlobalProject();
   return { ok: true };
 }
 

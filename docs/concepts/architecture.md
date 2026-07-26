@@ -40,7 +40,7 @@ When an external OpenCode session (CLI, VS Code) loads the `@ingenium/extension`
 
 ### Global-Default Semantics
 
-The `global-default` project carries `is_global=1` and serves as the sole server/public namespace:
+The `global-default` project carries `is_global=1` and serves as the sole server/public namespace. The database permits at most one active global project (an archived global does not count). Runtime resolution does not silently choose among duplicate active globals; ambiguity is an integrity failure that must be repaired before shared resources or mail operations continue:
 
 - **Docker deployment**: Created at startup by `scripts/docker-entrypoint.sh` via `POST /api/v1/projects`
 - **Local development**: Created by `ensureGlobalProject()` in the API server before the scheduler or email engine start — idempotent no-op if already present
@@ -48,6 +48,11 @@ The `global-default` project carries `is_global=1` and serves as the sole server
 - **Global config path**: `/home/appuser/.config/opencode/opencode.jsonc` (set by the Docker entrypoint)
 - **Auto-loading**: When a new project is created, global skills from `global-default` are automatically copied into it via `copySkills()`
 - **Graceful degradation**: If `global-default` cannot be created, the API logs a warning and skips mail sync with `"Skipping mail sync — no global project configured"`
+
+Do not run a live global-project or mail-settings migration before deploying
+the release that contains its schema and runtime guards. Deploy the application,
+run the migration preflight against the target database, and only then permit
+runtime reconciliation.
 
 ### Project-Name Safety Validation
 
@@ -481,9 +486,10 @@ The `ingenium-chat` agent uses **no hardcoded `model` field** — it inherits th
 
 ## Native Provider OAuth Integration
 
-Native OpenCode provider integrations use two OAuth modes, both handled by a public `GET /auth/callback` endpoint registered **before** the auth middleware:
+Native OpenCode provider integrations use two OAuth modes, both handled by the
+exact unauthenticated `GET /auth/callback` allowlist inside the auth middleware:
 
-- **Auto mode (default)**: OpenCode opens a local HTTP listener on `localhost:1455` inside the container. The Docker Compose file maps `127.0.0.1:1455` on the host to port `4097` (the API). When the OAuth provider redirects the browser to `http://localhost:1455/auth/callback`, it reaches the API, which validates the state from the `pendingOAuthAttempts` Map (10-min TTL), consumes the state (preventing replay), and forwards the callback to OpenCode's internal listener. The user sees an "Authorization received" page.
+- **Auto mode (default)**: OpenCode opens a local HTTP listener on `localhost:1455` inside the container. The host's `127.0.0.1:1455` reaches the Nginx callback listener, which forwards only `GET /auth/callback` to private Express `4096`. Express validates the state from the `pendingOAuthAttempts` Map (10-min TTL), consumes the state (preventing replay), and forwards the callback to OpenCode's internal listener. The user sees an "Authorization received" page.
 - **Code mode**: The API receives the OAuth code and state, validates and consumes the state, then calls `opencodeClient.completeIntegrationAttempt()` with the code. The user sees an "Authorization complete" page.
 
 > 🔴 Both modes consume the state parameter before forwarding or exchanging, preventing redirect replay. Malformed states (>1024 chars or containing control characters) are rejected with 400.
@@ -773,7 +779,7 @@ The Ingenium Dashboard (http://localhost:3000) provides 20 primary route-based p
 | `/observations` | Self-learning observations with FTS5 search + type/status filters |
 | `/personality` | Personality traits with confidence bars, enable/disable |
 | `/pipeline` | Git-workflow-style timeline of pipeline events (3s poll, filters, +N collapse) |
-| Settings (overlay) | Full-screen settings overlay opened with `?settings=<tab>`; `/settings` is a redirect entrypoint |
+| Settings (overlay) | Full-screen, URL-driven overlay with 14 panels opened with `?settings=<tab>`; four panels are functional forms/launchers and ten link to their dedicated workspaces; `/settings` redirects to `/?settings=general` |
 
 Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` embedding, `/mail/[id]`, `/mail/oauth/callback`, and `/observations/[id]`. Together with the 20 primary routes, the App Router contains 25 page entrypoints. The dashboard talks to the API layer only — zero direct DB access.
 
@@ -812,7 +818,7 @@ The system exposes **245 catalog tools** across **28 categories**. Canonical cat
 
 ## API Configuration
 
-The Express API uses `express.json({ limit: "2mb" })` for request body parsing. This allows large skill payloads (when uploading skills with file_tree data) without hitting the default 100KB limit. Other middleware includes helmet for security headers, CORS (configurable via `CORS_ORIGIN`), and optional bearer token auth.
+The Express API uses `express.json({ limit: "2mb" })` for request body parsing. This allows large skill payloads (when uploading skills with file_tree data) without hitting the default 100KB limit. Other middleware includes helmet for security headers, CORS and browser CSRF using the same exact `DASHBOARD_ALLOWED_ORIGINS` allowlist, and mandatory bearer token auth behind the loopback `4097` boundary.
 
 ## Dashboard Features
 
@@ -820,11 +826,11 @@ The Express API uses `express.json({ limit: "2mb" })` for request body parsing. 
 The dashboard includes an embedded OpenCode experience at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
 - **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved by `runtime-urls.ts` using a **two-tier embedding model**:
-  - **Loopback HTTP** (localhost/127.0.0.1/::1): direct port (`http://localhost:4098/`)
+  - **Local host gateway**: `http://opencode.localhost:3000/` (Web), without HTTP Basic Auth or browser bearer tokens.
   - **Remote HTTPS**: requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` pointing to a dedicated root HTTPS origin (e.g., `https://opencode.example.com/`)
-  - **Unsupported LAN HTTP**: `getOpenCodeAvailability()` returns `"unavailable"` — the iframe shows explicit guidance instead of a broken proxy
+   - **LAN/remote access**: requires an operator-managed authenticated TLS profile and explicit root HTTPS origins for both Web and CLI. The default Compose binding supports Windows-to-WSL localhost forwarding, but plain HTTP is not a supported LAN/remote profile.
   - The old same-origin proxy rewrites (`/opencode-web/`, `/opencode-cli/`) have been **removed** — OpenCode v1.18.3+ serves root-relative assets and cannot be proxied under a sub-path.
-- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. URL resolution follows the same two-tier model: loopback HTTP → `http://localhost:4099/`, remote HTTPS → explicit `NEXT_PUBLIC_OPENCODE_CLI_URL` (root HTTPS origin only). Connects via `opencode attach http://localhost:4098 --dir /workspace`, sharing session state.
+- **CLI mode** — Embeds a ttyd terminal through local `http://cli.localhost:3000/`, or an explicit root HTTPS origin via `NEXT_PUBLIC_OPENCODE_CLI_URL`, sharing session state with Web mode.
 - **Mode switch** — A right-edge glass tab toggles between Web and CLI modes. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` instead of `display:none` to prevent xterm dimension zeroing. Both iframes remain in the DOM at full viewport size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage` and restored on page load.
@@ -864,21 +870,28 @@ services:
   ingenium:
     build: .
     ports:
-      - "4097:4097"   # API
-      - "3000:3000"   # Dashboard
-      - "127.0.0.1:4098:4098"   # opencode-web (binds 0.0.0.0 inside container via `--hostname 0.0.0.0`; Compose publishes to host loopback only)
-      - "127.0.0.1:1455:4097"   # OAuth callback proxy (host loopback → API)
+       - "3000:3000"             # Local dashboard and gateway roots; WSL-forwardable
+      - "127.0.0.1:4097:4097"   # Bearer-authenticated host-loopback API boundary
+      - "127.0.0.1:1455:1455"   # Exact OAuth callback listener (host loopback only)
     volumes:
       - ingenium-data:/app/.ingenium
 ```
 
-Inside the container, **supervisord** manages four processes:
-1. **API** (Express on :4097) — `express.json({ limit: "2mb" })` for large skill/plugin uploads, all CRUD operations
+Inside the container, **supervisord** manages six processes:
+1. **API boundary** (:4097 → private Express :4096) — authenticated bearer boundary and `express.json({ limit: "2mb" })` for large skill/plugin uploads
 2. **Dashboard** (Next.js on :3000) — 20 primary routes plus the Settings overlay
-3. **opencode-web** (on :4098) — OpenCode web server (`--hostname 0.0.0.0` inside container; Compose publishes to host `127.0.0.1:4098` only)
-4. **ttyd-opencode** (on :4099) — OpenCode CLI terminal via ttyd (`ttyd --port 4099 opencode attach http://localhost:4098 --dir /workspace`). Serves an xterm.js terminal that the dashboard `/opencode` page embeds as a second iframe. The `appuser` has passwordless sudo access for package installation inside the container.
+3. **API** (private Express on :4096) — sole database authority
+4. **Nginx gateway** (:3000 and :1455) — local root gateways and the exact OAuth callback route
+5. **opencode-web** (on :4098) — private OpenCode web upstream behind the local `opencode.localhost:3000` gateway
+6. **ttyd-opencode** (on :4099) — private OpenCode CLI upstream behind the local `cli.localhost:3000` gateway. It serves an xterm.js terminal that the dashboard `/opencode` page embeds as a second iframe.
 
 Build-time UID matching ensures write access to workspace (`~/repos` → `/workspace`). Docker volumes `opencode-config` and `opencode-data` persist OpenCode configuration across container rebuilds.
+
+The builder and runtime stages both use glibc-based `node:22-slim`, keeping native
+Node module artifacts compatible with the runtime libc. The image verifies that
+`better-sqlite3` loads in the runtime stage. Nginx runs as `appuser`; its PID,
+lock, and temporary paths are recreated as owner-writable directories
+under ephemeral `/run/ingenium-gateway` on each start.
 
 > 🔴 **Docker git**: The Dockerfile installs the `git` package to support OpenCode repository creation inside the container. Without git, OpenCode fails to initialize new repos for code editing.
 
@@ -891,13 +904,14 @@ docker compose up --build
 
 | Host Port | Service | Description |
 |-----------|---------|-------------|
-| `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
-| `127.0.0.1:4097` | API | Express REST gateway (sole DB authority) |
-| `127.0.0.1:4098` | opencode-web | OpenCode Web UI — container binds **0.0.0.0** via `--hostname 0.0.0.0`; Compose publishes to host loopback only |
-| `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
-| `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → container `:4097` (API). OpenCode redirects OAuth provider callbacks here; the API validates state, consumes it (preventing replay), and either forwards to OpenCode's internal listener (auto mode) or completes the exchange (code mode). |
+| `3000` | Dashboard and gateways | Next.js frontend plus local root gateways without HTTP Basic Auth; supports default Windows-to-WSL localhost forwarding |
+| `127.0.0.1:4097` | API boundary | Authenticated bearer boundary for host MCP and in-container dashboard/OpenCode traffic |
+| internal `4096` | Express API | Private REST gateway and sole DB authority |
+| internal `4098` | opencode-web | OpenCode Web upstream behind local `opencode.localhost:3000` |
+| internal `4099` | ttyd-opencode | OpenCode CLI upstream behind local `cli.localhost:3000` |
+| `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → Nginx listener → private Express `:4096`; only exact `GET /auth/callback` is forwarded, and the auth middleware allowlists it without a bearer token. |
 
-> Note: Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099, 1455.
+> Note: 4098 and 4099 are internal container listeners and are not browser-facing host ports. The loopback-only 4097 boundary requires a bearer credential; the local 3000 gateway has no HTTP Basic Auth and never receives a browser bearer token.
 
 ### Volume Configurations
 

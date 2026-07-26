@@ -14,6 +14,7 @@ import { emailCache, logger } from "ingenium-core";
 import { getAccount, getCredentials, getGlobalProjectId } from "./accounts.js";
 import { connectAccount, getConnection, listFolders } from "./imap.js";
 import { parseRawEmail } from "./parser.js";
+import { providerErrorDiagnostic, sanitizeProviderError } from "./provider-errors.js";
 
 /**
  * 🔴 Single-flight deduplication map — prevents concurrent syncFolder calls
@@ -239,18 +240,25 @@ export async function syncFolder(
           if (bodiesCached > 0) {
             logger.info("email", `Prefetched ${bodiesCached} bodies for ${account.email}/${folder}`);
           }
-        } catch (err: unknown) {
+        } catch (error: unknown) {
           // Body prefetch failure is non-fatal — listings are already synced
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("email", `Body prefetch failed for ${account.email}/${folder} (non-fatal): ${msg}`);
+          logger.warn("email", "Body prefetch failed (non-fatal)", {
+            accountId,
+            folder,
+            ...providerErrorDiagnostic(error, "sync"),
+          });
         }
       }
 
       resolve({ folder, synced, total });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("email", `syncFolder FAILED for ${accountId}/${folder}: ${msg}`);
-      reject(err as Error);
+    } catch (error: unknown) {
+      const safe = sanitizeProviderError(error, "sync");
+      logger.warn("email", "Folder sync failed", {
+        accountId,
+        folder,
+        ...providerErrorDiagnostic(safe, "sync"),
+      });
+      reject(safe);
     } finally {
       inFlightSyncs.delete(key);
     }
@@ -340,10 +348,14 @@ export async function backfillFolderBodies(
 
     logger.info("email", `backfillFolderBodies: cached ${backfilled} bodies for ${account.email}/${folder}`);
     return { folder, backfilled };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("email", `backfillFolderBodies FAILED for ${account.email}/${folder}: ${msg}`);
-    return { folder, backfilled: 0, error: msg };
+  } catch (error: unknown) {
+    const safe = sanitizeProviderError(error, "sync");
+    logger.warn("email", "Body backfill failed", {
+      accountId,
+      folder,
+      ...providerErrorDiagnostic(safe, "sync"),
+    });
+    return { folder, backfilled: 0, error: safe.message };
   }
 }
 
@@ -447,9 +459,9 @@ export async function syncAccountFolders(
       try {
         const result = await syncFolder(projectId, accountId, folder.path);
         results.push(result);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        results.push({ folder: folder.path, synced: 0, total: 0, error: msg });
+      } catch (error: unknown) {
+        const safe = sanitizeProviderError(error, "sync");
+        results.push({ folder: folder.path, synced: 0, total: 0, error: safe.message });
       }
 
       opts?.onFolder?.(folder.path, false);
@@ -464,9 +476,12 @@ export async function syncAccountFolders(
     );
 
     return results;
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("email", `syncAccountFolders FAILED for ${account.email}: ${msg}`);
-    return [{ folder: "__all__", synced: 0, total: 0, error: msg }];
+  } catch (error: unknown) {
+    const safe = sanitizeProviderError(error, "sync");
+    logger.warn("email", "Account folder sync failed", {
+      accountId,
+      ...providerErrorDiagnostic(safe, "sync"),
+    });
+    return [{ folder: "__all__", synced: 0, total: 0, error: safe.message }];
   }
 }

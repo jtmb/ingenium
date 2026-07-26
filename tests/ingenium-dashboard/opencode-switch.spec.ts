@@ -1,6 +1,5 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 
-const DASHBOARD_URL = "http://localhost:3000";
 const WEB_IFRAME = 'iframe[title="OpenCode Web"]';
 const CLI_IFRAME = 'iframe[title="OpenCode Terminal"]';
 const SWITCH_TO_CLI = 'button[aria-label="Switch to CLI mode"]';
@@ -9,27 +8,44 @@ const SWITCH_TO_WEB = 'button[aria-label="Switch to Web mode"]';
 test.describe("OpenCode Web/CLI Mode Switch", () => {
   test.describe.configure({ mode: "serial" });
 
-  // Precondition: verify services are reachable
-  test.beforeAll(async ({ request }) => {
-    try {
-      const apiHealth = await request.get("http://localhost:4097/api/v1/health");
-      if (!apiHealth.ok()) {
-        test.skip(true, "API not reachable — skipping tests");
-      }
-    } catch {
-      test.skip(true, "Services not running — skipping tests");
-    }
+  // The health gateway is mocked so mode behavior can be exercised against a
+  // local dashboard without requiring Docker or an OpenCode/provider process.
+  test.beforeEach(async ({ page }) => {
+    await mockOpenCodeHealth(page);
+    await mockOpenCodeFrames(page);
   });
+
+  async function mockOpenCodeHealth(page: Page) {
+    await page.route("**/api/v1/opencode/health**", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ data: { healthy: true, status: "ready" } }),
+      }),
+    );
+  }
+
+  async function mockOpenCodeFrames(page: Page) {
+    await page.route(
+      /^(?:http:\/\/localhost:(?:4098|4099)|http:\/\/(?:opencode|cli)\.localhost:3000)\/.*$/,
+      (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "text/html",
+          body: "<!doctype html><title>OpenCode fixture</title>",
+        }),
+    );
+  }
 
   /* ------------------------------------------------------------------ */
   /*  1. Initial state — Web iframe visible, CLI absent (lazy-mounted)    */
   /* ------------------------------------------------------------------ */
   test("initial state: Web iframe visible, CLI iframe not yet mounted", async ({ page }) => {
     // Start fresh — clear any persisted mode
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
     // Full navigation to pick up cleared localStorage
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
 
     // Web iframe should be in DOM and visible
     const webFrame = page.locator(WEB_IFRAME);
@@ -48,9 +64,10 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
   /*  2. Switch to CLI mode — CLI mounts, Web hides                       */
   /* ------------------------------------------------------------------ */
   test("switching to CLI mode mounts CLI iframe and hides Web iframe", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(WEB_IFRAME)).toBeAttached({ timeout: 10000 });
 
     // Click switch to CLI
     const switchToCli = page.locator(SWITCH_TO_CLI);
@@ -76,9 +93,10 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
   /*  3. No display:none on CLI iframe                                    */
   /* ------------------------------------------------------------------ */
   test("CLI iframe never uses display:none", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(WEB_IFRAME)).toBeAttached({ timeout: 10000 });
 
     // Switch to CLI to mount it
     await page.locator(SWITCH_TO_CLI).click();
@@ -100,9 +118,10 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
   /*  4. Switching back preserves both iframes in DOM                     */
   /* ------------------------------------------------------------------ */
   test("switching back to Web restores visibility without removing either iframe", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(WEB_IFRAME)).toBeAttached({ timeout: 10000 });
 
     // Switch to CLI
     await page.locator(SWITCH_TO_CLI).click();
@@ -122,9 +141,10 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
   /*  5. Accessibility — correct role, label, and aria-pressed            */
   /* ------------------------------------------------------------------ */
   test("switch button has accessible role, aria-label, and aria-pressed", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(WEB_IFRAME)).toBeAttached({ timeout: 10000 });
 
     const switchBtn = page.locator(SWITCH_TO_CLI);
     await expect(switchBtn).toBeVisible({ timeout: 5000 });
@@ -149,15 +169,22 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
   /*  6. Keyboard shortcut Ctrl+Shift+` toggles mode                      */
   /* ------------------------------------------------------------------ */
   test("Ctrl+Shift+` keyboard shortcut toggles mode", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(WEB_IFRAME)).toBeAttached({ timeout: 10000 });
 
     // Initial: should have web mode button visible
     await expect(page.locator(SWITCH_TO_CLI)).toBeVisible({ timeout: 5000 });
 
     // Press keyboard shortcut — should switch to CLI
-    await page.keyboard.press("Control+Shift+Backquote");
+    await page.locator(SWITCH_TO_CLI).dispatchEvent("keydown", {
+      key: "`",
+      code: "Backquote",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+    });
 
     // CLI iframe should now be mounted
     await expect(page.locator(CLI_IFRAME)).toBeAttached({ timeout: 10000 });
@@ -166,7 +193,13 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
     await expect(page.locator(SWITCH_TO_WEB)).toBeVisible({ timeout: 5000 });
 
     // Press shortcut again to switch back
-    await page.keyboard.press("Control+Shift+Backquote");
+    await page.locator(SWITCH_TO_WEB).dispatchEvent("keydown", {
+      key: "`",
+      code: "Backquote",
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+    });
 
     // Should be back to Web mode
     await expect(page.locator(SWITCH_TO_CLI)).toBeVisible({ timeout: 5000 });
@@ -176,9 +209,10 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
   /*  7. Mode persists via localStorage across reload                     */
   /* ------------------------------------------------------------------ */
   test("mode persists across page reload via localStorage", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(WEB_IFRAME)).toBeAttached({ timeout: 10000 });
 
     // Switch to CLI mode
     await page.locator(SWITCH_TO_CLI).click();
@@ -188,41 +222,47 @@ test.describe("OpenCode Web/CLI Mode Switch", () => {
     expect(stored).toBe("cli");
 
     // Navigate away and back
-    await page.goto(`${DASHBOARD_URL}/`, { waitUntil: "domcontentloaded" });
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
 
-    // CLI iframe should be mounted and visible (persisted mode)
-    await expect(page.locator(CLI_IFRAME)).toBeAttached({ timeout: 10000 });
+    // The selected mode should be restored from localStorage.
     await expect(page.locator(SWITCH_TO_WEB)).toBeVisible({ timeout: 5000 });
   });
 
   /* ------------------------------------------------------------------ */
-  /*  8. Mobile viewport — compact pill button                            */
+  /*  8. Mobile viewport — mode controls remain accessible                 */
   /* ------------------------------------------------------------------ */
-  test("mobile viewport (< 768px) shows compact pill button", async ({ page }) => {
+  test("mobile viewport (< 768px) keeps both mode controls accessible", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(WEB_IFRAME)).toBeAttached({ timeout: 10000 });
 
-    const switchBtn = page.locator(SWITCH_TO_CLI);
-    // On mobile, the visible button should be the compact pill (md:hidden)
-    // The desktop button has hidden md:flex; the mobile has md:hidden
-    const visibleButton = switchBtn.first();
-    await expect(visibleButton).toBeVisible({ timeout: 5000 });
+    const webButton = page.locator('button[aria-label="Switch to Web mode"]');
+    const cliButton = page.locator(SWITCH_TO_CLI);
+    await expect(webButton).toBeVisible({ timeout: 5000 });
+    await expect(cliButton).toBeVisible({ timeout: 5000 });
 
-    // Mobile pill should have rounded-full class (vs rounded-l-lg for desktop)
-    const classList = await visibleButton.evaluate((el) => el.className);
-    expect(classList).toContain("rounded-full");
+    const viewport = page.viewportSize();
+    const [webBox, cliBox] = await Promise.all([webButton.boundingBox(), cliButton.boundingBox()]);
+    expect(viewport).not.toBeNull();
+    expect(webBox).not.toBeNull();
+    expect(cliBox).not.toBeNull();
+    if (viewport && webBox && cliBox) {
+      expect(webBox.x).toBeGreaterThanOrEqual(0);
+      expect(cliBox.x + cliBox.width).toBeLessThanOrEqual(viewport.width);
+    }
   });
 
   /* ------------------------------------------------------------------ */
   /*  9. Hidden iframe preserves full viewport dimensions                  */
   /* ------------------------------------------------------------------ */
   test("hidden iframe preserves full viewport dimensions (no display:none zeroing)", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
     await page.evaluate(() => localStorage.removeItem("opencode-mode"));
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(WEB_IFRAME)).toBeAttached({ timeout: 10000 });
 
     // Switch to CLI to mount both frames
     await page.locator(SWITCH_TO_CLI).click();

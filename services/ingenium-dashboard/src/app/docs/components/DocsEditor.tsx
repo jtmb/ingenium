@@ -10,7 +10,7 @@ import EditorToolbar, { type EditorMode } from "./EditorToolbar";
 import AIActions from "./AIActions";
 import DictationButton from "./DictationButton";
 import type { DocPage, DocDraft } from "@/lib/docs-types";
-import { getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase } from "@/lib/api";
 
 interface DocsEditorProps {
   page: DocPage;
@@ -40,9 +40,8 @@ async function fetchDraft(pageId: number): Promise<DocDraft | null> {
 
 async function saveDraft(pageId: number, content: string): Promise<void> {
   try {
-    await fetch(`${API_BASE}/docs/pages/${pageId}/draft`, {
+    await dashboardFetch(`${API_BASE}/docs/pages/${pageId}/draft`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content }),
     });
   } catch {
@@ -52,7 +51,9 @@ async function saveDraft(pageId: number, content: string): Promise<void> {
 
 async function deleteDraft(pageId: number): Promise<void> {
   try {
-    await fetch(`${API_BASE}/docs/pages/${pageId}/draft`, { method: "DELETE" });
+     await dashboardFetch(`${API_BASE}/docs/pages/${pageId}/draft`, {
+        method: "DELETE",
+      });
   } catch {
     // silently fail
   }

@@ -31,6 +31,7 @@ vi.mock("ingenium-core", () => {
         }),
       })),
     })),
+    execTransaction: <T>(operation: () => T): T => operation(),
   };
 });
 

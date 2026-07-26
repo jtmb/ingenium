@@ -2,7 +2,6 @@
 name: ingenium-security-auditor
 description: "Security audit agent. Reviews code for vulnerabilities, insecure patterns, and compliance issues. When infractions are found, automatically scans git history for past leaks."
 mode: subagent
-model: deepseek/deepseek-v4-flash
 permission:
   read: allow
   edit: deny
@@ -83,7 +82,7 @@ Procedure:
 2. Search all branches and tags:
    git log --all -p -S "<pattern>" --pretty=format:"%H %ai %s"
 3. Report which commits introduced/exposed the secret
-4. Create a Docs page for each confirmed leak
+4. Report each confirmed leak so a caller with Docs mutation permission can create the Docs page
 ```
 
 ### 3. Report
@@ -99,6 +98,6 @@ For each finding, include: file path, line number, what's wrong, and a concrete 
 ### 4. Remediate
 
 For confirmed leaks in git history:
-1. Create a Docs page with the commit SHA and fix instructions
+1. Report the commit SHA and fix instructions for a caller with Docs mutation permission
 2. Recommend: rotate the secret, then purge it with `git filter-branch` or BFG
 3. Reference the affected skill (e.g. `@development-conventions` for missing patterns, `@devops-conventions` for secret-in-args)

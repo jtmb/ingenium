@@ -1,14 +1,15 @@
-# Qwen 3.5 9B — Subagent Safety Protocol
+# Qwen 3.5 9B — Historical Subagent Safety Protocol
 
 > **Model**: qwen/qwen3.5-9b  
-> **Agents using it**: ingenium-docs, ingenium-explore, ingenium-scout  
+> **Current runtime assignment**: none. The current root `opencode.json` assigns no agent to Qwen 3.5 9B. Retain this reference for historical/local Qwen runs only; do not use it as an active model map.
 > **Purpose**: Prevents looping, hallucination, empty returns, and batch-read collapse
 
 ---
 
 ## 🔴 MANDATORY — Read Before Any Action
 
-You are qwen3.5-9b running as a subagent. You have known failure patterns.
+For a historical/local qwen3.5-9b run, use these known failure-pattern
+guards. This reference does not assign Qwen to any current agent.
 Follow these rules or you WILL loop and produce empty output.
 
 ### 1. PHASE LIMIT — Max 3-5 Files Per Execution

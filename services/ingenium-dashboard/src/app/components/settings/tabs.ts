@@ -1,6 +1,23 @@
+/** Every supported Settings deep-link ID. */
+export type SettingsTabId =
+  | "general"
+  | "projects"
+  | "skills"
+  | "tasks"
+  | "jobs"
+  | "plugins"
+  | "mail"
+  | "agents"
+  | "mcp-servers"
+  | "config"
+  | "observations"
+  | "personality"
+  | "providers"
+  | "logs";
+
 /** A settings sidebar tab definition. Icon names map to SVG paths in SettingsSidebar. */
 export interface SettingsTab {
-  id: string;
+  id: SettingsTabId;
   label: string;
   icon: "settings" | "folder" | "sparkle" | "check" | "clock" | "puzzle" | "mail" | "bot" | "server" | "file" | "eye" | "user" | "activity" | "terminal";
 }
@@ -33,22 +50,22 @@ export const ALL_TABS: SettingsTab[] = [
  */
 export function tabForPathname(pathname: string): string {
   const segment = pathname.split("/")[1] || "";
-  const MAP: Record<string, string> = {
+  const MAP: Record<string, SettingsTabId> = {
     "": "general",
-    projects: "general",
-    skills: "general",
-    tasks: "general",
-    jobs: "general",
-    plugins: "general",
+    projects: "projects",
+    skills: "skills",
+    tasks: "tasks",
+    jobs: "jobs",
+    plugins: "plugins",
     mail: "mail",
-    agents: "general",
-    "mcp-servers": "general",
+    agents: "agents",
+    "mcp-servers": "mcp-servers",
     config: "config",
-    observations: "general",
-    personality: "general",
+    observations: "observations",
+    personality: "personality",
     pipeline: "providers",
     providers: "providers",
-    logs: "general",
+    logs: "logs",
     status: "general",
     settings: "general",
     opencode: "general",

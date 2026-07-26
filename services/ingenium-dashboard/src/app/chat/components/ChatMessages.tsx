@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import ChatMarkdown from "./ChatMarkdown";
 import ToolCallCard from "./ToolCallCard";
 import PermissionPrompt from "./PermissionPrompt";
@@ -374,11 +374,21 @@ export default function ChatMessages({
   questions: activeQuestions,
   onSendReply,
 }: ChatMessagesProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScroll = useRef(true);
+
+  // Track user scroll position — auto-follow only while near bottom
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
+    shouldAutoScroll.current = scrollHeight - scrollTop - clientHeight < 4;
+  }, []);
 
   // Auto-scroll to bottom on new messages or loading state change
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (shouldAutoScroll.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
   }, [messages, isLoading]);
 
   // Map stream activity to human-readable labels
@@ -492,7 +502,12 @@ export default function ChatMessages({
     messages.length > 0;
 
   return (
-    <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-4 py-4 space-y-6">
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto overflow-x-hidden min-h-0 px-4 py-4 space-y-6"
+      data-testid="chat-messages-container"
+    >
       {/* Error banner */}
       {error && (
         <div
@@ -769,9 +784,6 @@ export default function ChatMessages({
           </div>
         </div>
       )}
-
-      {/* Scroll anchor */}
-      <div ref={bottomRef} />
 
       {/* prefers-reduced-motion: disable bounce animation */}
       <style jsx>{`

@@ -4,11 +4,9 @@
  * All functions accept a ready-to-use `token: string`. The caller is responsible
  * for ensuring the token is fresh (use `getFreshGmailToken` from oauth.ts).
  *
- * Errors are thrown with HTTP status + body detail. No error-sentinel pattern —
- * callers catch at the provider boundary.
- *
- * 🔴 Lesson 14: Any unhandled HTTP errors include the response body in the
- * error message so failures are diagnosable from logs alone.
+ * Errors cross this boundary only as sanitized provider errors. Provider response
+ * bodies and URLs can contain secrets, mailbox data, or correlation canaries and
+ * are intentionally not retained for logging.
  *
  * 🔴 Rate limits: Gmail API allows 250 quota units per second per user.
  *   - messages.get = 5 units
@@ -18,6 +16,8 @@
  *   - messages.send = 100 units
  *   - messages.modify = 5 units
  */
+
+import { providerErrorDiagnostic, sanitizeProviderError } from "../provider-errors.js";
 
 const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1";
 
@@ -36,8 +36,8 @@ interface GmailRequestOptions {
  *
  * Uses `res.text()` + `JSON.parse` instead of `res.json()` because Bun/Node
  * ReadableStream handling can fail on empty or malformed responses in ways that
- * text-then-parse avoids. Also enables including partial response body in error
- * messages for debuggability.
+ * text-then-parse avoids. Parse failures are normalized at this boundary so no
+ * provider response content can cross into logs or public error responses.
  */
 async function gmailRequest<T>(
   token: string,
@@ -68,27 +68,30 @@ async function gmailRequest<T>(
   let res: Response;
   try {
     res = await fetch(url, requestInit);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Gmail API fetch failed for ${method} ${path}: ${msg}`);
+  } catch (error: unknown) {
+    throw sanitizeProviderError(error, "api");
   }
 
   if (!res.ok) {
-    let body = "";
-    try { body = await res.text(); } catch { /* ignore */ }
-    throw new Error(
-      `Gmail API ${method} ${path} returned ${res.status} ${res.statusText}` +
-      (body ? ` — ${body.slice(0, 500)}` : ""),
-    );
+    // Do not parse or include a provider response body: it can echo request
+    // headers, tokens, mailbox data, or test canaries.
+    const statusError = { status: res.status };
+    throw sanitizeProviderError(statusError, "api");
   }
 
   // 204 No Content — no body to parse (e.g., modifyMessage success)
   if (res.status === 204) return undefined as T;
 
-  // Read as text, parse manually (avoids ReadableStream issues on empty responses)
-  const text = await res.text();
-  if (!text.trim()) return undefined as T;
-  return JSON.parse(text) as T;
+  // Read as text, parse manually (avoids ReadableStream issues on empty responses).
+  // A successful HTTP response can still carry malformed JSON; normalize the
+  // parser/read failure before it crosses this provider boundary.
+  try {
+    const text = await res.text();
+    if (!text.trim()) return undefined as T;
+    return JSON.parse(text) as T;
+  } catch (error: unknown) {
+    throw sanitizeProviderError(error, "api");
+  }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -153,10 +156,9 @@ export async function batchGetMessages(
         `/users/me/messages/${id}?format=${format}`,
       );
       results.push(msg);
-    } catch (err: unknown) {
+    } catch (error: unknown) {
       // Skip individual failures — log and continue
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`Gmail API: failed to get message ${id}: ${msg}`);
+      console.warn("Gmail API message fetch failed", providerErrorDiagnostic(error, "api"));
     }
   }
   return results;

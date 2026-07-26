@@ -115,7 +115,7 @@ function TasksContent() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0">
       {/* Header + create form */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -126,16 +126,16 @@ function TasksContent() {
         </div>
 
         {/* Search bar + Add Task button */}
-        <div className="flex gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row">
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks..."
-            className="border border-[var(--color-border)] rounded px-3 py-2 flex-1 text-sm"
+            className="border border-[var(--color-border)] rounded px-3 py-2 min-w-0 w-full sm:flex-1 text-sm"
           />
           <button
             onClick={() => setIsModalOpen(true)}
-            className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700"
+            className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700 w-full sm:w-auto shrink-0"
           >
             + Add Task
           </button>

@@ -38,7 +38,7 @@ export default function OpenCodeToolbar({
   const onModeChangeRef = useRef(onModeChange);
   onModeChangeRef.current = onModeChange;
 
-  const { status: healthStatus } = useOpenCodeHealth();
+  const { status: healthStatus, authScope } = useOpenCodeHealth();
 
   // Global keyboard shortcut: Ctrl+Shift+` — toggles Web ↔ CLI
   useEffect(() => {
@@ -169,30 +169,40 @@ export default function OpenCodeToolbar({
           title={
             healthStatus === "starting"
               ? "OpenCode is starting up…"
-              : healthStatus === "unavailable"
-                ? "OpenCode is unavailable"
-                : isLoaded
-                  ? "Connected"
-                  : "Loading…"
+              : healthStatus === "auth-required"
+                ? authScope === "dashboard"
+                  ? "Dashboard authentication required"
+                  : "OpenCode gateway authentication required"
+                : healthStatus === "unavailable"
+                  ? "OpenCode is unavailable"
+                  : isLoaded
+                    ? "Connected"
+                    : "Loading…"
           }
           className={[
             "w-2 h-2 rounded-full shrink-0 transition-colors duration-300",
             healthStatus === "starting"
               ? "bg-yellow-500 animate-pulse"
-              : healthStatus === "unavailable"
-                ? "bg-red-500"
-                : isLoaded
-                  ? "bg-green-500"
-                  : "bg-red-500 animate-pulse",
+              : healthStatus === "auth-required"
+                ? "bg-orange-500"
+                : healthStatus === "unavailable"
+                  ? "bg-red-500"
+                  : isLoaded
+                    ? "bg-green-500"
+                    : "bg-red-500 animate-pulse",
           ].join(" ")}
           aria-label={
             healthStatus === "starting"
               ? "OpenCode starting"
-              : healthStatus === "unavailable"
-                ? "OpenCode unavailable"
-                : isLoaded
-                  ? "OpenCode connected"
-                  : "OpenCode loading"
+              : healthStatus === "auth-required"
+                ? authScope === "dashboard"
+                  ? "Dashboard authentication required"
+                  : "OpenCode authentication required"
+                : healthStatus === "unavailable"
+                  ? "OpenCode unavailable"
+                  : isLoaded
+                    ? "OpenCode connected"
+                    : "OpenCode loading"
           }
         />
       </div>

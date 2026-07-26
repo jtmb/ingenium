@@ -15,7 +15,7 @@
 
 import { Router } from "express";
 import { createHash, randomUUID } from "node:crypto";
-import { getDb, execTransaction, checkpointAfterWrite, logger, rag } from "ingenium-core";
+import { getDb, execTransaction, checkpointAfterWrite, logger, projects, rag } from "ingenium-core";
 import { executeSynthesisBroker } from "../opencode-client.js";
 import { requireProject } from "../helpers.js";
 
@@ -52,7 +52,7 @@ ragRouter.post("/ingest", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   try {
-    const global = getDb(dbPath()).prepare("SELECT id FROM projects WHERE is_global = 1 LIMIT 1").get() as { id: string } | undefined;
+    const global = projects.getGlobalProject();
     if (!global) { res.status(409).json({ error: { code: "GLOBAL_PROJECT_MISSING", message: "A global-default project is required for repository documentation indexing" } }); return; }
     res.json({ data: rag.indexConfiguredDocs(global.id) });
   }

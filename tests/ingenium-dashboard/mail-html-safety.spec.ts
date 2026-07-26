@@ -13,8 +13,8 @@ import { test, expect, Page } from "@playwright/test";
  *   5. Cleans up by deleting the test email (DELETE /emails/:uid)
  *
  * The Gmail account (james.branco@gmail.com, id 68a96f5b-faaf-41d3-967e-5981564ec080)
- * must be connected and authenticated. Tests skip gracefully if the account
- * is not connected or SMTP fails.
+ * must be connected and authenticated. The mail config preflight is opt-in;
+ * missing account/provider state is a hard failure, never a skip.
  *
  * Each uses a unique timestamped subject so test emails are independently
  * identifiable and non-interfering.
@@ -181,11 +181,10 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
       },
     );
 
-    // Skip if SMTP is not available (account not connected, etc.)
-    test.skip(
-      !sendResp.ok(),
-      `SMTP send failed (${sendResp.status()}): cannot test HTML safety without sending a real email`,
-    );
+    expect(
+      sendResp.ok(),
+      `SMTP send failed (${sendResp.status()}): HTML safety requires a real sent message`,
+    ).toBeTruthy();
 
     // ── 2. Sync INBOX to bring the sent email into cache ──────────────
     // Wait briefly for SMTP→Gmail delivery (self-sends are typically instant)
@@ -201,7 +200,9 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
 
     // ── 3. Find the email UID via API search ──────────────────────────
     const uid = await findEmailBySubject(page, SUBJECT, "INBOX", 5);
-    test.skip(uid === null, `Could not find test email "${SUBJECT}" in INBOX after sync — skipping`);
+    if (uid === null) {
+      throw new Error(`Could not find test email "${SUBJECT}" in INBOX after sync`);
+    }
 
     // ── 4. Pre-cache the email body (fetch via API so cache is warm) ──
     const bodyResp = await page.request.get(
@@ -231,8 +232,7 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
     // The email was just sent so it should be among the first results.
     // Use text matching to find the row with our unique subject.
     const crashEmailRow = emailRows.filter({ hasText: SUBJECT }).first();
-    const rowVisible = await crashEmailRow.isVisible({ timeout: 10_000 }).catch(() => false);
-    test.skip(!rowVisible, `Could not find email row with subject "${SUBJECT}" in the UI — skipping`);
+    await expect(crashEmailRow, `Could not find email row with subject "${SUBJECT}" in the UI`).toBeVisible({ timeout: 10_000 });
 
     await crashEmailRow.click();
 
@@ -296,10 +296,10 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
       },
     );
 
-    test.skip(
-      !sendResp.ok(),
-      `SMTP send failed (${sendResp.status()}): cannot test HTML safety without sending a real email`,
-    );
+    expect(
+      sendResp.ok(),
+      `SMTP send failed (${sendResp.status()}): HTML safety requires a real sent message`,
+    ).toBeTruthy();
 
     // ── 2. Sync INBOX ─────────────────────────────────────────────────
     await new Promise((r) => setTimeout(r, 2000));
@@ -312,7 +312,9 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
 
     // ── 3. Find the email UID via API search ──────────────────────────
     const uid = await findEmailBySubject(page, SUBJECT, "INBOX", 5);
-    test.skip(uid === null, `Could not find test email "${SUBJECT}" in INBOX — skipping`);
+    if (uid === null) {
+      throw new Error(`Could not find test email "${SUBJECT}" in INBOX`);
+    }
 
     // ── 4. Pre-cache the email body ───────────────────────────────────
     const bodyResp = await page.request.get(
@@ -336,8 +338,7 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
 
     // Find the crash email by subject
     const crashEmailRow = emailRows.filter({ hasText: SUBJECT }).first();
-    const rowVisible = await crashEmailRow.isVisible({ timeout: 10_000 }).catch(() => false);
-    test.skip(!rowVisible, `Could not find email row with subject "${SUBJECT}" in the UI — skipping`);
+    await expect(crashEmailRow, `Could not find email row with subject "${SUBJECT}" in the UI`).toBeVisible({ timeout: 10_000 });
 
     await crashEmailRow.click();
 
@@ -357,15 +358,10 @@ test.describe("Mail — HTML Sanitization & Safety (Real API)", () => {
     expect(pageErrors).toHaveLength(0);
 
     // ✅ The reader should show either an iframe (html email) or pre (text)
-    const hasIframe = await page
+    const renderedBody = page
       .locator('[data-testid="email-html-iframe"]')
-      .isVisible()
-      .catch(() => false);
-    const hasText = await readerContent
-      .locator("pre")
-      .isVisible()
-      .catch(() => false);
-    expect(hasIframe || hasText).toBeTruthy();
+      .or(readerContent.locator("pre"));
+    await expect(renderedBody).toBeVisible({ timeout: 5000 });
 
     // ✅ Page heading "Mail" must still be visible
     const mailHeading = page.locator("h1").filter({ hasText: "Mail" });

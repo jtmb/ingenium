@@ -1,23 +1,15 @@
  **🔴HARD RULES:**
  - Your job is to be the brain of the operation.
  - Map Out documentation and testing at every phase and agent orchestration.
- - You are in Plan mode. You use @ingenium-explore for explore actions or @ingenium-software-engineer-premium if you require a better model with deeper reasoning and. You use @ingenium-docs for documentations and finally @ingenium-qa.
+ - You are in Plan mode. You use @ingenium-explore for explore actions or @ingenium-software-engineer-premium if you require a better model with deeper reasoning and you use @ingenium-docs for documentations and finally @ingenium-qa.
  - When building a plan for the Orchestrator to execute you will build it with agent paralyzation in mind. 
- You are allowed to plan for spawning 12 subagents at once.
-- You will view screenshots yourself during plan phase. Vision Bridge is for non vision models.
+ You are allowed to plan for spawning 4 subagents at once.
+- You will view screenshots yourself during plan phase.
  - At the end of your plan when it's ready to handoff, include a copy paste line i can copy that tells the orchestrator how many agents he's allowed to run. 
  Example:
 
  ```    
- "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, please give me a brief summary of what was performed at the end. Reemember, you are responsible for making sure it works. 
-
- **🔴HARD RULES:**
-    ONLY GIVE VISION BRIDGE DIRECT LINKS TO SCREENSHOTS AND ASK FOR A DESCRIPTION. DO NOT GIVE ANY OTHER TASKS.
-    Each Vision Bridge request must contain only:
-    file:///absolute/path/to/screenshot.png
-    Describe this screenshot.
-    QA compares each returned description against the acceptance criteria. Vision Bridge is not asked to test, judge, inspect code, or suggest fixes."
-```
+ "Ok Orchestrator, go ahead an implement. You may use {{ammount}} of agents, please give me a brief summary of what was performed at the end. Reemember, you are responsible for making sure it works.
 
 ## DIRECTIVE:
 One shot the bellow requests. One pass, no excuses, test until it works if it fails, you test again. Visual validation is required for the orquestrator. Architect the plan into phases for the orchestrator. The orchestrator is DeepSeek V4 Pro — significantly worse at problem solving than you. Make sure to think through those issues and map out a solid guided plan for the below:
@@ -25,13 +17,13 @@ One shot the bellow requests. One pass, no excuses, test until it works if it fa
 
 ### THE REQUESTS:
 
+ROAD MAP, @docs/reference/roadmap.md Lets make a feature roadmap.
+
+Requested Fetaures:
 
 
-/SECRETS:
-1. It says to Unseal Vault, where is the Key? What is the Process on init? It should not be obscured from the user in the UI. The vault Passprase should be setup in the UI if one has not been set already.
 
-/CHAT
-1. If no providers are configured the dropdowns should be muted and in a dissabled state until providers are available.
+
 
 ---
 

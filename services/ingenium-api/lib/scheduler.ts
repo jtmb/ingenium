@@ -1,6 +1,14 @@
 import { settings, projects, logger, extraction, synthesis, jobs, maintenanceLocks, checkpointAfterWrite } from "ingenium-core";
 import { executeJobRun } from "./job-runner.js";
-import { listAccounts, startEngine, getEngineStatus, getGlobalProjectId } from "ingenium-email";
+import {
+  getEmailEncryptionDiagnostics,
+  listAccounts,
+  startEngine,
+  getEngineStatus,
+  getGlobalProjectId,
+  providerErrorDiagnostic,
+} from "ingenium-email";
+import { loadApiToken } from "./middleware/api-token.js";
 
 /**
  * Default synthesis interval: 15 minutes (900,000ms).
@@ -46,11 +54,41 @@ const CROSS_PROJECT_TIMEOUT_MS = 120_000;
 /** Resource name for skills lock. */
 const LOCK_RESOURCE = "skills";
 
-async function triggerSynthesisForAllProjects(port: number) {
+let schedulerRunning = false;
+let schedulerGeneration = 0;
+const scheduledTimeouts = new Set<ReturnType<typeof setTimeout>>();
+const renewalIntervals = new Set<ReturnType<typeof setInterval>>();
+const activeTasks = new Set<Promise<void>>();
+const activeAbortControllers = new Set<AbortController>();
+
+function isSchedulerActive(generation: number): boolean {
+  return schedulerRunning && schedulerGeneration === generation;
+}
+
+function scheduleTimeout(generation: number, delayMs: number, callback: () => void): void {
+  if (!isSchedulerActive(generation)) return;
+
+  const timeout = setTimeout(() => {
+    scheduledTimeouts.delete(timeout);
+    if (!isSchedulerActive(generation)) return;
+    callback();
+  }, delayMs);
+  scheduledTimeouts.add(timeout);
+}
+
+function trackTask(task: Promise<void>): Promise<void> {
+  activeTasks.add(task);
+  void task.finally(() => activeTasks.delete(task)).catch(() => undefined);
+  return task;
+}
+
+async function triggerSynthesisForAllProjects(port: number, generation: number): Promise<void> {
+  if (!isSchedulerActive(generation)) return;
   const allProjects = projects.listProjects();
   const activeProjects = allProjects.filter(p => !p.archived_at);
 
   for (const p of activeProjects) {
+    if (!isSchedulerActive(generation)) break;
     // 0. Acquire per-project skills lock before touching any skill mutations.
     const ownerToken = maintenanceLocks.generateOwnerToken();
     const acquired = maintenanceLocks.acquireLock("skills", p.id, ownerToken, SYNTHESIS_LOCK_TTL_MS);
@@ -66,10 +104,14 @@ async function triggerSynthesisForAllProjects(port: number) {
         const renewed = maintenanceLocks.renewLock(LOCK_RESOURCE, p.id, ownerToken, SYNTHESIS_LOCK_TTL_MS);
         if (!renewed) {
           logger.warn("scheduler", `Lock renewal failed for "${p.name}" — lock may have expired or been stolen`);
-          if (heartbeat) clearInterval(heartbeat);
+          if (heartbeat) {
+            clearInterval(heartbeat);
+            renewalIntervals.delete(heartbeat);
+          }
           heartbeat = null;
         }
       }, LOCK_RENEW_INTERVAL_MS);
+      renewalIntervals.add(heartbeat);
 
       // 1. Extraction — LLM-based observation extraction from OpenCode messages.
       try {
@@ -94,20 +136,38 @@ async function triggerSynthesisForAllProjects(port: number) {
       checkpointAfterWrite();
     } finally {
       // Always clear heartbeat and release lock
-      if (heartbeat) clearInterval(heartbeat);
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        renewalIntervals.delete(heartbeat);
+      }
       maintenanceLocks.releaseLock("skills", p.id, ownerToken);
     }
   }
 
+  if (!isSchedulerActive(generation)) return;
+
   // Cross-project synthesis — the route OWNS the global lock internally.
   // Scheduler just calls with client timeout; does NOT acquire a second global lock.
   try {
+    let token: string;
+    try {
+      token = loadApiToken();
+    } catch {
+      logger.error("scheduler", "Cross-project synthesis skipped because API authentication is not configured");
+      return;
+    }
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), CROSS_PROJECT_TIMEOUT_MS);
+    activeAbortControllers.add(controller);
+    const timeoutId = setTimeout(() => {
+      scheduledTimeouts.delete(timeoutId);
+      controller.abort();
+    }, CROSS_PROJECT_TIMEOUT_MS);
+    scheduledTimeouts.add(timeoutId);
     try {
       const res = await fetch(`http://localhost:${port}/api/v1/synthesis/cross-project`, {
         method: "POST",
         signal: controller.signal,
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok && res.status !== 423) {
         const body = await res.json().catch(() => ({})) as any;
@@ -124,6 +184,8 @@ async function triggerSynthesisForAllProjects(port: number) {
       }
     } finally {
       clearTimeout(timeoutId);
+      scheduledTimeouts.delete(timeoutId);
+      activeAbortControllers.delete(controller);
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -153,7 +215,8 @@ function getMailSyncInterval(): number {
   return MAIL_SYNC_DEFAULT_MS;
 }
 
-async function triggerMailSyncForAllProjects(): Promise<void> {
+async function triggerMailSyncForAllProjects(generation: number): Promise<void> {
+  if (!isSchedulerActive(generation)) return;
   try {
     // Guard: skip mail sync entirely if no global project exists.
     // The engine requires a global project for account storage — without it,
@@ -168,6 +231,16 @@ async function triggerMailSyncForAllProjects(): Promise<void> {
 
     const engineStatus = getEngineStatus();
     const accounts = listAccounts(globalId);
+    const encryption = getEmailEncryptionDiagnostics();
+    if (encryption.status !== "ready") {
+      logger.debug("mail-sync", `Skipping mail sync — encryption continuity is ${encryption.status}`);
+      return;
+    }
+
+    // Reconcile on every scheduler tick so a global-project reassignment does
+    // not leave workers bound to account snapshots from the former global.
+    if (!isSchedulerActive(generation)) return;
+    startEngine(globalId);
 
     if (!engineStatus.running || !engineStatus.heartbeatAt) {
       logger.warn("mail-sync", `Engine not running (running=${engineStatus.running}, heartbeat=${engineStatus.heartbeatAt}), restarting`);
@@ -186,31 +259,36 @@ async function triggerMailSyncForAllProjects(): Promise<void> {
       const engineAccounts = engineStatus.accounts.length;
       logger.info("mail-sync", `Engine healthy: ${engineAccounts}/${accounts.length} workers, heartbeat=${Math.round(msSince / 1000)}s ago`);
     }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("mail-sync", `Engine health check failed: ${msg}`);
+  } catch (error: unknown) {
+    logger.warn("mail-sync", "Engine health check failed", providerErrorDiagnostic(error, "sync"));
   }
 }
 
-function scheduleMailSync(): void {
+function scheduleMailSync(generation: number): void {
+  if (!isSchedulerActive(generation)) return;
   const interval = getMailSyncInterval();
   if (interval > 0) {
     logger.info("mail-sync", `Next mail sync in ${interval / 1000}s`);
-    setTimeout(() => {
-      triggerMailSyncForAllProjects().finally(() => scheduleMailSync());
-    }, interval);
+    scheduleTimeout(generation, interval, () => {
+      void trackTask(triggerMailSyncForAllProjects(generation)).finally(() => {
+        if (isSchedulerActive(generation)) scheduleMailSync(generation);
+      }).catch(() => undefined);
+    });
   } else {
     logger.info("mail-sync", "Mail sync disabled (mail_sync_interval_ms = 0)");
   }
 }
 
-function scheduleNext(port: number) {
+function scheduleNext(port: number, generation: number): void {
+  if (!isSchedulerActive(generation)) return;
   const interval = getSynthesisInterval();
   if (interval > 0) {
     logger.info("scheduler", `Next synthesis in ${interval / 1000}s`);
-    setTimeout(() => {
-      triggerSynthesisForAllProjects(port).finally(() => scheduleNext(port));
-    }, interval);
+    scheduleTimeout(generation, interval, () => {
+      void trackTask(triggerSynthesisForAllProjects(port, generation)).finally(() => {
+        if (isSchedulerActive(generation)) scheduleNext(port, generation);
+      }).catch(() => undefined);
+    });
   } else {
     logger.info("scheduler", `Synthesis disabled (interval = 0)`);
   }
@@ -254,16 +332,19 @@ function matchField(pattern: string, value: number, _min: number, _max: number):
   return value === n;
 }
 
-function runJobScheduler(): void {
+function runJobScheduler(generation: number): void {
+  if (!isSchedulerActive(generation)) return;
   try {
     const allProjects = projects.listProjects();
     const activeProjects = allProjects.filter(p => !p.archived_at);
     const now = new Date();
 
     for (const p of activeProjects) {
+      if (!isSchedulerActive(generation)) break;
       const projectJobs = jobs.listJobs(p.id);
 
       for (const job of projectJobs) {
+        if (!isSchedulerActive(generation)) break;
         if (!job.enabled) continue;
         if (!job.schedule_cron || job.schedule_cron.trim() === "") continue;
         if (!matchesCron(job.schedule_cron, now)) continue;
@@ -277,6 +358,11 @@ function runJobScheduler(): void {
 
         logger.info("job-scheduler", `Triggered cron run ${result.id} for job "${job.name}"`);
 
+        if (!isSchedulerActive(generation)) {
+          jobs.cancelJobRun(result.id);
+          break;
+        }
+
         executeJobRun(result.id, job, job.prompt_template).catch((err: Error) => {
           logger.error("job-scheduler", `Fire-and-forget executeJobRun failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
         });
@@ -286,19 +372,19 @@ function runJobScheduler(): void {
     logger.warn("job-scheduler", `Job scheduler tick failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
   }
 
-  scheduleJobTick();
+  if (isSchedulerActive(generation)) scheduleJobTick(generation);
 }
 
-function scheduleJobTick(): void {
-  setTimeout(runJobScheduler, 60_000);
+function scheduleJobTick(generation: number): void {
+  scheduleTimeout(generation, 60_000, () => runJobScheduler(generation));
 }
 
 // ============================================================================
 // Lock cleanup scheduler
 // ============================================================================
 
-function scheduleLockCleanup(): void {
-  setTimeout(() => {
+function scheduleLockCleanup(generation: number): void {
+  scheduleTimeout(generation, LOCK_CLEANUP_INTERVAL_MS, () => {
     try {
       const cleaned = maintenanceLocks.cleanupExpiredLocks();
       if (cleaned > 0) {
@@ -307,15 +393,22 @@ function scheduleLockCleanup(): void {
     } catch (err: any) {
       logger.warn("scheduler", `Lock cleanup failed: ${err.message}`);
     }
-    scheduleLockCleanup();
-  }, LOCK_CLEANUP_INTERVAL_MS);
+    if (isSchedulerActive(generation)) scheduleLockCleanup(generation);
+  });
 }
 
 // ============================================================================
 // Main scheduler entry point
 // ============================================================================
 
-export function startScheduler(port: number) {
+export function startScheduler(port: number): void {
+  if (schedulerRunning) {
+    logger.warn("scheduler", "Scheduler start ignored because it is already running");
+    return;
+  }
+
+  schedulerRunning = true;
+  const generation = ++schedulerGeneration;
   logger.info(
     "scheduler",
     `Auto-synthesis initial default: ${SYNTHESIS_DEFAULT_MS / 1000}s (reads settings after first cycle)`,
@@ -325,29 +418,50 @@ export function startScheduler(port: number) {
 
   // Start periodic expired-lock cleanup
   logger.info("scheduler", `Lock cleanup scheduler started (${LOCK_CLEANUP_INTERVAL_MS / 1000}s cycle)`);
-  setTimeout(scheduleLockCleanup, 60_000);
+  scheduleTimeout(generation, 60_000, () => scheduleLockCleanup(generation));
 
   // Staggered startup delays
-  setTimeout(() => {
-    triggerSynthesisForAllProjects(port).catch((err: unknown) => {
+  scheduleTimeout(generation, 30_000, () => {
+    void trackTask(triggerSynthesisForAllProjects(port, generation)).catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       const name = err instanceof Error ? err.name : "Unknown";
       const stack = err instanceof Error ? err.stack : undefined;
       logger.error("scheduler", `Initial synthesis cycle failed: ${msg}`, { error: msg, name, stack: stack?.split("\n").slice(0, 5).join("\n") });
     });
-  }, 30000);
-  setTimeout(() => scheduleNext(port), 30000);
+  });
+  scheduleTimeout(generation, 30_000, () => scheduleNext(port, generation));
 
   logger.info("scheduler", "Job cron scheduler started (60s cycle)");
-  setTimeout(scheduleJobTick, 10_000);
+  scheduleTimeout(generation, 10_000, () => scheduleJobTick(generation));
 
   const mailInterval = getMailSyncInterval();
   if (mailInterval > 0) {
     logger.info("mail-sync", `Mail sync scheduler started (${mailInterval / 1000}s cycle)`);
-    setTimeout(scheduleMailSync, 15_000);
+    scheduleTimeout(generation, 15_000, () => scheduleMailSync(generation));
   } else {
     logger.info("mail-sync", "Mail sync disabled (mail_sync_interval_ms = 0)");
   }
+}
+
+/** Stop every scheduler-owned timer and abort in-flight local HTTP calls. */
+export async function stopScheduler(): Promise<void> {
+  if (!schedulerRunning) return;
+
+  schedulerRunning = false;
+  ++schedulerGeneration;
+  for (const timeout of scheduledTimeouts) clearTimeout(timeout);
+  scheduledTimeouts.clear();
+  for (const interval of renewalIntervals) clearInterval(interval);
+  renewalIntervals.clear();
+  for (const controller of activeAbortControllers) controller.abort();
+  activeAbortControllers.clear();
+
+  await Promise.allSettled([...activeTasks]);
+  logger.info("scheduler", "Background scheduler stopped");
+}
+
+export function isSchedulerRunning(): boolean {
+  return schedulerRunning;
 }
 
 function logSynthesisHealth(): void {

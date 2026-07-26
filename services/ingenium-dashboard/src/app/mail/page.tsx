@@ -9,7 +9,7 @@ import AccountSetup from "./components/AccountSetup";
 import SyncProgress from "./components/SyncProgress";
 import Overlay from "../components/Overlay";
 import EmailComposer from "./components/EmailComposer";
-import { getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase } from "@/lib/api";
 
 const API_BASE = getApiBase();
 
@@ -348,9 +348,8 @@ export default function MailPage() {
       if (data.html) body.html = data.html;
       if (data.text) body.text = data.text;
 
-      const res = await fetch(`${API_BASE}/emails?project=${project}`, {
+      const res = await dashboardFetch(`${API_BASE}/emails?project=${project}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (res.ok) {
@@ -376,9 +375,8 @@ export default function MailPage() {
       if (data.html) body.html = data.html;
       if (data.text) body.text = data.text;
 
-      const res = await fetch(`${API_BASE}/emails/draft?project=${project}`, {
+      const res = await dashboardFetch(`${API_BASE}/emails/draft?project=${project}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (res.ok) {
@@ -400,9 +398,8 @@ export default function MailPage() {
   const handleDelete = useCallback(async () => {
     if (!selectedEmail) return;
     try {
-      await fetch(`${API_BASE}/emails/${selectedEmail.uid}?project=${project}`, {
+      await dashboardFetch(`${API_BASE}/emails/${selectedEmail.uid}?project=${project}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account: selectedAccount }),
       });
       setSelectedEmail(null);
@@ -416,9 +413,8 @@ export default function MailPage() {
   const handleArchive = useCallback(async () => {
     if (!selectedEmail) return;
     try {
-      await fetch(`${API_BASE}/emails/${selectedEmail.uid}/move?project=${project}`, {
+      await dashboardFetch(`${API_BASE}/emails/${selectedEmail.uid}/move?project=${project}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account: selectedAccount, fromFolder: selectedFolder, toFolder: "Archive" }),
       });
       setSelectedEmail(null);
@@ -448,9 +444,8 @@ export default function MailPage() {
 
   const handleHideAccount = useCallback(async (accountId: string) => {
     try {
-      await fetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, {
+      await dashboardFetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hidden: true }),
       });
       // Refresh account list
@@ -476,9 +471,8 @@ export default function MailPage() {
 
   const handleShowAccount = useCallback(async (accountId: string) => {
     try {
-      await fetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, {
+      await dashboardFetch(`${API_BASE}/emails/accounts/${accountId}?project=${project}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ hidden: false }),
       });
       // Refresh account list
@@ -501,7 +495,9 @@ export default function MailPage() {
     if (!deleteAccountId) return;
     setDeletingAccount(true);
     try {
-      await fetch(`${API_BASE}/emails/accounts/${deleteAccountId}?project=${project}`, { method: "DELETE" });
+      await dashboardFetch(`${API_BASE}/emails/accounts/${deleteAccountId}?project=${project}`, {
+        method: "DELETE",
+      });
       // Refresh account list with hidden included
       const accountsRes = await fetch(`${API_BASE}/emails/accounts?project=${project}&include_hidden=true`);
       if (accountsRes.ok) {
@@ -531,9 +527,8 @@ export default function MailPage() {
     setEmailError(null);
 
     // Fire-and-forget cache boost hint — the /sync route calls boostFolder internally
-    fetch(`${API_BASE}/emails/sync?project=${project}`, {
+    dashboardFetch(`${API_BASE}/emails/sync?project=${project}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ account: selectedAccount, folder }),
     }).catch(() => {});
   }, [selectedAccount, project]);

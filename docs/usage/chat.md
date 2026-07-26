@@ -108,7 +108,7 @@ Left-aligned with **no card wrapper** — full-width text with relaxed leading. 
 - **Reasoning blocks**: `ReasoningBlock` component — auto-expands during streaming (shows "Thinking…"), auto-collapses on completion ("Thought for a moment"). Content renders with a left border accent and muted text. Click the summary to re-expand after collapse.
 - **Markdown content**: Rendered via ChatMarkdown component
 - **File parts**: Rendered inline based on MIME type
-- **Tool call cards**: `ToolCallCard` component showing tool identity (human-friendly label + SVG icon), input summary (collapsible JSON), live elapsed time (updates during execution, final duration on completion), state badge (pending/running/completed/failed/retry), structured output or error detail, and a revert button on failed calls.
+- **Tool-call traces**: Compact OpenCode-style rows showing a human-friendly tool label and a short argument summary. **Web Search is the sole compact-trace exception**: its row is keyboard-accessible and exposes the search query inline with an `aria-expanded` disclosure. All other tools remain non-interactive compact traces; traces do not expand into payloads or expose execution status, duration, output, or error details. A separate revert affordance may appear for failed calls.
 
 ### Activity Status Indicator
 During streaming, a human-readable status label appears beneath the last assistant message:

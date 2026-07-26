@@ -8,7 +8,7 @@ test.describe("Mail — no resync storm on folder click", () => {
     const acctResp = await page.request.get(`${API_BASE}/emails/accounts?project=global-default`);
     const acctData = await acctResp.json();
     const accounts = acctData?.data ?? [];
-    test.skip(accounts.length === 0, "No email accounts configured — skipping");
+    expect(accounts.length, "At least one email account is required").toBeGreaterThan(0);
 
     const accountId = accounts[0].id;
 
@@ -19,14 +19,14 @@ test.describe("Mail — no resync storm on folder click", () => {
     const inboxData = await inboxResp.json();
     const inboxSource = inboxData?.source;
     const inboxTotal = inboxData?.total ?? 0;
-    test.skip(inboxTotal === 0, "INBOX is empty — skipping");
+    expect(inboxTotal, "INBOX must contain cached messages").toBeGreaterThan(0);
     expect(inboxSource).toBe("cache");
 
     // Open /mail page and intercept network
     await page.goto("/mail");
     await page.waitForLoadState("load");
     // Don't use networkidle — the mail page polls /sync-status every 2s
-    await page.waitForSelector('[role="listitem"], .email-row, tr', { timeout: 10000 }).catch(() => {});
+    await expect(page.locator("h1").filter({ hasText: "Mail" })).toBeVisible({ timeout: 15_000 });
 
     // Intercept all sync requests
     const syncCalls: string[] = [];
@@ -36,8 +36,16 @@ test.describe("Mail — no resync storm on folder click", () => {
 
     // Click the Starred folder in the sidebar
     const starredLink = page.locator('button, a, div[role="button"]').filter({ hasText: /Starred/i }).first();
+    const starredResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/v1/emails") &&
+        !response.url().includes("/sync-status") &&
+        decodeURIComponent(response.url()).includes("Starred") &&
+        response.status() === 200,
+      { timeout: 15_000 },
+    );
+    await expect(starredLink).toBeVisible({ timeout: 15_000 });
     await starredLink.click();
-    await page.waitForTimeout(3000);
+    await starredResponse;
 
     // Assert: NO sync request was made WITHOUT a folder param (which would be full-account)
     for (const call of syncCalls) {
@@ -60,7 +68,7 @@ test.describe("Mail — no resync storm on folder click", () => {
     // Precondition
     const acctResp = await page.request.get(`${API_BASE}/emails/accounts?project=global-default`);
     const accounts = (await acctResp.json())?.data ?? [];
-    test.skip(accounts.length === 0, "No email accounts — skipping");
+    expect(accounts.length, "At least one email account is required").toBeGreaterThan(0);
     const accountId = accounts[0].id;
 
     // Get first email UID from cache
@@ -69,7 +77,7 @@ test.describe("Mail — no resync storm on folder click", () => {
     );
     const listData = await listResp.json();
     const emails = listData?.data ?? [];
-    test.skip(emails.length === 0, "No cached emails — skipping");
+    expect(emails, "INBOX must contain at least one cached email").not.toHaveLength(0);
 
     const firstUid = emails[0].uid;
 

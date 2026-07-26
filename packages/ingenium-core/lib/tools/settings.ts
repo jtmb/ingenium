@@ -5,12 +5,19 @@
  * relies on this to avoid multi-step "select then insert/update" branches.
  */
 import { getDb } from "../db.js";
+import {
+  getOAuthClientSecret,
+  isOAuthClientSecretKey,
+} from "./protected-settings.js";
 
 /**
  * Get a setting value by project and key.
  * @returns The stored value, or `defaultVal` if the key is not set.
  */
 export function getSetting(projectId: string, key: string, defaultVal?: string): string | undefined {
+  if (isOAuthClientSecretKey(key)) {
+    return getOAuthClientSecret(projectId, key) ?? defaultVal;
+  }
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   const row = db.prepare("SELECT value FROM settings WHERE project_id = ? AND key = ?").get(projectId, key) as { value: string } | undefined;
   return row?.value ?? defaultVal;
@@ -21,6 +28,9 @@ export function getSetting(projectId: string, key: string, defaultVal?: string):
  * Uses ON CONFLICT ... DO UPDATE SET for atomic upsert — avoids a separate SELECT + branch.
  */
 export function setSetting(projectId: string, key: string, value: string): string {
+  if (isOAuthClientSecretKey(key)) {
+    throw new Error("OAuth client secrets must be stored in protected vault storage");
+  }
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
   db.prepare(
     `INSERT INTO settings (project_id, key, value) VALUES (?, ?, ?)

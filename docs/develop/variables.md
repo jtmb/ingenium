@@ -13,7 +13,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
-| `INGENIUM_CORE_DB_PATH` | `./.ingenium/data.db` | `db.ts`, all tool modules | Path to the SQLite database file |
+| `INGENIUM_CORE_DB_PATH` | `/app/.ingenium/data` in Docker; host fallback resolves to `.ingenium/data` | `db.ts`, all tool modules | Canonical SQLite database path; do not create a sibling `data.db` |
 | `INGENIUM_HOME` | `~/.ingenium` | `tools/projects.ts` | Base directory for project data storage |
 | `LOG_LEVEL` | `info` | `logger.ts` | Pino log level (`debug`, `info`, `warn`, `error`) |
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
@@ -24,10 +24,12 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
-| `INGENIUM_API_PORT` | `4097` | `config/index.ts` | Port the Express API server listens on |
+| `INGENIUM_API_PORT` | `4096` in Docker (`4097` standalone) | `config/index.ts` | Private Express API listen port in the container; public host bearer boundary remains `127.0.0.1:4097`. |
 | `INGENIUM_API_RATE_LIMIT` | `100` | `lib/middleware/rate-limit.ts` | Max requests per minute per IP |
-| `INGENIUM_API_TOKEN` | _(none)_ | `lib/middleware/auth.ts` | Optional bearer token for API authentication |
-| `CORS_ORIGIN` | `http://localhost:3000` | `config/index.ts` | Allowed CORS origin for browser requests |
+| `INGENIUM_API_TOKEN` | _(required; no default)_ | entrypoint, API boundary, `lib/middleware/auth.ts`, dashboard server proxy | Mandatory 32–128 character base64url bearer token. Bootstrap input is consumed into a protected runtime file and unset before supervisord; never place it in tracked OpenCode config. |
+| `INGENIUM_API_TOKEN_FILE` | _(optional bootstrap; runtime default `/run/ingenium-secrets/api-token` in container)_ | entrypoint, API boundary, API, dashboard, health probe, email watcher | Protected regular token file alternative to the inline variable. Must not be a symlink; runtime file is mode `0600` in a mode `0700` directory. Supports API access after supervised services clear inherited credential environment variables. |
+| `DASHBOARD_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | dashboard `proxy.ts`, API `config/index.ts`, supervised launchers | Comma-separated **exact** HTTP(S) dashboard origins accepted by both dashboard-proxy CSRF and API CORS/CSRF. Entries cannot include paths, credentials, query/fragment, whitespace, or wildcards. |
+| `CORS_ORIGIN` | _(legacy single-origin fallback only)_ | `config/index.ts` | Backward-compatible non-container fallback when `DASHBOARD_ALLOWED_ORIGINS` is unset. New deployments must configure the explicit allowlist. |
 | `SYNTHESIS_INTERVAL_MS` | `900000` | `scheduler.ts` | Scheduled synthesis + extraction interval (15 min), 0 = disabled |
 | `SYNTHESIS_MODEL` | _(none)_ | `synthesis-llm.ts` | Fallback synthesis model name (used when no provider config is saved in DB) |
 | `SYNTHESIS_API_KEY` | _(none)_ | `synthesis-llm.ts` | Fallback synthesis API key (used when no provider config is saved in DB) |
@@ -46,7 +48,8 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
-| `NEXT_PUBLIC_API_URL` | `http://localhost:4097/api/v1` | `src/lib/api.ts` | API URL for the dashboard HTTP client |
+| `NEXT_PUBLIC_API_URL` | `/api/v1` | `src/lib/api.ts` | Same-origin dashboard API prefix. The browser does not receive `INGENIUM_API_TOKEN`; the dashboard server injects it while proxying requests. |
+| `DASHBOARD_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | `src/proxy.ts`, `scripts/run-dashboard.sh` | Server-only copy of the exact dashboard origin allowlist. Production gateway mutations must reconstruct one of these origins from Nginx-overwritten `X-Forwarded-Proto`, `X-Forwarded-Host`, and `X-Forwarded-Port`; isolated direct fixtures may use their exact browser origin only when forwarding metadata is absent (or is the recognized Next direct-listener default) and that origin is explicitly allowlisted. |
 
 ## Email (`packages/ingenium-email`)
 
@@ -64,6 +67,8 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
 | `OPENCODE_SERVER_PASSWORD` | _(none, required)_ | `scripts/docker-entrypoint.sh`, `ingenium-api` (OpenCode proxy routes) | **Required.** Server-side API proxy guard credential. The browser-facing OpenCode Web child overrides it to empty and is restricted to host loopback. |
+| `NEXT_PUBLIC_OPENCODE_WEB_URL` | `http://opencode.localhost:3000/` at build time | Docker Compose build args, Next.js dashboard | Public browser origin embedded during `docker compose build`; use an authenticated dedicated root HTTPS origin for LAN/remote deployments. |
+| `NEXT_PUBLIC_OPENCODE_CLI_URL` | `http://cli.localhost:3000/` at build time | Docker Compose build args, Next.js dashboard | Public browser origin embedded during `docker compose build`; use an authenticated dedicated root HTTPS origin for LAN/remote deployments. |
 | `OPENCODE_SERVER_URL` | `http://localhost:4098` | `ingenium-api` (opencode client) | Base URL of the OpenCode web server |
 
 > Multer file uploads for `/api/v1/opencode/upload` are stored at `/tmp/ingenium-chat-uploads/`.

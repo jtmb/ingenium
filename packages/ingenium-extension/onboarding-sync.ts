@@ -13,6 +13,7 @@
  */
 import { pushDiskToApi } from "./resource-sync.js";
 import { ensureExtensionProject } from "./project-resolver.js";
+import { apiRequestHeaders } from "./api-auth.js";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -45,7 +46,9 @@ async function syncServers(worktree: string, project: string): Promise<UpsertRes
     if (!mcpBlock || typeof mcpBlock !== "object") return result;
 
     // Fetch existing servers to distinguish created vs skipped
-    const listRes = await fetch(`${API_BASE}/servers?project=${encodeURIComponent(project)}`);
+    const listRes = await fetch(`${API_BASE}/servers?project=${encodeURIComponent(project)}`, {
+      headers: apiRequestHeaders(worktree),
+    });
     const existing = new Set<string>();
     if (listRes.ok) {
       const listData = await listRes.json() as { data: Array<{ name: string }> };
@@ -67,7 +70,7 @@ async function syncServers(worktree: string, project: string): Promise<UpsertRes
     // Upsert all servers in a single API call
     const syncRes = await fetch(`${API_BASE}/servers/sync-all?project=${encodeURIComponent(project)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiRequestHeaders(worktree, { "Content-Type": "application/json" }),
       body: JSON.stringify({ servers: serverPayloads }),
     });
     if (syncRes.ok) {

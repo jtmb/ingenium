@@ -12,6 +12,7 @@ Security documentation and procedures for the Ingenium system.
 | Document | Description |
 |----------|-------------|
 | [Credential Rotation](credential-rotation.md) | Git history secret remediation and credential rotation |
+| [API Authentication](api-authentication.md) | Phase 2G bearer auth, local token handling, dashboard proxy, OAuth callback, and gateway boundaries |
 | [Iframe Sandbox](iframe-sandbox.md) | Iframe sandbox baseline configuration and risk assessment |
 | [LLM Endpoint SSRF Protection](#llm-endpoint-ssrf-protection) | DNS-level validation of LLM provider endpoints, private-network blocking, and opt-in bypass |
 | [Vault Security Model](#vault-security-model) | scrypt key derivation, AES-256-GCM envelope encryption, passphrase-is-key design, no recovery |

@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSy
 import { resolve, basename, dirname, isAbsolute, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { ensureExtensionProject, resolveExtensionProject } from "./project-resolver.js";
+import { apiRequestHeaders } from "./api-auth.js";
 
 const API_BASE =
   (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ??
@@ -138,9 +139,9 @@ export function saveManifest(worktree: string, manifest: SyncManifest): void {
  * Returns null on any failure (non-2xx, network error, parse error) for resilient sync.
  * The caller's catch block handles the null; individual sync failures must not cascade.
  */
-async function apiGet<T>(path: string): Promise<T | null> {
+async function apiGet<T>(worktree: string, path: string): Promise<T | null> {
   try {
-    const res = await fetch(`${API_BASE}${path}`);
+    const res = await fetch(`${API_BASE}${path}`, { headers: apiRequestHeaders(worktree) });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -243,6 +244,87 @@ function isSafeName(name: unknown): name is string {
   if (name.includes("/") || name.includes("\\")) return false;
   if (name.includes("\x00")) return false;
   return true;
+}
+
+const AGENT_CATEGORIES = ["primary", "execution", "research", "security", "chat"] as const;
+
+function isSafeAgentName(name: unknown): name is string {
+  return typeof name === "string"
+    && name.length > 0
+    && name.length <= 64
+    && name.trim() === name
+    && name !== "."
+    && name !== ".."
+    && !/[\\/\u0000-\u001f\u007f]/.test(name);
+}
+
+function isAgentCategory(category: unknown): category is typeof AGENT_CATEGORIES[number] {
+  return typeof category === "string" && (AGENT_CATEGORIES as readonly string[]).includes(category);
+}
+
+/** Return a canonical agents root only when it is contained by the worktree. */
+function safeAgentsRoot(worktree: string, create = false): string | null {
+  try {
+    const worktreeCanon = realpathSync(worktree);
+    const openCodeDir = resolve(worktree, ".opencode");
+    if (existsSync(openCodeDir)) {
+      if (lstatSync(openCodeDir).isSymbolicLink()) return null;
+    } else if (create) {
+      mkdirSync(openCodeDir, { recursive: true });
+    } else {
+      return null;
+    }
+    const openCodeCanon = realpathSync(openCodeDir);
+    if (!openCodeCanon.startsWith(worktreeCanon + sep)) return null;
+
+    const agentsDir = resolve(openCodeCanon, "agents");
+    if (existsSync(agentsDir)) {
+      if (lstatSync(agentsDir).isSymbolicLink()) return null;
+    } else if (create) {
+      mkdirSync(agentsDir, { recursive: true });
+    } else {
+      return null;
+    }
+    const agentsCanon = realpathSync(agentsDir);
+    return agentsCanon.startsWith(openCodeCanon + sep) ? agentsCanon : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeAgentFilePath(worktree: string, name: string, category: string, create = false): string | null {
+  if (!isSafeAgentName(name) || !isAgentCategory(category)) return null;
+  const agentsRoot = safeAgentsRoot(worktree, create);
+  if (!agentsRoot) return null;
+  const categoryDir = resolve(agentsRoot, category);
+  try {
+    if (existsSync(categoryDir)) {
+      if (lstatSync(categoryDir).isSymbolicLink()) return null;
+    } else if (create) {
+      mkdirSync(categoryDir, { recursive: true });
+    } else {
+      return null;
+    }
+    const categoryCanon = realpathSync(categoryDir);
+    if (!categoryCanon.startsWith(agentsRoot + sep)) return null;
+    const filePath = resolve(categoryCanon, `${name}.md`);
+    if (!filePath.startsWith(categoryCanon + sep)) return null;
+    return filePath;
+  } catch {
+    return null;
+  }
+}
+
+function findAgentCategory(worktree: string, name: string): string | null {
+  if (!isSafeAgentName(name)) return null;
+  for (const category of AGENT_CATEGORIES) {
+    const filePath = safeAgentFilePath(worktree, name, category);
+    if (!filePath) continue;
+    try {
+      if (existsSync(filePath) && !lstatSync(filePath).isSymbolicLink()) return category;
+    } catch { /* try the next category */ }
+  }
+  return null;
 }
 
 /**
@@ -431,17 +513,21 @@ function rmRecursive(dir: string): void {
 
 function scanDiskAgents(worktree: string): Map<string, string> {
   const map = new Map<string, string>();
-  const agentsDir = resolve(worktree, ".opencode", "agents");
-  if (!existsSync(agentsDir)) return map;
+  const agentsDir = safeAgentsRoot(worktree);
+  if (!agentsDir) return map;
   try {
     for (const category of readdirSync(agentsDir)) {
+      if (!isAgentCategory(category)) continue;
       const catDir = resolve(agentsDir, category);
-      if (!statSync(catDir).isDirectory()) continue;
+      if (lstatSync(catDir).isSymbolicLink() || !statSync(catDir).isDirectory()) continue;
+      const categoryCanon = realpathSync(catDir);
+      if (!categoryCanon.startsWith(agentsDir + sep)) continue;
       for (const file of readdirSync(catDir)) {
         if (!file.endsWith(".md")) continue;
         const name = file.slice(0, -3);
-        const filePath = resolve(catDir, file);
-        if (!existsSync(filePath)) continue;
+        if (!isSafeAgentName(name)) continue;
+        const filePath = safeAgentFilePath(worktree, name, category);
+        if (!filePath || !existsSync(filePath) || lstatSync(filePath).isSymbolicLink()) continue;
         const rawContent = readFileSync(filePath, "utf-8");
         // Hash only the body (without YAML frontmatter) to match API representation
         const { body } = parseYamlFrontmatter(rawContent);
@@ -454,31 +540,58 @@ function scanDiskAgents(worktree: string): Map<string, string> {
   return map;
 }
 
-function writeAgentToDisk(
+export function writeAgentToDisk(
   worktree: string,
   agent: { name: string; content: string; description?: string; category?: string; mode?: string; model?: string; permissions?: string },
-): void {
+): boolean {
+  if (!isSafeAgentName(agent.name)) return false;
   const category = agent.category || "execution";
-  const dir = resolve(worktree, ".opencode", "agents", category);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!isAgentCategory(category)) return false;
+  const filePath = safeAgentFilePath(worktree, agent.name, category, true);
+  if (!filePath) return false;
+  try {
+    if (existsSync(filePath) && lstatSync(filePath).isSymbolicLink()) return false;
+  } catch { return false; }
 
   const parts: string[] = [];
   parts.push(`name: ${agent.name}`);
   if (agent.description) parts.push(`description: "${agent.description.replace(/"/g, '\\"')}"`);
   if (agent.mode) parts.push(`mode: ${agent.mode}`);
-  if (agent.model) parts.push(`model: ${agent.model}`);
   if (agent.permissions) parts.push(`permissions: ${agent.permissions}`);
   const frontmatter = `---\n${parts.join("\n")}\n---\n`;
 
-  writeFileSync(resolve(dir, `${agent.name}.md`), frontmatter + "\n" + (agent.content || ""));
+  writeFileSync(filePath, frontmatter + "\n" + (agent.content || ""));
+  return true;
 }
 
-function removeAgentFromDisk(worktree: string, name: string, category?: string): void {
-  const catDir = resolve(worktree, ".opencode", "agents", category || "execution");
-  const filePath = resolve(catDir, `${name}.md`);
-  if (existsSync(filePath)) {
-    try { unlinkSync(filePath); } catch { /* non-fatal */ }
+function configuredAgentModel(worktree: string, name: string): string | undefined {
+  const configPath = resolve(worktree, "opencode.json");
+  if (!existsSync(configPath)) return undefined;
+  try {
+    const raw = readFileSync(configPath, "utf-8").replace(/^\s*\/\/.*$/gm, "");
+    const config = JSON.parse(raw) as { agent?: Record<string, { model?: unknown }> };
+    const model = config.agent?.[name]?.model;
+    return typeof model === "string" ? model : undefined;
+  } catch {
+    return undefined;
   }
+}
+
+function removeAgentFromDisk(worktree: string, name: string, category?: string): boolean {
+  const filePath = safeAgentFilePath(worktree, name, category || "execution");
+  if (!filePath) return false;
+  if (existsSync(filePath)) {
+    try { unlinkSync(filePath); return true; } catch { /* non-fatal */ }
+  }
+  return false;
+}
+
+function removeAgentFromAllCategories(worktree: string, name: string): boolean {
+  let removed = false;
+  for (const category of AGENT_CATEGORIES) {
+    removed = removeAgentFromDisk(worktree, name, category) || removed;
+  }
+  return removed;
 }
 
 function scanDiskPlugins(worktree: string): Map<string, string> {
@@ -709,7 +822,7 @@ async function pushSkillToApi(worktree: string, project: string, name: string, l
 
     const res = await fetch(`${API_BASE}/skills?${encodeProject(project)}`, {
       method: "POST",
-      headers: apiHeaders(lockToken),
+      headers: apiHeaders(worktree, lockToken),
       body: JSON.stringify(bodyPayload),
     });
     return res.ok;
@@ -719,18 +832,23 @@ async function pushSkillToApi(worktree: string, project: string, name: string, l
 }
 
 async function pushAgentToApi(worktree: string, project: string, name: string, category: string): Promise<boolean> {
-  const filePath = resolve(worktree, ".opencode", "agents", category, `${name}.md`);
-  if (!existsSync(filePath)) return false;
+  const filePath = safeAgentFilePath(worktree, name, category);
+  if (!filePath || !existsSync(filePath)) return false;
   try {
+    if (lstatSync(filePath).isSymbolicLink()) return false;
     const rawContent = readFileSync(filePath, "utf-8");
     const { body, frontmatter } = parseYamlFrontmatter(rawContent);
     const description = frontmatter.description || "";
     const mode = frontmatter.mode || "subagent";
-    const model = frontmatter.model || "";
+    // Runtime config is the only model source. Legacy markdown model metadata
+    // must not be pushed back into the API or reintroduced on a later sync.
+    const model = configuredAgentModel(worktree, name) || "";
     const res = await fetch(`${API_BASE}/agents?${encodeProject(project)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, content: body, description, category, mode, model }),
+      headers: apiHeaders(worktree),
+      // Disk-only agents are imported disabled. An API deletion therefore cannot
+      // be silently undone by a stale local markdown file on a later initial sync.
+      body: JSON.stringify({ name, content: body, description, category, mode, model, enabled: false }),
     });
     return res.ok;
   } catch {
@@ -745,7 +863,7 @@ async function pushPluginToApi(worktree: string, project: string, name: string, 
     const sourceContent = readFileSync(fullPath, "utf-8");
     const res = await fetch(`${API_BASE}/plugins?${encodeProject(project)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(worktree),
       body: JSON.stringify({ name, file_path: filePathRel, source_content: sourceContent }),
     });
     return res.ok;
@@ -761,7 +879,7 @@ async function pushCommandToApi(worktree: string, project: string, name: string,
     const content = readFileSync(fullPath, "utf-8");
     const res = await fetch(`${API_BASE}/commands?${encodeProject(project)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(worktree),
       body: JSON.stringify({ name, file_path: filePathRel, content }),
     });
     return res.ok;
@@ -777,7 +895,7 @@ async function pushConfigToApi(worktree: string, project: string): Promise<boole
     const content = readFileSync(configPath, "utf-8");
     const res = await fetch(`${API_BASE}/config?${encodeProject(project)}&type=project`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(worktree),
       body: JSON.stringify({ content }),
     });
     return res.ok;
@@ -899,10 +1017,10 @@ interface SyncOptions {
  * Returns the ownerToken if acquired, or null if the lock is held by another owner.
  * Throws on transport/API errors so the caller can distinguish 423 from failure.
  */
-async function acquireSkillLock(project: string, ttlMs: number = 30_000): Promise<string | null> {
+async function acquireSkillLock(worktree: string, project: string, ttlMs: number = 30_000): Promise<string | null> {
   const res = await fetch(`${API_BASE}/skills/locks/acquire?${encodeProject(project)}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: apiHeaders(worktree),
     body: JSON.stringify({ ttlMs }),
   });
   if (!res.ok) {
@@ -918,11 +1036,11 @@ async function acquireSkillLock(project: string, ttlMs: number = 30_000): Promis
  * Returns true if the lock was successfully released.
  * Logs release failure but does not throw — release is best-effort in finally.
  */
-async function releaseSkillLock(project: string, ownerToken: string): Promise<boolean> {
+async function releaseSkillLock(worktree: string, project: string, ownerToken: string): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/skills/locks/release?${encodeProject(project)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders(worktree),
       body: JSON.stringify({ ownerToken }),
     });
     const ok = res.ok;
@@ -930,8 +1048,8 @@ async function releaseSkillLock(project: string, ownerToken: string): Promise<bo
       logSync("skills", project, `WARNING — lock release failed: HTTP ${res.status}`);
     }
     return ok;
-  } catch (err: any) {
-    logSync("skills", project, `WARNING — lock release failed: ${err.message}`);
+  } catch {
+    logSync("skills", project, "WARNING — lock release request failed");
     return false;
   }
 }
@@ -943,9 +1061,9 @@ function logSync(category: string, project: string, message: string): void {
 }
 
 /** API base URL for skill mutation calls that carry a lock token. */
-function apiHeaders(lockToken?: string): Record<string, string> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (lockToken) headers["x-ingenium-lock-token"] = lockToken;
+function apiHeaders(worktree: string, lockToken?: string): Headers {
+  const headers = apiRequestHeaders(worktree, { "Content-Type": "application/json" });
+  if (lockToken) headers.set("x-ingenium-lock-token", lockToken);
   return headers;
 }
 
@@ -963,10 +1081,10 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
   // Phase 0: Acquire a skills lock for the mutation phase.
   let lockToken: string | null;
   try {
-    lockToken = await acquireSkillLock(project, 30_000);
-  } catch (err: any) {
+    lockToken = await acquireSkillLock(worktree, project, 30_000);
+  } catch {
     // Transport/API error — treat as error, preserve manifest
-    logSync("skills", project, `ERROR — lock acquire failed (transport/API): ${err.message}; manifest preserved`);
+    logSync("skills", project, "ERROR — lock acquire request failed; manifest preserved");
     result.errors = 1;
     return result;
   }
@@ -982,7 +1100,7 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
     const diskMap = scanDiskSkills(worktree);
 
     // Fetch API skills
-    const listRes = await apiGet<{ data: Array<{ name: string; description: string; content: string; tags?: string; always_apply?: number; file_tree?: string; enabled?: boolean; category?: string }> }>(`/skills?${encodeProject(project)}`);
+    const listRes = await apiGet<{ data: Array<{ name: string; description: string; content: string; tags?: string; always_apply?: number; file_tree?: string; enabled?: boolean; category?: string }> }>(worktree, `/skills?${encodeProject(project)}`);
     if (!listRes || !Array.isArray(listRes.data)) return result;
 
     const apiMap = new Map<string, { hash: string; data: (typeof listRes.data)[number] }>();
@@ -1096,7 +1214,7 @@ export async function syncSkills(worktree: string, project: string, manifest: Sy
     }
   } finally {
     // Always release the lock — whether success or failure.
-    await releaseSkillLock(project, lockToken);
+    await releaseSkillLock(worktree, project, lockToken);
   }
 
   return result;
@@ -1110,11 +1228,23 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
   const result = emptyResult();
   const diskMap = scanDiskAgents(worktree);
 
-  const listRes = await apiGet<{ data: Array<{ name: string; content: string; description?: string; category?: string; mode?: string; model?: string; permissions?: string; enabled?: boolean }> }>(`/agents?${encodeProject(project)}`);
+  const listRes = await apiGet<{ data: Array<{ name: string; content: string; description?: string; category?: string; mode?: string; model?: string; permissions?: string; enabled?: boolean }> }>(worktree, `/agents?${encodeProject(project)}`);
   if (!listRes || !Array.isArray(listRes.data)) return result;
 
   const apiMap = new Map<string, { hash: string; data: (typeof listRes.data)[number] }>();
   for (const agent of listRes.data) {
+    if (!isSafeAgentName(agent.name) || !isAgentCategory(agent.category || "execution")) {
+      result.errors++;
+      continue;
+    }
+    // Disabled API records are authoritative tombstones for disk sync. Never
+    // rewrite them and remove any stale local markdown before it can be pushed.
+    if (agent.enabled === false) {
+      if (diskMap.has(agent.name) && removeAgentFromAllCategories(worktree, agent.name)) result.removed++;
+      diskMap.delete(agent.name);
+      delete manifest.resources.agents[agent.name];
+      continue;
+    }
     const h = hashContent(agent.content || "");
     apiMap.set(agent.name, { hash: h, data: agent });
   }
@@ -1122,18 +1252,9 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
   if (opts.isInitialSync) {
     for (const [name] of diskMap) {
       if (!apiMap.has(name)) {
-        // Find the category from disk
-        let cat = "execution";
-        const agentsDir = resolve(worktree, ".opencode", "agents");
-        if (existsSync(agentsDir)) {
-          for (const category of readdirSync(agentsDir)) {
-            if (existsSync(resolve(agentsDir, category, `${name}.md`))) {
-              cat = category;
-              break;
-            }
-          }
-        }
-        const ok = await pushAgentToApi(worktree, project, name, cat);
+        const category = findAgentCategory(worktree, name);
+        if (!category) { result.errors++; continue; }
+        const ok = await pushAgentToApi(worktree, project, name, category);
         if (ok) result.pushed++;
         else result.errors++;
       }
@@ -1154,22 +1275,13 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
       baselineHash,
       {
         writeToDisk: () => {
-          if (apiEntry) { writeAgentToDisk(worktree, apiEntry.data); return true; }
+          if (apiEntry) return writeAgentToDisk(worktree, apiEntry.data);
           return false;
         },
-        removeFromDisk: () => removeAgentFromDisk(worktree, name),
+        removeFromDisk: () => { removeAgentFromAllCategories(worktree, name); },
         pushToApi: async () => {
-          let cat = "execution";
-          const agentsDir = resolve(worktree, ".opencode", "agents");
-          if (existsSync(agentsDir)) {
-            for (const category of readdirSync(agentsDir)) {
-              if (existsSync(resolve(agentsDir, category, `${name}.md`))) {
-                cat = category;
-                break;
-              }
-            }
-          }
-          return pushAgentToApi(worktree, project, name, cat);
+          const category = findAgentCategory(worktree, name);
+          return category ? pushAgentToApi(worktree, project, name, category) : false;
         },
         changedLabel: "agents",
       },
@@ -1204,7 +1316,7 @@ export async function syncPlugins(worktree: string, project: string, manifest: S
   const result = emptyResult();
   const diskMap = scanDiskPlugins(worktree);
 
-  const listRes = await apiGet<{ data: Array<{ name: string; file_path: string; source_content?: string; enabled?: boolean }> }>(`/plugins?${encodeProject(project)}`);
+  const listRes = await apiGet<{ data: Array<{ name: string; file_path: string; source_content?: string; enabled?: boolean }> }>(worktree, `/plugins?${encodeProject(project)}`);
   if (!listRes || !Array.isArray(listRes.data)) return result;
 
   const apiMap = new Map<string, { hash: string; data: (typeof listRes.data)[number] }>();
@@ -1281,7 +1393,7 @@ export async function syncCommands(worktree: string, project: string, manifest: 
   const result = emptyResult();
   const diskMap = scanDiskCommands(worktree);
 
-  const listRes = await apiGet<{ data: Array<{ name: string; file_path: string; content?: string }> }>(`/commands?${encodeProject(project)}`);
+  const listRes = await apiGet<{ data: Array<{ name: string; file_path: string; content?: string }> }>(worktree, `/commands?${encodeProject(project)}`);
   if (!listRes || !Array.isArray(listRes.data)) return result;
 
   const apiMap = new Map<string, { hash: string; data: (typeof listRes.data)[number] }>();
@@ -1352,7 +1464,7 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
   const result = emptyResult();
   const diskHash = scanDiskConfig(worktree);
 
-  const configRes = await apiGet<{ data: { content: string } | null }>(`/config?${encodeProject(project)}&type=project`);
+  const configRes = await apiGet<{ data: { content: string } | null }>(worktree, `/config?${encodeProject(project)}&type=project`);
   const apiContent = configRes?.data?.content || null;
   const apiHash = apiContent ? hashContent(apiContent) : undefined;
   const baselineHash = manifest.resources.config.hash;
@@ -1402,7 +1514,7 @@ export async function fullSync(worktree: string): Promise<FullSyncResult & { res
   const project = await ensureExtensionProject(worktree, API_BASE);
   _projectCache = project;
   _projectResolved = true;
-  const projectsResponse = await apiGet<{ data: Array<{ id: string; name: string }> }>("/projects");
+  const projectsResponse = await apiGet<{ data: Array<{ id: string; name: string }> }>(worktree, "/projects");
   const projectId = projectsResponse?.data.find((candidate) => candidate.name === project)?.id;
   const storedManifest = loadManifest(worktree, project);
   const manifest = projectId && storedManifest.projectId !== projectId
@@ -1583,7 +1695,7 @@ export async function pushDiskToApi(worktree: string): Promise<{
       const r = emptyResult();
       const diskHash = scanDiskConfig(worktree);
       if (diskHash) {
-        const configRes = await apiGet<{ data: { content: string } | null }>(`/config?${encodeProject(project)}&type=project`);
+        const configRes = await apiGet<{ data: { content: string } | null }>(worktree, `/config?${encodeProject(project)}&type=project`);
         if (!configRes?.data) {
           const ok = await pushConfigToApi(worktree, project);
           if (ok) r.pushed++;

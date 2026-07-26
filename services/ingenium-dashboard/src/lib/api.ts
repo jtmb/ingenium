@@ -1,3 +1,8 @@
+import {
+  DASHBOARD_MARKER_HEADER,
+  DASHBOARD_MARKER_VALUE,
+} from "./dashboard-auth";
+
 /**
  * Canonical browser API base URL.
  *
@@ -49,23 +54,88 @@ function parseRetryAfter(header: string | null): number | null {
   return Math.min(seconds, 60);
 }
 
+function setRequestHeader(
+  headers: Record<string, string>,
+  name: string,
+  value: string,
+): void {
+  const existing = Object.keys(headers).find(
+    (key) => key.toLowerCase() === name.toLowerCase(),
+  );
+  if (existing && existing !== name) delete headers[existing];
+  headers[name] = value;
+}
+
+function requestHeaderEntries(
+  input: HeadersInit | undefined,
+): Array<[string, string]> {
+  if (!input) return [];
+  if (input instanceof Headers) {
+    const entries: Array<[string, string]> = [];
+    input.forEach((value, name) => entries.push([name, value]));
+    return entries;
+  }
+  if (Array.isArray(input)) return input.map(([name, value]) => [name, value]);
+  return Object.entries(input);
+}
+
+function buildRequestHeaders(options?: RequestInit): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const suppliedEntries = requestHeaderEntries(options?.headers);
+
+  for (const [name, value] of suppliedEntries) {
+    const lowerName = name.toLowerCase();
+    // These headers are controlled by the browser/server boundary, not by an
+    // individual dashboard call site.
+    if (
+      lowerName === "authorization"
+      || lowerName === "proxy-authorization"
+      || lowerName === DASHBOARD_MARKER_HEADER
+    ) {
+      continue;
+    }
+    setRequestHeader(headers, name, value);
+  }
+
+  const isFormDataBody =
+    typeof FormData !== "undefined" && options?.body instanceof FormData;
+  if (!isFormDataBody && !Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
+    setRequestHeader(headers, "Content-Type", "application/json");
+  }
+
+  // The marker is required by the proxy for mutations and is canonicalized so
+  // a call site cannot replace it with an arbitrary value.
+  setRequestHeader(headers, DASHBOARD_MARKER_HEADER, DASHBOARD_MARKER_VALUE);
+  return headers;
+}
+
+/**
+ * Canonical dashboard fetch path for exceptional call sites that need the raw
+ * Response. It applies the same marker and browser-credential stripping as
+ * request(), so raw mutation paths cannot silently bypass the CSRF contract.
+ */
+export function dashboardFetch(
+  input: RequestInfo | URL,
+  options?: RequestInit,
+): Promise<Response> {
+  return fetch(input, {
+    ...options,
+    headers: buildRequestHeaders(options),
+  });
+}
+
 /**
  * Typed fetch wrapper for the Ingenium API.
  *
  * - Throws `ApiError` on non-OK responses, preserving status + Retry-After header
  * - Handles 204 No Content (returned by DELETE endpoints) without trying to parse JSON
- * - Overwrites the `Content-Type` header if `options.headers` is provided, so callers
- *   can pass FormData (for file uploads) without the default JSON header
+ * - Sends the canonical dashboard marker and never forwards browser Authorization
+ *   or Proxy-Authorization overrides
+ * - Allows callers to provide a content type, while leaving multipart boundaries
+ *   to the browser for FormData uploads
  */
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${getApiBase()}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "x-ingenium-ui": "dashboard",
-      ...(options?.headers as Record<string, string> | undefined),
-    },
-  });
+  const res = await dashboardFetch(`${getApiBase()}${path}`, options);
   if (!res.ok) {
     const retryAfter = parseRetryAfter(res.headers?.get?.("Retry-After") ?? null);
     const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
@@ -167,7 +237,7 @@ export type TaskNotification = { id: string; task_id: string; recipient: string;
 /** An MCP plugin registered in the system. */
 export type Plugin = { id: string; name: string; file_path: string; enabled: boolean; source_content?: string };
 
-/** An AI agent definition synced to OpenCode. */
+/** An AI agent definition synced to OpenCode. Model metadata mirrors centralized opencode.json runtime config. */
 export type Agent = {
   id: string;
   name: string;
@@ -281,6 +351,29 @@ export interface EmailAccount {
   smtpPort?: number;
   connected: boolean;
   lastSync?: string;
+}
+
+/** Explicit operation for protected OAuth client-secret settings. */
+export type OAuthClientSecretOperation =
+  | { action: "preserve" }
+  | { action: "replace"; value: string }
+  | { action: "clear" };
+
+/** Sanitized response for a protected OAuth client-secret setting. */
+export interface OAuthClientSecretSetting {
+  key: string;
+  isSet: boolean;
+  masked: boolean;
+}
+
+/** Response shape shared by ordinary and protected settings endpoints. */
+export interface SettingResponse {
+  key: string;
+  // Ordinary settings include a value. Protected OAuth responses omit it at
+  // runtime, but callers must use isSet/masked rather than this field.
+  value: string;
+  isSet?: boolean;
+  masked?: boolean;
 }
 
 export interface TriageResult {
@@ -566,7 +659,7 @@ export interface HealthData {
   dashboard: { status: "ok" | "down" };
   opencode: { status: "ok" | "down" };
   docker: { status: "healthy" | "unhealthy" | "unknown" };
-  services: Array<{ name: string; status: string; uptime?: number }>;
+  services: Array<{ name: string; status: string; uptime?: number; required?: boolean }>;
 }
 
 export interface DashboardSummary {
@@ -892,9 +985,23 @@ export const api = {
     },
   },
   settings: {
-    get: (key: string, project = DEFAULT_PROJECT) => request<{ data: { key: string; value: string } }>(`/settings?project=${project}&key=${key}`),
-    set: (key: string, value: string, project = DEFAULT_PROJECT) =>
-      request<{ data: { key: string; value: string } }>(`/settings?project=${project}`, { method: "POST", body: JSON.stringify({ key, value }) }),
+    get: (key: string, project = DEFAULT_PROJECT) => request<{ data: SettingResponse }>(`/settings?project=${project}&key=${key}`),
+    /**
+     * Save an ordinary setting or an explicit protected-secret operation.
+     *
+     * Protected OAuth secrets must never use an empty string as an implicit
+     * clear. Callers pass `preserve`, `replace`, or `clear` so the server can
+     * apply its canonical vault semantics.
+     */
+    set: (key: string, valueOrOperation: string | OAuthClientSecretOperation, project = DEFAULT_PROJECT) =>
+      request<{ data: SettingResponse | OAuthClientSecretSetting }>(`/settings?project=${project}`, {
+        method: "POST",
+        body: JSON.stringify(
+          typeof valueOrOperation === "string"
+            ? { key, value: valueOrOperation }
+            : { key, ...valueOrOperation },
+        ),
+      }),
 
     testLlm: (endpoint: string, model: string, apiKey: string, project = DEFAULT_PROJECT) =>
       request<{ data: { ok: boolean; status?: number; message?: string } }>(`/settings/test-llm?project=${project}`, {

@@ -64,9 +64,14 @@ await ingenium_backup_schedule_set({
 
 ## Database Location
 
-The primary SQLite database is stored at the path specified by `INGENIUM_CORE_DB_PATH` (default: `./.ingenium/data.db`).
+The primary SQLite database is stored at the path specified by `INGENIUM_CORE_DB_PATH`.
+The deployed canonical path is `/app/.ingenium/data` (no `.db` suffix); do not
+create or restore a sibling `data.db` file.
 
 In Docker, this is on the `ingenium-data` volume mounted at `/app/.ingenium/`.
+The volume survives image rebuilds. Keep the Compose project name stable and do
+not run `docker compose down -v`; a changed project name selects a different
+prefixed named volume.
 
 ---
 
@@ -125,16 +130,15 @@ The API currently records a confirmed restore job and returns `restartRequired: 
 
 The database uses WAL journal mode, which allows hot backups while the application is running.
 
+Use the SQLite Backup API or the dashboard/MCP backup workflow while the service
+is running. Do not copy only the main database file while a WAL is active:
+committed mail/settings may still be in the WAL. If an operator must make a
+file-level backup, stop the service first, or preserve `data`, `data-wal`, and
+`data-shm` as one set.
+
 ```bash
-# 1. Trigger a checkpoint to minimize WAL size
-sqlite3 .ingenium/data.db "PRAGMA wal_checkpoint(TRUNCATE);"
-
-# 2. Copy the database files (both main file and WAL/SHM if present)
-cp .ingenium/data.db .ingenium/data.db.backup-$(date +%Y%m%d-%H%M%S)
-
-# 3. If WAL file exists, copy it too (for crash-consistent backup)
-cp .ingenium/data.db-wal .ingenium/data.db-wal.backup 2>/dev/null || true
-cp .ingenium/data.db-shm .ingenium/data.db-shm.backup 2>/dev/null || true
+# Canonical deployed file; run inside the container
+sqlite3 /app/.ingenium/data ".backup '/app/.ingenium/data.snapshot'"
 ```
 
 ### Using SQLite Backup API (Recommended)
@@ -142,22 +146,22 @@ cp .ingenium/data.db-shm .ingenium/data.db-shm.backup 2>/dev/null || true
 The `.backup` command creates a consistent snapshot even during writes:
 
 ```bash
-sqlite3 .ingenium/data.db ".backup .ingenium/data.db.snapshot"
+sqlite3 /app/.ingenium/data ".backup /app/.ingenium/data.snapshot"
 ```
 
 ### Docker Backup
 
 ```bash
 # Backup from running container
-docker compose exec ingenium bash -c "sqlite3 /app/.ingenium/data.db '.backup /app/.ingenium/data.db.backup'"
+docker compose exec ingenium bash -c "sqlite3 /app/.ingenium/data '.backup /app/.ingenium/data.snapshot'"
 
 # Copy backup to host
-docker compose cp ingenium:/app/.ingenium/data.db.backup ./data.db.backup-$(date +%Y%m%d)
+docker compose cp ingenium:/app/.ingenium/data.snapshot ./data.snapshot-$(date +%Y%m%d)
 
 # Full volume backup (stops the container briefly)
-docker compose down
-docker run --rm -v ingenium_data:/data -v $(pwd):/backup alpine tar czf /backup/ingenium-data-$(date +%Y%m%d).tar.gz -C /data .
-docker compose up -d
+docker compose stop ingenium
+docker run --rm -v ingenium_ingenium-data:/data -v "$(pwd)":/backup alpine tar czf /backup/ingenium-data-$(date +%Y%m%d).tar.gz -C /data .
+docker compose start ingenium
 ```
 
 ### Database File Structure
@@ -166,9 +170,9 @@ The `.ingenium/` directory contains:
 
 ```
 .ingenium/
-├── data.db            # Main SQLite database
-├── data.db-wal        # Write-Ahead Log (may not exist after checkpoint)
-├── data.db-shm        # Shared Memory file (may not exist after checkpoint)
+├── data               # Main SQLite database (canonical deployed filename)
+├── data-wal           # Write-Ahead Log (may not exist after checkpoint)
+├── data-shm           # Shared Memory file (may not exist after checkpoint)
 ├── attachments/       # File attachments from docs workspace
 └── ...                # Other runtime data
 ```
@@ -177,6 +181,23 @@ The `.ingenium/` directory contains:
 
 ## Restore Procedures
 
+### Gateway Deployment Rollback
+
+The local gateway has no password file, so a rebuild does not change persisted
+Ingenium or OpenCode volumes. Before a deployment change, create a manual backup
+from `/backups` (or `ingenium_backup_create`). If the new deployment is unhealthy:
+
+```bash
+# Stop the current container and return to the previously known-good checkout/image
+docker compose down
+# restore the previous image or checkout, then recreate the service
+docker compose up --build -d
+```
+
+If data must also be reverted, use the restore preview/job workflow below; do not
+replace active database files while the service is running. After restoring, restart
+the container and verify API health and both local gateway roots.
+
 ### Standard Restore
 
 ```bash
@@ -184,10 +205,10 @@ The `.ingenium/` directory contains:
 docker compose stop ingenium
 
 # 2. Restore from snapshot
-cp data.db.snapshot .ingenium/data.db
+cp data.snapshot /app/.ingenium/data
 
 # 3. Remove stale WAL/SHM files (they may contain conflicting state)
-rm -f .ingenium/data.db-wal .ingenium/data.db-shm
+rm -f /app/.ingenium/data-wal /app/.ingenium/data-shm
 
 # 4. Start the service
 docker compose start ingenium
@@ -197,7 +218,7 @@ docker compose start ingenium
 
 ```bash
 # 1. Copy backup into container
-docker compose cp ./data.db.backup ingenium:/app/.ingenium/data.db
+docker compose cp ./data.snapshot ingenium:/app/.ingenium/data
 
 # 2. Restart to force re-read
 docker compose restart ingenium
@@ -212,12 +233,12 @@ docker compose restart ingenium
 1. **Identify the failed migration** from the API logs
 2. **Check for orphaned `_old` tables**:
    ```bash
-   sqlite3 .ingenium/data.db ".tables" | grep "_old$"
+   sqlite3 /app/.ingenium/data ".tables" | grep "_old$"
    ```
 3. **Check FTS integrity**:
    ```bash
-   sqlite3 .ingenium/data.db "SELECT COUNT(*) FROM observations_fts;"
-   sqlite3 .ingenium/data.db "SELECT COUNT(*) FROM observations;"
+   sqlite3 /app/.ingenium/data "SELECT COUNT(*) FROM observations_fts;"
+   sqlite3 /app/.ingenium/data "SELECT COUNT(*) FROM observations;"
    ```
 
 ### Common Recovery Scenarios
@@ -243,17 +264,18 @@ See [database-migrations.md](../reference/database-migrations.md) for complete m
 
 ```bash
 # 1. Check database integrity
-sqlite3 .ingenium/data.db "PRAGMA integrity_check;"
+sqlite3 /app/.ingenium/data "PRAGMA integrity_check;"
 
 # 2. Check foreign key integrity
-sqlite3 .ingenium/data.db "PRAGMA foreign_key_check;"
+sqlite3 /app/.ingenium/data "PRAGMA foreign_key_check;"
 
 # 3. Verify key tables have data
-sqlite3 .ingenium/data.db "SELECT COUNT(*) FROM projects;"
-sqlite3 .ingenium/data.db "SELECT COUNT(*) FROM skills;"
+sqlite3 /app/.ingenium/data "SELECT COUNT(*) FROM projects;"
+sqlite3 /app/.ingenium/data "SELECT COUNT(*) FROM skills;"
 
 # 4. Check the API responds
-curl http://localhost:4097/api/v1/health
+curl --config "${XDG_CONFIG_HOME:-$HOME/.config}/ingenium/api-curl.conf" \
+  http://localhost:4097/api/v1/health
 ```
 
 ---

@@ -1,5 +1,11 @@
 import { Router } from "express";
-import { logger, settings, pipelineEvents, synthesis, docs, tasks, projects } from "ingenium-core";
+import { logger, settings, synthesis, docs, tasks, projects } from "ingenium-core";
+import {
+  getEmailClientStatus,
+  getSynthesisStatus,
+  hasRequiredApplicationIssue,
+  type ApplicationHealth,
+} from "../application-health.js";
 
 /** Handles /api/v1/services — supervisord process status, logs, and application health checks (email-client, synthesis-engine). */
 export const servicesRouter = Router();
@@ -24,12 +30,7 @@ interface ServiceDetail extends ServiceInfo {
   processName: string;
 }
 
-interface AppInfo {
-  name: string;
-  state: "healthy" | "degraded" | "stopped" | "starting" | "idle" | "disabled" | "error" | "unknown";
-  description: string;
-  detail?: string;
-}
+type AppInfo = ApplicationHealth;
 
 type OverallHealth = "healthy" | "degraded" | "down";
 
@@ -219,98 +220,6 @@ function buildServiceDetail(info: Record<string, string>): ServiceDetail {
 }
 
 /**
- * Email-client health: checks the sync engine status and heartbeat.
- * Returns idle state when engine runs but no accounts are configured.
- */
-async function getEmailClientStatus(): Promise<AppInfo> {
-  try {
-    const engine = (await import("ingenium-email")).getEngineStatus();
-    if (!engine.running) {
-      return { name: "email-client", state: "stopped", description: "Mail sync engine", detail: "Engine not running" };
-    }
-    if (!engine.heartbeatAt) {
-      return { name: "email-client", state: "healthy", description: "Mail sync engine", detail: "Engine active, awaiting first heartbeat" };
-    }
-    const hbAge = Date.now() - new Date(engine.heartbeatAt).getTime();
-    if (hbAge > 120_000) {
-      return { name: "email-client", state: "degraded", description: "Mail sync engine", detail: `Heartbeat stale (${Math.round(hbAge / 1000)}s)` };
-    }
-    const accounts = engine.accounts ?? [];
-    if (accounts.length === 0) {
-      return { name: "email-client", state: "idle", description: "Mail sync engine running, no accounts", detail: "Add an email account to begin syncing" };
-    }
-    // Check if any account has all folders in error state
-    const allErrorAccounts = accounts.filter((a: any) => 
-      a.folders && a.folders.length > 0 && 
-      a.folders.every((f: any) => f.state === "error")
-    );
-    if (allErrorAccounts.length === accounts.length) {
-      return { 
-        name: "email-client", 
-        state: "degraded", 
-        description: "Mail sync engine", 
-        detail: "Re-authentication required" 
-      };
-    }
-    return {
-      name: "email-client",
-      state: "healthy",
-      description: `Mail sync engine — ${accounts.length} account(s) connected`,
-      detail: `${accounts.length} account(s) connected`,
-    };
-  } catch {
-    return { name: "email-client", state: "error", description: "Mail sync engine", detail: "Internal error" };
-  }
-}
-
-/**
- * Synthesis-engine health: checks configured interval vs last run time.
- * Falls back to pipeline_events if getSynthesisStatus is unavailable.
- */
-async function getSynthesisStatus(): Promise<AppInfo> {
-  try {
-    const intervalMs = parseInt(settings.getSetting("global-default", "synthesis_interval_ms") ?? "900000", 10);
-    if (intervalMs === 0) {
-      return { name: "synthesis-engine", state: "disabled", description: "Synthesis pipeline", detail: "Interval set to 0 (disabled)" };
-    }
-
-    let lastRun: number | null = null;
-    try {
-      const status = synthesis.getSynthesisStatus("global-default");
-      lastRun = status.last_synthesis_at ? new Date(status.last_synthesis_at).getTime() : null;
-    } catch {
-      // Fall back to pipeline events
-      try {
-        const events = pipelineEvents.getEvents("global-default", { type: "synthesis_completed", limit: 1 });
-        if (events.length > 0) {
-          lastRun = new Date(events[0]!.created_at).getTime();
-        }
-      } catch {
-        // Both methods failed — lastRun stays null
-      }
-    }
-
-    if (!lastRun) {
-      const intervalMin = Math.round(intervalMs / 60000);
-      const detail = intervalMs > 0
-        ? `No runs yet — checks every ${intervalMin}m`
-        : "No runs yet";
-      return { name: "synthesis-engine", state: "healthy", description: "Synthesis pipeline", detail };
-    }
-    const age = Date.now() - lastRun;
-    if (age <= intervalMs * 1.5) {
-      return { name: "synthesis-engine", state: "healthy", description: "Synthesis pipeline", detail: `Last run: ${Math.round(age / 60000)}m ago (interval: ${Math.round(intervalMs / 60000)}m)` };
-    }
-    if (age <= intervalMs * 3) {
-      return { name: "synthesis-engine", state: "degraded", description: "Synthesis pipeline", detail: `Last run: ${Math.round(age / 60000)}m ago (interval: ${Math.round(intervalMs / 60000)}m)` };
-    }
-    return { name: "synthesis-engine", state: "error", description: "Synthesis pipeline", detail: `Last run: ${Math.round(age / 60000)}m ago — may be stuck` };
-  } catch (err) {
-    return { name: "synthesis-engine", state: "error", description: "Synthesis pipeline", detail: (err as Error).message };
-  }
-}
-
-/**
  * Docs-workspace health: checks doc stats from ingenium-core.
  * Returns idle when no documents exist yet.
  */
@@ -319,16 +228,17 @@ async function getDocsStatus(): Promise<AppInfo> {
     const stats = docs.getDocStats();
     const total = stats.spaces + stats.pages + stats.drafts;
     if (total === 0) {
-      return { name: "docs-workspace", state: "idle", description: "Documentation workspace", detail: "No documents yet — create a space to begin" };
+      return { name: "docs-workspace", state: "idle", description: "Documentation workspace", detail: "No documents yet — create a space to begin", required: false };
     }
     return {
       name: "docs-workspace",
       state: "healthy",
       description: `Documentation workspace — ${stats.spaces} space(s), ${stats.pages} page(s)`,
       detail: `${stats.spaces} spaces, ${stats.pages} pages, ${stats.drafts} drafts`,
+      required: false,
     };
   } catch (err: any) {
-    return { name: "docs-workspace", state: "error", description: "Documentation workspace", detail: (err as Error).message };
+    return { name: "docs-workspace", state: "error", description: "Documentation workspace", detail: (err as Error).message, required: false };
   }
 }
 
@@ -346,7 +256,7 @@ async function getTasksStatus(): Promise<AppInfo> {
     }
     const total = allTasks.length;
     if (total === 0) {
-      return { name: "tasks-board", state: "idle", description: "Task board", detail: "No tasks — create one to begin" };
+      return { name: "tasks-board", state: "idle", description: "Task board", detail: "No tasks — create one to begin", required: false };
     }
     const todo = byColumn["todo"] || 0;
     const inProgress = byColumn["in_progress"] || 0;
@@ -357,9 +267,10 @@ async function getTasksStatus(): Promise<AppInfo> {
       state: "healthy",
       description: `Task board — ${total} task(s)`,
       detail: `${todo} todo, ${inProgress} in progress, ${review} in review, ${done} done`,
+      required: false,
     };
   } catch (err: any) {
-    return { name: "tasks-board", state: "error", description: "Task board", detail: (err as Error).message };
+    return { name: "tasks-board", state: "error", description: "Task board", detail: (err as Error).message, required: false };
   }
 }
 
@@ -412,8 +323,9 @@ servicesRouter.get("/status", async (_req, res): Promise<void> => {
       overall = "degraded";
     }
 
-    // Downgrade overall health if any application is error or stopped
-    const hasAppIssue = applications.some(app => app.state === "error" || app.state === "stopped");
+    // In-process services do not appear in supervisord. Required application
+    // failures must therefore participate in the same aggregate health result.
+    const hasAppIssue = applications.some(hasRequiredApplicationIssue);
     if (hasAppIssue && overall === "healthy") {
       overall = "degraded";
     }

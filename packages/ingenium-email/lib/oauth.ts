@@ -3,9 +3,11 @@
 import crypto from "node:crypto";
 import type { OAuthToken } from "./types.js";
 import type { EmailProvider } from "./types.js";
+import * as core from "ingenium-core";
 import { settings, getDb } from "ingenium-core";
-import { getGlobalProjectId, getAccount } from "./accounts.js";
-import { resetAuthCircuit } from "./circuit-breaker.js";
+import { getCredentials, getGlobalProjectId, storeOAuthTokens } from "./accounts.js";
+import { decryptCredentialValue, encryptCredentialValue } from "./credential-crypto.js";
+import { ProviderOperationError, sanitizeProviderError } from "./provider-errors.js";
 
 // ── OAuth credential resolution ──────────────────────────────────────────
 
@@ -44,75 +46,19 @@ function getOAuthCreds(
 
 // ── Encryption helpers ────────────────────────────────────────────────────
 
-/**
- * Retrieve the AES-256 encryption key from environment.
- * A 64-character hex key is used directly. A 64-character base64url secret
- * is deterministically reduced to 32 bytes for AES-256 compatibility.
- * SECURITY: Key is never stored in DB — only referenced from the env var at runtime.
- */
-function getEncryptionKey(): Buffer {
-  const value = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
-  if (!value) {
-    throw new Error("INGENIUM_EMAIL_ENCRYPTION_KEY environment variable not set (32-byte hex)");
-  }
-  if (/^[0-9a-fA-F]{64}$/.test(value)) {
-    return Buffer.from(value, "hex");
-  }
-  if (/^[A-Za-z0-9_-]{64}$/.test(value)) {
-    return crypto.createHash("sha256").update(value, "utf8").digest();
-  }
-  throw new Error("INGENIUM_EMAIL_ENCRYPTION_KEY must be 32 bytes (64 hex chars) or a 64-character base64url secret");
-}
+/** Backward-compatible public encryption helpers. */
+export const encryptCredentials = encryptCredentialValue;
+export const decryptCredentials = decryptCredentialValue;
 
-/**
- * Encrypt string data using AES-256-GCM.
- *
- * AES-256-GCM chosen over AES-256-CBC for built-in authentication tag (detects
- * tampering) and no padding oracle vulnerability.  IV is random 16 bytes per call.
- *
- * Output format (base64): [16-byte IV] + [16-byte GCM auth tag] + [ciphertext]
- */
-export function encryptCredentials(data: string): string {
-  const key = getEncryptionKey();
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-
-  const encrypted = Buffer.concat([
-    cipher.update(data, "utf-8"),
-    cipher.final(),
-  ]);
-  const authTag = cipher.getAuthTag();
-
-  const combined = Buffer.concat([iv, authTag, encrypted]);
-  return combined.toString("base64");
-}
-
-/** Decrypt AES-256-GCM encrypted data (base64-encoded). */
-export function decryptCredentials(encrypted: string): string {
-  const key = getEncryptionKey();
-  const combined = Buffer.from(encrypted, "base64");
-
-  const iv = combined.subarray(0, 16);
-  const authTag = combined.subarray(16, 32);
-  const ciphertext = combined.subarray(32);
-
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(authTag);
-
-  const decrypted = Buffer.concat([
-    decipher.update(ciphertext),
-    decipher.final(),
-  ]);
-  return decrypted.toString("utf-8");
+function checkpointOAuthStateDelete(): void {
+  // Focused legacy tests can mock only the settings APIs. Production has the
+  // checkpoint export; use ownership checking so a partial mock stays safe.
+  if (!Object.prototype.hasOwnProperty.call(core, "checkpointAfterWrite")) return;
+  const checkpoint = Reflect.get(core, "checkpointAfterWrite") as (() => void) | undefined;
+  checkpoint?.();
 }
 
 // ── OAuth token storage ───────────────────────────────────────────────────
-
-const OAUTH_SETTINGS_PREFIX = "email_oauth_";
-
-function oauthKey(accountId: string): string {
-  return `${OAUTH_SETTINGS_PREFIX}${accountId}`;
-}
 
 /**
  * Store encrypted OAuth tokens in settings. Always uses the global project.
@@ -126,27 +72,7 @@ export function storeTokens(
   accountId: string,
   tokens: OAuthToken,
 ): void {
-  const projectId = getGlobalProjectId();
-  const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
-  let payload: OAuthToken;
-  if (encKey) {
-    payload = {
-      accessToken: encryptCredentials(tokens.accessToken),
-      refreshToken: encryptCredentials(tokens.refreshToken),
-      expiryDate: tokens.expiryDate,
-      scope: tokens.scope,
-    };
-  } else {
-    payload = tokens;
-  }
-  settings.setSetting(projectId, oauthKey(accountId), JSON.stringify(payload));
-
-  // Clear any tripped auth circuit breaker — new valid tokens mean the
-  // account can resume syncing.
-  const account = getAccount(projectId, accountId);
-  if (account) {
-    resetAuthCircuit(account.email);
-  }
+  storeOAuthTokens(_projectId, accountId, tokens);
 }
 
 /**
@@ -164,29 +90,8 @@ export async function getValidTokens(
   provider: EmailProvider,
 ): Promise<OAuthToken | null> {
   const projectId = getGlobalProjectId();
-  const raw = settings.getSetting(projectId, oauthKey(accountId));
-  if (!raw) return null;
-
-  const stored = JSON.parse(raw) as OAuthToken;
-  const encKey = process.env.INGENIUM_EMAIL_ENCRYPTION_KEY;
-
-  let tokens: OAuthToken;
-  try {
-    if (encKey) {
-      tokens = {
-        accessToken: decryptCredentials(stored.accessToken),
-        refreshToken: decryptCredentials(stored.refreshToken),
-        expiryDate: stored.expiryDate,
-        scope: stored.scope,
-      };
-    } else {
-      tokens = stored;
-    }
-  } catch {
-    // Decryption failed — credentials are unreadable. Return null so the
-    // caller knows re-authentication is needed.
-    return null;
-  }
+  const tokens = getCredentials(projectId, accountId)?.tokens;
+  if (!tokens) return null;
 
   // Check if expired (with 60-second buffer to avoid TOCTOU expiry races)
   const now = Date.now();
@@ -285,41 +190,45 @@ export async function getOAuthUrl(
   provider: EmailProvider,
   _projectId?: string,
 ): Promise<{ url: string; state: string }> {
-  const state = crypto.randomBytes(16).toString("hex");
-  const pid = getGlobalProjectId();
+  try {
+    const state = crypto.randomBytes(16).toString("hex");
+    const pid = getGlobalProjectId();
 
-  // Store state for CSRF validation on callback
-  settings.setSetting(pid, `oauth_state_${provider}`, state);
+    // Store state for CSRF validation on callback
+    settings.setSetting(pid, `oauth_state_${provider}`, state);
 
-  if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient(pid);
-    const url = gClient.generateAuthUrl({
-      access_type: "offline",
-      prompt: "consent",
-      // Full Gmail scope for IMAP/SMTP API access; openid+email+profile for user info
-      scope: "https://mail.google.com/ openid email profile",
-      state,
-      redirect_uri: getRedirectUri(),
-    });
-    return { url, state };
+    if (provider === "gmail") {
+      const { client: gClient } = await cachedGoogleClient(pid);
+      const url = gClient.generateAuthUrl({
+        access_type: "offline",
+        prompt: "consent",
+        // Full Gmail scope for IMAP/SMTP API access; openid+email+profile for user info
+        scope: "https://mail.google.com/ openid email profile",
+        state,
+        redirect_uri: getRedirectUri(),
+      });
+      return { url, state };
+    }
+
+    if (provider === "outlook") {
+      const msalApp = await getMsalApp(pid);
+      const url = await msalApp.getAuthCodeUrl({
+        scopes: [
+          "https://outlook.office.com/IMAP.AccessAsUser.All",
+          "https://outlook.office.com/SMTP.Send",
+          "offline_access",
+        ],
+        redirectUri: getRedirectUri(),
+        state,
+      });
+      return { url, state };
+    }
+
+    // yahoo / custom — placeholder URL (these providers use app-password auth)
+    return { url: "", state };
+  } catch (error: unknown) {
+    throw sanitizeProviderError(error, "oauth");
   }
-
-  if (provider === "outlook") {
-    const msalApp = await getMsalApp(_projectId);
-    const url = await msalApp.getAuthCodeUrl({
-      scopes: [
-        "https://outlook.office.com/IMAP.AccessAsUser.All",
-        "https://outlook.office.com/SMTP.Send",
-        "offline_access",
-      ],
-      redirectUri: getRedirectUri(),
-      state,
-    });
-    return { url, state };
-  }
-
-  // yahoo / custom — placeholder URL (these providers use app-password auth)
-  return { url: "", state };
 }
 
 /**
@@ -339,63 +248,69 @@ export async function exchangeCode(
   _redirectUri?: string,
   _projectId?: string,
 ): Promise<OAuthToken> {
-  const pid = getGlobalProjectId();
-  const storedState = settings.getSetting(pid, `oauth_state_${provider}`);
-  if (!storedState || storedState !== state) {
-    throw new Error(`OAuth state mismatch for provider ${provider}. Possible CSRF attack.`);
-  }
-  // Delete stored state after validation (one-time use, prevents replay)
-  const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-  db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
-    .run(pid, `oauth_state_${provider}`);
-
-  const redirectUri = _redirectUri ?? getRedirectUri();
-
-  if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient(pid);
-    const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
-    // Extract email from id_token JWT (unverified decode — standard for getting email claim)
-    let email: string | undefined;
-    if (tokens.id_token) {
-      try {
-        const parts = tokens.id_token.split(".");
-        if (parts.length >= 2 && parts[1]) {
-          const payload = JSON.parse(Buffer.from(parts[1]!, "base64").toString("utf8"));
-          email = payload.email;
-        }
-      } catch { /* non-fatal */ }
+  try {
+    const pid = getGlobalProjectId();
+    const storedState = settings.getSetting(pid, `oauth_state_${provider}`);
+    if (!storedState || storedState !== state) {
+      throw new ProviderOperationError("OAUTH_STATE_INVALID", "oauth", false);
     }
-    return {
-      accessToken: tokens.access_token ?? "",
-      refreshToken: tokens.refresh_token ?? "",
-      // Fallback expiry: 1 hour from now (typical Google expiry)
-      expiryDate: tokens.expiry_date ?? Date.now() + 3600_000,
-      scope: tokens.scope ?? "https://mail.google.com/",
-      email,
-    };
-  }
+    // Delete stored state after validation (one-time use, prevents replay), then
+    // checkpoint after the write commits before contacting the external provider.
+    const db = getDb();
+    db.prepare("DELETE FROM settings WHERE project_id = ? AND key = ?")
+      .run(pid, `oauth_state_${provider}`);
+    checkpointOAuthStateDelete();
 
-  if (provider === "outlook") {
-    const msalApp = await getMsalApp(_projectId);
-    const result = await msalApp.acquireTokenByCode({
-      code,
-      scopes: [
-        "https://outlook.office.com/IMAP.AccessAsUser.All",
-        "https://outlook.office.com/SMTP.Send",
-        "offline_access",
-      ],
-      redirectUri,
-    });
-    return {
-      accessToken: result?.accessToken ?? "",
-      refreshToken: "", // MSAL handles refresh internally — no refresh token to store
-      expiryDate: result?.expiresOn?.getTime() ?? Date.now() + 3600_000,
-      scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
-      email: result?.account?.username ?? undefined,
-    };
-  }
+    const redirectUri = _redirectUri ?? getRedirectUri();
 
-  throw new Error(`OAuth exchange not supported for provider: ${provider}`);
+    if (provider === "gmail") {
+      const { client: gClient } = await cachedGoogleClient(pid);
+      const { tokens } = await gClient.getToken({ code, redirect_uri: redirectUri });
+      // Extract email from id_token JWT (unverified decode — standard for getting email claim)
+      let email: string | undefined;
+      if (tokens.id_token) {
+        try {
+          const parts = tokens.id_token.split(".");
+          if (parts.length >= 2 && parts[1]) {
+            const payload = JSON.parse(Buffer.from(parts[1]!, "base64").toString("utf8"));
+            email = payload.email;
+          }
+        } catch { /* non-fatal */ }
+      }
+      return {
+        accessToken: tokens.access_token ?? "",
+        refreshToken: tokens.refresh_token ?? "",
+        // Fallback expiry: 1 hour from now (typical Google expiry)
+        expiryDate: tokens.expiry_date ?? Date.now() + 3600_000,
+        scope: tokens.scope ?? "https://mail.google.com/",
+        email,
+      };
+    }
+
+    if (provider === "outlook") {
+      const msalApp = await getMsalApp(pid);
+      const result = await msalApp.acquireTokenByCode({
+        code,
+        scopes: [
+          "https://outlook.office.com/IMAP.AccessAsUser.All",
+          "https://outlook.office.com/SMTP.Send",
+          "offline_access",
+        ],
+        redirectUri,
+      });
+      return {
+        accessToken: result?.accessToken ?? "",
+        refreshToken: "", // MSAL handles refresh internally — no refresh token to store
+        expiryDate: result?.expiresOn?.getTime() ?? Date.now() + 3600_000,
+        scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
+        email: result?.account?.username ?? undefined,
+      };
+    }
+
+    throw new ProviderOperationError("OAUTH_UNSUPPORTED", "oauth", false);
+  } catch (error: unknown) {
+    throw sanitizeProviderError(error, "oauth");
+  }
 }
 
 /**
@@ -408,9 +323,7 @@ export async function getFreshGmailToken(accountId: string): Promise<string> {
   const projectId = getGlobalProjectId();
   const tokens = await getValidTokens(projectId, accountId, "gmail");
   if (!tokens) {
-    throw new Error(
-      `No stored OAuth tokens for account ${accountId}. Please re-authenticate the account.`,
-    );
+    throw new ProviderOperationError("AUTH_REQUIRED", "oauth", false);
   }
   return tokens.accessToken;
 }
@@ -419,37 +332,46 @@ export async function getFreshGmailToken(accountId: string): Promise<string> {
 export async function refreshAccessToken(
   provider: EmailProvider,
   refreshToken: string,
-  projectId?: string,
+  _projectId?: string,
 ): Promise<OAuthToken> {
-  if (provider === "gmail") {
-    const { client: gClient } = await cachedGoogleClient(projectId);
-    gClient.setCredentials({ refresh_token: refreshToken });
-    const { credentials } = await gClient.refreshAccessToken();
-    return {
-      accessToken: credentials.access_token ?? "",
-      refreshToken: credentials.refresh_token ?? refreshToken,
-      expiryDate: credentials.expiry_date ?? Date.now() + 3600_000,
-      scope: credentials.scope ?? "https://mail.google.com/",
-    };
-  }
+  try {
+    // OAuth credentials are shared mail infrastructure. Preserve the optional
+    // argument for API compatibility, but never let a caller select a
+    // non-global project's client credentials.
+    const projectId = getGlobalProjectId();
 
-  if (provider === "outlook") {
-    const msalApp = await getMsalApp(projectId);
-    const result = await msalApp.acquireTokenByRefreshToken({
-      refreshToken,
-      scopes: [
-        "https://outlook.office.com/IMAP.AccessAsUser.All",
-        "https://outlook.office.com/SMTP.Send",
-        "offline_access",
-      ],
-    });
-    return {
-      accessToken: result?.accessToken ?? "",
-      refreshToken: refreshToken,
-      expiryDate: result?.expiresOn?.getTime() ?? Date.now() + 3600_000,
-      scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
-    };
-  }
+    if (provider === "gmail") {
+      const { client: gClient } = await cachedGoogleClient(projectId);
+      gClient.setCredentials({ refresh_token: refreshToken });
+      const { credentials } = await gClient.refreshAccessToken();
+      return {
+        accessToken: credentials.access_token ?? "",
+        refreshToken: credentials.refresh_token ?? refreshToken,
+        expiryDate: credentials.expiry_date ?? Date.now() + 3600_000,
+        scope: credentials.scope ?? "https://mail.google.com/",
+      };
+    }
 
-  throw new Error(`Token refresh not supported for provider: ${provider}`);
+    if (provider === "outlook") {
+      const msalApp = await getMsalApp(projectId);
+      const result = await msalApp.acquireTokenByRefreshToken({
+        refreshToken,
+        scopes: [
+          "https://outlook.office.com/IMAP.AccessAsUser.All",
+          "https://outlook.office.com/SMTP.Send",
+          "offline_access",
+        ],
+      });
+      return {
+        accessToken: result?.accessToken ?? "",
+        refreshToken: refreshToken,
+        expiryDate: result?.expiresOn?.getTime() ?? Date.now() + 3600_000,
+        scope: "https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access",
+      };
+    }
+
+    throw new ProviderOperationError("OAUTH_UNSUPPORTED", "oauth", false);
+  } catch (error: unknown) {
+    throw sanitizeProviderError(error, "oauth");
+  }
 }

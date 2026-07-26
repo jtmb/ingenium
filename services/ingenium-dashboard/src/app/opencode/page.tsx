@@ -30,6 +30,9 @@ export default function OpenCodePage() {
       const saved = localStorage.getItem("opencode-mode");
       if (saved === "cli") {
         setMode("cli");
+        // A persisted CLI choice is still a first activation for this page
+        // instance, so mount the terminal alongside the restored mode.
+        setCliMounted(true);
       }
       // "chat" and any other value fall back to "web" (default)
     } catch {

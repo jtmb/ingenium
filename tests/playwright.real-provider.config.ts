@@ -3,14 +3,14 @@ import { defineConfig } from "@playwright/test";
 /**
  * Playwright E2E test configuration for real-provider smoke tests.
  *
- * This config is for smoke tests that require a fully running Docker
- * deployment (API, Dashboard, OpenCode, etc.). It does NOT start any
- * webServer entries — the Docker container provides all services.
+ * This config is for the real-provider smoke suite only. It does not start
+ * Docker or any web servers; the requested provider environment must already
+ * be running.
  *
  * Key differences from the main playwright.config.ts:
  * - No webServer entries (Docker handles everything)
  * - No TEST_DB_PATH / TEST_PROJECT / TEST_TMP (Docker manages the DB)
- * - baseURL hardcoded to http://localhost:3000
+ * - baseURL is configurable for an authenticated external deployment
  * - Longer timeouts (3 min test, 2 min expect) for real LLM calls
  * - fullyParallel: false — one test at a time to avoid session races
  *
@@ -20,12 +20,15 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: ".",
+  testMatch: ["**/ingenium-dashboard/chat-real-provider.smoke.spec.ts"],
+  globalSetup: "./ingenium-dashboard/provider-global-setup.ts",
   timeout: 180000,
-  retries: 1,
+  retries: 0,
+  workers: 1,
   fullyParallel: false,
-  outputDir: "test-results",
+  outputDir: "artifacts/playwright/real-provider",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000",
     headless: true,
     viewport: { width: 1280, height: 720 },
     trace: "retain-on-failure",

@@ -292,7 +292,8 @@ Each setting row uses the `SettingRow` component:
 - **MailPanel**: OAuth credentials + sync intervals + window sizes
 - **PipelinePanel**: LLM provider catalog management (repeatable blocks, model lists, primary/backup roles)
 - **ConfigPanel**: Link to /config editor
-- All other tabs: `PlaceholderPanel` — centered icon + "No settings for {label} yet"
+- **Route-linked panels**: Projects → `/projects`, Skills → `/skills`, Tasks → `/tasks`, Jobs → `/jobs`, Plugins → `/plugins`, Agents → `/agents`, MCP → `/mcp-servers`, Observations → `/observations`, Personality → `/personality`, and Logs → `/logs`
+- Route-linked panels use `RouteLinkedPanel`: a concise category description plus an **Open {label} workspace** link. They intentionally reuse the dedicated route's data loading, authorization, mutation flows, and responsive UI rather than rendering placeholder content in the overlay.
 
 ### PipelinePanel — Draft Lifecycle & Native Provider Cards
 

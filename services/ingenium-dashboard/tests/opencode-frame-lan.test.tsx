@@ -1,31 +1,25 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import OpenCodeFrame from "@/app/components/OpenCodeFrame";
 
 /**
- * OpenCodeFrame iframe DOM behavior tests against the real component.
+ * Focused OpenCode boundary tests against the real iframe component.
  *
- * Verifies runtime URL derivation, conditional CLI mount, sandbox/security
- * attributes, active/inactive visibility, and accessibility attributes.
- *
- * Health-gating (useOpenCodeHealth) is mocked to return "ready" so the
- * iframes render. The mock is set in beforeEach.
+ * The health hook is ready by default so these tests cover URL validation and
+ * deterministic UI states without a live OpenCode, Docker, or provider.
  */
-
-// ── Mock useOpenCodeHealth ─────────────────────────────────────────────────
-
-vi.mock("@/lib/use-opencode-health", () => ({
-  useOpenCodeHealth: () => ({
-    status: "ready" as const,
-    error: null,
-    lastChecked: Date.now(),
-    retry: vi.fn(),
-  }),
+const healthMock = vi.hoisted(() => ({
+  status: "ready" as "starting" | "ready" | "unavailable",
+  error: null as string | null,
+  lastChecked: 1,
+  retry: vi.fn(),
 }));
 
-// ── window.location helpers (mutable for testing) ─────────────────────────
+vi.mock("@/lib/use-opencode-health", () => ({
+  useOpenCodeHealth: () => healthMock,
+}));
 
 function setLocation(url: string) {
   const parsed = new URL(url);
@@ -46,184 +40,169 @@ function setLocation(url: string) {
   });
 }
 
-const DEFAULT_LOCATION = "http://localhost:3000/";
-
 beforeEach(() => {
-  setLocation(DEFAULT_LOCATION);
+  setLocation("http://localhost:3000/");
 });
 
 afterEach(() => {
   cleanup();
+  healthMock.status = "ready";
+  healthMock.error = null;
+  healthMock.retry.mockReset();
+  delete process.env.NEXT_PUBLIC_OPENCODE_WEB_URL;
+  delete process.env.NEXT_PUBLIC_OPENCODE_CLI_URL;
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
-// ── Iframe rendering ──────────────────────────────────────────────────────
+describe("OpenCodeFrame — direct local development", () => {
+  it("resolves direct loopback iframe roots after hydration", () => {
+    render(<OpenCodeFrame mode="web" cliMounted={false} />);
 
-describe("OpenCodeFrame — web iframe", () => {
-  it("omits iframe sources during SSR so hydration resolves the client URL once", () => {
-    const savedWindow = globalThis.window;
-    // @ts-expect-error — deleting window simulates the SSR environment
-    delete globalThis.window;
-    try {
-      const html = renderToStaticMarkup(
-        React.createElement(OpenCodeFrame, { mode: "web", cliMounted: true }),
-      );
-      // During SSR, availability is "unavailable" (no window), so the component
-      // renders the guidance message, not an iframe
-      expect(html).toContain("OpenCode cannot be embedded on this connection");
-    } finally {
-      globalThis.window = savedWindow;
-    }
-  });
-
-  it("resolves the loopback Web URL after mount instead of the SSR proxy URL", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
     expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe("http://localhost:4098/");
-  });
-
-  it("shows unavailable guidance for LAN HTTP without HTTPS override", () => {
-    delete process.env.NEXT_PUBLIC_OPENCODE_WEB_URL;
-    setLocation("http://192.168.1.50:3000/");
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    expect(screen.getByText("OpenCode cannot be embedded on this connection")).not.toBeNull();
-  });
-
-  it("renders with title 'OpenCode Web'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    expect(screen.getByTitle("OpenCode Web")).not.toBeNull();
-  });
-
-  it("has no sandbox attribute (bundled OpenCode is trusted first-party content)", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("sandbox")).toBeNull();
-  });
-
-  it("has allow='clipboard-write'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("allow")).toBe(
-      "clipboard-write",
-    );
-  });
-
-  it("renders with w-full h-full border-0 classes", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    const iframe = screen.getByTitle("OpenCode Web");
-    expect(iframe.className).toContain("w-full");
-    expect(iframe.className).toContain("h-full");
-    expect(iframe.className).toContain("border-0");
-  });
-});
-
-describe("OpenCodeFrame — CLI iframe conditional mount", () => {
-  it("does NOT render the CLI iframe when cliMounted is false", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
     expect(screen.queryByTitle("OpenCode Terminal")).toBeNull();
   });
 
-  it("renders the CLI iframe when cliMounted is true", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: true }));
-    expect(screen.getByTitle("OpenCode Terminal")).not.toBeNull();
+  it("mounts the CLI only after activation and uses its direct local port", () => {
+    render(<OpenCodeFrame mode="cli" cliMounted />);
+
+    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe("http://localhost:4098/");
+    expect(screen.getByTitle("OpenCode Terminal").getAttribute("src")).toBe("http://localhost:4099/");
   });
 
-  it("renders CLI iframe with correct runtime URL on port 4099", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "cli", cliMounted: true }));
-    expect(screen.getByTitle("OpenCode Terminal").getAttribute("src")).toBe(
+  it("keeps inactive frames mounted without display:none", () => {
+    render(<OpenCodeFrame mode="web" cliMounted />);
+
+    const cli = screen.getByTitle("OpenCode Terminal");
+    expect(cli.style.opacity).toBe("0");
+    expect(cli.style.visibility).toBe("hidden");
+    expect(cli.style.pointerEvents).toBe("none");
+    expect(cli.style.display).not.toBe("none");
+  });
+});
+
+describe("OpenCodeFrame — bounded health gating", () => {
+  it.each([
+    ["starting", "OpenCode is starting up…"],
+    ["unavailable", "OpenCode is unavailable"],
+  ] as const)("does not mount a blank iframe while health is %s", (status, message) => {
+    healthMock.status = status;
+    render(<OpenCodeFrame mode="web" cliMounted />);
+
+    expect(screen.queryByTitle("OpenCode Web")).toBeNull();
+    expect(screen.queryByTitle("OpenCode Terminal")).toBeNull();
+    expect(screen.getByText(message)).not.toBeNull();
+  });
+
+  it("replaces a stalled active iframe with a bounded retry surface", () => {
+    vi.useFakeTimers();
+    render(<OpenCodeFrame mode="web" cliMounted={false} />);
+
+    act(() => {
+      vi.advanceTimersByTime(15_000);
+    });
+
+    expect(screen.queryByTitle("OpenCode Web")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("could not be loaded");
+    fireEvent.click(screen.getByRole("button", { name: "Retry connection" }));
+    expect(healthMock.retry).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+});
+
+describe("OpenCodeFrame — configured roots", () => {
+  it("uses dedicated HTTPS roots for both modes", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "https://opencode.example.com";
+    process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = "https://terminal.example.com/";
+    setLocation("https://dashboard.example.com/opencode");
+
+    render(<OpenCodeFrame mode="web" cliMounted />);
+
+    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe("https://opencode.example.com/");
+    expect(screen.getByTitle("OpenCode Terminal").getAttribute("src")).toBe("https://terminal.example.com/");
+  });
+
+  it("uses the authenticated host gateway roots on LAN HTTP", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "http://opencode.localhost:3000/";
+    process.env.NEXT_PUBLIC_OPENCODE_CLI_URL = "http://cli.localhost:3000/";
+    setLocation("http://192.168.1.50:3000/opencode");
+
+    render(<OpenCodeFrame mode="web" cliMounted />);
+
+    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe("http://opencode.localhost:3000/");
+    expect(screen.getByTitle("OpenCode Terminal").getAttribute("src")).toBe("http://cli.localhost:3000/");
+  });
+
+  it("does not mount a frame for an untrusted HTTP host or a subpath", () => {
+    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "http://dashboard.example.com:3000/opencode";
+    setLocation("http://192.168.1.50:3000/opencode");
+
+    render(<OpenCodeFrame mode="web" cliMounted={false} />);
+
+    expect(screen.getByRole("alert").textContent).toContain("OpenCode cannot be embedded on this connection");
+    expect(screen.queryByTitle("OpenCode Web")).toBeNull();
+  });
+});
+
+describe("OpenCodeFrame — host-boundary failure messaging", () => {
+  it("explains the LAN HTTP boundary and offers direct local development", () => {
+    setLocation("http://192.168.1.50:3000/opencode");
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    render(<OpenCodeFrame mode="web" cliMounted={false} />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain(
+      "OpenCode serves root-relative assets and cannot be proxied under a shared origin.",
+    );
+    expect(alert.textContent).toContain("Configure the validated host gateway roots or a dedicated HTTPS origin");
+    fireEvent.click(screen.getByRole("button", { name: "Open OpenCode in a new tab" }));
+    expect(openSpy).toHaveBeenCalledWith(
+      "http://localhost:4098/",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  it("uses the CLI direct-port escape hatch when CLI is the active mode", () => {
+    setLocation("http://192.168.1.50:3000/opencode");
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    render(<OpenCodeFrame mode="cli" cliMounted />);
+    fireEvent.click(screen.getByRole("button", { name: "Open OpenCode in a new tab" }));
+
+    expect(openSpy).toHaveBeenCalledWith(
       "http://localhost:4099/",
+      "_blank",
+      "noopener,noreferrer",
     );
   });
 
-  it("renders CLI iframe with title 'OpenCode Terminal'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "cli", cliMounted: true }));
-    expect(screen.getByTitle("OpenCode Terminal")).not.toBeNull();
-  });
-
-  it("shows unavailable for HTTPS without override, not the old proxy URLs", () => {
-    delete process.env.NEXT_PUBLIC_OPENCODE_WEB_URL;
-    delete process.env.NEXT_PUBLIC_OPENCODE_CLI_URL;
-    setLocation("https://dashboard.example.com/opencode");
-    render(React.createElement(OpenCodeFrame, { mode: "cli", cliMounted: true }));
-    // HTTPS without override is "ok-https-origin" for availability but URLs are null
-    // The component still renders because health is mocked as "ready" and availability
-    // is not "unavailable" (it's "ok-https-origin"). But the iframe src is null.
-    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBeNull();
-    expect(screen.getByTitle("OpenCode Terminal").getAttribute("src")).toBeNull();
-  });
-
-  it("uses configured HTTPS origin when NEXT_PUBLIC_OPENCODE_WEB_URL is set", () => {
-    process.env.NEXT_PUBLIC_OPENCODE_WEB_URL = "https://opencode.example.com/";
-    setLocation("https://dashboard.example.com/opencode");
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: true }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("src")).toBe(
-      "https://opencode.example.com/",
-    );
-  });
 });
 
-describe("OpenCodeFrame — mode visibility", () => {
-  it("web iframe is visible (opacity 1, visible, auto) when mode='web'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: true }));
-    const webIframe = screen.getByTitle("OpenCode Web");
-    expect(webIframe.style.opacity).toBe("1");
-    expect(webIframe.style.visibility).toBe("visible");
-    expect(webIframe.style.pointerEvents).toBe("auto");
+describe("OpenCodeFrame — trusted iframe and hydration contract", () => {
+  it("does not apply the stale sandbox attribute", () => {
+    render(<OpenCodeFrame mode="web" cliMounted={false} />);
+
+    const frame = screen.getByTitle("OpenCode Web");
+    expect(frame.getAttribute("sandbox")).toBeNull();
+    expect(frame.getAttribute("allow")).toBe("clipboard-write");
   });
 
-  it("web iframe is hidden (opacity 0, hidden, none) when mode='cli'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "cli", cliMounted: true }));
-    const webIframe = screen.getByTitle("OpenCode Web");
-    expect(webIframe.style.opacity).toBe("0");
-    expect(webIframe.style.visibility).toBe("hidden");
-    expect(webIframe.style.pointerEvents).toBe("none");
-  });
-
-  it("CLI iframe is visible when mode='cli'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "cli", cliMounted: true }));
-    const cliIframe = screen.getByTitle("OpenCode Terminal");
-    expect(cliIframe.style.opacity).toBe("1");
-    expect(cliIframe.style.visibility).toBe("visible");
-    expect(cliIframe.style.pointerEvents).toBe("auto");
-  });
-
-  it("CLI iframe is hidden when mode='web'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: true }));
-    const cliIframe = screen.getByTitle("OpenCode Terminal");
-    expect(cliIframe.style.opacity).toBe("0");
-    expect(cliIframe.style.visibility).toBe("hidden");
-    expect(cliIframe.style.pointerEvents).toBe("none");
-  });
-});
-
-describe("OpenCodeFrame — accessibility attributes", () => {
-  it("web iframe has aria-hidden=false when mode='web'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("aria-hidden")).toBe("false");
-  });
-
-  it("web iframe has aria-hidden=true when mode='cli'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "cli", cliMounted: true }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("aria-hidden")).toBe("true");
-  });
-
-  it("web iframe has tabIndex=0 when mode='web'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("tabindex")).toBe("0");
-  });
-
-  it("web iframe has tabIndex=-1 when mode='cli'", () => {
-    render(React.createElement(OpenCodeFrame, { mode: "cli", cliMounted: true }));
-    expect(screen.getByTitle("OpenCode Web").getAttribute("tabindex")).toBe("-1");
-  });
-});
-
-describe("OpenCodeFrame — container structure", () => {
-  it("renders a container div with 'absolute inset-0' class", () => {
-    const { container } = render(
-      React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }),
-    );
-    // The outermost element is the container div
-    const outerDiv = container.firstElementChild;
-    expect(outerDiv).not.toBeNull();
-    expect(outerDiv!.className).toContain("absolute");
-    expect(outerDiv!.className).toContain("inset-0");
+  it("does not render a broken proxy iframe during SSR", () => {
+    const savedWindow = globalThis.window;
+    // @ts-expect-error — deleting window simulates SSR.
+    delete globalThis.window;
+    try {
+      const html = renderToStaticMarkup(
+        React.createElement(OpenCodeFrame, { mode: "web", cliMounted: false }),
+      );
+      expect(html).toContain("Preparing OpenCode");
+      expect(html).not.toContain("/opencode-web/");
+      expect(html).not.toContain("/opencode-cli/");
+      expect(html).not.toContain("<iframe");
+    } finally {
+      globalThis.window = savedWindow;
+    }
   });
 });

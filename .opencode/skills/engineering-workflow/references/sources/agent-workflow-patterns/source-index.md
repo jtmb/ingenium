@@ -7,10 +7,10 @@ description: "Implementation workflow patterns including verification gates, age
 
 ## 🔴 HARD RULEs — Concurrency & Phase Scheduling
 
-- **Maximum 12 active subagents per phase** — total simultaneous subagents, including both writers and read-only agents
-- **Maximum 6 concurrent writers per wave** — subagents with `edit:` or `write:` allow in their permission block
+- **Maximum 6 active subagents per phase** — total simultaneous subagents, including both writers and read-only agents
+- **Maximum 3 concurrent writers per wave** — subagents with `edit:` or `write:` allow in their permission block
 - **Exclusive write territories** — no two writers may touch the same file/directory path concurrently; serialize overlapping writers across waves
-- **Remaining active capacity** (beyond writer count, up to 12 total) reserved for read-only/research/QA/docs/security/browser agents
+- **Remaining active capacity** (beyond writer count, up to 6 total) is available to non-writer/research/QA/security agents
 - **Mandatory phase declarations** — before executing any phase, declare: active count, writer count, ownership paths, dependencies, verification owners
 - **Duplicate writer instances** (same agent type) are valid only for separate, non-overlapping territories
 
@@ -33,23 +33,22 @@ description: "Implementation workflow patterns including verification gates, age
 ## 🔴 HARD RULEs — Plan Architecture
 
 - Plans must be architected into distinct phases for orchestrator execution
-- Plan handoff messages must include specific agent count instructions (max 12 active, max 6 writers per phase)
+- Plan handoff messages must include specific agent count instructions (max 6 active, max 3 writers per phase)
 - Every plan must end with copy-paste handoff instruction summarizing agent limits and verification steps
-- Parallel subagent planning governed by 12-active/6-writer policy, prioritizing engineer/qa tasks for speedup
+- Parallel subagent planning governed by 6-active/3-writer policy, prioritizing engineer/qa tasks for speedup
 - Documentation and testing mapped at EVERY phase before proceeding
 
 ## 🔴 HARD RULEs — Execution
 
 - Iterative testing required until functionality confirmed (no simulated testing)
 - Visual validation from orchestrator required during implementation phases
-- Tool selection: @ingenium-explore for exploration, @ingenium-software-engineer-premium for deep reasoning, @ingenium-software-engineer-terra for critical tasks (auth, migrations, runtime outages, multi-service contracts, cross-package refactors, persistent high-risk failures)
-- @ingenium-software-engineer-fast for routine isolated fixes/tests
+- Tool selection: @ingenium-explore for exploration, @ingenium-software-engineer-premium for critical and complex work (auth, migrations, runtime outages, multi-service contracts, cross-package refactors, persistent high-risk failures), @ingenium-software-engineer-fast for routine isolated fixes/tests
 
 ## Reference Files
 
 | File | Content |
 |------|--------|
-| [`references/agent-limits.md`](references/agent-limits.md) | Canonical concurrency policy: 12 active subagents per phase, 6 concurrent writers, exclusive territories, mandatory phase declarations, collision resolution |
+| [`references/agent-limits.md`](references/agent-limits.md) | Canonical concurrency policy: 6 active subagents per phase, 3 concurrent writers, exclusive territories, mandatory phase declarations, collision resolution |
 | [`references/verification-gates.md`](references/verification-gates.md) | Sub-agent output verification patterns and gate requirements |
 | [`references/visual-validation.md`](references/visual-validation.md) | Canonical changed-route and final-sweep visual QA protocol |
 | [`references/todo-workflow.md`](references/todo-workflow.md) | Todo tool usage patterns across implementation phases |

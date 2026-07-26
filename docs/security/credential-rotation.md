@@ -1,188 +1,59 @@
 ---
-title: Credential Rotation
-description: Git history secret remediation and credential rotation procedures for the Ingenium repository.
+title: Credential Incident Runbook
+description: Redacted response record and future remediation steps for the historical credential exposure.
 ---
 
-# Credential Rotation & Git History Remediation
+# Credential Incident Runbook
 
-> **Status**: External release blocker — coordinated rotation/re-auth plus `git filter-repo` across all clones required.
-> **Last updated**: 2026-07-16
+> **Handling:** Redacted operational documentation. Do not add token values, hashes, or other secret material here.
 
----
+## Incident status
 
-## 🔴 Security Advisory
+- **History remediation:** The history rewrite was completed from an isolated mirror.
+- **Affected paths:** The affected paths were removed from historical history.
+- **Remote refs:** `origin` branches `main` and `the-next-level` were force-updated to the reported sanitized refs.
+- **Current scans:** Local and current scans are clean.
+- **Historical credential comparison:** No historical JWT matched the current local credentials.
+- **Local email key:** Unchanged.
+- **Outstanding verification:** External provider revocation, cache invalidation, and collaborator/CI clone-reset actions remain to be verified.
 
-The Ingenium git repository contains **legacy secrets in git history** from earlier development phases.
-The current worktree uses placeholders and required environment variables, but the secrets
-remain in historical commits and cannot be removed without coordinated history rewriting.
+No secret values are recorded in this document, issues, commits, logs, or support transcripts.
 
-> 🔴 **The legacy git-history secret rotation/purge remains a release blocker.**
-> Phase A (rotate active credentials) must be completed before Phase B (git filter-repo).
-> This is tracked as a pre-release blocker — not yet actioned.
+## Remediation record
 
-### Secrets Present in Git History
+### 1. Credential verification
 
-| Secret | Type | Current Worktree Status | Risk |
-|--------|------|-------------------------|------|
-| **Legacy email encryption key** | AES-256-GCM encryption key | `INGENIUM_EMAIL_ENCRYPTION_KEY` — now **required** with 64-character hex or base64url validation; no hardcoded default | Rotated key in current config; old key in git history |
-| **Legacy OpenCode password** | Web server auth password | `OPENCODE_SERVER_PASSWORD` — now **required** with entrypoint guard; no hardcoded default | Rotated password in current config; old password in git history |
+External provider revocation and related cache invalidation are still pending verification. No credential values are recorded here.
 
-### Why This Is a Release Blocker
+### 2. History rewrite
 
-1. **Any clone of the repository** contains the full history, including these secrets
-2. **`git filter-repo` must be coordinated** across all clones — if even one clone pushes unfiltered history, the secrets reappear
-3. **External collaborators** must re-clone after the purge
-4. **Rotation/re-auth** must happen before or simultaneously with the purge — otherwise rotated credentials are invalidated but old compromised ones remain searchable
+The rewrite was performed from an isolated mirror. Affected paths were removed historically, and `origin/main` and `origin/the-next-level` were force-updated to the reported sanitized refs.
 
----
+### 3. Local verification
 
-## Safe Remediation Steps
+Local and current scans are clean. No historical JWT matched the current local credentials. The local email key was not changed. Keep local secret material out of commits, build contexts, issue reports, and shell history.
 
-### Phase A — Rotate All Active Credentials (Do This First)
+### 4. Add ongoing secret scanning
 
-Before rewriting history, ensure all currently active credentials are replaced with new values:
+- Run secret scanning against commits, branches, tags, and pull requests.
+- Enable repository-host scanning and push protection where available.
+- Add a pre-commit or CI check that detects JWT-shaped credentials without printing matching values.
+- Review alerts in a protected channel and treat every confirmed finding as compromised until revoked.
+- Repeat a full scan after the history rewrite and after force-updating remotes.
 
-1. **Generate a new INGENIUM_EMAIL_ENCRYPTION_KEY** (64 hex chars or 64-char base64url secret):
-   ```bash
-   # 64 hex characters (used directly as 32-byte AES-256 key)
-   openssl rand -hex 32
+## Verification checklist
 
-   # Alternatively, a 64-character base64url secret (deterministically reduced to AES-256 key)
-   openssl rand -base64 48 | tr '+/' '-_' | tr -d '=\n' | head -c 64
-   ```
-   The hex format is used directly as the AES-256 key. The base64url format is **deterministically reduced** to 32 bytes via SHA-256 — either is accepted.
-2. **Set a new OPENCODE_SERVER_PASSWORD** (any strong password)
-3. **Re-authenticate email accounts** with the new encryption key (existing encrypted credentials become undecryptable)
+- [x] History rewritten from an isolated mirror.
+- [x] Affected paths removed from historical history.
+- [x] `origin/main` and `origin/the-next-level` force-updated to the reported sanitized refs.
+- [x] Local and current scans clean.
+- [x] No historical JWT matched current local credentials.
+- [x] Local email key unchanged.
+- [ ] External provider revocation verified.
+- [ ] External provider caches invalidated or confirmed clear.
+- [ ] Collaborators and CI re-cloned or reset from the rewritten history.
 
-   > 🔴 After key rotation, the sync engine parks the affected workers immediately — no infinite retry loop or repeated warnings. Navigate to the Mail page in the Dashboard; a **Reconnect** button appears on the account, and the SyncProgress component prompts for re-authentication. Clicking Reconnect opens the account setup flow to enter the new credentials.
-4. **Re-login to OpenCode** with the new password
-5. **Update `.env` files, Docker Compose, and CI/CD** secrets with the new values
+## Related documents
 
-### Phase B — Coordinate Git History Purge
-
-After all credentials are rotated:
-
-1. **Notify all collaborators** of the upcoming history rewrite
-2. **Freeze commits** on the main branch
-3. **Run `git filter-repo`** to remove the secrets from history:
-   ```bash
-   # Install git-filter-repo: https://github.com/newren/git-filter-repo
-   
-   # Strip secrets from all commits (replace placeholders with actual patterns)
-    git filter-repo \
-     --replace-text <(echo "INGENIUM_EMAIL_ENCRYPTION_KEY") \
-     --force
-   ```
-   
-   > ⚠️ **Do not print the actual secret values.** Use placeholder patterns only.
-   > The command above is illustrative — actual patterns must be derived from
-   > the specific strings found in the commit history.
-
-4. **Verify the purge**:
-    ```bash
-    # Check no secrets remain in history
-    git log --all --pickaxe-all -S "INGENIUM_EMAIL_ENCRYPTION_KEY" --oneline
-    # Should return empty
-    ```
-
-5. **Force-push** to all remotes:
-   ```bash
-   git push origin --force --all
-   git push origin --force --tags
-   ```
-
-6. **All collaborators must re-clone** — anyone who force-pushes from an unfiltered clone will reintroduce the secrets
-
-### Phase C — Post-Purge Verification
-
-1. **Verify no secrets remain** in any branch or tag
-2. **Rotate credentials again** (belt-and-suspenders):
-   - Generate new encryption key
-   - Set new OpenCode password
-3. **Update documentation** to remove any historical references to old credential values
-4. **Add a pre-receive hook** to the remote to block any commit containing known secret patterns:
-   ```bash
-   # Example pre-receive hook (server-side)
-   #!/bin/sh
-   while read oldrev newrev refname; do
-     git rev-list $oldrev..$newrev | while read commit; do
-        if git show $commit | grep -qE 'INGENIUM_EMAIL_ENCRYPTION_KEY|OPENCODE_SERVER_PASSWORD'; then
-         echo "ERROR: Commit $commit contains secrets. Rejected."
-         exit 1
-       fi
-     done
-   done
-   ```
-
----
-
-## Active Defense Measures
-
-### 🔴 Timing-Safe API Token Comparison
-
-`INGENIUM_API_TOKEN` is validated via `crypto.timingSafeEqual` at `services/ingenium-api/lib/middleware/auth.ts`:
-
-```typescript
-// Timing-safe comparison — pad both inputs to equal length so
-// timingSafeEqual never throws on differing buffer lengths.
-const providedBuf = Buffer.from(provided, "utf8");
-const tokenBuf = Buffer.from(token, "utf8");
-const maxLen = Math.max(providedBuf.length, tokenBuf.length);
-const paddedProvided = Buffer.alloc(maxLen, 0);
-const paddedToken = Buffer.alloc(maxLen, 0);
-providedBuf.copy(paddedProvided);
-tokenBuf.copy(paddedToken);
-
-if (!timingSafeEqual(paddedProvided, paddedToken)) {
-  throw new AppError("Invalid authorization token", "FORBIDDEN", 403);
-}
-```
-
-Key properties:
-- **Length-safe padding**: Both inputs are padded to `maxLen` so `timingSafeEqual` never throws on differing buffer sizes (which would leak the correct token length)
-- **Middleware chain placement**: Auth sits AFTER rate limiting — brute-force attempts are throttled before any token comparison cost is paid
-- **401 vs 403 distinction**: Missing/invalid header → 401 UNAUTHORIZED; wrong token → 403 FORBIDDEN (distinguishes "not configured" from "wrong value")
-
-### 🔴 `.dockerignore` Secret Build-Context Prison
-
-The `.dockerignore` excludes all secret files from the Docker build context, preventing accidental layer leakage:
-
-```
-# Secrets
-.env
-.env.*
-*.key
-*.pem
-secrets/
-```
-
-These patterns block:
-- `.env` / `.env.*` — environment files containing tokens, keys, passwords
-- `*.key`, `*.pem` — TLS/SSH private keys
-- `secrets/` — any dedicated secrets directory
-
-Secrets are supplied exclusively at runtime via Docker Compose `environment:` or `.env` files — never baked into the image. The Docker build never sees credential material.
-
-> 🔴 **Build-context + git-history = two-layer defense.** Even if `.dockerignore` blocks secrets from the image, they remain in git history. Both must be addressed: `.dockerignore` prevents image-layer leakage; `git filter-repo` prevents source-archive leakage.
-
----
-
-## 🔴 Hard Rules
-
-1. **Never hardcode `INGENIUM_EMAIL_ENCRYPTION_KEY`** — always require it from the environment.
-2. **Never print full secret values** in documentation, issues, or transcripts.
-3. **Rotate before purge** — always invalidate old credentials before rewriting history.
-4. **Coordinate all clones** before `git filter-repo` — unfiltered clones will reintroduce secrets.
-5. **Add a pre-receive hook** to prevent future secret commits.
-
----
-
-## Related Documents
-
-- `docs/VARIABLES.md` — Environment variable reference with security notes
-- `docs/reference/environment-variables.md` — Canonical env var reference
-- `AGENTS.md` — Header security rule and env var enforcement
-- `docs/security/iframe-sandbox.md` — Iframe sandbox evaluation (separate concern)
-
-> **Note**: There is currently no security index/README file. This document is linked from
-> `next-steps-plan/SKILL-SYSTEM-MIGRATION.md` and the security section of `AGENTS.md`.
+- [Security documentation](index.md)
+- [Environment variables](../develop/variables.md)

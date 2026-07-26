@@ -57,11 +57,8 @@ const ICON_PATHS: Record<SettingsTab["icon"], React.JSX.Element> = {
   ),
 };
 
-/**
- * Standalone tab icon renderer, exported so PlaceholderPanel can reuse it
- * without pulling in the entire sidebar.
- */
-export function TabIcon({ icon, className = "" }: { icon: SettingsTab["icon"]; className?: string }) {
+/** Static tab icon renderer shared by the settings sidebar buttons. */
+function TabIcon({ icon, className = "" }: { icon: SettingsTab["icon"]; className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       {ICON_PATHS[icon]}

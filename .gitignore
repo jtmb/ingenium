@@ -41,6 +41,7 @@ build/
 
 # ── Resource sync state — local manifest, not for sharing ─
 .opencode/.ingenium-sync-state.json
+.opencode/.ingenium-api-token
 
 # ── Existing entries ──────────────────────────────────────
 .agents/.lm-studio-env

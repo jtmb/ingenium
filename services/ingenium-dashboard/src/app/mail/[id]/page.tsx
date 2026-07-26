@@ -3,7 +3,7 @@
 import { useState, useEffect, use } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import EmailReader from "../components/EmailReader";
-import { getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase } from "@/lib/api";
 import { useProject } from "@/lib/ProjectContext";
 
 const API_BASE = getApiBase();
@@ -85,9 +85,8 @@ export default function EmailDetailPage({
   const handleDelete = async () => {
     if (!email) return;
     try {
-      const res = await fetch(`${API_BASE}/emails/${email.uid}?project=${project}`, {
+      const res = await dashboardFetch(`${API_BASE}/emails/${email.uid}?project=${project}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account: accountId }),
       });
       if (res.ok) {
@@ -101,9 +100,8 @@ export default function EmailDetailPage({
   const handleArchive = async () => {
     if (!email) return;
     try {
-      const res = await fetch(`${API_BASE}/emails/${email.uid}/move?project=${project}`, {
+      const res = await dashboardFetch(`${API_BASE}/emails/${email.uid}/move?project=${project}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ account: accountId, fromFolder: folder, toFolder: "Archive" }),
       });
       if (res.ok) {

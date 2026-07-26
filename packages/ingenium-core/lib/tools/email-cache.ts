@@ -5,7 +5,7 @@
  * After the first IMAP fetch, subsequent loads read from SQLite for < 2s response.
  */
 
-import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
+import { getDb, execTransaction, checkpointAfterWrite, resolveCoreDbPath } from "../db.js";
 import { logger } from "../logger.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -59,9 +59,9 @@ export interface SyncState {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/** Resolve the SQLite DB path from env var or fall back to the default location. */
+/** Use the core resolver so cache writes cannot create a divergent database. */
 function dbPath(): string {
-  return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
+  return resolveCoreDbPath();
 }
 
 // ── Email listing cache ────────────────────────────────────────────────────

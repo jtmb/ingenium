@@ -1,4 +1,6 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import type { AddressInfo, Socket } from "node:net";
+import { basename } from "node:path";
 
 /**
  * Lightweight OpenCode API fixture server for the chat E2E smoke test.
@@ -22,8 +24,35 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
  * Any unhandled path returns 404.
  */
 
-const PORT = 4999;
+export const DEFAULT_FIXTURE_PORT = 4999;
 const FIXTURE_SESSION_ID = "fixture-session-1";
+
+export function getFixturePort(environment: NodeJS.ProcessEnv = process.env): number {
+  const value = environment.CHAT_FIXTURE_PORT;
+  if (value === undefined || value.trim() === "") return DEFAULT_FIXTURE_PORT;
+  if (!/^\d+$/.test(value.trim())) throw new Error("CHAT_FIXTURE_PORT must be an integer");
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error("CHAT_FIXTURE_PORT must be between 1024 and 65535");
+  }
+  return port;
+}
+
+interface FixtureRuntime {
+  server: Server;
+  port: number;
+  sockets: Set<Socket>;
+  sseResponses: Set<ServerResponse>;
+  timers: Set<NodeJS.Timeout>;
+  shuttingDown: boolean;
+}
+
+let fixtureRuntime: FixtureRuntime | undefined;
+
+function runtime(): FixtureRuntime {
+  if (!fixtureRuntime) throw new Error("Chat fixture server has not been created");
+  return fixtureRuntime;
+}
 
 /* ── Session store ── */
 
@@ -115,7 +144,8 @@ function userMessage(): FixtureMessage {
 
 /* ── Provider data ── */
 
-const fixtureProviders = {
+function fixtureProviders(port: number) {
+  return {
   all: [
     {
       id: "opencode",
@@ -127,7 +157,7 @@ const fixtureProviders = {
         "fixture-model": {
           id: "fixture-model",
           providerID: "opencode",
-          api: { id: "fixture", url: "http://localhost:4999", npm: "fixture" },
+          api: { id: "fixture", url: `http://127.0.0.1:${port}`, npm: "fixture" },
           name: "Fixture Model",
           capabilities: {},
           cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
@@ -143,7 +173,8 @@ const fixtureProviders = {
   ],
   default: { opencode: "fixture-model" },
   connected: ["opencode"],
-};
+  };
+}
 
 /* ── Helpers ── */
 
@@ -189,10 +220,32 @@ function parseBody(req: IncomingMessage): Promise<string> {
  */
 
 function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  const state = runtime();
+  if (state.shuttingDown) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      state.timers.delete(timer);
+      resolve();
+    }, ms);
+    state.timers.add(timer);
+  });
+}
+
+function writeSse(res: ServerResponse, body: string): boolean {
+  const state = runtime();
+  if (state.shuttingDown || res.destroyed || res.writableEnded) return false;
+  try {
+    return res.write(body);
+  } catch {
+    return false;
+  }
 }
 
 async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"): Promise<void> {
+  const state = runtime();
+  state.sseResponses.add(res);
+  try {
+  if (state.shuttingDown || res.destroyed || res.writableEnded) return;
   // Parse query string for session ID
   const url = new URL(`http://localhost${res.req.url ?? ""}`);
   const sessionId = url.searchParams.get("session");
@@ -211,7 +264,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     // ── Rich mode: full v1.18.3 pipeline ──
 
     // 1. session.status: busy
-    res.write(
+    writeSse(res,
       `event: session.status\ndata: ${JSON.stringify({
         type: "session.status",
         properties: { status: { type: "busy" } },
@@ -222,7 +275,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     await delay(300);
 
     // 2. message.updated — skeleton
-    res.write(
+    writeSse(res,
       `event: message.updated\ndata: ${JSON.stringify({
         type: "message.updated",
         properties: {
@@ -247,7 +300,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     ];
     for (const chunk of reasoningChunks) {
       await delay(100);
-      res.write(
+      writeSse(res,
         `event: message.part.delta\ndata: ${JSON.stringify({
           type: "message.part.delta",
           properties: {
@@ -268,7 +321,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     const toolCallId = "call_bash_001";
 
     // pending
-    res.write(
+    writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
         properties: {
@@ -292,7 +345,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     await delay(300);
 
     // running
-    res.write(
+    writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
         properties: {
@@ -316,7 +369,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     await delay(300);
 
     // completed
-    res.write(
+    writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",
         properties: {
@@ -342,7 +395,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     await delay(300);
 
     // 5. response text
-    res.write(
+    writeSse(res,
       `event: message.part.delta\ndata: ${JSON.stringify({
         type: "message.part.delta",
         properties: {
@@ -357,7 +410,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     await delay(300);
 
     // 6. completed message metadata
-    res.write(
+    writeSse(res,
       `event: message.updated\ndata: ${JSON.stringify({
         type: "message.updated",
         properties: {
@@ -375,7 +428,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     );
 
     // 7. session.idle
-    res.write(
+    writeSse(res,
       `event: session.idle\ndata: ${JSON.stringify({
         type: "session.idle",
         properties: {},
@@ -387,7 +440,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     const streamText = "Hello! I received your message. This confirms the chat pipeline is working.";
 
     // 1. message.updated — announces the assistant message
-    res.write(
+    writeSse(res,
       `event: message.updated\ndata: ${JSON.stringify({
         type: "message.updated",
         properties: {
@@ -403,7 +456,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     );
 
     // 2. message.part.delta — stream a single text chunk
-    res.write(
+    writeSse(res,
       `event: message.part.delta\ndata: ${JSON.stringify({
         type: "message.part.delta",
         properties: {
@@ -416,7 +469,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     );
 
     // 3. session.idle — signal completion
-    res.write(
+    writeSse(res,
       `event: session.idle\ndata: ${JSON.stringify({
         type: "session.idle",
         properties: {},
@@ -424,7 +477,10 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
     );
   }
 
-  res.end();
+  } finally {
+    state.sseResponses.delete(res);
+    if (!res.writableEnded && !res.destroyed) res.end();
+  }
 }
 
 /* ── Router ── */
@@ -445,6 +501,8 @@ function route(req: IncomingMessage, res: ServerResponse): void {
       const s = makeSession(FIXTURE_SESSION_ID, "New conversation");
       sessions.push(s);
       json(res, 201, s);
+    }).catch(() => {
+      if (!res.destroyed && !res.writableEnded) res.destroy();
     });
     return;
   }
@@ -506,6 +564,8 @@ function route(req: IncomingMessage, res: ServerResponse): void {
         createdMsg.parts[0]!.text = userText;
       }
       json(res, 201, createdMsg);
+    }).catch(() => {
+      if (!res.destroyed && !res.writableEnded) res.destroy();
     });
     return;
   }
@@ -521,8 +581,8 @@ function route(req: IncomingMessage, res: ServerResponse): void {
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
       });
-      res.write(`event: session.idle\ndata: {"type":"session.idle","properties":{}}\n\n`);
-      res.end();
+      writeSse(res, `event: session.idle\ndata: {"type":"session.idle","properties":{}}\n\n`);
+      if (!res.destroyed && !res.writableEnded) res.end();
       return;
     }
     streamSSE(res, mode);
@@ -531,7 +591,7 @@ function route(req: IncomingMessage, res: ServerResponse): void {
 
   // ── GET /provider ──
   if (method === "GET" && path === "/provider") {
-    json(res, 200, fixtureProviders);
+    json(res, 200, fixtureProviders(runtime().port));
     return;
   }
 
@@ -563,20 +623,113 @@ function route(req: IncomingMessage, res: ServerResponse): void {
   notFound(res);
 }
 
-/* ── Server ── */
+/* ── Server lifecycle ── */
 
-const server = createServer(route);
+export function createChatFixtureServer(port = getFixturePort()): Server {
+  const server = createServer(route);
+  fixtureRuntime = {
+    server,
+    port,
+    sockets: new Set(),
+    sseResponses: new Set(),
+    timers: new Set(),
+    shuttingDown: false,
+  };
+  sessions.length = 0;
+  server.on("connection", (socket) => {
+    const state = runtime();
+    state.sockets.add(socket);
+    socket.once("close", () => state.sockets.delete(socket));
+  });
+  return server;
+}
 
-server.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`[chat-fixture] Listening on http://localhost:${PORT}`);
-});
+export async function startChatFixtureServer(port = getFixturePort()): Promise<Server> {
+  const server = createChatFixtureServer(port);
+  await new Promise<void>((resolve, reject) => {
+    const onListening = () => {
+      server.off("error", onError);
+      const address = server.address() as AddressInfo | null;
+      if (address && typeof address !== "string") runtime().port = address.port;
+      resolve();
+    };
+    const onError = (error: Error) => {
+      server.off("listening", onListening);
+      reject(error);
+    };
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  });
+  return server;
+}
 
-server.on("error", (err: NodeJS.ErrnoException) => {
-  if (err.code === "EADDRINUSE") {
-    // eslint-disable-next-line no-console
-    console.error(`[chat-fixture] Port ${PORT} is already in use — another instance may be running`);
-    process.exit(1);
+export async function closeChatFixtureServer(server: Server, timeoutMs = 5_000): Promise<void> {
+  const state = fixtureRuntime?.server === server ? fixtureRuntime : undefined;
+  if (state) {
+    state.shuttingDown = true;
+    for (const timer of state.timers) clearTimeout(timer);
+    state.timers.clear();
+    for (const response of state.sseResponses) response.destroy();
+    for (const socket of state.sockets) socket.destroy();
   }
-  throw err;
-});
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    const timer = setTimeout(() => finish(new Error(`Chat fixture did not close within ${timeoutMs}ms`)), timeoutMs);
+    server.close((error) => finish(error ?? undefined));
+    if (!server.listening) finish();
+  });
+  if (fixtureRuntime?.server === server) fixtureRuntime = undefined;
+}
+
+export interface FixtureSignalSource {
+  once(event: "SIGINT" | "SIGTERM", listener: () => void): unknown;
+  removeListener(event: "SIGINT" | "SIGTERM", listener: () => void): unknown;
+}
+
+export function installFixtureSignalHandlers(
+  server: Server,
+  signalSource: FixtureSignalSource = process,
+  exit: (code: number) => void = (code) => process.exit(code),
+): () => void {
+  let shuttingDown = false;
+  const onSignal = (code: number) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void closeChatFixtureServer(server).catch(() => undefined).finally(() => exit(code));
+  };
+  const onInterrupt = () => onSignal(130);
+  const onTerminate = () => onSignal(143);
+  signalSource.once("SIGINT", onInterrupt);
+  signalSource.once("SIGTERM", onTerminate);
+  return () => {
+    signalSource.removeListener("SIGINT", onInterrupt);
+    signalSource.removeListener("SIGTERM", onTerminate);
+  };
+}
+
+// The direct-argv check preserves `tsx tests/chat-fixture-server.ts` for local
+// debugging. The explicit environment gate is used by the managed runner and
+// keeps importing this module in Vitest from binding a listener.
+const directExecution = typeof process.argv[1] === "string" && /^chat-fixture-server\.(ts|js)$/.test(basename(process.argv[1]));
+if (directExecution || process.env.CHAT_FIXTURE_RUNNER === "1") {
+  const port = getFixturePort();
+  void startChatFixtureServer(port).then((server) => {
+    installFixtureSignalHandlers(server);
+    // eslint-disable-next-line no-console
+    console.log(`[chat-fixture] Listening on http://127.0.0.1:${port}`);
+  }).catch((error: unknown) => {
+    const code = (error as NodeJS.ErrnoException).code;
+    // eslint-disable-next-line no-console
+    console.error(code === "EADDRINUSE" ? `[chat-fixture] Port ${port} is already in use` : error);
+    process.exitCode = 1;
+  });
+}

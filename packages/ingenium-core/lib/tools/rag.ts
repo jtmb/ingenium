@@ -15,6 +15,7 @@ import { getDb, execTransaction, checkpointAfterWrite, sanitizeFts5Query } from 
 import type { RagSource, RagSearchResult } from "../schema.js";
 import type { Chunk } from "./rag-chunker.js";
 import { chunkText } from "./rag-chunker.js";
+import { getGlobalProject } from "./projects.js";
 
 function dbPath(): string {
   return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
@@ -161,6 +162,7 @@ export function ingestCanonicalSource(projectId: string, title: string, content:
 export function searchChunks(projectId: string, query: string, limit = 20, includeGlobal = true): RagSearchResult[] {
   const sanitized = sanitizeFts5Query(query);
   if (!sanitized) return [];
+  const globalProjectId = includeGlobal ? getGlobalProject()?.id ?? null : null;
 
   return getDb(dbPath()).prepare(
     `SELECT c.rowid AS _rowid, c.id, c.source_id, c.chunk_index, c.content, c.token_count,
@@ -171,10 +173,10 @@ export function searchChunks(projectId: string, query: string, limit = 20, inclu
      FROM rag_chunks_fts
      INNER JOIN rag_chunks c ON c.rowid = rag_chunks_fts.rowid
      INNER JOIN rag_sources s ON s.id = c.source_id
-      WHERE (s.project_id = ? OR (? = 1 AND s.project_id = (SELECT id FROM projects WHERE is_global = 1 LIMIT 1))) AND rag_chunks_fts MATCH ?
+       WHERE (s.project_id = ? OR (? IS NOT NULL AND s.project_id = ?)) AND rag_chunks_fts MATCH ?
       ORDER BY c.priority DESC, rank, s.updated_at DESC, c.chunk_index ASC
       LIMIT ?`,
-  ).all(projectId, includeGlobal ? 1 : 0, sanitized, Math.max(1, limit)) as RagSearchResult[];
+  ).all(projectId, globalProjectId, globalProjectId, sanitized, Math.max(1, limit)) as RagSearchResult[];
 }
 
 /**
@@ -242,7 +244,7 @@ export function indexConfiguredDocs(globalProjectId: string, root = process.env.
 /** Keep a published Docs Workspace page synchronized at its lifecycle boundary. */
 export function indexPublishedDoc(page: { id: number; title: string; slug: string; content: string; status: string }): void {
   const db = getDb(dbPath());
-  const global = db.prepare("SELECT id FROM projects WHERE is_global = 1 LIMIT 1").get() as { id: string } | undefined;
+  const global = getGlobalProject();
   if (!global) return;
   const sourcePath = `docs-page:${page.id}`;
   if (page.status !== "published") {

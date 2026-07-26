@@ -18,10 +18,16 @@ export default function MainContainer({ children }: { children: React.ReactNode 
     pathname === "/tasks" ||
     pathname.startsWith("/mail/");
   if (isImmersive) {
-    return <main className="p-0 min-w-0">{children}</main>;
+    return <main className="h-full min-h-0 p-0 min-w-0">{children}</main>;
   }
   return (
-    <main className={fullWidth ? "p-6" : "p-6 xl:px-8 w-full min-w-0 mx-auto max-w-screen-2xl"}>
+    <main className={
+      pathname === "/tasks"
+        ? "p-6 min-w-0"
+        : fullWidth
+          ? "p-6"
+          : "p-6 xl:px-8 w-full min-w-0 mx-auto max-w-screen-2xl"
+    }>
       {children}
     </main>
   );

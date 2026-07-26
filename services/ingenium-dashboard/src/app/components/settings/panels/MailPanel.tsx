@@ -1,25 +1,54 @@
 "use client";
 import { useState, useEffect } from "react";
-import { api } from "../../../../lib/api";
+import { api, type OAuthClientSecretOperation, type OAuthClientSecretSetting } from "../../../../lib/api";
 import { useProject } from "../../../../lib/ProjectContext";
 import SettingRow from "../SettingRow";
+
+type SecretField = "gmail" | "outlook";
+
+interface SecretState {
+  isSet: boolean;
+  masked: boolean;
+}
+
+const EMPTY_SECRET_STATE: SecretState = { isSet: false, masked: false };
+
+function secretState(data: Partial<OAuthClientSecretSetting> | undefined): SecretState {
+  return {
+    isSet: data?.isSet === true,
+    masked: data?.masked === true,
+  };
+}
+
+function secretStatusLabel(state: SecretState): string {
+  if (!state.isSet) return "Not configured";
+  return state.masked ? "Configured (masked)" : "Configured";
+}
 
 /**
  * Mail settings panel — OAuth credentials (gated by project), mail sync intervals,
  * body/header caching windows, and smart-reply configuration.
  *
- * Smart-reply settings are stored in the global-default project because the API
- * routes that read them always resolve to the global project regardless of the
- * caller's project. OAuth and sync settings are per-project.
+ * All mail settings are stored in the server's canonical global project because
+ * the mail engine and email routes always resolve that project.
  */
 export default function MailPanel() {
   const project = useProject();
+
+  // Mail and OAuth are server-global resources. Resolve the actual global
+  // project from the API rather than assuming that the selected project is
+  // global-default; the latter can be an external worktree.
+  const [globalProject, setGlobalProject] = useState<string | null>(null);
+  const [globalProjectLoading, setGlobalProjectLoading] = useState(true);
 
   // OAuth state
   const [gmailClientId, setGmailClientId] = useState("");
   const [gmailClientSecret, setGmailClientSecret] = useState("");
   const [outlookClientId, setOutlookClientId] = useState("");
   const [outlookClientSecret, setOutlookClientSecret] = useState("");
+  const [gmailSecretState, setGmailSecretState] = useState<SecretState>(EMPTY_SECRET_STATE);
+  const [outlookSecretState, setOutlookSecretState] = useState<SecretState>(EMPTY_SECRET_STATE);
+  const [clearingSecret, setClearingSecret] = useState<SecretField | null>(null);
   const [savingOauth, setSavingOauth] = useState(false);
   const [loadingOauth, setLoadingOauth] = useState(true);
 
@@ -45,38 +74,80 @@ export default function MailPanel() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  // Load OAuth settings — runs once on mount (project is stable for the panel lifecycle).
-  // eslint-disable-next-line react-hooks/exhaustive-deps is intentionally suppressed:
-  // adding `project` to the deps would re-fetch on every project switch, which is
-  // unnecessary since the panel is remounted when the overlay opens.
+  // Resolve the server's canonical global project before any mail setting can
+  // be read or written. A test-only fallback keeps this component renderable
+  // when a focused mock omits the projects client; production always has it.
   useEffect(() => {
+    let cancelled = false;
+    setGlobalProjectLoading(true);
+    const projectsClient = api.projects?.list;
+    if (typeof projectsClient !== "function") {
+      // This branch is only for isolated component tests. Never use this
+      // fallback when the real API client is present.
+      setGlobalProject(project === "global-default" ? project : null);
+      setGlobalProjectLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    projectsClient()
+      .then((response) => {
+        if (cancelled) return;
+        const global = response.data?.find((candidate) => candidate.is_global && !candidate.archived_at);
+        setGlobalProject(global?.name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setGlobalProject(null);
+      })
+      .finally(() => {
+        if (!cancelled) setGlobalProjectLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [project]);
+
+  // Load OAuth settings from the canonical global project. Secret responses
+  // are metadata-only; a response value is intentionally never copied into
+  // an input, even if a compromised/legacy server includes one.
+  useEffect(() => {
+    if (!globalProject) {
+      if (!globalProjectLoading) setLoadingOauth(false);
+      return;
+    }
+    setLoadingOauth(true);
     Promise.all([
-      api.settings.get("oauth_gmail_client_id", project),
-      api.settings.get("oauth_gmail_client_secret", project),
-      api.settings.get("oauth_outlook_client_id", project),
-      api.settings.get("oauth_outlook_client_secret", project),
+      api.settings.get("oauth_gmail_client_id", globalProject),
+      api.settings.get("oauth_gmail_client_secret", globalProject),
+      api.settings.get("oauth_outlook_client_id", globalProject),
+      api.settings.get("oauth_outlook_client_secret", globalProject),
     ])
       .then(([gid, gs, oid, os]) => {
-        if (gid.data?.value) setGmailClientId(gid.data.value);
-        if (gs.data?.value) setGmailClientSecret(gs.data.value);
-        if (oid.data?.value) setOutlookClientId(oid.data.value);
-        if (os.data?.value) setOutlookClientSecret(os.data.value);
+        setGmailClientId(gid.data?.value ?? "");
+        setGmailSecretState(secretState(gs.data));
+        setOutlookClientId(oid.data?.value ?? "");
+        setOutlookSecretState(secretState(os.data));
+        // Protected responses never contain a usable value. Keep these blank
+        // so saving without edits produces an explicit preserve operation.
+        setGmailClientSecret("");
+        setOutlookClientSecret("");
       })
       .catch(() => {})
       .finally(() => setLoadingOauth(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [globalProject, globalProjectLoading]);
 
   // Load mail sync and smart-reply settings.
-  // Smart-reply settings intentionally read from "global-default" because the
-  // API route that resolves them always falls back to the global project.
   useEffect(() => {
+    if (!globalProject) {
+      if (!globalProjectLoading) setLoadingSync(false);
+      return;
+    }
+    setLoadingSync(true);
     Promise.all([
-      api.settings.get("mail_sync_interval_ms", project),
-      api.settings.get("mail_offline_window", project),
-      api.settings.get("mail_body_window", project),
-      api.settings.get("mail_smart_replies_enabled", "global-default"),
-      api.settings.get("mail_smart_replies_mode", "global-default"),
-      api.settings.get("mail_smart_replies_prefetch", "global-default"),
+      api.settings.get("mail_sync_interval_ms", globalProject),
+      api.settings.get("mail_offline_window", globalProject),
+      api.settings.get("mail_body_window", globalProject),
+      api.settings.get("mail_smart_replies_enabled", globalProject),
+      api.settings.get("mail_smart_replies_mode", globalProject),
+      api.settings.get("mail_smart_replies_prefetch", globalProject),
     ])
       .then(([intervalR, offlineR, bodyR, enabledR, modeR, prefetchR]) => {
         const ms = parseInt(intervalR.data?.value, 10);
@@ -94,26 +165,72 @@ export default function MailPanel() {
       })
       .catch(() => {})
       .finally(() => setLoadingSync(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [globalProject, globalProjectLoading]);
 
   const saveOauth = async () => {
+    if (!globalProject || globalProjectLoading) {
+      setToast("OAuth credentials are unavailable until the global mail project is resolved.");
+      return;
+    }
     setSavingOauth(true);
     try {
-      await api.settings.set("oauth_gmail_client_id", gmailClientId, project);
-      await api.settings.set("oauth_gmail_client_secret", gmailClientSecret, project);
-      await api.settings.set("oauth_outlook_client_id", outlookClientId, project);
-      await api.settings.set("oauth_outlook_client_secret", outlookClientSecret, project);
-      setToast("OAuth settings saved ✓");
+      await api.settings.set("oauth_gmail_client_id", gmailClientId, globalProject);
+      const gmailOperation: OAuthClientSecretOperation = gmailClientSecret.trim()
+        ? { action: "replace", value: gmailClientSecret }
+        : { action: "preserve" };
+      const gmailResult = await api.settings.set("oauth_gmail_client_secret", gmailOperation, globalProject);
+      await api.settings.set("oauth_outlook_client_id", outlookClientId, globalProject);
+      const outlookOperation: OAuthClientSecretOperation = outlookClientSecret.trim()
+        ? { action: "replace", value: outlookClientSecret }
+        : { action: "preserve" };
+      const outlookResult = await api.settings.set("oauth_outlook_client_secret", outlookOperation, globalProject);
+      if (gmailResult.data && "isSet" in gmailResult.data) setGmailSecretState(secretState(gmailResult.data));
+      if (outlookResult.data && "isSet" in outlookResult.data) setOutlookSecretState(secretState(outlookResult.data));
+      setGmailClientSecret("");
+      setOutlookClientSecret("");
+      setToast(`OAuth settings saved in global project “${globalProject}” ✓`);
     } catch (err: any) {
       setToast(`Error: ${err.message}`);
     }
     setSavingOauth(false);
   };
 
-  const saveSetting = async (key: string, value: string, successMsg: string, useGlobal = false) => {
+  const clearSecret = async (field: SecretField) => {
+    if (!globalProject || globalProjectLoading) return;
+    const current = field === "gmail" ? gmailSecretState : outlookSecretState;
+    if (!current.isSet || clearingSecret) return;
+    const label = field === "gmail" ? "Gmail" : "Outlook";
+    if (!window.confirm(`Clear the saved ${label} client secret? This cannot be undone.`)) return;
+
+    const key = field === "gmail" ? "oauth_gmail_client_secret" : "oauth_outlook_client_secret";
+    setClearingSecret(field);
     try {
-      const targetProject = useGlobal ? "global-default" : project;
-      await api.settings.set(key, value, targetProject);
+      const operation: OAuthClientSecretOperation = { action: "clear" };
+      const result = await api.settings.set(key, operation, globalProject);
+      const next = result.data && "isSet" in result.data ? secretState(result.data) : EMPTY_SECRET_STATE;
+      if (field === "gmail") {
+        setGmailSecretState(next);
+        setGmailClientSecret("");
+      } else {
+        setOutlookSecretState(next);
+        setOutlookClientSecret("");
+      }
+      setToast(`${label} client secret cleared from global project “${globalProject}” ✓`);
+    } catch (err: any) {
+      setToast(`Error: ${err.message}`);
+    } finally {
+      setClearingSecret(null);
+    }
+  };
+
+  const saveSetting = async (key: string, value: string, successMsg: string) => {
+    if (!globalProject) {
+      setToast("Mail settings are unavailable until the global mail project is resolved.");
+      return;
+    }
+    try {
+      // Mail settings are consumed by the server's global mail engine.
+      await api.settings.set(key, value, globalProject);
       setToast(successMsg);
     } catch (err: any) {
       setToast(`Error: ${err.message}`);
@@ -129,11 +246,17 @@ export default function MailPanel() {
     onChange,
     placeholder,
     name,
+    secret,
+    onClear,
+    clearDisabled,
   }: {
     value: string;
     onChange: (v: string) => void;
     placeholder?: string;
     name: string;
+    secret: SecretState;
+    onClear: () => void;
+    clearDisabled: boolean;
   }) {
     return (
       <div className="flex items-center gap-1">
@@ -141,7 +264,8 @@ export default function MailPanel() {
           type={showPw[name] ? "text" : "password"}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
+          placeholder={secret.isSet ? "Saved secret — leave blank to preserve" : placeholder}
+          autoComplete="new-password"
           className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-64 text-[var(--color-text-primary)]"
         />
         <button
@@ -151,6 +275,16 @@ export default function MailPanel() {
         >
           {showPw[name] ? "Hide" : "Show"}
         </button>
+        {secret.isSet && (
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={clearDisabled}
+            className="text-xs text-[var(--color-error-text)] hover:underline disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap px-1"
+          >
+            {clearDisabled ? "Clearing..." : "Clear"}
+          </button>
+        )}
       </div>
     );
   }
@@ -160,12 +294,21 @@ export default function MailPanel() {
       <div className="px-6 pt-5 pb-2">
         <h3 className="text-sm font-semibold text-[var(--color-text-primary)]">OAuth Credentials</h3>
         <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-          Google and Microsoft OAuth 2.0 credentials for connecting email accounts.
+          Google and Microsoft OAuth 2.0 credentials for connecting email accounts. These follow the server&apos;s global mail project, not the selected worktree.
         </p>
+        {globalProject && (
+          <p className="text-xs text-[var(--color-text-secondary)] mt-2" data-testid="oauth-project-notice">
+            Saving to global project: <span className="font-mono">{globalProject}</span> (selected project: <span className="font-mono">{project}</span>)
+          </p>
+        )}
       </div>
 
-      {loadingOauth ? (
-        <div className="px-6 py-4 text-sm text-[var(--color-text-muted)] animate-pulse">Loading credentials...</div>
+      {globalProjectLoading || loadingOauth ? (
+        <div className="px-6 py-4 text-sm text-[var(--color-text-muted)] animate-pulse">Resolving global mail credentials...</div>
+      ) : !globalProject ? (
+        <div className="px-6 py-4 text-sm text-[var(--color-error-text)]">
+          OAuth credentials are unavailable because the server did not return a global mail project. No credentials were changed.
+        </div>
       ) : (
         <>
           <SettingRow label="Gmail Client ID" description="Google Cloud OAuth client ID">
@@ -184,7 +327,11 @@ export default function MailPanel() {
               value={gmailClientSecret}
               onChange={setGmailClientSecret}
               placeholder="Google Cloud OAuth client secret"
+              secret={gmailSecretState}
+              onClear={() => void clearSecret("gmail")}
+              clearDisabled={clearingSecret === "gmail" || savingOauth}
             />
+            <span className="block text-xs text-[var(--color-text-muted)] mt-1">{secretStatusLabel(gmailSecretState)}</span>
           </SettingRow>
 
           <SettingRow label="Outlook Client ID" description="Azure AD application client ID">
@@ -203,13 +350,17 @@ export default function MailPanel() {
               value={outlookClientSecret}
               onChange={setOutlookClientSecret}
               placeholder="Azure AD application client secret"
+              secret={outlookSecretState}
+              onClear={() => void clearSecret("outlook")}
+              clearDisabled={clearingSecret === "outlook" || savingOauth}
             />
+            <span className="block text-xs text-[var(--color-text-muted)] mt-1">{secretStatusLabel(outlookSecretState)}</span>
           </SettingRow>
 
           <div className="px-6 py-3 border-t border-[var(--color-border)]">
             <button
               onClick={saveOauth}
-              disabled={savingOauth}
+              disabled={savingOauth || globalProjectLoading || !globalProject}
               className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
             >
               {savingOauth ? "Saving..." : "Save OAuth Credentials"}
@@ -298,12 +449,11 @@ export default function MailPanel() {
               onChange={(e) => {
                 const checked = e.target.checked;
                 setSmartRepliesEnabled(checked);
-              saveSetting(
-                "mail_smart_replies_enabled",
-                checked ? "true" : "false",
-                checked ? "Smart replies enabled ✓" : "Smart replies disabled ✓",
-                true,
-              );
+                saveSetting(
+                  "mail_smart_replies_enabled",
+                  checked ? "true" : "false",
+                  checked ? "Smart replies enabled ✓" : "Smart replies disabled ✓",
+                );
               }}
               className="w-4 h-4 cursor-pointer"
             />
@@ -315,12 +465,11 @@ export default function MailPanel() {
               onChange={(e) => {
                 const v = e.target.value;
                 setSmartRepliesMode(v);
-              saveSetting(
-                "mail_smart_replies_mode",
-                v,
-                v === "auto" ? "Trigger mode set to automatic ✓" : "Trigger mode set to manual ✓",
-                true,
-              );
+                saveSetting(
+                  "mail_smart_replies_mode",
+                  v,
+                  v === "auto" ? "Trigger mode set to automatic ✓" : "Trigger mode set to manual ✓",
+                );
               }}
               className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] hover:bg-[var(--color-surface-hover)] cursor-pointer"
             >
@@ -337,7 +486,11 @@ export default function MailPanel() {
                 const checked = e.target.checked;
                 setSmartRepliesPrefetch(checked);
                 try {
-                  await api.settings.set("mail_smart_replies_prefetch", checked ? "true" : "false", "global-default");
+                  if (!globalProject) {
+                    setToast("Mail settings are unavailable until the global mail project is resolved.");
+                    return;
+                  }
+                  await api.settings.set("mail_smart_replies_prefetch", checked ? "true" : "false", globalProject);
                   setToast(`Precompute replies ${checked ? "enabled" : "disabled"} ✓`);
                 } catch (err: any) {
                   setToast(`Error: ${err.message}`);

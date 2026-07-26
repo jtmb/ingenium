@@ -25,6 +25,7 @@ import type {
 import { parseRawEmail } from "./parser.js";
 import { PROVIDERS } from "./providers.js";
 import type { ProviderConfig } from "./providers.js";
+import { ProviderOperationError, providerErrorDiagnostic, sanitizeProviderError } from "./provider-errors.js";
 
 // ── Connection pool ──────────────────────────────────────────────────────
 
@@ -65,20 +66,14 @@ function buildAuth(
   if (account.authType === "oauth2") {
     const accessToken = auth?.tokens?.accessToken;
     if (!accessToken) {
-      throw new Error(
-        `OAuth2 account "${account.email}" has no access token. ` +
-        `Tokens may be expired or not yet provisioned. Re-authenticate the account.`,
-      );
+      throw new ProviderOperationError("AUTH_REQUIRED", "imap", false);
     }
     return { user, accessToken };
   }
   // Password/app-password auth — require a non-empty password
   const pass = auth?.password;
   if (!pass) {
-    throw new Error(
-      `Account "${account.email}" has no password configured. ` +
-      `Provide appPassword credentials or switch to OAuth2.`,
-    );
+    throw new ProviderOperationError("AUTH_REQUIRED", "imap", false);
   }
   return { user, pass };
 }
@@ -150,18 +145,15 @@ export async function connectAccount(
       //    ImapFlow emits "error" on connection failure; without a handler,
       //    Node.js would crash with an unhandled error event.
       client.on("error", (err: Error) => {
-        console.error(`[imap] pool error for ${account.email}:`, err.message);
+        console.error("[imap] pool error", providerErrorDiagnostic(err, "imap"));
         pool.delete(account.id);
       });
       client.on("close", () => {
         pool.delete(account.id);
       });
       await client.connect();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `IMAP connection failed for account "${account.email}" (${host}:${port}): ${msg}`,
-      );
+    } catch (error: unknown) {
+      throw sanitizeProviderError(error, "imap");
     }
     pool.set(account.id, client);
     return client;
@@ -197,7 +189,7 @@ export async function disconnectAccount(accountId: string): Promise<void> {
 export function getConnection(accountId: string): ImapFlow {
   const client = pool.get(accountId);
   if (!client || !client.usable) {
-    throw new Error(`No active IMAP connection for account ${accountId}`);
+    throw new ProviderOperationError("PROVIDER_UNAVAILABLE", "imap", true);
   }
   return client;
 }

@@ -23,6 +23,11 @@ import { listAccounts, getAccount, getCredentials, getGlobalProjectId } from "./
 import { GmailProvider } from "./providers/gmail.js";
 import type { MailProvider } from "./providers/mail-provider.js";
 import { getVoiceSamples, generateSmartReplies } from "./suggest-llm.js";
+import {
+  isAuthenticationProviderError,
+  providerErrorDiagnostic,
+  sanitizeProviderError,
+} from "./provider-errors.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -128,7 +133,6 @@ const engineState: {
 // ── Settings helpers ────────────────────────────────────────────────────────
 
 function getProjectId(): string {
-  if (engineState.projectId) return engineState.projectId;
   return getGlobalProjectId();
 }
 
@@ -362,10 +366,13 @@ async function processSuggestionQueue(worker: AccountWorker): Promise<void> {
       logger.info("sync-engine",
         `Generated ${suggestions.length} smart replies for ${job.account_id}/${job.folder}/${job.uid}`,
       );
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("sync-engine", `processSuggestionQueue failed for job ${job.id}: ${msg}`);
-      emailSuggestionQueue.markJobFailed(job.id, msg);
+    } catch (error: unknown) {
+      const safe = sanitizeProviderError(error, "sync");
+      logger.warn("sync-engine", "Suggestion processing failed", {
+        jobId: job.id,
+        ...providerErrorDiagnostic(safe, "sync"),
+      });
+      emailSuggestionQueue.markJobFailed(job.id, safe.message);
     } finally {
       clearTimeout(timeout);
     }
@@ -442,9 +449,11 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
       for (const f of folders) {
         getFolderState(worker, f);
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("sync-engine", `Worker for ${worker.email}: listFolders failed: ${msg}`);
+    } catch (error: unknown) {
+      logger.warn("sync-engine", "Folder discovery failed", {
+        accountId: worker.accountId,
+        ...providerErrorDiagnostic(error, "sync"),
+      });
       // Continue with empty folder list — we can still do INBOX
       folders = ["INBOX"];
     }
@@ -538,9 +547,11 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
             // delta poll to be a full resync.
             emailCache.setAccountCursor(worker.accountId, delta.newCursor || "", "gmail");
           }
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.warn("sync-engine", `Delta poll failed for ${worker.email}: ${msg}`);
+        } catch (error: unknown) {
+          logger.warn("sync-engine", "Delta poll failed", {
+            accountId: worker.accountId,
+            ...providerErrorDiagnostic(error, "sync"),
+          });
           // Non-fatal: continue the loop
         }
       }
@@ -650,9 +661,11 @@ async function runAccountWorker(worker: AccountWorker): Promise<void> {
         await sleep(LOOP_YIELD_MS);
       }
     }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("sync-engine", `Worker for ${worker.email} crashed: ${msg}`);
+  } catch (error: unknown) {
+    logger.warn("sync-engine", "Mail worker stopped after a recoverable failure", {
+      accountId: worker.accountId,
+      ...providerErrorDiagnostic(error, "sync"),
+    });
   } finally {
     logger.info("sync-engine", `Worker stopped for ${worker.email}`);
   }
@@ -756,15 +769,18 @@ async function executeSyncFolder(
         folder,
       });
     }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("sync-engine", `executeSyncFolder FAILED for ${worker.email}/${folder}: ${msg}`);
-    setFolderState(worker, folder, { state: "error", lastError: msg });
+  } catch (error: unknown) {
+    const safe = sanitizeProviderError(error, "sync");
+    logger.warn("sync-engine", "Folder header sync failed", {
+      accountId,
+      folder,
+      ...providerErrorDiagnostic(safe, "sync"),
+    });
+    setFolderState(worker, folder, { state: "error", lastError: safe.message });
     
     // Circuit breaker: track consecutive auth errors
     // Matches 401, auth-related HTTP errors, decryption failures, and invalid credentials
-    const authMsg = String(err instanceof Error ? err.message : String(err));
-    const isAuthError = /401|unauthorized|invalid.*credential|auth.*error|re-authenticate|oauthtoken/i.test(authMsg);
+    const isAuthError = isAuthenticationProviderError(safe, "sync");
     if (isAuthError) {
       const key = `${worker.email}:${folder}`;
       const count = (authErrorCount.get(key) || 0) + 1;
@@ -850,11 +866,12 @@ async function executeBackfillBodies(
             JSON.stringify({ attachments: body.attachments }),
           );
           backfilled++;
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.info("sync-engine",
-            `Body backfill skipped for ${worker.email}/${folder} uid=${uid}: ${msg}`,
-          );
+        } catch (error: unknown) {
+          logger.info("sync-engine", "Body backfill item skipped", {
+            accountId,
+            folder,
+            ...providerErrorDiagnostic(error, "sync"),
+          });
           // Continue with next UID instead of aborting all backfill
         }
       }
@@ -894,10 +911,14 @@ async function executeBackfillBodies(
     try {
       emailCache.updateSyncState(accountId, folder, "0", 0);
     } catch { /* non-fatal */ }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("sync-engine", `executeBackfillBodies FAILED for ${worker.email}/${folder}: ${msg}`);
-    setFolderState(worker, folder, { state: "error", lastError: msg });
+  } catch (error: unknown) {
+    const safe = sanitizeProviderError(error, "sync");
+    logger.warn("sync-engine", "Body backfill failed", {
+      accountId,
+      folder,
+      ...providerErrorDiagnostic(safe, "sync"),
+    });
+    setFolderState(worker, folder, { state: "error", lastError: safe.message });
   }
 }
 
@@ -915,30 +936,40 @@ function sleep(ms: number): Promise<void> {
  * Safe to call repeatedly: an already-running engine reconciles workers for
  * accounts that became available after startup.
  */
-export function startEngine(projectId: string): void {
+export function startEngine(_projectId: string): void {
+  const projectId = getGlobalProjectId();
+  if (engineState.projectId && engineState.projectId !== projectId) {
+    // Global assignment can change without a process restart. Workers are bound
+    // to account snapshots, so retire them before reconciling the new namespace.
+    for (const worker of engineState.workers.values()) {
+      worker.running = false;
+      worker.abortController?.abort();
+    }
+    engineState.workers.clear();
+    logger.info("sync-engine", "Global project changed; discarded stale account workers");
+  }
+  engineState.projectId = projectId;
   if (engineState.running) {
-    spawnWorkers(projectId).catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.warn("sync-engine", `worker reconciliation failed: ${msg}`);
+    spawnWorkers(projectId).catch((error: unknown) => {
+      logger.warn("sync-engine", "Worker reconciliation failed", providerErrorDiagnostic(error, "sync"));
     });
     return;
   }
 
-  engineState.projectId = projectId;
   engineState.running = true;
   engineState.heartbeatAt = nowISO();
 
   logger.info("sync-engine", `Starting sync engine for project ${projectId}`);
 
   // Launch workers asynchronously
-  spawnWorkers(projectId).catch((err: unknown) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn("sync-engine", `spawnWorkers failed: ${msg}`);
+  spawnWorkers(projectId).catch((error: unknown) => {
+    logger.warn("sync-engine", "Worker startup failed", providerErrorDiagnostic(error, "sync"));
   });
 }
 
-async function spawnWorkers(projectId: string): Promise<void> {
+async function spawnWorkers(_projectId: string): Promise<void> {
   const pid = getProjectId();
+  engineState.projectId = pid;
   const accounts = listAccounts(pid);
 
   if (accounts.length === 0) {
@@ -953,7 +984,7 @@ async function spawnWorkers(projectId: string): Promise<void> {
     const worker: AccountWorker = {
       accountId: acct.id,
       email: acct.email,
-      projectId,
+      projectId: pid,
       running: true,
       provider: GmailProvider,
       taskQueue: [],

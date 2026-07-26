@@ -7,17 +7,17 @@
  * 3. Review with AI panel (Smart Suggestions)
  * 4. Smart-reply cache-hit behavior (instant cached suggestions)
  *
- * Saves screenshots to tests/qa-screenshots/ for visual QA analysis.
+ * Saves manual evidence below tests/artifacts/manual/<run-id>/.
  */
 
 import { test, expect, Page } from "@playwright/test";
-import * as fs from "fs";
 import * as path from "path";
+import { manualArtifactDirectory } from "./ingenium-dashboard/visual-qa-artifacts";
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000";
 const GMAIL_EMAIL = "james.branco@gmail.com";
 const ACCOUNT_ID = "5a214d5b-1d89-4e89-9bd9-7a857495efa7";
-const SCREENSHOT_DIR = path.resolve(__dirname, "../artifacts/visual-qa");
+const SCREENSHOT_DIR = manualArtifactDirectory("mail-darkmode");
 
 const MOCK_ACCOUNTS = {
   data: [
@@ -81,7 +81,7 @@ const CACHED_SUGGESTIONS = [
 ];
 
 async function setupMocks(page: Page) {
-  await page.unroute();
+  await page.unrouteAll();
 
   // Accounts
   await page.route("**/api/v1/emails/accounts*", async (route) => {
@@ -215,13 +215,11 @@ test.describe("Mail dark-mode visual QA", () => {
 
     // Wait for account selector
     await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
-    await page.waitForTimeout(2000);
 
     // Click INBOX to load email list
     const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
-    await page.waitForTimeout(1000);
 
     // Wait for email rows
     const emailRows = page.locator("div.cursor-pointer");
@@ -229,7 +227,6 @@ test.describe("Mail dark-mode visual QA", () => {
 
     // Click the first email to open it in the reader
     await emailRows.first().click();
-    await page.waitForTimeout(800);
 
     // Wait for reader pane
     const readerPane = page.locator("div.min-w-\\[400px\\]").first();
@@ -239,14 +236,11 @@ test.describe("Mail dark-mode visual QA", () => {
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
-    await page.waitForTimeout(500);
 
     // Screenshot the inline reply section (the composer at the bottom of the reader)
     const inlineReply = page.locator("div.min-w-\\[400px\\]").first().locator("..").locator("div.border-t").last();
     await expect(inlineReply).toBeVisible({ timeout: 3000 });
-    await page.waitForTimeout(300);
 
-    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, "dark-mode-inline-reply.png"),
       fullPage: false,
@@ -269,17 +263,15 @@ test.describe("Mail dark-mode visual QA", () => {
       { name: "theme", value: "dark", domain: "localhost", path: "/" }
     ]);
 
-    await page.goto(`${BASE}/mail`, { waitUntil: "networkidle" });
+    await page.goto(`${BASE}/mail`, { waitUntil: "domcontentloaded" });
 
     // Wait for account selector
     await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
-    await page.waitForTimeout(2000);
 
     // Click INBOX
     const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
-    await page.waitForTimeout(1000);
 
     // Wait for email rows
     const emailRows = page.locator("div.cursor-pointer");
@@ -287,7 +279,6 @@ test.describe("Mail dark-mode visual QA", () => {
 
     // Click the first email
     await emailRows.first().click();
-    await page.waitForTimeout(800);
 
     // Wait for reader pane
     const readerPane = page.locator("div.min-w-\\[400px\\]").first();
@@ -311,13 +302,11 @@ test.describe("Mail dark-mode visual QA", () => {
     const summariseBtn = readerPane.getByRole("button", { name: "Summarise this email" }).first();
     await expect(summariseBtn).toBeVisible({ timeout: 3000 });
     await summariseBtn.click();
-    await page.waitForTimeout(1000);
 
     // Wait for the summary panel to appear
     const summaryPanel = page.locator("text=AI Summary").first();
     await expect(summaryPanel).toBeVisible({ timeout: 5000 });
 
-    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, "dark-mode-summarize-panel.png"),
       fullPage: false,
@@ -336,13 +325,11 @@ test.describe("Mail dark-mode visual QA", () => {
 
     // Wait for account selector
     await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
-    await page.waitForTimeout(2000);
 
     // Click INBOX
     const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
-    await page.waitForTimeout(1000);
 
     // Wait for email rows
     const emailRows = page.locator("div.cursor-pointer");
@@ -350,7 +337,6 @@ test.describe("Mail dark-mode visual QA", () => {
 
     // Click the first email
     await emailRows.first().click();
-    await page.waitForTimeout(800);
 
     // Wait for reader pane
     const readerPane = page.locator("div.min-w-\\[400px\\]").first();
@@ -360,12 +346,9 @@ test.describe("Mail dark-mode visual QA", () => {
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
-    await page.waitForTimeout(500);
 
     // Wait for SmartSuggest to auto-fetch and render suggestion chips in the composer
-    await page.waitForTimeout(1500);
-
-    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    await expect(page.getByText("professional", { exact: true }).first()).toBeVisible({ timeout: 10000 });
 
     // Take a full reader panel screenshot showing smart suggestions
     const readerSection = page.locator("div.min-w-\\[400px\\]").first();
@@ -406,13 +389,11 @@ test.describe("Mail dark-mode visual QA", () => {
 
     // Wait for account selector
     await expect(page.getByText(GMAIL_EMAIL).first()).toBeVisible({ timeout: 15000 });
-    await page.waitForTimeout(2000);
 
     // Click INBOX
     const inboxBtn = page.locator("button").filter({ hasText: "INBOX" }).first();
     await expect(inboxBtn).toBeVisible({ timeout: 10000 });
     await inboxBtn.click();
-    await page.waitForTimeout(1000);
 
     // Wait for email rows
     const emailRows = page.locator("div.cursor-pointer");
@@ -420,7 +401,6 @@ test.describe("Mail dark-mode visual QA", () => {
 
     // Click the first email
     await emailRows.first().click();
-    await page.waitForTimeout(800);
 
     // Click Reply to open the inline composer — SmartSuggest renders inside it
     const readerPane = page.locator("div.min-w-\\[400px\\]").first();
@@ -428,33 +408,16 @@ test.describe("Mail dark-mode visual QA", () => {
     const replyBtn = readerPane.getByRole("button", { name: "Reply" }).first();
     await expect(replyBtn).toBeVisible();
     await replyBtn.click();
-    await page.waitForTimeout(500);
 
     // Wait for SmartSuggest to auto-fetch and render suggestions in composer
-    await page.waitForTimeout(2000);
+    await expect(page.getByText("professional", { exact: true }).first()).toBeVisible({ timeout: 10000 });
 
     // Verify Smart Suggestions appeared as compact chips (from cache)
     // In compact mode, tone labels appear as text in suggestion chips
     const toneChip = page.getByText("professional").first();
 
-    if (await toneChip.isVisible().catch(() => false)) {
-      // Cache hit — suggestions rendered immediately as compact chips
-      console.log("✅ Suggestion chip 'professional' visible — cache hit confirmed");
-
-      // Verify the suggest endpoint was called
-      expect(suggestCallCount).toBeGreaterThanOrEqual(1);
-      console.log(`📊 Suggest endpoint called ${suggestCallCount} time(s)`);
-
-      // Verify source indicator is "cache"
-      // The source badge isn't shown in the UI — it's in the API response only
-      // But we can verify from the mock that source is "cache"
-    } else {
-      // Might need to scroll
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-      await page.waitForTimeout(500);
-    }
-
-    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    await expect(toneChip).toBeVisible({ timeout: 10000 });
+    expect(suggestCallCount).toBeGreaterThanOrEqual(1);
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, "dark-mode-cache-hit.png"),
       fullPage: true,

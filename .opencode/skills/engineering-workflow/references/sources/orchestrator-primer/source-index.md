@@ -14,7 +14,8 @@ This skill primes coordination agents with the pattern recognition and delegatio
 ### Parallel Independent Work
 When tasks have no dependencies, spawn all subagents in a single message:
 ```
-@ingenium-software-engineer → implement feature A
+@ingenium-software-engineer-fast → implement feature A
+@ingenium-software-engineer-premium → implement feature B (critical path)
 @ingenium-qa → write tests for feature A
 @ingenium-security-auditor → audit feature A
 ```
@@ -28,7 +29,7 @@ When task B depends on task A:
 ### Research → Implementation
 1. `@ingenium-explore` finds the relevant file/pattern
 2. `@ingenium-scout` retrieves past decisions from Docs RAG
-3. `@ingenium-software-engineer` implements based on research
+3. `@ingenium-software-engineer-premium` or `@ingenium-software-engineer-fast` implements based on research
 4. `@ingenium-qa` reviews the implementation
 
 ## Checkpointing

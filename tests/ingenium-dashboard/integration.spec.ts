@@ -1,6 +1,6 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import path from "path";
-import fs from "fs";
+import { visualQaArtifactDirectory } from "./visual-qa-artifacts";
 
 /**
  * REAL-SYSTEM INTEGRATION TESTS — NO MOCKS.
@@ -14,15 +14,15 @@ import fs from "fs";
  *   - gh-llm-bootstrap project with 27 skills
  *   - james.branco@gmail.com email account (may not be OAuth2 connected)
  *
- * Screenshots are saved to /tmp/opencode/phase2-test-NN.png.
+ * Screenshots are saved under tests/artifacts/visual-qa/<run-id>/.
  */
 
 // ————————————————————————————————————————————————————————————————————————————
 //  Constants
 // ————————————————————————————————————————————————————————————————————————————
 
-const BASE = "http://localhost:3000";
-const SCREENSHOTS_DIR = "tests/artifacts/visual-qa";
+const BASE = process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000";
+const SCREENSHOTS_DIR = visualQaArtifactDirectory("integration");
 const PROJECT = "global-default";
 const PROJECT_WITH_SKILLS = "gh-llm-bootstrap";
 const GMAIL_EMAIL = "james.branco@gmail.com";
@@ -31,17 +31,14 @@ const GMAIL_EMAIL = "james.branco@gmail.com";
 //  Helpers
 // ————————————————————————————————————————————————————————————————————————————
 
-fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-
 /** Navigate to a dashboard page and wait for client JS to render dynamic content. */
 async function goto(page: any, urlPath: string, project?: string) {
   const fullUrl = project
     ? `${BASE}${urlPath}?project=${project}`
     : `${BASE}${urlPath}`;
-  const res = await page.goto(fullUrl, { waitUntil: "networkidle" });
+  const res = await page.goto(fullUrl, { waitUntil: "domcontentloaded" });
   expect(res?.ok()).toBeTruthy();
-  // Allow client-side data fetches to complete
-  await page.waitForTimeout(2000);
+  await expect(page.locator("main")).toBeVisible({ timeout: 15_000 });
 }
 
 // ————————————————————————————————————————————————————————————————————————————
@@ -63,12 +60,11 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
     // each cell has a bold number and a label underneath.
     // Stats are loaded asynchronously from the API.
     // Look for stat values (text-3xl) that are NOT "..."
-    await page.waitForTimeout(3000);
-
     // Find all stat values in the grid
     const statCards = page.locator(
       "div.grid > div.border.rounded-xl.p-6",
     );
+    await expect(statCards.first()).toBeVisible({ timeout: 15_000 });
     const cardCount = await statCards.count();
     expect(cardCount).toBeGreaterThanOrEqual(4);
 
@@ -104,9 +100,6 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
     // Page heading
     await expect(page.locator("h1")).toContainText("Observations");
 
-    // Wait for data to load
-    await page.waitForTimeout(3000);
-
     // Stats: Total and Pending count
     await expect(page.getByText("Total:").first()).toBeVisible({
       timeout: 5000,
@@ -117,10 +110,6 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
 
     // Check that observation type badges are rendered
     // These are spans like: <span class="text-xs px-2 py-0.5 rounded ...">preference</span>
-    const typeBadges = page.locator("span.rounded").filter({
-      has: page.locator("span"),
-      hasNot: page.locator("svg"),
-    });
     // Look for known types in the text content
     const knownTypes = [
       "preference",
@@ -129,30 +118,10 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
       "insight",
       "behavior",
     ];
-    let foundType = false;
-    for (const t of knownTypes) {
-      const hasType = await page.getByText(t, { exact: true }).isVisible().catch(() => false);
-      if (hasType) {
-        foundType = true;
-        break;
-      }
-    }
-    // If the exact text isn't visible, check for any non-empty badge text
-    if (!foundType) {
-      const allBadges = page.locator("span.text-xs");
-      const count = await allBadges.count();
-      expect(count).toBeGreaterThan(0);
-      // At least one badge should have meaningful text
-      let hasContent = false;
-      for (let i = 0; i < Math.min(count, 10); i++) {
-        const text = await allBadges.nth(i).textContent();
-        if (text && text.trim().length > 0) {
-          hasContent = true;
-          break;
-        }
-      }
-      expect(hasContent).toBeTruthy();
-    }
+    const allBadges = page.locator("span.text-xs");
+    const count = await allBadges.count();
+    expect(count, `Expected an observation badge from ${knownTypes.join(", ")}`).toBeGreaterThan(0);
+    await expect(allBadges.first()).toContainText(/\S+/);
 
     // Screenshot
     await page.screenshot({
@@ -170,9 +139,6 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
 
     // Page heading
     await expect(page.locator("h1")).toContainText("Personality Profile");
-
-    // Wait for trait data to load from API
-    await page.waitForTimeout(3000);
 
     // Should show "N trait(s)" text
     const traitCount = page.locator("span.text-sm").filter({
@@ -194,8 +160,8 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
 
     const isLoaded =
       (await groupSections.count()) > 0 ||
-      (await hiddenBanner.isVisible().catch(() => false)) ||
-      (await emptyState.isVisible().catch(() => false));
+      (await hiddenBanner.isVisible()) ||
+      (await emptyState.isVisible());
 
     expect(isLoaded).toBeTruthy();
 
@@ -215,9 +181,6 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
 
     // Page heading
     await expect(page.locator("h1")).toContainText("System Logs");
-
-    // Wait for logs to load (the page polls every 2s)
-    await page.waitForTimeout(5000);
 
     // The total count should be visible
     await expect(page.getByText("Total:").first()).toBeVisible({
@@ -255,15 +218,12 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
   test("5 - Observations data persists across page reload", async ({ page }) => {
     await goto(page, "/observations", PROJECT);
 
-    // Wait for observations to load
-    await page.waitForTimeout(3000);
     const statsTotal = page.getByText("Total:").first();
     await expect(statsTotal).toBeVisible({ timeout: 10000 });
     const initialTotalText = await statsTotal.textContent();
 
     // Reload the page
-    await page.reload({ waitUntil: "networkidle" });
-    await page.waitForTimeout(3000);
+    await page.reload({ waitUntil: "domcontentloaded" });
 
     // The same stats should appear after reload
     const statsTotalAfter = page.getByText("Total:").first();
@@ -286,9 +246,6 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
       timeout: 10000,
     });
 
-    // Wait for data to load
-    await page.waitForTimeout(3000);
-
     // The Add Plugin button should be present
     await expect(
       page.getByRole("button", { name: /Add Plugin/i }),
@@ -299,7 +256,7 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
     // - Plugin cards with "Edit", "Enabled"/"Disabled", "Delete" buttons
     const emptyState = page.getByText("No plugins registered");
 
-    if (await emptyState.isVisible().catch(() => false)) {
+    if (await emptyState.isVisible()) {
       // Empty state is fine — we verified the page loaded
       await expect(emptyState).toBeVisible();
     } else {
@@ -347,11 +304,9 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
       page.getByRole("button", { name: "Upload Skill" }),
     ).toBeVisible();
 
-    // Wait for skill cards to render
-    await page.waitForTimeout(3000);
-
     // Skill cards: each is a <div> with cursor-pointer, containing an <h3> with the name
     const skillCards = page.locator("div.grid > div > h3.font-medium");
+    await expect(skillCards.first()).toBeVisible({ timeout: 15_000 });
     const cardCount = await skillCards.count();
     expect(cardCount).toBeGreaterThan(0);
 
@@ -385,36 +340,19 @@ test.describe("Mail Integration (real API, no mocks)", () => {
       timeout: 15000,
     });
 
-    // Wait for the accounts API fetch to complete
-    await page.waitForTimeout(3000);
-
     // The mail page has various states. Check which one we're in:
     // 1. EmptyState: "No email accounts configured" + "Add Account" button
     // 2. AccountSetup page (showAccountSetup=true)
     // 3. Full 3-pane layout with account selector
 
-    const emptyState = page.getByText("No email accounts configured");
-    const addAccountBtn = page.getByRole("button", { name: /Add Account/i });
     const emailSelector = page
       .locator("button")
       .filter({ hasText: GMAIL_EMAIL })
       .first();
 
-    const hasEmptyState = await emptyState.isVisible().catch(() => false);
-    const hasAccount = await emailSelector.isVisible().catch(() => false);
-
-    // We created an account via API — it should appear unless it was deleted
-    if (hasAccount) {
-      await expect(emailSelector).toBeVisible({ timeout: 5000 });
-      const accountText = await emailSelector.textContent();
-      expect(accountText).toContain(GMAIL_EMAIL);
-    } else if (hasEmptyState) {
-      await expect(emptyState).toBeVisible();
-      await expect(addAccountBtn).toBeVisible();
-    } else {
-      // Some other state — verify the page rendered at least
-      await expect(page.locator("body")).toBeVisible();
-    }
+    await expect(emailSelector, `Expected configured account ${GMAIL_EMAIL}`).toBeVisible({ timeout: 15_000 });
+    const accountText = await emailSelector.textContent();
+    expect(accountText).toContain(GMAIL_EMAIL);
 
     // Screenshot
     await page.screenshot({
@@ -430,63 +368,39 @@ test.describe("Mail Integration (real API, no mocks)", () => {
   test("9 - Clicking INBOX folder attempts to load real emails", async ({ page }) => {
     await goto(page, "/mail", PROJECT);
 
-    // Wait for page to initialize and fetch accounts
-    await page.waitForTimeout(3000);
-
     // Check if we're on the 3-pane layout (account exists)
     const accountBtn = page
       .locator("button")
       .filter({ hasText: GMAIL_EMAIL })
       .first();
-    const hasAccount = await accountBtn.isVisible().catch(() => false);
-
-    if (!hasAccount) {
-      // Account doesn't exist or page is in different state — take screenshot and pass
-      await page.screenshot({
-        path: path.join(SCREENSHOTS_DIR, "phase2-test-09.png"),
-        fullPage: true,
-      });
-      return;
-    }
+    await expect(accountBtn, `Expected configured account ${GMAIL_EMAIL}`).toBeVisible({ timeout: 15_000 });
 
     // Account exists — try to select it via the dropdown
     await accountBtn.click();
-    await page.waitForTimeout(800);
 
     // Look for the account in the dropdown
     const dropdownItems = page.locator("div.shadow-lg button");
     const gmailOption = dropdownItems.filter({ hasText: GMAIL_EMAIL }).first();
-    const optionExists = await gmailOption.isVisible().catch(() => false);
-    if (optionExists) {
-      await gmailOption.click();
-      await page.waitForTimeout(2000);
-    }
+    await expect(gmailOption).toBeVisible({ timeout: 5000 });
+    await gmailOption.click();
 
     // Now try to find and click the INBOX folder
     const inboxBtn = page
       .locator("button")
       .filter({ hasText: "INBOX" })
       .first();
-    const hasInbox = await inboxBtn.isVisible({ timeout: 8000 }).catch(() => false);
-
-    if (hasInbox) {
-      await inboxBtn.click();
-      // Wait for email fetch
-      await page.waitForTimeout(3000);
-
-      // After clicking INBOX, the page fetches emails.
-      // Since the account isn't connected, this will likely show an error
-      // in the email list or the email list area.
-      // Check for any visible text in the email list area
-      const emailRows = page.locator("div.cursor-pointer");
-      const rowCount = await emailRows.count();
-
-      if (rowCount > 0) {
-        // Emails loaded from cache/API — verify the first one
-        await expect(emailRows.first()).toBeVisible();
-      }
-      // Error or empty state is acceptable — the API call was real
-    }
+    await expect(inboxBtn).toBeVisible({ timeout: 15_000 });
+    const inboxResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/v1/emails") &&
+        !response.url().includes("/sync-status") &&
+        response.status() < 500,
+      { timeout: 15_000 },
+    );
+    await inboxBtn.click();
+    await inboxResponse;
+    const emailRows = page.locator("div.cursor-pointer");
+    const emailError = page.getByText(/failed|error|unable/i).first();
+    await expect(emailRows.first().or(emailError)).toBeVisible({ timeout: 15_000 });
 
     // Screenshot
     await page.screenshot({
@@ -501,9 +415,6 @@ test.describe("Mail Integration (real API, no mocks)", () => {
 
   test("10 - Non-INBOX folder sidebar interaction", async ({ page }) => {
     await goto(page, "/mail", PROJECT);
-
-    // Wait for the page to load
-    await page.waitForTimeout(3000);
 
     // Check for folder buttons in the sidebar
     const folderNames = [
@@ -520,27 +431,27 @@ test.describe("Mail Integration (real API, no mocks)", () => {
       "Work",
     ];
 
-    let foundFolder = false;
+    let selectedFolder: Locator | undefined;
     for (const name of folderNames) {
       const btn = page.locator("button").filter({ hasText: name }).first();
-      if (await btn.isVisible().catch(() => false)) {
-        await btn.click();
-        await page.waitForTimeout(3000);
-        foundFolder = true;
+      if (await btn.isVisible()) {
+        selectedFolder = btn;
         break;
       }
     }
 
-    // If we found and clicked a folder, verify the state changed
-    if (foundFolder) {
-      // The email list area should show something (either emails, loading, or error)
-      const emailListArea = page.locator("div.cursor-pointer");
-      const count = await emailListArea.count();
-      if (count > 0) {
-        await expect(emailListArea.first()).toBeVisible();
-      }
-      // Error text is also fine — we're testing real API interaction
-    }
+    expect(selectedFolder, "A non-INBOX mail folder is required").toBeDefined();
+    const folderResponse = page.waitForResponse(
+      (response) => response.url().includes("/api/v1/emails") &&
+        !response.url().includes("/sync-status") &&
+        response.status() < 500,
+      { timeout: 15_000 },
+    );
+    await selectedFolder!.click();
+    await folderResponse;
+    const emailListArea = page.locator("div.cursor-pointer");
+    const emailError = page.getByText(/failed|error|unable/i).first();
+    await expect(emailListArea.first().or(emailError)).toBeVisible({ timeout: 15_000 });
 
     // Screenshot
     await page.screenshot({

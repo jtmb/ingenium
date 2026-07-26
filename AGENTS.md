@@ -16,7 +16,7 @@ This is the **Agent Protocol** for the Ingenium MCP Server. Skills live at `.ope
 |---------|-------------|
 | [🔴 HARD RULEs](#-hard-rules-summary) | Non-negotiable rules |
 | [Repository Structure](#repository-structure) | Package and service layout |
-| [🔴 Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) | 12-active/6-writer concurrency, writer tiers, phase declarations |
+| [🔴 Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) | 6-active/3-writer concurrency, writer tiers, phase declarations |
 | [Database Isolation](#-mandatory--database-isolation) | DB access boundaries |
 | [Docker Deployment](#docker-deployment) | Ports, volumes, health |
 | [Testing](#testing) | Test commands |
@@ -109,24 +109,28 @@ services/
 
 ## Agent Table
 
-**12 agents total: 2 primary + 10 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference.
+**12 agents total: 2 primary + 10 subagents.** Each agent has defined skill permissions that control which conventions and patterns it may reference. The hidden `ingenium-llm-broker` is a system-internal agent reserved for the LLM broker (never invoked directly, not listed as modeled). The `browser-agent` handles web automation and self-healing site interaction.
 
-| Agent | Type | Model | Skills Allowed |
-|-------|------|-------|----------------|
-| **ingenium-orchestrator** | Primary | `deepseek/deepseek-v4-pro` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` |
-| **ingenium-chat** | Primary | `deepseek/deepseek-v4-flash` | — |
-| **ingenium-explore** | Subagent | `deepseek/deepseek-v4-flash` | `local-models` |
-| **ingenium-scout** | Subagent | `deepseek/deepseek-v4-flash` | `local-models` |
-| **ingenium-prompt-engineer** | Subagent | `deepseek/deepseek-v4-pro` | — |
-| **ingenium-qa-vision** | Subagent | `openai/gpt-5.6-luna` | `development-conventions`, `engineering-workflow`, `mcp-tooling` |
-| **ingenium-software-engineer-fast** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
-| **ingenium-software-engineer-premium** | Subagent | `deepseek/deepseek-v4-pro` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
-| **ingenium-software-engineer-terra** | Subagent | `openai/gpt-5.6-terra` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `documentation`, `local-models`, `skill-maintenance`, `database-conventions` |
-| **ingenium-qa** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
-| **ingenium-docs** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
-| **ingenium-security-auditor** | Subagent | `deepseek/deepseek-v4-flash` | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
+> **Model configuration**: Agent model mappings are defined centrally in `opencode.json` under the `"agent"` key. Markdown agent profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment. See [`opencode.json`](./opencode.json).
 
-> Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter.
+| Agent | Type | Mode | Skills Allowed |
+|-------|------|------|----------------|
+| **ingenium-orchestrator** | Primary | Coordination — delegates to subagents, never writes code directly | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `skill-maintenance`, `mcp-tooling`, `documentation`, `security-audit`, `self-learning`, `database-conventions` |
+| **ingenium-chat** | Primary | Chat (read-only, `hidden: true`) | — |
+| **ingenium-explore** | Subagent | Research and exploration | `local-models` |
+| **ingenium-scout** | Subagent | Research + Docs RAG | `local-models` |
+| **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling` |
+| **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
+| **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
+| **ingenium-qa** | Subagent | Quality assurance — reviews changes, runs tests, verifies quality | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
+| **ingenium-docs** | Subagent | **Writer** — documentation updates (AGENTS.md, SKILL-INDEX.md, docs workspace) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
+| **ingenium-security-auditor** | Subagent | Security audit — git history leak scanning, dependency review | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
+| **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `mcp-tooling`, `engineering-workflow` |
+| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`) | — |
+
+> Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter. Archived profiles at `.opencode/archive/agents/`.
+>
+> > **Note on `ingenium-chat`**: A legacy root-level duplicate at `.opencode/agents/ingenium-chat.md` exists alongside the canonical `.opencode/agents/chat/ingenium-chat.md`. This is a **compatibility mirror** — both files represent the same logical agent. The root duplicate is preserved for backward compatibility and does **not** count as a separate agent in the 12-agent total.
 
 ### MCP Tool Naming Convention
 
@@ -144,7 +148,7 @@ The full pattern is `ingenium_<noun>_<verb>` (e.g., `ingenium_skill_list`, `inge
 
 Native OpenCode provider integrations use two OAuth modes:
 
-- **Auto mode (default)**: OpenCode opens a local HTTP listener on `localhost:1455`. The API registers `GET /auth/callback` as a public endpoint (before auth middleware). The Docker Compose file maps `127.0.0.1:1455` to container port `4097` (the API). When OpenCode issues a redirect to `http://localhost:1455/auth/callback`, it reaches the API, which validates the state, forward-forwards the callback to OpenCode's internal listener, and renders an "Authorization received" page. State is consumed on first use to prevent replay.
+- **Auto mode (default)**: OpenCode opens a local HTTP listener on `localhost:1455`. The host `127.0.0.1:1455` reaches the Nginx callback listener, which forwards only the exact `GET /auth/callback` path to private Express `4096`. The auth middleware explicitly allowlists that method/path without a bearer token; Express validates the state, forwards the callback to OpenCode's internal listener, and renders an "Authorization received" page. State is consumed on first use to prevent replay.
 - **Code mode**: The API receives the OAuth code, completes the attempt via the OpenCode client, and renders an "Authorization complete" page.
 
 > 🔴 Both modes consume the state parameter (`pendingOAuthAttempts` Map) before forwarding or exchanging, preventing redirect replay. Malformed states (too long, containing control characters) are rejected with 400.
@@ -230,7 +234,7 @@ A historical artifact (`/workspace` project from the container mount) is migrate
 
 ---
 
-## 🔴 Orchestration Policy — 12-Active / 6-Writer Phase Scheduler
+## 🔴 Orchestration Policy — 6-Active / 3-Writer Phase Scheduler
 
 The orchestrator follows a **behavioral** concurrency policy for parallel subagent execution. This is **not an OpenCode configuration field** — it is a documented scheduling discipline enforced by the orchestrator's own delegation logic in `@ingenium-orchestrator`.
 
@@ -238,25 +242,48 @@ The orchestrator follows a **behavioral** concurrency policy for parallel subage
 
 | Limit | Value | Scope |
 |-------|-------|-------|
-| **Active subagents per phase** | 12 | Total simultaneous subagents (writers + read-only) in a single orchestration phase |
-| **Concurrent writers per wave** | 6 | Subagents with `edit: allow` or `write: allow` permissions |
-| **Remaining capacity** | 6 | Reserved for read-only agents (explore, QA, docs, security, browser, scout, vision) |
+| **Active subagents per phase** | 6 | Total simultaneous subagents (writers + read-only) in a single orchestration phase |
+| **Concurrent writers per wave** | 3 | Subagents with `edit: allow` or `write: allow` permissions |
+| **Remaining capacity** | 3 | Available to non-writer agents (explore, scout, QA, vision, security) |
 | **Write territory overlap** | 0 | No two writers may touch the same file/directory path concurrently |
 
 ### Writer Tiers and Routing
 
-| Tier | Model | When to route |
-|------|-------|---------------|
-| **Fast** | `deepseek/deepseek-v4-flash` | Routine isolated work: bug fixes, simple refactors, test authoring, single-package scope |
-| **Premium** | `deepseek/deepseek-v4-pro` | Complex architecture-wide / cross-cutting work: multi-file refactoring, architectural changes, performance-critical code |
-| **Terra** | `openai/gpt-5.6-terra` | 🔴 **First choice for critical work**: auth/secrets/permissions; migrations/data integrity; Docker/runtime outages; multi-service contracts; cross-package refactors; persistent high-risk failures. Higher reasoning throughput via GPT-5.6 Terra OAuth. |
+All agents with `edit: allow` or `write: allow` count toward the three-writer limit. In this topology, the writer-capable agents are `@ingenium-software-engineer-fast`, `@ingenium-software-engineer-premium`, `@ingenium-docs`, and `@browser-agent`. `@ingenium-orchestrator` is not a writer because its edit/write permissions are denied.
+
+The non-writer agents are `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`, `@ingenium-qa-vision`, and `@ingenium-security-auditor`; they count toward the six-active limit only.
+
+| Tier | Model Profile | When to route |
+|------|---------------|---------------|
+| **Fast** | `ingenium-software-engineer-fast` | Routine isolated work: bug fixes, simple refactors, test authoring, single-package scope |
+| **Premium** | `ingenium-software-engineer-premium` | 🔴 **First choice for critical and complex work**: auth/secrets/permissions; migrations/data integrity; Docker/runtime outages; multi-service contracts; cross-package refactors; persistent high-risk failures; multi-file refactoring; architectural changes; performance-critical code. |
+| **Docs** | `ingenium-docs` | Documentation and skill-system updates; dispatchable writer for documentation territories |
+| **Browser** | `browser-agent` | Browser automation and self-healing site interaction; dispatchable writer for browser-owned territories |
+
+**Writer accounting is permission-derived, not task-type-derived.** Docs and Browser remain writers even when their work is documentation or browser automation rather than application code, and both count toward the maximum of three writers. Browser is dispatchable through the orchestrator like the other writer agents.
+
+### Valid Phase Example
+
+The following single phase is within both limits: **6 active, 3 permission-derived writers**.
+
+```text
+Phase: "Dashboard implementation, docs, and browser verification"
+  @ingenium-software-engineer-fast → dashboard/components/ (writer)
+  @ingenium-docs                   → docs/              (writer)
+  @browser-agent                   → browser recipes/   (writer)
+  @ingenium-qa                     → review all         (non-writer)
+  @ingenium-explore                → search patterns    (non-writer)
+  @ingenium-qa-vision              → visual review      (non-writer)
+```
+
+No phase may dispatch more than six active subagents or three agents whose permission block grants `edit: allow` or `write: allow`; overlapping writer territories must be serialized.
 
 ### Phase Declaration Protocol
 
 Every orchestration phase MUST declare before dispatch:
 
-1. **Active count** — total subagents to spawn (max 12)
-2. **Writer count** — total writers among them (max 6)
+1. **Active count** — total subagents to spawn (max 6)
+2. **Writer count** — total writers among them (max 3)
 3. **Exclusive territories** — file/directory ownership per writer; zero overlap
 4. **Dependencies** — serialization order for writers sharing territories across waves
 5. **Verification owners** — which QA/docs agent reviews which writer's output
@@ -267,7 +294,7 @@ Conflicting writers (touching the same file) MUST be serialized across waves —
 
 After UI implementation plus normal QA, test, deployment, and health verification, the orchestrator MUST run a changed-route visual gate through `@ingenium-qa-vision` at 1440x900 and 390x844. Before final completion or commit, it MUST run a passive full-site desktop/mobile sweep of every non-sensitive primary route at both viewports. PASS requires screenshot, accessibility, network/console, and browser-cleanup evidence. FAIL or BLOCKED status routes work back to a writer and requires a visual recheck.
 
-All screenshots from visual QA gates must be saved under `tests/artifacts/visual-qa/<run-id>/` (e.g., `tests/artifacts/visual-qa/run-20260719/homepage-desktop.png`). Historical artifacts reside in `tests/artifacts/legacy/`. See [mcp-tooling skill](../.opencode/skills/mcp-tooling/SKILL.md) for the complete screenshot storage convention.
+All screenshots from visual QA gates must be saved under `tests/artifacts/visual-qa/<run-id>/` (e.g., `tests/artifacts/visual-qa/run-20260719/homepage-desktop.png`). See [mcp-tooling skill](../.opencode/skills/mcp-tooling/SKILL.md) for the complete screenshot storage convention.
 
 ### Restart Required for New Agent Profiles
 
@@ -335,7 +362,7 @@ if (!parent) return; // parent removed — skip silently
 
 ## Docker Deployment
 
-**Single-container via `docker compose up --build`.** Four supervisord processes: API (:4097), Dashboard (:3000), opencode-web (:4098), ttyd-opencode (:4099).
+**Single-container via `docker compose up --build`.** Six supervisord processes: API boundary (:4097), private Express API (:4096), Dashboard (:3000), Nginx gateway (:3000/:1455), opencode-web (:4098), and ttyd-opencode (:4099).
 
 ### Start/Stop Commands
 
@@ -350,46 +377,89 @@ docker compose exec ingenium npm run test   # Execute inside container
 
 | Host Port | Service | Description |
 |-----------|---------|-------------|
-| `3000` | Dashboard | Next.js frontend (http://localhost:3000) |
-| `127.0.0.1:4097` | API | Express REST gateway (sole DB authority) |
-| `127.0.0.1:4098` | OpenCode Web | OpenCode web server (host loopback only; container binds 0.0.0.0 via `--hostname 0.0.0.0`) |
-| `127.0.0.1:4099` | ttyd-opencode | OpenCode CLI terminal via ttyd (host loopback only) |
-| `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → container `:4097` (API). OpenCode redirects OAuth here; API validates and forwards callback |
+| `3000` | Dashboard + root gateways | WSL-forwardable local gateway; dashboard, Web, and CLI roots do not use HTTP Basic Auth |
+| `127.0.0.1:4097` | API | Host-loopback bearer boundary for MCP clients; not the browser gateway |
+| internal `4098` | OpenCode Web | Private container upstream; access only through authenticated `opencode.localhost:3000` root |
+| internal `4099` | ttyd-opencode | Private container upstream; access only through authenticated `cli.localhost:3000` root |
+| `127.0.0.1:1455` | OAuth callback proxy | Host `127.0.0.1:1455` → Nginx listener → private Express `:4096`. Only exact unauthenticated `GET /auth/callback` is allowed; the API validates and forwards the callback |
 
-> 🔴 Dockerfile `EXPOSE` covers ports 3000, 4097, 4098, 4099, 1455.
+> 🔴 Dockerfile `EXPOSE` covers ports 3000, 4097, and 1455. OpenCode ports 4098 and 4099 remain private container listeners.
 
 ### Key Docker Notes
 
 - **Volumes**: `ingenium-data` (/app/.ingenium), `opencode-config`, `opencode-data`. Workspace bind-mount: `~/repos` → `/workspace`.
+- **Native-module libc parity**: Docker builder and runtime both use glibc-based `node:22-slim`; the runtime image verifies that copied native modules such as `better-sqlite3` load successfully. Do not mix an Alpine/musl builder with this runtime.
+- **Nginx runtime paths and validation**: Nginx runs unprivileged as `appuser`; the image and entrypoint validate writable runtime paths and run `nginx -t` as `appuser`. Startup recreates the owner-only PID, lock, temporary, and error-log paths under ephemeral `/run/ingenium-gateway`; access logs are disabled and warning-level errors use the Supervisor-readable `nginx-error.log` file.
 - **OpenCode Web/CLI**: Dashboard `/opencode` page has dual-mode iframes (Web: :4098, CLI: ttyd :4099). Glass tab toggle with `Ctrl+Shift+\``. Mode persisted in `localStorage`. The `sandbox` attribute has been removed from OpenCode iframes (trusted first-party content on separate origins).
-- **Direct terminal attachment**: `opencode attach http://localhost:4098 --dir /workspace`
 - **OpenCode Access**: The Dashboard iframe connects to OpenCode Web via a URL derived at runtime by `runtime-urls.ts` using a **two-tier embedding model**. The old same-origin proxy rewrites (`/opencode-web/`, `/opencode-cli/`) have been **removed** — OpenCode v1.18.3+ serves root-relative assets and cannot be proxied under a sub-path:
-  - **Loopback HTTP** (localhost/127.0.0.1/::1): direct port (`http://localhost:4098/` for Web, `http://localhost:4099/` for CLI)
+  - **Loopback HTTP**: the dashboard accepts `http://localhost:3000/` and `http://127.0.0.1:3000/`; authenticated OpenCode roots are `http://opencode.localhost:3000/` (Web) and `http://cli.localhost:3000/` (CLI). Unexpected dashboard Host headers are rejected.
+  - **Gateway separation**: dashboard and OpenCode traffic use independent Nginx `30r/s`, burst-60 buckets; assets and upgrade handshakes do not consume the dynamic OpenCode bucket. Direct IPv6 loopback dashboard navigation (`::1`/`[::1]`) is canonicalized with `308` to `localhost` so the CSP origin remains valid.
+  - **Private upstream boundary**: OpenCode Web/ttyd ports `4098`/`4099` are container-internal only. The gateway strips browser authorization, identity, and proxy-chain headers, injects ttyd's fixed internal identity, and owns the loopback-only iframe CSP.
   - **Remote HTTPS**: requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL` pointing to a dedicated root HTTPS origin (e.g., `https://opencode.example.com/`). Only root HTTPS origins are accepted — relative same-origin paths are no longer supported.
   - **Unsupported LAN HTTP**: `getOpenCodeAvailability()` returns `"unavailable"`. The iframe shows explicit guidance: "OpenCode serves root-relative assets and cannot be proxied under a shared origin" with a fallback "Open OpenCode in a new tab" button.
   - The `sandbox` attribute has been **removed** from all OpenCode iframes (trusted first-party content; separate origin provides isolation). The `allow="clipboard-write"` Permissions Policy is retained.
-  - The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty so the iframe never opens a native login prompt. Compose publishes ports 4098 and 4099 to host loopback only (`127.0.0.1`). The root `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
+  - The browser-facing process overrides `OPENCODE_SERVER_PASSWORD` to empty. The local Windows↔WSL gateway does not use browser credentials; ports 4098 and 4099 remain private container listeners. `OPENCODE_SERVER_PASSWORD` remains required for the API proxy guard and is never exposed to the browser.
 - 🔴 **`synthesis-engine` and `email-client` are NOT supervisord processes.** They are in-process scheduled tasks in the API Express process. See [`services/ingenium-api/lib/routes/services.ts`](./services/ingenium-api/lib/routes/services.ts).
-- 🔴 **Docker sudo**: `appuser` has passwordless sudo for package installs.
 - 🔴 **Docker git**: `git` package installed for OpenCode repo creation.
 
 ---
 
 ## Testing
 
+The default Playwright command is the deterministic Phase 5E fixture E2E run:
+it starts production-mode API/dashboard processes and the chat fixture with a
+run-owned temporary DB/project, validated manifest, and isolated high-port
+block. Phase 5E also requires allowlisted child environments, API-only test
+mode/bearer propagation (no bearer to dashboard or fixture), dashboard
+server-only token-file isolation, retained stopping manifests and telemetry
+for failed teardown, dynamic-port cleanup, and safe stale-artifact handling.
+Manifestless stale processes are a manual recovery case: verify process
+identity and ports before terminating anything, and retain unowned evidence.
+It does not select
+Docker, real-provider, mail, or manual visual suites. Those suites require
+explicit opt-in and must never be treated as successful when skipped or
+unselected. Full guidance is in
+[docs/develop/testing.md](docs/develop/testing.md).
+
 ```bash
 bash tests/test-self-improving.sh        # All 4 detection pipeline tests
 bash tests/test-self-improving.sh -v     # Verbose output
 bash tests/enforce-no-db-leaks.sh        # CI gate: verify no DB access leaks
-bash tests/test-agent-validation.sh      # Agent validation checks (13 agents)
+bash tests/test-agent-validation.sh      # Agent validation checks (12 active agents)
 bash tests/test-append-only-files.sh     # Verify append-only file constraints
 
 npm run test --workspace=packages/ingenium-core          # Unit tests
 npm run test --workspace=packages/ingenium-extension     # Extension package tests (vitest)
 npm run typecheck --workspace=packages/ingenium-extension # Extension type checking (tsc --noEmit)
-npx playwright test --config=tests/playwright.config.ts tests/ingenium-dashboard/   # E2E dashboard
+npx playwright test --config=tests/playwright.config.ts                             # Default fixture E2E (production mode)
 npm test                                                  # All tests
 ```
+
+Explicit suites:
+
+```bash
+RUN_DASHBOARD_DOCKER=1 npx playwright test --config=tests/playwright.docker.config.ts
+RUN_DASHBOARD_PROVIDER=1 npx playwright test --config=tests/playwright.real-provider.config.ts
+RUN_DASHBOARD_MAIL=1 npx playwright test --config=tests/playwright.mail.config.ts
+RUN_DASHBOARD_MANUAL=1 npx playwright test --config=tests/playwright.manual.config.ts
+```
+
+Use `INGENIUM_E2E_API_PORT`, `INGENIUM_E2E_DASH_PORT`, and
+`INGENIUM_E2E_FIXTURE_PORT` only for distinct isolated fixture ports;
+`INGENIUM_E2E_DASHBOARD_URL`, `INGENIUM_E2E_API_URL`,
+`INGENIUM_E2E_OPENCODE_WEB_URL`, `INGENIUM_E2E_CLI_URL`,
+`OPENCODE_SERVER_URL`, and `INGENIUM_API_TOKEN` override external-suite
+endpoints/authentication. `INGENIUM_E2E_SKIP_BUILD=1` skips only an already
+completed build; it does not switch the fixture run out of production mode.
+After runs, verify manifest-owned cleanup, retained recovery evidence, orphan
+processes/ports, temporary directories, active handles, and RSS. Use
+`npx tsx tests/suite-containment-audit.ts --strict`; strict mode is the required
+gate and must inspect dynamic ports from the manifest/retained telemetry. The
+canonical runner evidence root is `tests/artifacts/test-runs/<run-id>/`.
+Screenshots must be run-scoped and stored below
+`tests/artifacts/visual-qa/<run-id>/` or `tests/artifacts/manual/<date>/`, never
+at the repository root. Missing, malformed, active, or unowned stale
+artifacts must be retained and investigated, not removed with broad globs.
 
 ---
 
@@ -471,12 +541,11 @@ For quick reference, here are the non-negotiable rules from above:
 | 15 | `synthesis-engine`/`email-client` are NOT supervisord processes | [Docker](#key-docker-notes) |
 | 16 | Plugin lifecycle MUST sync disk + `opencode.json` plugin array | [Plugin Conventions](#plugin--skill-conventions) |
 | 17 | Auto-observer registered in DB + both opencode configs | [Plugin Conventions](#plugin--skill-conventions) |
-| 18 | Orchestration policy is behavioral — not an OpenCode config concurrency field | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
-| 19 | Never exceed 12 active subagents or 6 concurrent writers per phase; serialize conflicting writers | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
-| 20 | Declare phase (active count, writers, territories, dependencies, verification) before dispatch | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
-| 21 | Terra is first choice for critical work (auth, migrations, Docker, multi-service, cross-package, high-risk) | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
-| 22 | Restart OpenCode for newly-added agent profiles to become invocable | [Orchestration Policy](#-orchestration-policy--12-active--6-writer-phase-scheduler) |
-| 23 | Restart OpenCode when sync engine reports plugin/config changes | [Plugin Conventions](#plugin--skill-conventions) |
+| 18 | Agent model mappings live in `opencode.json` — not in Markdown profile frontmatter | [Agent Table](#agent-table) |
+| 19 | Never exceed 6 active subagents or 3 concurrent writers per phase; serialize conflicting writers | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 20 | Declare phase (active count, writers, territories, dependencies, verification) before dispatch | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 21 | Restart OpenCode for newly-added agent profiles to become invocable | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 22 | Restart OpenCode when sync engine reports plugin/config changes | [Plugin Conventions](#plugin--skill-conventions) |
 
 ---
 
@@ -488,9 +557,19 @@ For quick reference, here are the non-negotiable rules from above:
 
 ## 🔴 QA-First Workflow
 
-After every subagent task that modifies files:
+After the orchestrator completes every subagent task that modifies files:
+
 1. **Spawn `@ingenium-qa`** — Review changes, run tests, verify quality
-2. **Spawn `@ingenium-docs`** — Update affected documentation (AGENTS.md, SKILL-INDEX.md)
+2. **Spawn `@ingenium-docs`** — Update affected documentation (AGENTS.md, SKILL-INDEX.md, docs workspace)
 3. **Task not done until QA passes and docs are updated**
 
 See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrator.md) for the full Definition of Done process.
+
+---
+
+## Agent Profiles
+
+Full agent profile definitions: `.opencode/agents/<category>/<name>.md`
+Archived profiles (historical reference): `.opencode/archive/agents/<category>/<name>.md`
+
+> 💡 Adding a new Markdown agent profile requires an OpenCode restart for the agent to become invocable via `@mention`. Agent metadata (model, enabled status) is managed via the Dashboard `/agents` page or `ingenium_agent_*` MCP tools, which persist runtime config to `opencode.json`. The model field is intentionally stripped from Markdown profiles on write — see `packages/ingenium-core/lib/tools/agents.ts`.

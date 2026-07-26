@@ -25,6 +25,14 @@ export function listProjects(): Project[] {
 
 export const MAX_PROJECT_NAME_LENGTH = 64;
 
+/** Raised instead of arbitrarily selecting a global project from corrupt legacy data. */
+export class GlobalProjectResolutionError extends Error {
+  constructor() {
+    super("Multiple active global projects exist; resolve the global designation before continuing");
+    this.name = "GlobalProjectResolutionError";
+  }
+}
+
 /** Names are identifiers, never paths. Keep this contract aligned with the extension resolver. */
 export function isValidProjectName(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= MAX_PROJECT_NAME_LENGTH &&
@@ -48,7 +56,12 @@ export function createProject(name: string, isGlobal = false): Project {
   assertProjectName(name);
   // Idempotent: return existing project on container restart
   const existing = getProject(name);
-  if (existing) return existing;
+  if (existing) {
+    if (!isGlobal) return existing;
+    if (existing.archived_at) unarchiveProject(name);
+    if (!setProjectGlobal(name, true)) throw new Error("Unable to designate existing project as global");
+    return getProject(name)!;
+  }
 
   const project = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
@@ -58,13 +71,13 @@ export function createProject(name: string, isGlobal = false): Project {
     if (!existsSync(projectPath)) {
       mkdirSync(projectPath, { recursive: true });
     }
-    if (isGlobal) db.prepare("UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1").run(now);
+    if (isGlobal) db.prepare("UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1 AND archived_at IS NULL").run(now);
     db.prepare(
       `INSERT INTO projects (id, name, path, is_global, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(id, name, projectPath, isGlobal ? 1 : 0, now, now);
     // Auto-load global skills into new project
-    const globalProject = db.prepare("SELECT * FROM projects WHERE is_global = 1").get() as Project | undefined;
+    const globalProject = db.prepare("SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL").get() as Project | undefined;
     if (globalProject && globalProject.id !== id) {
       const count = skills.copySkills(globalProject.id, id);
       if (count > 0) {
@@ -104,7 +117,12 @@ export function unarchiveProject(name: string): boolean {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE name = ? AND archived_at IS NOT NULL").get(name);
     if (!existing) return false;
-    db.prepare("UPDATE projects SET archived_at = NULL WHERE name = ?").run(name);
+    const activeGlobal = db.prepare(
+      "SELECT id FROM projects WHERE is_global = 1 AND archived_at IS NULL AND id <> ?",
+    ).get((existing as Project).id) as { id: string } | undefined;
+    const restoreAsGlobal = Boolean((existing as Project).is_global) && !activeGlobal;
+    db.prepare("UPDATE projects SET archived_at = NULL, is_global = ? WHERE name = ?")
+      .run(restoreAsGlobal ? 1 : 0, name);
     return true;
   });
   if (changed) checkpointAfterWrite();
@@ -201,17 +219,17 @@ export function updateProject(currentName: string, newName: string): Project | u
 
 /**
  * Toggle a project's global flag. When isGlobal=true, the project's skills/plugins
- * become the shared baseline for all other projects. Only one project should be
- * global at a time (not enforced here — UI layer manages this).
+ * become the shared baseline for all other projects. The database enforces one
+ * active global row; this transaction keeps the transition atomic as well.
  */
 export function setProjectGlobal(name: string, isGlobal: boolean): boolean {
   assertProjectName(name);
   const changed = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
     const existing = db.prepare("SELECT * FROM projects WHERE name = ?").get(name) as Project | undefined;
-    if (!existing) return false;
+    if (!existing || existing.archived_at) return false;
     const now = new Date().toISOString();
-    if (isGlobal) db.prepare("UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1").run(now);
+    if (isGlobal) db.prepare("UPDATE projects SET is_global = 0, updated_at = ? WHERE is_global = 1 AND archived_at IS NULL").run(now);
     db.prepare("UPDATE projects SET is_global = ?, updated_at = ? WHERE name = ?").run(isGlobal ? 1 : 0, now, name);
     return true;
   });
@@ -219,12 +237,23 @@ export function setProjectGlobal(name: string, isGlobal: boolean): boolean {
   return changed;
 }
 
-/** Get the single global project (is_global=1, not archived). There should be at most one. */
+/** Get the sole active global project without silently choosing legacy duplicates. */
 export function getGlobalProject(): Project | undefined {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-  return db.prepare(
-    "SELECT * FROM projects WHERE is_global = 1 AND archived_at IS NULL LIMIT 1"
-  ).get() as Project | undefined;
+  const globals = db.prepare(
+    `SELECT * FROM projects
+     WHERE is_global = 1 AND archived_at IS NULL
+     ORDER BY CASE WHEN name = 'global-default' THEN 0 ELSE 1 END, created_at, id`,
+  ).all() as Project[];
+  if (globals.length > 1) throw new GlobalProjectResolutionError();
+  return globals[0];
+}
+
+/** Resolve or create the canonical runtime global project without a name-based fallback. */
+export function ensureGlobalProject(): Project {
+  const active = getGlobalProject();
+  if (active) return active;
+  return createProject("global-default", true);
 }
 
 export interface WorkspaceMigrationResult {

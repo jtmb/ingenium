@@ -1,1331 +1,972 @@
 #!/usr/bin/env bash
-# ───────────────────────────────────────────────────────────
-# test-agent-validation.sh — Validate ALL agent .md files
-# under .opencode/agents/.  Agent count is determined dynamically at runtime.
-#
-# Tests:
-#   1. Agent frontmatter validity (name, description, model)
-#   2. Permission completeness (edit and write)
-#   3. No stale skill references (every skill listed exists)
-#   4. No duplicate skills within the same agent
-#   5. Task block safety (read-only agents can't spawn
-#      write-capable subagents)
-#   6. No stale git-workflows references
-#   7. Skill count consistency (filesystem vs SKILL-INDEX.md)
-#
-# Usage:
-#   tests/test-agent-validation.sh           # run all tests
-#   tests/test-agent-validation.sh -v        # verbose output
-# ───────────────────────────────────────────────────────────
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 AGENTS_DIR="$REPO_ROOT/.opencode/agents"
-SKILLS_DIR="$REPO_ROOT/.opencode/skills"
-SKILL_INDEX="$REPO_ROOT/.opencode/SKILL-INDEX.md"
-VERBOSE=false
-PASSED=0
+CONFIG="$REPO_ROOT/opencode.json"
+EXPECTED_LOGICAL_AGENT_COUNT=12
+MAX_ACTIVE_SUBAGENTS=6
+MAX_CONCURRENT_WRITERS=3
 FAILED=0
-TEST_FAILED=false
 
-# ── Parse args ────────────────────────────────────────────
-for arg in "$@"; do
-    case "$arg" in
-        --verbose|-v) VERBOSE=true ;;
-    esac
+pass() { printf 'PASS: %s\n' "$1"; }
+fail() { printf 'FAIL: %s\n' "$1"; FAILED=1; }
+
+# A profile is a writer when either edit or write grants any allow rule.  The
+# permission may be a scalar (`edit: allow`) or a map (`edit: {"*": allow}`),
+# so checking only the scalar form misses profiles such as ingenium-docs and
+# browser-agent.
+profile_has_writer_permission() {
+  awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    !in_frontmatter { next }
+
+    /^  (edit|write):[[:space:]]*("?allow"?)[[:space:]]*$/ { found = 1; next }
+    /^  (edit|write):.*allow/ { found = 1; next }
+    /^  (edit|write):[[:space:]]*$/ { nested_permission = 1; next }
+    nested_permission && /^    / {
+      if ($0 ~ /:[[:space:]]*"?allow"?[[:space:]]*$/) found = 1
+      next
+    }
+    nested_permission { nested_permission = 0 }
+
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
+# Collect active agent files (YAML frontmatter only)
+mapfile -t AGENT_FILES < <(find "$AGENTS_DIR" -type f -name '*.md' -print | sort)
+mapfile -t AGENT_FILES < <(for file in "${AGENT_FILES[@]}"; do [[ "$(head -n 1 "$file")" == '---' ]] && printf '%s\n' "$file"; done)
+
+if [[ "${#AGENT_FILES[@]}" -eq 0 ]]; then
+  fail "no active agent profiles found"
+  exit 1
+fi
+
+# Check frontmatter completeness and no Markdown model field.
+# Old agent topology tolerates the duplicate root-level ingenium-chat.md
+# (it mirrors chat/ingenium-chat.md for legacy OpenCode discovery).
+declare -A NAMES=()
+declare -A HIDDEN_NAMES=()
+declare -A WRITER_NAMES=()
+declare -A NON_WRITER_NAMES=()
+for file in "${AGENT_FILES[@]}"; do
+  name="$(basename "$file" .md)"
+
+  # Read name from frontmatter for accurate dedup
+  fm_name="$(grep -m1 '^name:' "$file" | sed 's/^name: *//')"
+  [[ -z "$fm_name" ]] && fm_name="$name"
+
+  # Detect hidden agents
+  if grep -q '^hidden:.*true' "$file"; then
+    HIDDEN_NAMES["$fm_name"]=1
+  fi
+
+  if profile_has_writer_permission "$file"; then
+    WRITER_NAMES["$fm_name"]=1
+  fi
+
+  # Tolerate duplicate root-level ingenium-chat (canonical copy in chat/ subdirectory)
+  if [[ -n "${NAMES[$fm_name]:-}" && "$fm_name" == "ingenium-chat" ]]; then
+    continue
+  fi
+  NAMES["$fm_name"]=1
+
+  if ! grep -q '^name:' "$file" || ! grep -q '^description:' "$file" || ! grep -q '^permission:' "$file"; then
+    fail "$fm_name has incomplete frontmatter"
+  fi
+
+  if grep -q '^model:' "$file"; then
+    fail "$fm_name has markdown model frontmatter"
+  fi
 done
 
-# ── Helpers ───────────────────────────────────────────────
-green()  { echo -e "\033[32m$*\033[0m"; }
-red()    { echo -e "\033[31m$*\033[0m"; }
-yellow() { echo -e "\033[33m$*\033[0m"; }
-dim()    { echo -e "\033[2m$*\033[0m"; }
-
-pass() {
-    PASSED=$((PASSED + 1))
-    green "  ✓ PASS: $1"
-}
-
-fail() {
-    FAILED=$((FAILED + 1))
-    TEST_FAILED=true
-    if [[ -n "${2:-}" ]]; then
-        red "  ✗ FAIL: $1 — $2"
-    else
-        red "  ✗ FAIL: $1"
-    fi
-}
-
-info() {
-    $VERBOSE && dim "  · $*" || true
-}
-
-section() {
-    echo ""
-    echo "━━━ $1 ━━━"
-}
-
-# ── Agent File Discovery ──────────────────────────────────
-# Returns all agent .md files sorted by path.
-# Skips .md files that don't start with --- (non-agent files like
-# browser-agent-errors.md).
-find_agent_files() {
-    local all_files
-    all_files=$(find "$AGENTS_DIR" -name "*.md" -type f | sort)
-    for f in $all_files; do
-        local bn
-        bn=$(basename "$f")
-        # Skip documentation/non-agent files — browser-agent-errors.md, etc.
-        if [[ "$bn" == browser-agent-errors* || "$bn" == *-errors.md ]]; then
-            $VERBOSE && yellow "  ⚠ SKIP: Excluding non-agent file: $bn" >&2
-            continue
-        fi
-        local first_line
-        first_line=$(head -1 "$f")
-        if [[ "$first_line" == "---" ]]; then
-            echo "$f"
-        else
-            yellow "  ⚠ WARNING: Skipping non-agent file (no --- frontmatter): $bn" >&2
-        fi
-    done
-}
-
-# Returns just the agent name (basename without .md)
-agent_name_from_path() {
-    basename "$1" .md
-}
-
-# ── Frontmatter Extraction ────────────────────────────────
-# Extract YAML frontmatter from a .md file (content between --- fences)
-extract_frontmatter() {
-    local file="$1"
-    awk '/^---$/ { count++; next } count == 1 { print } count == 2 { exit }' "$file"
-}
-
-# Extract a top-level YAML block from frontmatter (content after key: until
-# next top-level key at column 0).
-extract_yaml_block() {
-    local key="$1"
-    awk -v key="^${key}:" '$0 ~ key{found=1; next} found && /^[a-zA-Z]/{exit} found{print}'
-}
-
-# Extract a value for a top-level field in the frontmatter (e.g. name, model)
-get_field_value() {
-    local fm="$1"
-    local field="$2"
-    echo "$fm" | grep "^${field}:" | head -1 | sed 's/^'"${field}"': *//' || true
-}
-
-# ── Agent Capability Detection ────────────────────────────
-# Check if an agent is write-capable (edit:allow OR write:allow).
-# Supports both flat form (edit: allow) and nested YAML form
-# (edit:\n  "*": allow) used by software-engineer agents.
-is_agent_write_capable() {
-    local agent_name="$1"
-
-    # Search all subdirectories for this agent file
-    local file
-    file=$(find "$AGENTS_DIR" -name "${agent_name}.md" -type f 2>/dev/null | head -1)
-
-    if [[ -z "$file" ]]; then
-        # If agent file doesn't exist, assume not write-capable (conservative)
-        return 1
-    fi
-
-    local fm
-    fm=$(extract_frontmatter "$file")
-    local perm_block
-    perm_block=$(extract_yaml_block "permission" <<< "$fm")
-
-    # Check flat form: "  edit: allow" or "  write: allow"
-    if echo "$perm_block" | grep -qE '^  (edit|write): allow$'; then
-        return 0
-    fi
-
-    # Check nested form: "  edit:" followed by a value containing "allow"
-    # at a deeper indent (e.g., "    \"*\": allow"). Extract the edit block
-    # and look for "allow" within it.
-    local edit_block
-    edit_block=$(echo "$perm_block" | awk '/^  edit:/{found=1; print; next} found && /^  [a-z]/{exit} found{print}')
-    if echo "$edit_block" | grep -q 'allow'; then
-        return 0
-    fi
-
-    local write_block
-    write_block=$(echo "$perm_block" | awk '/^  write:/{found=1; print; next} found && /^  [a-z]/{exit} found{print}')
-    if echo "$write_block" | grep -q 'allow'; then
-        return 0
-    fi
-
-    return 1
-}
-
-# ── Skill List Extraction ─────────────────────────────────
-# Extract skill names from the agent frontmatter.
-# Supports both a top-level skills: block (legacy) and the
-# permission.skill: nested block (standard agent format).
-# Returns one bare skill name per line (no @ prefix).
-extract_skill_list() {
-    local fm="$1"
-
-    # Check for inline empty list (legacy top-level skills: [])
-    if echo "$fm" | grep -q '^skills: \[\]' 2>/dev/null; then
-        return 0
-    fi
-
-    # Check for inline list: skills: [a, b, c] — uncommon, handle gracefully
-    local inline_list
-    inline_list=$(echo "$fm" | grep '^skills: \[' 2>/dev/null | sed 's/^skills: \[//;s/\]$//' | tr ',' '\n' | sed 's/^ *"//;s/" *$//' || true)
-    if [[ -n "$inline_list" ]]; then
-        echo "$inline_list" | sed 's/^ *//;s/ *$//'
-        return 0
-    fi
-
-    # Extract multi-line top-level skills block (legacy)
-    local skills_block
-    skills_block=$(extract_yaml_block "skills" <<< "$fm")
-    if [[ -n "$skills_block" ]]; then
-        # Parse YAML list items: "  - skillname" or "- skillname"
-        local result
-        result=$(echo "$skills_block" | grep -- '- ' 2>/dev/null \
-            | sed 's/^[[:space:]]*- //' \
-            | sed 's/[[:space:]]*#.*//' \
-            | sed 's/[[:space:]]*$//' || true)
-        if [[ -n "$result" ]]; then
-            echo "$result"
-            return 0
-        fi
-    fi
-
-    # NEW: Extract from permission.skill nested block (standard agent format)
-    # Agent frontmatter uses: permission: → skill: → "@skill-name": allow
-    local perm_block
-    perm_block=$(extract_yaml_block "permission" <<< "$fm")
-    if [[ -n "$perm_block" ]]; then
-        # Extract skill names from lines matching: "@skill-name": allow
-        # These appear under the "skill:" sub-key within the permission block.
-        # Strip the @ prefix and surrounding quotes to get bare skill names.
-        echo "$perm_block" | grep -E '^\s+"@[^"]+":\s*allow' \
-            | sed 's/.*"@\([^"]*\)".*/\1/' || true
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 1 — Agent Frontmatter Validity
-# Check every agent file has --- fences and required fields.
-# ═══════════════════════════════════════════════════════════
-test_frontmatter_validity() {
-    section "TEST 1 — Agent Frontmatter Validity"
-
-    local errors=0
-    local files
-    files=$(find_agent_files)
-    local count=0
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-        count=$((count + 1))
-
-        # Check opening fence
-        if [[ "$(head -1 "$file")" != "---" ]]; then
-            fail "$name" "Missing opening --- frontmatter fence"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        # Check closing fence
-        local fence_count
-        fence_count=$(grep -c '^---' "$file" || true)
-        if [[ "$fence_count" -lt 2 ]]; then
-            fail "$name" "Missing closing --- frontmatter fence (found $fence_count)"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-        if [[ -z "$fm" ]]; then
-            fail "$name" "Empty frontmatter section"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        # Check required fields — ingenium-chat is exempt from model: requirement
-        # because it inherits the model from the requesting context (Settings → OpenCode config).
-        local missing_fields=""
-
-        if ! echo "$fm" | grep -q "^name:"; then
-            missing_fields="${missing_fields}name "
-        fi
-        if ! echo "$fm" | grep -q "^description:"; then
-            missing_fields="${missing_fields}description "
-        fi
-        if ! echo "$fm" | grep -q "^model:"; then
-            if [[ "$name" != "ingenium-chat" ]]; then
-                missing_fields="${missing_fields}model "
-            fi
-        fi
-
-        if [[ -n "$missing_fields" ]]; then
-            fail "$name" "Missing required frontmatter field(s): $missing_fields"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        # Validate name matches file basename
-        local fm_name
-        fm_name=$(get_field_value "$fm" "name" | tr -d '[:space:]')
-        if [[ "$fm_name" != "$name" ]]; then
-            fail "$name" "Frontmatter name '$fm_name' doesn't match filename '$name'"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        info "$name — frontmatter valid (name: $fm_name)"
-    done
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "All $count agent files have valid frontmatter (--- fences + name, description, model)"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 2 — Permission Completeness
-# Every agent must have explicit edit: in permission.
-# write: is required only for write-capable agents
-# (edit: allow OR write: allow). Read-only agents
-# (edit: deny AND not write: allow) may omit write:.
-# ═══════════════════════════════════════════════════════════
-test_permission_completeness() {
-    section "TEST 2 — Permission Completeness"
-
-    local errors=0
-    local files
-    files=$(find_agent_files)
-    local count=0
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-        count=$((count + 1))
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-
-        # Check permission block exists
-        if ! echo "$fm" | grep -q "^permission:"; then
-            fail "$name" "Missing 'permission:' block in frontmatter"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        # Extract permission block
-        local perm_block
-        perm_block=$(extract_yaml_block "permission" <<< "$fm")
-
-        # Check edit: field (always required)
-        if ! echo "$perm_block" | grep -q "^  edit:"; then
-            fail "$name" "Missing 'edit:' in permission block"
-            errors=$((errors + 1))
-            continue
-        fi
-
-        local edit_val
-        edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}')
-
-        # Determine if agent has an explicit write: field
-        local has_write=false
-        local write_val=""
-        if echo "$perm_block" | grep -q "^  write:"; then
-            has_write=true
-            write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}')
-        fi
-
-        # write: is required for write-capable agents (edit: allow OR write: allow)
-        # Read-only agents (edit: deny AND not write: allow) may omit write:
-        if [[ "$edit_val" == "allow" || "$write_val" == "allow" ]]; then
-            # This agent is write-capable — must have write: field
-            if ! $has_write; then
-                fail "$name" "Missing 'write:' in permission block (write-capable agent: edit=$edit_val)"
-                errors=$((errors + 1))
-                continue
-            fi
-        fi
-
-        info "$name — edit: $edit_val, write: ${write_val:-<none>}"
-    done
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "All $count agent files have valid permission blocks"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 3 — No Stale Skill References
-# Every skill referenced in an agent's skills: list must exist
-# as .opencode/skills/<skillname>/SKILL.md.
-# ═══════════════════════════════════════════════════════════
-test_stale_skill_references() {
-    section "TEST 3 — No Stale Skill References"
-
-    local total_refs=0
-    local stale_refs=0
-    local files
-    files=$(find_agent_files)
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-
-        # Extract skill list
-        local skill_list
-        skill_list=$(extract_skill_list "$fm")
-
-        if [[ -z "$skill_list" ]]; then
-            info "$name — no skills to check (empty list)"
-            continue
-        fi
-
-        while IFS= read -r skill; do
-            [[ -z "$skill" ]] && continue
-            total_refs=$((total_refs + 1))
-
-            local skill_file="$SKILLS_DIR/$skill/SKILL.md"
-            if [[ ! -f "$skill_file" ]]; then
-                fail "$name" "References non-existent skill '$skill' (expected $skill_file)"
-                stale_refs=$((stale_refs + 1))
-            else
-                info "$name → $skill ✓"
-            fi
-        done <<< "$skill_list"
-    done
-
-    if [[ "$stale_refs" -eq 0 ]]; then
-        if [[ "$total_refs" -gt 0 ]]; then
-            pass "$total_refs skill references checked — all valid"
-        else
-            pass "No stale skill references (no agent has a non-empty skills list)"
-        fi
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 4 — No Duplicate Skills
-# Within a single agent's skills: list, no skill may appear
-# more than once.
-# ═══════════════════════════════════════════════════════════
-test_no_duplicate_skills() {
-    section "TEST 4 — No Duplicate Skills"
-
-    local duplicate_count=0
-    local files
-    files=$(find_agent_files)
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-        local skill_list
-        skill_list=$(extract_skill_list "$fm")
-
-        if [[ -z "$skill_list" ]]; then
-            info "$name — no skills to check for duplicates"
-            continue
-        fi
-
-        # Find duplicates
-        local dupes
-        dupes=$(echo "$skill_list" | sort | uniq -d)
-
-        if [[ -n "$dupes" ]]; then
-            while IFS= read -r dup; do
-                [[ -z "$dup" ]] && continue
-                fail "$name" "Duplicate skill '$dup' appears multiple times"
-                duplicate_count=$((duplicate_count + 1))
-            done <<< "$dupes"
-        else
-            info "$name — no duplicate skills"
-        fi
-    done
-
-    if [[ "$duplicate_count" -eq 0 ]]; then
-        pass "No duplicate skill references in any agent"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 5 — Task Block Safety
-# Read-only agents (edit: deny + write: deny) must not be able
-# to spawn write-capable subagents (edit: allow or write: allow)
-# via their task: allow list.
-# ═══════════════════════════════════════════════════════════
-test_task_block_safety() {
-    section "TEST 5 — Task Block Safety"
-
-    local files
-    files=$(find_agent_files)
-
-    # ── Phase 1: Build write-capable agent index ──
-    declare -A WRITE_CAPABLE_AGENTS
-    local all_agent_names=""
-
-    for file in $files; do
-        local agent_name
-        agent_name=$(agent_name_from_path "$file")
-        all_agent_names="$all_agent_names $agent_name"
-
-        if is_agent_write_capable "$agent_name"; then
-            WRITE_CAPABLE_AGENTS["$agent_name"]=1
-            info "$agent_name — write-capable (indexed)"
-        else
-            info "$agent_name — read-only (indexed)"
-        fi
-    done
-
-    # ── Phase 2: Check every read-only agent's task block ──
-    local violations=0
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-
-        # Determine agent mode and permissions
-        local agent_mode
-        agent_mode=$(get_field_value "$fm" "mode" | tr -d '[:space:]')
-
-        local perm_block
-        perm_block=$(extract_yaml_block "permission" <<< "$fm")
-
-        local edit_val
-        edit_val=$(echo "$perm_block" | grep "^  edit:" | head -1 | awk '{print $2}') || true
-        local write_val
-        write_val=$(echo "$perm_block" | grep "^  write:" | head -1 | awk '{print $2}') || true
-
-        # Primary/coordinator agents are exempt — their job is to spawn
-        # write-capable subagents for privileged operations
-        if [[ "$agent_mode" == "primary" ]]; then
-            info "$name — primary/coordinator agent, exempt from task block safety check"
-            continue
-        fi
-
-        # Only check read-only agents (not write-capable)
-        # An agent is write-capable if edit: allow OR write: allow
-        if [[ "$edit_val" == "allow" || "$write_val" == "allow" ]]; then
-            info "$name — write-capable, skipping task block safety check"
-            continue
-        fi
-
-        # Extract allowed subagents from task block
-        # Lines in the permission block between "  task:" and next 2-space key
-        local task_allows
-        task_allows=$(echo "$perm_block" | sed -n '/^  task:/,/^  [a-z]/p' \
-            | grep '": "allow"' \
-            | sed 's/.*"\(.*\)": "allow".*/\1/' \
-            | grep -v '^\*$' || true)
-
-        local local_violations=0
-
-        while IFS= read -r allowed_agent; do
-            [[ -z "$allowed_agent" ]] && continue
-
-            # Trim whitespace
-            allowed_agent=$(echo "$allowed_agent" | tr -d '[:space:]')
-
-            if [[ -n "${WRITE_CAPABLE_AGENTS[$allowed_agent]:-}" ]]; then
-                fail "$name" "Read-only agent can spawn write-capable subagent '$allowed_agent'"
-                violations=$((violations + 1))
-                local_violations=$((local_violations + 1))
-            fi
-        done <<< "$task_allows"
-
-        if [[ "$local_violations" -eq 0 ]]; then
-            info "$name — task block is safe (no write-capable subagent allowed)"
-        fi
-    done
-
-    if [[ "$violations" -eq 0 ]]; then
-        pass "All read-only agents have safe task blocks"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 6 — No Stale git-workflows References
-# The git-workflows skill was deleted — ensure no agent
-# references it.
-# ═══════════════════════════════════════════════════════════
-test_no_git_workflows() {
-    section "TEST 6 — No Stale git-workflows References"
-
-    local files
-    files=$(find_agent_files)
-    local found=false
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        if grep -q "git-workflows" "$file"; then
-            fail "$name" "Contains stale reference to 'git-workflows' (skill deleted)"
-            found=true
-        fi
-    done
-
-    if ! $found; then
-        pass "No agent references the deleted 'git-workflows' skill"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 7 — Skill Count Consistency
-# Compare actual skill directories against SKILL-INDEX.md count.
-# ═══════════════════════════════════════════════════════════
-test_skill_count_consistency() {
-    section "TEST 7 — Skill Count Consistency"
-
-    # Count actual skill directories (dirs with SKILL.md)
-    local actual_count
-    actual_count=$(find "$SKILLS_DIR" -maxdepth 2 -name "SKILL.md" | wc -l)
-
-    # Extract count from SKILL-INDEX.md
-    # Look for "Total: N items" or count entries in the "# Skills" table
-    local index_count=0
-    local total_line
-    total_line=$(grep "^\\*\\*Total:" "$SKILL_INDEX" 2>/dev/null | head -1 || true)
-
-    if [[ -n "$total_line" ]]; then
-        # Extract number from "**Total: N items**"
-        index_count=$(echo "$total_line" | sed 's/.*Total: *//;s/ *items.*//')
-    fi
-
-    # Fallback: count entries in the skills table at the bottom
-    if [[ "$index_count" -eq 0 ]]; then
-        index_count=$(grep -c '^| [0-9]' "$SKILL_INDEX" 2>/dev/null || true)
-        info "Falling back to counting table entries in SKILL-INDEX.md"
-    fi
-
-    info "Actual skill directories: $actual_count"
-    info "SKILL-INDEX.md reported:  $index_count"
-
-    local diff=$(( actual_count - index_count ))
-    local abs_diff=${diff#-}
-
-    if [[ "$abs_diff" -eq 0 ]]; then
-        pass "Skill count matches: $actual_count directories = $index_count in SKILL-INDEX.md"
-    else
-        fail "Skill count mismatch" "$actual_count actual vs $index_count in SKILL-INDEX.md (diff=$diff)"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 8 — Frontmatter-Model vs Body-Model Identity Match
-# Detect body text like "You are qwen3.5-9b running locally"
-# that contradicts the frontmatter model: field.
-# ═══════════════════════════════════════════════════════════
-test_model_identity_match() {
-    section "TEST 8 — Model Identity Match (frontmatter vs body)"
-
-    local errors=0
-    local files
-    files=$(find_agent_files)
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-        local fm_model
-        fm_model=$(get_field_value "$fm" "model" | tr -d '[:space:]')
-
-        # Skip if no frontmatter model (unlikely; caught by TEST 1)
-        if [[ -z "$fm_model" ]]; then
-            continue
-        fi
-
-        # Extract just the core model name (last segment after final /)
-        # e.g., "qwen/qwen3.5-9b" → "qwen3.5-9b"
-        #       "deepseek/deepseek-v4-pro" → "deepseek-v4-pro"
-        #       "opencode/deepseek-v4-flash-free" → "deepseek-v4-flash-free"
-        local fm_core
-        fm_core=$(echo "$fm_model" | sed 's|.*/||' | tr '[:upper:]' '[:lower:]')
-
-        # Search body text for "You are" identity statements
-        local body
-        body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$file")
-
-        # Find "You are ..." pattern (until end of line or sentence)
-        local body_models
-        body_models=$(echo "$body" | grep -oPi 'You are\s+[^\n.]*' | head -5 || true)
-
-        if [[ -z "$body_models" ]]; then
-            info "$name — no 'You are' identity statement found in body"
-            continue
-        fi
-
-        # Check if any body statement mentions a model that differs from frontmatter
-        local mismatch=false
-        while IFS= read -r line; do
-            [[ -z "$line" ]] && continue
-            local normalized_body
-            normalized_body=$(echo "$line" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
-
-            # Only check if body mentions specific model names
-            if echo "$normalized_body" | grep -qiE 'qwen|deepseek|claude|gpt|llama|mistral|gemini'; then
-                # Check if body mentions the same model family as frontmatter
-                local fm_family=""
-                if [[ "$fm_core" == deepseek-* ]]; then fm_family="deepseek"; fi
-                if [[ "$fm_core" == qwen* ]]; then fm_family="qwen"; fi
-                if [[ "$fm_core" == claude* ]]; then fm_family="claude"; fi
-
-                # If body mentions a different model family, flag as mismatch
-                if [[ -n "$fm_family" ]]; then
-                    if ! echo "$normalized_body" | grep -qi "$fm_family"; then
-                        fail "$name" "Body model identity '$line' conflicts with frontmatter model '$fm_model' (expected family: $fm_family)"
-                        errors=$((errors + 1))
-                        mismatch=true
-                    else
-                        info "$name — body mentions $fm_family family (matches frontmatter: $fm_model)"
-                    fi
-                else
-                    # Fallback: check for core model name in body
-                    if ! echo "$normalized_body" | grep -qi "$fm_core"; then
-                        fail "$name" "Body model identity '$line' conflicts with frontmatter model '$fm_model'"
-                        errors=$((errors + 1))
-                        mismatch=true
-                    fi
-                fi
-            fi
-        done <<< "$body_models"
-
-        if ! $mismatch; then
-            [[ -n "$body_models" ]] && info "$name — body model identity matches frontmatter" || true
-        fi
-    done
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "All agent body model identities match frontmatter model field"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 9 — Body-Referenced Skills Must Be Subset of
-# Frontmatter-Allowed Skills
-# ═══════════════════════════════════════════════════════════
-test_body_skills_in_frontmatter() {
-    section "TEST 9 — Body Skills ⊆ Frontmatter Skills"
-
-    local errors=0
-    local files
-    files=$(find_agent_files)
-
-    # Get list of all known skill names from the skills directory
-    local known_skills
-    known_skills=$(find "$SKILLS_DIR" -maxdepth 2 -name "SKILL.md" -exec dirname {} \; | xargs -I{} basename {} | sort -u)
-
-    for file in $files; do
-        local name
-        name=$(agent_name_from_path "$file")
-
-        local fm
-        fm=$(extract_frontmatter "$file")
-
-        # Get frontmatter-allowed skills (bare names, no @ prefix)
-        local fm_skills
-        fm_skills=$(extract_skill_list "$fm" | sort -u || true)
-
-        # Extract body text after frontmatter
-        local body
-        body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$file")
-
-        # Search body for @word references in "Required Skills" or skill requirement sections
-        local body_at_refs
-        body_at_refs=$(echo "$body" | grep -oP '@([a-z][a-z0-9-]*)' | sed 's/^@//' | sort -u || true)
-
-        if [[ -z "$body_at_refs" ]]; then
-            info "$name — no @ references found in body"
-            continue
-        fi
-
-        # Filter to only skill names (not agent names like ingenium-orchestrator)
-        local body_skills=""
-        while IFS= read -r ref; do
-            [[ -z "$ref" ]] && continue
-            # Check if this is a known skill name
-            if echo "$known_skills" | grep -qxF "$ref"; then
-                body_skills="${body_skills}${ref}"$'\n'
-            fi
-        done <<< "$body_at_refs"
-        body_skills=$(echo "$body_skills" | sort -u | grep -v '^$' || true)
-
-        if [[ -z "$body_skills" ]]; then
-            info "$name — no skill @references found in body"
-            continue
-        fi
-
-        # Check each body skill against frontmatter skills
-        local body_violations=0
-        while IFS= read -r bskill; do
-            [[ -z "$bskill" ]] && continue
-            # Check if this skill exists in the frontmatter skill allow list
-            if ! echo "$fm_skills" | grep -qxF "$bskill"; then
-                fail "$name" "Body references skill '@$bskill' not in frontmatter skill permissions"
-                errors=$((errors + 1))
-                body_violations=$((body_violations + 1))
-            fi
-        done <<< "$body_skills"
-
-        if [[ "$body_violations" -eq 0 ]]; then
-            info "$name — all body-referenced skills are in frontmatter permissions"
-        fi
-    done
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "All agent body skill references are subset of frontmatter-allowed skills"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 10 — AGENTS.md Table Entries Must Appear in a Task Block
-# Every subagent listed in the AGENTS.md agent table must either
-# be reachable from another agent's task block or marked as
-# standalone (prompt-engineer, browser-agent).
-# ═══════════════════════════════════════════════════════════
-test_agents_table_task_block_coverage() {
-    section "TEST 10 — AGENTS.md Agent Table Task Block Coverage"
-
-    local errors=0
-    local agents_md="$REPO_ROOT/AGENTS.md"
-
-    if [[ ! -f "$agents_md" ]]; then
-        fail "Cannot find AGENTS.md" "Expected at $agents_md"
-        return
-    fi
-
-    # Extract the Agent Table section only (between "## Agent Table" and next "## " heading)
-    # This avoids parsing non-agent tables like Concurrency Limits, Writer Tiers, etc.
-    local agent_table_section
-    agent_table_section=$(awk '
-      /^## Agent Table$/ { capture=1; next }
-      capture && /^## / { capture=0; exit }
-      capture { print }
-    ' "$agents_md")
-
-    # Parse agent names from the Agent Table section — extract bold first-column labels
-    # Agent table rows look like: | **agent-name** | Type | Model | Skills Allowed |
-    local table_agents
-    table_agents=$(echo "$agent_table_section" | grep -oP '^\| \*\*\K[^*]+(?=\*\* \|)' || true)
-
-    # Regression guard: verify no policy/label-table rows leaked into agent name extraction
-    local non_agent_patterns="Active subagents per phase|Concurrent writers per wave|Remaining capacity|Write territory overlap|Fast|Premium|Terra|Transport name|Catalog name|Exposed tool name"
-    local leaked
-    leaked=$(echo "$table_agents" | grep -E "$non_agent_patterns" || true)
-    if [[ -n "$leaked" ]]; then
-        fail "Parser regression" "Policy/label table rows incorrectly parsed as agent names: $(echo "$leaked" | tr '\n' ' ')"
-        errors=$((errors + 1))
-    else
-        info "No policy-table labels leaked into agent name extraction"
-    fi
-
-    # Collect all task block allowed subagents from ALL agent files
-    declare -A TASK_TARGETS
-    local files
-    files=$(find_agent_files)
-
-    for file in $files; do
-        local fm
-        fm=$(extract_frontmatter "$file")
-
-        # Extract task block from permission
-        local perm_block
-        perm_block=$(extract_yaml_block "permission" <<< "$fm")
-
-        # Get allowed subagents from task block
-        local task_allows
-        task_allows=$(echo "$perm_block" | sed -n '/^  task:/,/^  [a-z]/p' \
-            | grep '": "allow"' \
-            | sed 's/.*"\(.*\)": "allow".*/\1/' \
-            | grep -v '^\*$' || true)
-
-        while IFS= read -r allowed_agent; do
-            [[ -z "$allowed_agent" ]] && continue
-            allowed_agent=$(echo "$allowed_agent" | tr -d '[:space:]')
-            TASK_TARGETS["$allowed_agent"]=1
-        done <<< "$task_allows"
-    done
-
-    # Standalone agents: documented in AGENTS.md as not spawned by others
-    # ingenium-chat is a primary conversational agent, not a subagent
-    local standalone_agents="ingenium-prompt-engineer ingenium-chat"
-
-    # Check each subagent from the table (skip primary/orchestrator)
-    while IFS= read -r agent; do
-        [[ -z "$agent" ]] && continue
-
-        # Skip primary agents — their job is to spawn, not be spawned
-        if [[ "$agent" == "ingenium-orchestrator" || "$agent" == "ingenium-chat" ]]; then
-            continue
-        fi
-
-        # Check if standalone
-        if echo "$standalone_agents" | grep -qxF "$agent"; then
-            info "$agent — standalone agent (documented as not spawned by others)"
-            continue
-        fi
-
-        if [[ -n "${TASK_TARGETS[$agent]:-}" ]]; then
-            info "$agent — referenced in at least one agent's task block"
-        else
-            fail "$agent" "Not referenced in any agent's task block and not listed as standalone"
-            errors=$((errors + 1))
-        fi
-    done <<< "$table_agents"
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "All AGENTS.md table subagents appear in at least one task block or are marked standalone"
-    fi
-}
-
-# ═══════════════════════════════════════════════════════════
-# TEST 11 — Orchestration Policy: 12-Active/6-Writer + Terra Routing
-# Validates the canonical concurrency policy and Terra critical
-# routing are present where required and stale max-6 rules are absent.
-# ═══════════════════════════════════════════════════════════
-test_orchestration_policy() {
-    section "TEST 11 — Orchestration Policy (12-active/6-writer + Terra routing)"
-
-    local errors=0
-    local ORCHESTRATOR="$AGENTS_DIR/primary/ingenium-orchestrator.md"
-    local WORKFLOW_SOURCE="$SKILLS_DIR/engineering-workflow/references/sources/agent-workflow-patterns/source-index.md"
-    local AGENT_LIMITS="$SKILLS_DIR/engineering-workflow/references/sources/agent-workflow-patterns/references/agent-limits.md"
-
-    # ── Helper: scan a file for stale unqualified max-6-agents wording ──
-    # Legitimate: "6 concurrent writers", "max 6 writers", "6-writer cap"
-    # Stale:      "max 6 agents", "maximum of 6 agents", "6 concurrent agents"
-    check_no_stale_max6_agents() {
-        local file="$1"
-        local label="$2"
-        # Patterns that describe a 6-agent limit (stale — policy is now 12 agents / 6 writers).
-        # These explicitly reference "agent(s)" in the limit context, not "writer(s)".
-        local stale
-        stale=$(grep -Pin \
-            'max(imum)?\s*(of\s*)?6\s+concurrent\s+agents?\b|'\
-'max(imum)?\s*(of\s*)?6\s+agents?\b(?!\s*(and|with|\/|\-)\s*\d)|'\
-'\b6\s+concurrent\s+agents?\b|'\
-'\b6\s+agent\s+limit\b|'\
-'maximum\s+of\s+6\s+(active\s+)?agents?\s' \
-            "$file" || true)
-        if [[ -z "$stale" ]]; then
-            pass "No stale max-6-agents language in $label"
-            return 0
-        else
-            fail "$label" "Contains stale max-6-agents language: $stale"
-            errors=$((errors + 1))
-            return 1
-        fi
+# Dispatchable agents are active subagents, excluding the two primary agents
+# and the hidden system-internal broker.  Writer status is intentionally not
+# hard-coded here: it is derived from each profile's edit/write permissions.
+declare -A DISPATCHABLE_NAMES=()
+for name in "${!NAMES[@]}"; do
+  case "$name" in
+    ingenium-orchestrator|ingenium-chat|ingenium-llm-broker) ;;
+    *) DISPATCHABLE_NAMES["$name"]=1 ;;
+  esac
+  if [[ -z "${WRITER_NAMES[$name]:-}" ]]; then
+    NON_WRITER_NAMES["$name"]=1
+  fi
+done
+
+if [[ "$FAILED" -eq 0 ]]; then pass "active profiles have required frontmatter and no markdown models"; fi
+
+# Writer classification is derived from every profile's permission block, not
+# from a hard-coded list of implementation agents.  Keep explicit regression
+# guards for the two profiles that previously got misclassified because they
+# use nested permission maps.
+for expected_writer in \
+  ingenium-software-engineer-fast \
+  ingenium-software-engineer-premium \
+  ingenium-docs \
+  browser-agent; do
+  if [[ -n "${WRITER_NAMES[$expected_writer]:-}" ]]; then
+    pass "$expected_writer is recognized as a write-capable profile"
+  else
+    fail "$expected_writer has edit/write permissions but was not recognized as a writer"
+  fi
+done
+if [[ "${#WRITER_NAMES[@]}" -gt 0 ]]; then
+  writer_list="$(printf '%s\n' "${!WRITER_NAMES[@]}" | sort | paste -sd ',' -)"
+  pass "all edit/write-capable profiles are indexed as writers: $writer_list"
+else
+  fail "no edit/write-capable profiles were recognized"
+fi
+
+if [[ "${#NAMES[@]}" -ne "$EXPECTED_LOGICAL_AGENT_COUNT" ]]; then
+  fail "expected $EXPECTED_LOGICAL_AGENT_COUNT logical agent profiles, found ${#NAMES[@]}"
+else
+  pass "$EXPECTED_LOGICAL_AGENT_COUNT logical agent profiles are preserved (chat compatibility mirror deduplicated)"
+fi
+
+# ============================================================
+# 1. Validate Prompt Engineer and Terra agent files are absent
+# ============================================================
+for file in "${AGENT_FILES[@]}"; do
+  base="$(basename "$file" .md)"
+  if [[ "$base" == "ingenium-prompt-engineer" ]]; then
+    fail "Prompt Engineer agent file found at $file — must be absent"
+  fi
+  if [[ "$base" == "ingenium-software-engineer-terra" ]]; then
+    fail "Terra agent file found at $file — must be absent"
+  fi
+done
+if [[ "$FAILED" -eq 0 ]]; then pass "Prompt Engineer and Terra agent files are absent"; fi
+
+# ============================================================
+# 2. Verify non-hidden active agents (except hidden ingenium-llm-broker)
+#    have model mappings in centralized opencode.json with case-sensitive
+#    variant validation by provider
+# ============================================================
+# Build list of active agent names, excluding hidden ingenium-llm-broker
+declare -a CHECK_NAMES=()
+for name in "${!NAMES[@]}"; do
+  # Skip hidden ingenium-llm-broker — system-internal agent, no model mapping required
+  [[ "$name" == "ingenium-llm-broker" ]] && continue
+  CHECK_NAMES+=("$name")
+done
+if [[ "${#CHECK_NAMES[@]}" -gt 0 ]]; then
+  if [[ "${#CHECK_NAMES[@]}" -ne $((EXPECTED_LOGICAL_AGENT_COUNT - 1)) ]]; then
+    fail "expected $((EXPECTED_LOGICAL_AGENT_COUNT - 1)) centralized model mappings, found ${#CHECK_NAMES[@]}"
+  else
+    pass "$((EXPECTED_LOGICAL_AGENT_COUNT - 1)) non-broker profiles require centralized model mappings"
+  fi
+  node - "$CONFIG" "${CHECK_NAMES[@]}" <<'NODE' || FAILED=1
+const fs = require("fs");
+const [configPath, ...activeNames] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const agent = config.agent || {};
+const errors = [];
+
+// Allowed variants by provider (case-sensitive)
+const VARIANT_RULES = {
+  openai:  new Set(["low", "medium", "high", "xhigh", "max"]),
+  deepseek: new Set(["high", "max"]),
+};
+
+for (const name of activeNames) {
+  if (!agent[name]) {
+    errors.push(`active agent "${name}" is missing from opencode.json agent config`);
+    continue;
+  }
+  if (!agent[name].model) {
+    errors.push(`active agent "${name}" lacks a model mapping in opencode.json`);
+    continue;
+  }
+
+  // Case-sensitive variant validation by provider
+  const model = agent[name].model;
+  const variant = agent[name].variant;
+
+  // Determine provider from model string
+  const provider = model.startsWith("openai/") ? "openai"
+    : model.startsWith("deepseek/") ? "deepseek"
+    : model.startsWith("opencode/") && model.endsWith("-free") ? "opencode-free"
+    : "other";
+
+  if (provider === "opencode-free") {
+    // OpenCode free models must NOT have a variant
+    if (variant !== undefined) {
+      errors.push(`active agent "${name}" uses opencode-free model "${model}" but has variant "${variant}" — opencode free must have no variant`);
     }
-
-    # ── 11a: Terra is in the orchestrator task allow-list ──
-    local orch_fm
-    orch_fm=$(extract_frontmatter "$ORCHESTRATOR")
-    local terra_allow
-    terra_allow=$(echo "$orch_fm" | grep -c '"ingenium-software-engineer-terra": "allow"' || true)
-    if [[ "$terra_allow" -ge 1 ]]; then
-        pass "Terra is in orchestrator task allow-list"
-    else
-        fail "Orchestrator" "ingenium-software-engineer-terra not found in task allow-list"
-        errors=$((errors + 1))
-    fi
-
-    # ── 11b: Check ALL three canonical policy sources for stale max-6-agents ──
-    check_no_stale_max6_agents "$ORCHESTRATOR" "orchestrator profile"
-    check_no_stale_max6_agents "$WORKFLOW_SOURCE" "workflow source-index"
-    check_no_stale_max6_agents "$AGENT_LIMITS" "agent-limits.md"
-
-    # ── 11c: agent-limits.md reference file exists ──
-    if [[ -f "$AGENT_LIMITS" ]]; then
-        pass "agent-limits.md reference file exists"
-    else
-        fail "agent-limits.md" "Missing reference file at $AGENT_LIMITS"
-        errors=$((errors + 1))
-    fi
-
-    # ── 11d: Orchestrator body contains 12-active/6-writer policy ──
-    local orch_body
-    orch_body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$ORCHESTRATOR")
-    local has_12active
-    has_12active=$(echo "$orch_body" | grep -cP '12.*active.*subagents.*per.*phase|12-Active.*6-Writer|12\s*active.*per\s*phase' || true)
-    local has_6writer
-    has_6writer=$(echo "$orch_body" | grep -cP '6\s*-?\s*[Ww]riter|Concurrent\s+writers.*\|.*\s+6\b' || true)
-    local has_territory
-    has_territory=$(echo "$orch_body" | grep -ciP 'exclusive.*territor|write.*territor.*overlap|territory.*reservation' || true)
-
-    local orch_policy_ok=true
-    if [[ "$has_12active" -lt 1 ]]; then
-        fail "Orchestrator" "Missing 12-active subagents policy language in body"
-        errors=$((errors + 1))
-        orch_policy_ok=false
-    fi
-    if [[ "$has_6writer" -lt 1 ]]; then
-        fail "Orchestrator" "Missing 6-concurrent-writers policy language in body"
-        errors=$((errors + 1))
-        orch_policy_ok=false
-    fi
-    if [[ "$has_territory" -lt 1 ]]; then
-        fail "Orchestrator" "Missing exclusive write territory language in body"
-        errors=$((errors + 1))
-        orch_policy_ok=false
-    fi
-    if $orch_policy_ok; then
-        pass "Orchestrator contains 12-active/6-writer policy with territory protocol"
-    fi
-
-    # ── 11e: Orchestrator contains Terra critical routing guidance ──
-    local has_terra_routing
-    has_terra_routing=$(echo "$orch_body" | \
-        grep -cP 'FIRST CHOICE.*auth.*secrets.*permissions|Terra.*first.*choice.*auth' || true)
-    if [[ "$has_terra_routing" -ge 1 ]]; then
-        pass "Orchestrator contains Terra critical routing (first choice for auth/secrets)"
-    else
-        fail "Orchestrator" "Missing Terra critical routing guidance (first choice for auth/secrets/permissions)"
-        errors=$((errors + 1))
-    fi
-
-    # ── 11f: source-index references agent-limits.md ──
-    local refs_limits
-    refs_limits=$(grep -c 'references/agent-limits.md' "$WORKFLOW_SOURCE" || true)
-    if [[ "$refs_limits" -ge 1 ]]; then
-        pass "Workflow source-index references agent-limits.md"
-    else
-        fail "Workflow source-index" "Missing reference to agent-limits.md"
-        errors=$((errors + 1))
-    fi
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "All orchestration policy checks passed"
-    fi
+  } else if (provider !== "other") {
+    // Known provider with variant rules
+    const allowed = VARIANT_RULES[provider];
+    if (!allowed) {
+      errors.push(`active agent "${name}" uses unknown provider for model "${model}" — no variant rules defined`);
+    } else if (variant !== undefined && !allowed.has(variant)) {
+      errors.push(`active agent "${name}" has invalid variant "${variant}" for ${provider} model "${model}" — allowed: ${[...allowed].join(", ")}`);
+    }
+  }
+  // "other" providers (e.g. qwen/): no variant restrictions
 }
 
-# ═══════════════════════════════════════════════════════════
-# TEST 12 — Luna Visual QA Migration
-# Protect the visual-QA profile, its read-only permission boundary,
-# exclusive orchestrator delegation, and mandatory visual gates.
-# ═══════════════════════════════════════════════════════════
-test_luna_visual_qa_migration() {
-    section "TEST 12 — Luna Visual QA Migration"
-
-    local errors=0
-    local vision_agent="ingenium-qa-vision"
-    local legacy_agent="vision""-bridge"
-    local profile="$AGENTS_DIR/execution/${vision_agent}.md"
-    local legacy_profile="$AGENTS_DIR/research/${legacy_agent}.md"
-    local orchestrator="$AGENTS_DIR/primary/ingenium-orchestrator.md"
-    local plan_template="$REPO_ROOT/next-steps-plan/next-steps-template.md"
-    local deepseek_protocol="$SKILLS_DIR/local-models/references/deep-seek.md"
-    local agents_md="$REPO_ROOT/AGENTS.md"
-    local agents_doc="$REPO_ROOT/docs/configure/agents.md"
-
-    if [[ -e "$legacy_profile" ]]; then
-        fail "Legacy visual profile" "Deprecated profile still exists: $legacy_profile"
-        errors=$((errors + 1))
-    else
-        pass "Legacy visual profile is absent"
-    fi
-
-    local stale_refs
-    stale_refs=$(grep -R -n -F --exclude-dir=.git "$legacy_agent" "$REPO_ROOT" || true)
-    if [[ -n "$stale_refs" ]]; then
-        fail "Legacy visual references" "Found stale references: $stale_refs"
-        errors=$((errors + 1))
-    else
-        pass "No stale legacy visual references remain"
-    fi
-
-    local spaced_legacy_refs=""
-    local migration_file
-    for migration_file in "$profile" "$orchestrator" "$plan_template" "$deepseek_protocol"; do
-        if [[ -f "$migration_file" ]]; then
-            local matches
-            matches=$(grep -inE 'vision[[:space:]]+bridge' "$migration_file" || true)
-            if [[ -n "$matches" ]]; then
-                spaced_legacy_refs="${spaced_legacy_refs}${migration_file}: ${matches}"$'\n'
-            fi
-        fi
-    done
-    if [[ -z "$spaced_legacy_refs" ]]; then
-        pass "No case-insensitive spaced legacy visual references remain in migration paths"
-    else
-        fail "Legacy visual references" "Found spaced remnants: $spaced_legacy_refs"
-        errors=$((errors + 1))
-    fi
-
-    if [[ ! -f "$profile" ]]; then
-        fail "$vision_agent" "Missing profile: $profile"
-        errors=$((errors + 1))
-        return
-    fi
-
-    local fm
-    fm=$(extract_frontmatter "$profile")
-    local model
-    model=$(get_field_value "$fm" "model" | tr -d '[:space:]')
-    if [[ "$model" == "openai/gpt-5.6-luna" ]]; then
-        pass "$vision_agent uses openai/gpt-5.6-luna"
-    else
-        fail "$vision_agent" "Expected model openai/gpt-5.6-luna, found '$model'"
-        errors=$((errors + 1))
-    fi
-
-    local permission_checks=(
-        '^  read: allow$'
-        '^  glob: allow$'
-        '^  grep: allow$'
-        '^  playwright_\*: allow$'
-        '^  edit: deny$'
-        '^  write: deny$'
-        '^  bash: deny$'
-        '^    "\*": "deny"$'
-        '^    "\*": deny$'
-    )
-    local missing_permission=false
-    for pattern in "${permission_checks[@]}"; do
-        if ! echo "$fm" | grep -qE "$pattern"; then
-            missing_permission=true
-            fail "$vision_agent" "Missing required permission pattern: $pattern"
-            errors=$((errors + 1))
-        fi
-    done
-    if ! $missing_permission; then
-        pass "$vision_agent has the required read-only Playwright permissions"
-    fi
-
-    # OpenCode's schema permits individual permission keys in addition to
-    # wildcard keys. Deny interaction and evaluation tools explicitly.
-    local forbidden_playwright_tools=(
-        playwright_browser_click playwright_browser_drag playwright_browser_drop
-        playwright_browser_evaluate playwright_browser_file_upload playwright_browser_fill_form playwright_browser_find
-        playwright_browser_handle_dialog playwright_browser_hover playwright_browser_mouse_click_xy
-        playwright_browser_mouse_down playwright_browser_mouse_drag_xy playwright_browser_mouse_move_xy
-        playwright_browser_mouse_up playwright_browser_mouse_wheel playwright_browser_navigate_back
-        playwright_browser_press_key playwright_browser_run_code_unsafe playwright_browser_select_option
-        playwright_browser_type playwright_browser_wait_for
-        playwright_browser_press_sequentially playwright_browser_check playwright_browser_uncheck
-        playwright_browser_keydown playwright_browser_keyup playwright_browser_cookie_clear
-        playwright_browser_cookie_delete playwright_browser_cookie_set playwright_browser_cookie_get
-        playwright_browser_cookie_list playwright_browser_localstorage_clear playwright_browser_localstorage_delete
-        playwright_browser_localstorage_set playwright_browser_localstorage_get playwright_browser_localstorage_list
-        playwright_browser_sessionstorage_clear playwright_browser_sessionstorage_delete playwright_browser_sessionstorage_set
-        playwright_browser_sessionstorage_get playwright_browser_sessionstorage_list playwright_browser_set_storage_state
-        playwright_browser_storage_state playwright_browser_route playwright_browser_reload
-        playwright_browser_network_state_set playwright_browser_pdf_save playwright_browser_annotate
-        playwright_browser_navigate_forward
-    )
-    local missing_denies=0
-    local forbidden_tool
-    for forbidden_tool in "${forbidden_playwright_tools[@]}"; do
-        if ! echo "$fm" | grep -qE "^  ${forbidden_tool}: deny$"; then
-            fail "$vision_agent" "Forbidden Playwright action is not explicitly denied: $forbidden_tool"
-            errors=$((errors + 1))
-            missing_denies=$((missing_denies + 1))
-        fi
-    done
-    if [[ "$missing_denies" -eq 0 ]]; then
-        pass "$vision_agent explicitly denies all forbidden Playwright actions"
-    fi
-
-    local denied_playwright_count
-    denied_playwright_count=$(echo "$fm" | grep -cE '^  playwright_browser_.*: deny$' || true)
-    if [[ "$denied_playwright_count" -ge 49 ]]; then
-        pass "$vision_agent denies $denied_playwright_count Playwright actions across interaction, storage, cookie, keyboard, navigation, and form domains"
-    else
-        fail "$vision_agent" "Expected at least 49 explicit Playwright action denies, found $denied_playwright_count"
-        errors=$((errors + 1))
-    fi
-
-    local task_block
-    task_block=$(echo "$fm" | awk '/^  task:/{found=1; print; next} found && /^  [a-z]/{exit} found{print}')
-    if [[ "$task_block" == $'  task:\n    "*": "deny"' ]]; then
-        pass "$vision_agent task permission denies every delegation target"
-    else
-        fail "$vision_agent" "Task permission must contain only \"*\": \"deny\""
-        errors=$((errors + 1))
-    fi
-
-    local skill
-    for skill in development-conventions engineering-workflow mcp-tooling; do
-        if ! echo "$fm" | grep -q "\"@${skill}\": allow"; then
-            fail "$vision_agent" "Missing allowed skill @$skill"
-            errors=$((errors + 1))
-        fi
-    done
-    if echo "$fm" | grep -q '^    "\*": deny$'; then
-        pass "$vision_agent denies all remaining skills"
-    else
-        fail "$vision_agent" "Missing deny-all skill permission"
-        errors=$((errors + 1))
-    fi
-    local actual_skills expected_skills
-    actual_skills=$(extract_skill_list "$fm" | sort)
-    expected_skills=$(printf '%s\n' development-conventions engineering-workflow mcp-tooling | sort)
-    if [[ "$actual_skills" == "$expected_skills" ]]; then
-        pass "$vision_agent allows exactly the approved skills"
-    else
-        fail "$vision_agent" "Unexpected allowed skills: $actual_skills"
-        errors=$((errors + 1))
-    fi
-
-    local orch_fm
-    orch_fm=$(extract_frontmatter "$orchestrator")
-    if echo "$orch_fm" | grep -q "\"${vision_agent}\": \"allow\""; then
-        pass "Orchestrator may spawn $vision_agent"
-    else
-        fail "Orchestrator" "Missing task allow-list entry for $vision_agent"
-        errors=$((errors + 1))
-    fi
-
-    local non_orchestrator_allows=""
-    local file
-    for file in $(find_agent_files); do
-        [[ "$file" == "$orchestrator" ]] && continue
-        if extract_frontmatter "$file" | grep -q "\"${vision_agent}\": \"allow\""; then
-            non_orchestrator_allows="${non_orchestrator_allows}${file}"$'\n'
-        fi
-    done
-    if [[ -z "$non_orchestrator_allows" ]]; then
-        pass "Only the orchestrator may spawn $vision_agent"
-    else
-        fail "$vision_agent" "Unexpected task allow-list entries: $non_orchestrator_allows"
-        errors=$((errors + 1))
-    fi
-
-    local orch_body
-    orch_body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$orchestrator")
-    for phrase in "mandatory changed-route visual gate" "final full-site desktop/mobile visual sweep"; do
-        if echo "$orch_body" | grep -qiF "$phrase"; then
-            pass "Orchestrator contains '$phrase'"
-        else
-            fail "Orchestrator" "Missing required visual gate phrase: $phrase"
-            errors=$((errors + 1))
-        fi
-    done
-
-    local architecture_diagram
-    architecture_diagram=$(awk '/^## Architecture$/ { capture=1; next } capture && /^## / { exit } capture { print }' "$orchestrator")
-    local per_task_line visual_gate_line deploy_line
-    per_task_line=$(echo "$architecture_diagram" | grep -nF '├─► For each task:' | cut -d: -f1 | head -1 || true)
-    visual_gate_line=$(echo "$architecture_diagram" | grep -nF '@ingenium-qa-vision changed-route visual gate' | cut -d: -f1 | head -1 || true)
-    deploy_line=$(echo "$architecture_diagram" | grep -nF 'Deploy + health verification' | cut -d: -f1 | head -1 || true)
-    if [[ -n "$per_task_line" && -n "$visual_gate_line" && -n "$deploy_line" \
-        && "$visual_gate_line" -gt "$per_task_line" && "$visual_gate_line" -gt "$deploy_line" ]]; then
-        pass "Orchestrator diagram places the changed-route visual gate after per-task QA/test and deploy/health verification"
-    else
-        fail "Orchestrator" "Architecture diagram must place the changed-route visual gate after the per-task block and deploy/health verification"
-        errors=$((errors + 1))
-    fi
-
-    local vision_body
-    vision_body=$(awk '/^---$/ { count++; next } count >= 2 { print }' "$profile")
-    local vision_policy_phrases=(
-        'http://localhost:3000'
-        'http://localhost:4097'
-        'about:blank'
-        'browser_evaluate'
-        'BLOCKED — sensitive content'
-        '/secrets'
-        '/config'
-        'Settings **Providers**'
-        '**Config** tabs'
-        'email bodies or attachments'
-        'private message contents'
-    )
-    local missing_vision_policy=0
-    local phrase
-    for phrase in "${vision_policy_phrases[@]}"; do
-        if ! echo "$vision_body" | grep -qF "$phrase"; then
-            fail "$vision_agent" "Missing passive/sensitive-data policy phrase: $phrase"
-            errors=$((errors + 1))
-            missing_vision_policy=$((missing_vision_policy + 1))
-        fi
-    done
-    if [[ "$missing_vision_policy" -eq 0 ]]; then
-        pass "$vision_agent contains localhost-only and sensitive-page rules"
-    fi
-
-    local forbidden_body_actions='evaluate|type/fill|click|press keys|hover|drag/drop/upload|mouse controls|dialogs|select options'
-    if echo "$vision_body" | grep -qiE "$forbidden_body_actions"; then
-        pass "$vision_agent body explicitly prohibits interactive Playwright actions"
-    else
-        fail "$vision_agent" "Missing explicit body prohibition for interactive Playwright actions"
-        errors=$((errors + 1))
-    fi
-
-    local restart_file
-    for restart_file in "$agents_md" "$agents_doc"; do
-        if grep -qiE 'After an OpenCode restart.*known non-sensitive dashboard state' "$restart_file" \
-            && grep -qiE 'BLOCKED.*stop and reconfigure.*not a pass' "$restart_file"; then
-            pass "Restart/smoke gate present in $(basename "$restart_file")"
-        else
-            fail "Restart/smoke gate" "Missing required Luna restart/smoke language in $restart_file"
-            errors=$((errors + 1))
-        fi
-    done
-
-    local docs_table
-    docs_table=$(awk '
-        /^## Agent Table$/ { capture=1; next }
-        capture && /^---$/ { exit }
-        capture { print }
-    ' "$agents_doc")
-    local docs_agent_count
-    docs_agent_count=$(echo "$docs_table" | grep -cP '^\| \*\*[^*]+\*\* \|' || true)
-    if [[ "$docs_agent_count" -eq 12 ]]; then
-        pass "docs/configure/agents.md lists 12 public agents"
-    else
-        fail "docs/configure/agents.md" "Expected 13 public agents in Agent Table, found $docs_agent_count"
-        errors=$((errors + 1))
-    fi
-
-    if [[ "$errors" -eq 0 ]]; then
-        pass "Luna visual QA migration checks passed"
-    fi
+if (errors.length) {
+  console.error(errors.join("\n"));
+  process.exit(1);
 }
-main() {
-    echo "═══════════════════════════════════════════════════════"
-    echo "  Agent Validation Tests"
-    echo "  Agents dir: $AGENTS_DIR"
-    echo "  Skills dir: $SKILLS_DIR"
-    echo "═══════════════════════════════════════════════════════"
+console.log("PASS: centralized config model mappings + case-sensitive variant validation");
+NODE
+else
+  pass "no active non-hidden agents to check (skipped)"
+fi
 
-    test_frontmatter_validity
-    test_permission_completeness
-    test_stale_skill_references
-    test_no_duplicate_skills
-    test_task_block_safety
-    test_no_git_workflows
-    test_skill_count_consistency
-    test_model_identity_match
-    test_body_skills_in_frontmatter
-    test_agents_table_task_block_coverage
-    test_orchestration_policy
-    test_luna_visual_qa_migration
+# ============================================================
+# 2b. Canonical active-model guidance must match opencode.json.
+#     Only inspect the explicit local-model active-assignment references;
+#     historical examples, drafts, and archived material are not authority.
+# ============================================================
+ORCHESTRATOR="$AGENTS_DIR/primary/ingenium-orchestrator.md"
+LOCAL_MODEL_GUIDANCE_SOURCES=(
+  "$REPO_ROOT/.opencode/skills/local-models/SKILL.md"
+  "$REPO_ROOT/.opencode/skills/local-models/references/deep-seek.md"
+  "$REPO_ROOT/.opencode/skills/local-models/references/qwen-3.5-9b.md"
+)
+local_model_guidance_valid=1
+for guidance_source in "${LOCAL_MODEL_GUIDANCE_SOURCES[@]}"; do
+  if [[ ! -r "$guidance_source" ]]; then
+    fail "canonical local-model guidance is missing or unreadable: $guidance_source"
+    local_model_guidance_valid=0
+  fi
+done
 
-    echo ""
-    echo "═══════════════════════════════════════════════════════"
-    echo "  Results: $(green "$PASSED passed"), $(red "$FAILED failed")"
-    echo "═══════════════════════════════════════════════════════"
+if [[ "$local_model_guidance_valid" -eq 1 && "${#CHECK_NAMES[@]}" -gt 0 ]]; then
+  node - "$CONFIG" "${LOCAL_MODEL_GUIDANCE_SOURCES[@]}" "${CHECK_NAMES[@]}" <<'NODE' || FAILED=1
+const fs = require("fs");
 
-    if $TEST_FAILED; then
-        exit 1
-    fi
+const [configPath, skillPath, deepSeekPath, qwenPath, ...activeNames] = process.argv.slice(2);
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const configuredAgents = config.agent || {};
+const active = new Set(activeNames);
+const errors = [];
+
+function modelFamily(model) {
+  return String(model).split("/", 1)[0].toLowerCase();
 }
 
-main "$@"
+function claimFor(label) {
+  const normalized = String(label).toLowerCase();
+  if (normalized.includes("deepseek")) {
+    const hasFlash = normalized.includes("flash");
+    const hasPro = normalized.includes("pro");
+    return {
+      family: "deepseek",
+      requiredText: normalized.includes("v4") ? "deepseek-v4" : null,
+      exactModel: hasFlash && !hasPro
+        ? "deepseek/deepseek-v4-flash"
+        : hasPro && !hasFlash
+          ? "deepseek/deepseek-v4-pro"
+          : null,
+    };
+  }
+  if (normalized.includes("qwen")) {
+    return {
+      family: "qwen",
+      requiredText: null,
+      exactModel: /3\.5[^0-9]*9b/.test(normalized) || normalized.includes("qwen3.5-9b")
+        ? "qwen/qwen3.5-9b"
+        : null,
+    };
+  }
+  return null;
+}
+
+function checkClaim(agentName, label, source, lineNumber) {
+  if (!active.has(agentName)) return;
+  const mapping = configuredAgents[agentName];
+  if (!mapping || !mapping.model) return;
+
+  const claim = claimFor(label);
+  if (!claim) return;
+
+  const actualModel = String(mapping.model).toLowerCase();
+  if (modelFamily(actualModel) !== claim.family) {
+    errors.push(
+      `${source}:${lineNumber} claims ${agentName} uses ${claim.family}, ` +
+      `but opencode.json assigns ${mapping.model}`,
+    );
+    return;
+  }
+  if (claim.requiredText && !actualModel.includes(claim.requiredText)) {
+    errors.push(
+      `${source}:${lineNumber} claims ${agentName} uses ${label.trim()}, ` +
+      `but opencode.json assigns ${mapping.model}`,
+    );
+  } else if (claim.exactModel && actualModel !== claim.exactModel) {
+    errors.push(
+      `${source}:${lineNumber} claims ${agentName} uses ${label.trim()}, ` +
+      `but opencode.json assigns ${mapping.model}`,
+    );
+  }
+}
+
+function checkActiveParityTable(filePath) {
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  let inTable = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.includes("### Active OpenCode agent assignments")) {
+      inTable = true;
+      continue;
+    }
+    if (inTable && line.startsWith("For model-specific")) {
+      inTable = false;
+      continue;
+    }
+    if (!inTable) continue;
+
+    const row = line.match(/^\|\s*`([^`]+)`\s*\|\s*([^|]+)\s*\|/);
+    if (row) checkClaim(row[1], row[2], filePath, index + 1);
+  }
+}
+
+function checkNamedActiveAgents(filePath) {
+  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
+  const modelLine = lines.find((line) => /^\s*>?\s*\*\*Model\*\*:/i.test(line));
+  const modelLabel = modelLine ? modelLine.replace(/^.*?\*\*Model\*\*:\s*/i, "") : "";
+
+  lines.forEach((line, index) => {
+    const activeLine = line.match(/^\s*>?\s*\*\*Active agents using it\*\*:\s*(.*)$/i);
+    if (!activeLine || activeLine[1].trim().toLowerCase() === "none") return;
+
+    for (const name of activeLine[1].split(",").map((value) => value.trim())) {
+      if (name) checkClaim(name, modelLabel, filePath, index + 1);
+    }
+  });
+}
+
+checkActiveParityTable(skillPath);
+checkNamedActiveAgents(deepSeekPath);
+checkNamedActiveAgents(qwenPath);
+
+if (errors.length) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: canonical local-model active assignments match opencode.json");
+NODE
+elif [[ "$local_model_guidance_valid" -eq 1 ]]; then
+  pass "no active non-hidden agents to check (skipped canonical model guidance)"
+fi
+
+# ============================================================
+# 2c. Canonical agent docs must respect QA Vision's denied Bash permission.
+#     Keep this an explicit allow-list so drafts and archives cannot affect it.
+# ============================================================
+QA_VISION_PROFILE="$AGENTS_DIR/execution/ingenium-qa-vision.md"
+CANONICAL_AGENT_DOCS=(
+  "$REPO_ROOT/AGENTS.md"
+  "$REPO_ROOT/docs/configure/agents.md"
+  "$ORCHESTRATOR"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/agent-limits.md"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/configuring-opencode/source-index.md"
+)
+if [[ ! -r "$QA_VISION_PROFILE" ]]; then
+  fail "canonical QA Vision profile is missing or unreadable: $QA_VISION_PROFILE"
+elif ! grep -q '^  bash: deny$' "$QA_VISION_PROFILE"; then
+  fail "QA Vision profile does not deny Bash"
+else
+  vision_bash_errors=0
+  for canonical_agent_doc in "${CANONICAL_AGENT_DOCS[@]}"; do
+    if [[ ! -r "$canonical_agent_doc" ]]; then
+      fail "canonical agent doc is missing or unreadable: $canonical_agent_doc"
+      vision_bash_errors=1
+      continue
+    fi
+
+    stale_vision_bash_claim="$(grep -Ein \
+      '(^|[[:space:]|])@?ingenium-qa-vision([[:space:]|]|$).*([[:space:]|])Bash([[:space:]+|]|$)|(^|[[:space:]|])Bash([[:space:]+|]|$).*@?ingenium-qa-vision([[:space:]|]|$)' \
+      "$canonical_agent_doc" || true)"
+    if [[ -n "$stale_vision_bash_claim" ]]; then
+      fail "$(basename "$canonical_agent_doc") claims QA Vision has Bash despite its denied profile: $stale_vision_bash_claim"
+      vision_bash_errors=1
+    fi
+  done
+  if [[ "$vision_bash_errors" -eq 0 ]]; then
+    pass "canonical agent docs do not grant Bash to QA Vision"
+  fi
+fi
+
+# ============================================================
+# 3. Validate no stale Terra/Prompt Engineer task allow entries
+#    in orchestrator
+# ============================================================
+WORKFLOW_POLICY_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/source-index.md"
+AGENT_LIMITS_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/agent-limits.md"
+DOCUMENTED_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+  "$REPO_ROOT/AGENTS.md"
+  "$REPO_ROOT/docs/configure/agents.md"
+  "$WORKFLOW_POLICY_SOURCE"
+  "$AGENT_LIMITS_SOURCE"
+)
+
+extract_task_allow_names() {
+  awk '
+    /^  task:/ { in_task = 1; next }
+    in_task && /^  [^[:space:]]/ { exit }
+    in_task && /^    "[^"]+": *"allow"/ {
+      name = $0
+      sub(/^    "/, "", name)
+      sub(/".*$/, "", name)
+      print name
+    }
+  ' "$1"
+}
+
+validate_orchestrator_bash_permissions() {
+  local errors=0
+  local bash_header_count
+  local rule command action
+  local -a expected_rules=(
+    'git add *'
+    'git commit *'
+    'git push *'
+    'git rev-parse --short HEAD'
+    'npm test*'
+    'npm run test*'
+    'npm run build*'
+    'npm run typecheck*'
+    'npx tsc*'
+    'npx playwright test*'
+    'python -m pytest*'
+    'pytest*'
+    'go test*'
+    'go build*'
+    'cargo test*'
+    'cargo check*'
+    'cargo build*'
+  )
+  local -a bash_rules=()
+  declare -A expected_rules_set=()
+  declare -A seen_rules=()
+
+  for rule in "${expected_rules[@]}"; do
+    expected_rules_set["$rule"]=1
+  done
+
+  bash_header_count="$(awk '/^  bash:[[:space:]]*$/ { count++ } END { print count + 0 }' "$ORCHESTRATOR")"
+  if [[ "$bash_header_count" -ne 1 ]]; then
+    fail "orchestrator must define exactly one granular bash permission object"
+    errors=1
+  fi
+
+  if ! awk '
+    /^  bash:[[:space:]]*$/ { in_bash = 1; next }
+    in_bash && /^  [^[:space:]]/ { exit }
+    in_bash && /^    "\*"[[:space:]]*:[[:space:]]*"?deny"?[[:space:]]*$/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$ORCHESTRATOR"; then
+    fail "orchestrator bash permissions must deny arbitrary commands with a wildcard rule"
+    errors=1
+  fi
+
+  if ! awk '
+    /^  edit:[[:space:]]*/ {
+      edit_count++
+      if ($0 ~ /^  edit:[[:space:]]*deny[[:space:]]*$/) edit_denied = 1
+    }
+    /^  write:[[:space:]]*/ {
+      write_count++
+      if ($0 ~ /^  write:[[:space:]]*deny[[:space:]]*$/) write_denied = 1
+    }
+    END {
+      exit(edit_count == 1 && edit_denied && write_count == 1 && write_denied ? 0 : 1)
+    }
+  ' "$ORCHESTRATOR"; then
+    fail "orchestrator edit and write permissions must remain scalar deny rules"
+    errors=1
+  fi
+
+  mapfile -t bash_rules < <(awk '
+    /^  bash:[[:space:]]*$/ { in_bash = 1; next }
+    in_bash && /^  [^[:space:]]/ { exit }
+    in_bash && /^[[:space:]]*$/ { next }
+    in_bash && /^    "[^"]+":[[:space:]]*"?(allow|deny)"?[[:space:]]*$/ {
+      key = $0
+      sub(/^    "/, "", key)
+      sub(/".*$/, "", key)
+      value = $0
+      sub(/^.*":[[:space:]]*/, "", value)
+      gsub(/[[:space:]]/, "", value)
+      gsub(/"/, "", value)
+      print key "\t" value
+      next
+    }
+    in_bash && /^    / { print "__MALFORMED__\t" $0 }
+  ' "$ORCHESTRATOR")
+
+  for rule in "${bash_rules[@]}"; do
+    command="${rule%%$'\t'*}"
+    action="${rule#*$'\t'}"
+    if [[ "$command" == "__MALFORMED__" ]]; then
+      fail "orchestrator bash permissions contain a malformed nested rule: $action"
+      errors=1
+    elif [[ "$action" == "allow" && -n "${expected_rules_set[$command]:-}" ]]; then
+      if [[ -n "${seen_rules[$command]:-}" ]]; then
+        fail "orchestrator bash permissions contain duplicate allow rule: $command"
+        errors=1
+      else
+        seen_rules["$command"]=1
+      fi
+    elif [[ "$command" == "*" && "$action" == "deny" ]]; then
+      if [[ -n "${seen_rules['*|deny']:-}" ]]; then
+        fail "orchestrator bash permissions contain duplicate wildcard deny rules"
+        errors=1
+      else
+        seen_rules['*|deny']=1
+      fi
+    else
+      fail "orchestrator bash permissions contain an unexpected rule: $command ($action)"
+      errors=1
+    fi
+  done
+
+  for rule in "${expected_rules[@]}"; do
+    if [[ -z "${seen_rules[$rule]:-}" ]]; then
+      fail "orchestrator bash permissions are missing intended rule: $rule"
+      errors=1
+    fi
+  done
+
+  if [[ "$errors" -eq 0 ]]; then
+    pass "orchestrator has deny-by-default bash permissions limited to git coordination and test/build verification"
+    return 0
+  fi
+  return 1
+}
+
+extract_declared_agent_list() {
+  local source="$1"
+  local heading="$2"
+  awk -v heading="$heading" 'index($0, heading) == 1 { print; exit }' "$source" \
+    | grep -Eo '@[[:alnum:]-]+' | sed 's/^@//' || true
+}
+
+if [[ ! -f "$ORCHESTRATOR" ]]; then
+  fail "orchestrator profile not found at $ORCHESTRATOR"
+else
+  HAS_STALE=0
+  if grep -q 'ingenium-software-engineer-terra' "$ORCHESTRATOR"; then
+    fail "orchestrator has stale task allow entry for Terra (ingenium-software-engineer-terra)"
+    HAS_STALE=1
+  fi
+  if grep -q 'ingenium-prompt-engineer' "$ORCHESTRATOR"; then
+    fail "orchestrator has stale task allow entry for Prompt Engineer"
+    HAS_STALE=1
+  fi
+  if [[ "$HAS_STALE" -eq 0 ]]; then
+    pass "orchestrator has no stale Terra/Prompt Engineer task allow entries"
+  fi
+  # Still validate the standard delegation pattern and the granular bash
+  # permission boundary independently.
+  task_delegation_valid=0
+  if ! grep -q '^  task:' "$ORCHESTRATOR" || ! grep -q '"\*": "deny"' "$ORCHESTRATOR"; then
+    fail "orchestrator agent permissions or task delegation are invalid"
+  else
+    task_delegation_valid=1
+  fi
+  bash_permissions_valid=0
+  if validate_orchestrator_bash_permissions; then
+    bash_permissions_valid=1
+  fi
+  if [[ "$task_delegation_valid" -eq 1 && "$bash_permissions_valid" -eq 1 ]]; then
+    pass "orchestrator has delegation permissions with task deny-all pattern"
+  fi
+
+  # The task allow-list, writer list, and read-only list are three views of
+  # the same dispatchable topology.  Compare all three against the active
+  # profiles and derive writer status from permissions rather than prose.
+  declare -A TASK_ALLOW_NAMES=()
+  declare -A DECLARED_WRITER_NAMES=()
+  declare -A DECLARED_READ_ONLY_NAMES=()
+  mapfile -t TASK_ALLOW_LIST < <(extract_task_allow_names "$ORCHESTRATOR")
+  mapfile -t DECLARED_WRITER_LIST < <(
+    extract_declared_agent_list "$ORCHESTRATOR" "Writers (count toward"
+  )
+  mapfile -t DECLARED_READ_ONLY_LIST < <(
+    extract_declared_agent_list "$ORCHESTRATOR" "Read-only (count only toward"
+  )
+  for name in "${TASK_ALLOW_LIST[@]}"; do TASK_ALLOW_NAMES["$name"]=1; done
+  for name in "${DECLARED_WRITER_LIST[@]}"; do DECLARED_WRITER_NAMES["$name"]=1; done
+  for name in "${DECLARED_READ_ONLY_LIST[@]}"; do DECLARED_READ_ONLY_NAMES["$name"]=1; done
+
+  topology_errors=0
+  for name in "${!TASK_ALLOW_NAMES[@]}"; do
+    if [[ -z "${NAMES[$name]:-}" ]]; then
+      fail "orchestrator task allow-list contains stale or unknown agent: $name"
+      topology_errors=1
+    elif [[ -z "${DISPATCHABLE_NAMES[$name]:-}" ]]; then
+      fail "orchestrator task allow-list contains non-dispatchable agent: $name"
+      topology_errors=1
+    fi
+  done
+  for name in "${!DISPATCHABLE_NAMES[@]}"; do
+    if [[ -z "${TASK_ALLOW_NAMES[$name]:-}" ]]; then
+      fail "orchestrator task allow-list is missing active dispatchable agent: $name"
+      topology_errors=1
+    fi
+  done
+
+  for name in "${!DISPATCHABLE_NAMES[@]}"; do
+    if [[ -n "${WRITER_NAMES[$name]:-}" ]]; then
+      if [[ -z "${DECLARED_WRITER_NAMES[$name]:-}" ]]; then
+        fail "writer list is missing permissions-derived writer: $name"
+        topology_errors=1
+      fi
+      if [[ -n "${DECLARED_READ_ONLY_NAMES[$name]:-}" ]]; then
+        fail "$name appears in both writer and read-only lists"
+        topology_errors=1
+      fi
+    else
+      if [[ -z "${DECLARED_READ_ONLY_NAMES[$name]:-}" ]]; then
+        fail "read-only list is missing permissions-derived non-writer: $name"
+        topology_errors=1
+      fi
+      if [[ -n "${DECLARED_WRITER_NAMES[$name]:-}" ]]; then
+        fail "$name is permission-derived non-writer but appears in writer list"
+        topology_errors=1
+      fi
+    fi
+  done
+  for name in "${!DECLARED_WRITER_NAMES[@]}"; do
+    if [[ -z "${DISPATCHABLE_NAMES[$name]:-}" ]]; then
+      fail "writer list contains stale or non-dispatchable agent: $name"
+      topology_errors=1
+    fi
+  done
+  for name in "${!DECLARED_READ_ONLY_NAMES[@]}"; do
+    if [[ -z "${DISPATCHABLE_NAMES[$name]:-}" ]]; then
+      fail "read-only list contains stale or non-dispatchable agent: $name"
+      topology_errors=1
+    fi
+  done
+
+  # A documented dispatchable agent must also be task-allowed.  This explicit
+  # browser guard keeps the permission boundary from regressing silently.
+  if grep -q '@browser-agent' "$ORCHESTRATOR"; then
+    if [[ -n "${TASK_ALLOW_NAMES[browser-agent]:-}" ]]; then
+      pass "documented browser-agent dispatch is explicitly task-allowed"
+    else
+      fail "orchestrator documents browser-agent dispatch without task permission"
+      topology_errors=1
+    fi
+  fi
+
+  # Every task-allowed agent must appear in exactly one documented list, and
+  # every listed agent must be task-allowed.  This catches stale list/task
+  # drift even when both lists happen to contain plausible names.
+  for name in "${!TASK_ALLOW_NAMES[@]}"; do
+    listed=0
+    [[ -n "${DECLARED_WRITER_NAMES[$name]:-}" ]] && listed=$((listed + 1))
+    [[ -n "${DECLARED_READ_ONLY_NAMES[$name]:-}" ]] && listed=$((listed + 1))
+    if [[ "$listed" -ne 1 ]]; then
+      fail "task allow-list/list classification mismatch for $name"
+      topology_errors=1
+    fi
+  done
+  for name in "${!DECLARED_WRITER_NAMES[@]}" "${!DECLARED_READ_ONLY_NAMES[@]}"; do
+    if [[ -z "${TASK_ALLOW_NAMES[$name]:-}" ]]; then
+      fail "documented dispatch list contains agent not task-allowed: $name"
+      topology_errors=1
+    fi
+  done
+  if [[ "$topology_errors" -eq 0 ]]; then
+    pass "task allow-list and permissions-derived writer/read-only lists agree"
+  fi
+fi
+
+# ============================================================
+# 4. Validate every canonical policy source and recognizable examples.
+#    Policy copies must agree on the 6-active/3-writer limits.  Examples are
+#    checked by observed @agent lines, rather than trusting their prose.
+# ============================================================
+for policy_source in "${DOCUMENTED_POLICY_SOURCES[@]}"; do
+  if [[ -r "$policy_source" ]]; then
+    pass "canonical policy source is available for safe inspection: ${policy_source#"$REPO_ROOT"/}"
+  else
+    fail "canonical policy source is missing or unreadable: $policy_source"
+  fi
+done
+
+policy_errors=0
+
+check_policy_pattern() {
+  local source="$1"
+  local label="$2"
+  local pattern="$3"
+  local description="$4"
+  if grep -qE "$pattern" "$source"; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    policy_errors=1
+  fi
+}
+
+check_normalized_policy_pattern() {
+  local source="$1"
+  local label="$2"
+  local phrase="$3"
+  local description="$4"
+  local normalized_source
+  local normalized_phrase
+
+  normalized_source="$(tr -s '[:space:]' ' ' < "$source")"
+  normalized_phrase="$(printf '%s\n' "$phrase" | tr -s '[:space:]' ' ')"
+  if [[ "$normalized_source" == *"$normalized_phrase"* ]]; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    policy_errors=1
+  fi
+}
+
+# These patterns intentionally vary by document format.  That makes this a
+# real cross-source check instead of merely checking that the files exist.
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  '6-Active / 3-Writer Phase Scheduler' \
+  "the 6-active/3-writer scheduler declaration"
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  '^\| \*\*Active subagents per phase\*\* \| 6 \|' \
+  "the max-6 active concurrency table entry"
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  '^\| \*\*Concurrent writers per wave\*\* \| 3 \|' \
+  "the max-3 writer concurrency table entry"
+check_policy_pattern "$ORCHESTRATOR" "orchestrator" \
+  'Phase Declaration Protocol' \
+  "the phase declaration protocol"
+
+check_policy_pattern "$REPO_ROOT/AGENTS.md" "AGENTS.md" \
+  '## 🔴 Orchestration Policy — 6-Active / 3-Writer Phase Scheduler' \
+  "the 6-active/3-writer scheduler declaration"
+check_policy_pattern "$REPO_ROOT/AGENTS.md" "AGENTS.md" \
+  '^\| \*\*Active subagents per phase\*\* \| 6 \|' \
+  "the max-6 active concurrency table entry"
+check_policy_pattern "$REPO_ROOT/AGENTS.md" "AGENTS.md" \
+  '^\| \*\*Concurrent writers per wave\*\* \| 3 \|' \
+  "the max-3 writer concurrency table entry"
+check_policy_pattern "$REPO_ROOT/AGENTS.md" "AGENTS.md" \
+  'Phase Declaration Protocol' \
+  "the phase declaration protocol"
+
+check_normalized_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
+  '6 active subagents max, 3 concurrent writers max' \
+  "the max-6/max-3 behavioral policy"
+check_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
+  'Phase Declaration' \
+  "the phase declaration protocol"
+check_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
+  'max 6' \
+  "a max-6 phase limit"
+check_policy_pattern "$REPO_ROOT/docs/configure/agents.md" "docs/configure/agents.md" \
+  'max 3' \
+  "a max-3 writer limit"
+
+check_policy_pattern "$WORKFLOW_POLICY_SOURCE" "workflow source-index" \
+  'Maximum 6 active subagents per phase' \
+  "the max-6 active policy"
+check_policy_pattern "$WORKFLOW_POLICY_SOURCE" "workflow source-index" \
+  'Maximum 3 concurrent writers per wave' \
+  "the max-3 writer policy"
+check_policy_pattern "$WORKFLOW_POLICY_SOURCE" "workflow source-index" \
+  'Mandatory phase declarations' \
+  "the phase declaration requirement"
+
+check_policy_pattern "$AGENT_LIMITS_SOURCE" "agent-limits.md" \
+  'Canonical Policy: 6 Active / 3 Writers' \
+  "the canonical max-6/max-3 policy heading"
+check_policy_pattern "$AGENT_LIMITS_SOURCE" "agent-limits.md" \
+  '^\| \*\*Max active subagents per phase\*\* \| 6 \|' \
+  "the max-6 active limit"
+check_policy_pattern "$AGENT_LIMITS_SOURCE" "agent-limits.md" \
+  '^\| \*\*Max concurrent writers\*\* \| 3 \|' \
+  "the max-3 writer limit"
+check_policy_pattern "$AGENT_LIMITS_SOURCE" "agent-limits.md" \
+  'Mandatory Phase Declarations' \
+  "the phase declaration requirement"
+
+# A stale policy claim must mention concurrency/phase/wave semantics.  This
+# avoids confusing the valid 12 logical-profile count with a stale 12/6
+# scheduling limit while still catching 12/6 and 6/6 policy variants.
+STALE_POLICY_PATTERN='(^|[^[:alnum:]])12[[:space:]_-]*(active|concurrent)[[:space:]_-]*(sub)?agents?([^[:alnum:]]|$).*(phase|wave|limit|concurr|simultaneous|writer)|(^|[^[:alnum:]])(phase|wave|limit|concurr|simultaneous|writer).*(12[[:space:]_-]*(active|concurrent)[[:space:]_-]*(sub)?agents?|12[[:space:]_-]*writers?)|(^|[^[:alnum:]])12[[:space:]]*/[[:space:]]*6([^[:alnum:]]|$)|(^|[^[:alnum:]])6[[:space:]]*/[[:space:]]*6([^[:alnum:]]|$)|(^|[^[:alnum:]])6[[:space:]_-]*(concurrent[[:space:]_-]*)?writers?([^[:alnum:]]|$)|(^|[^[:alnum:]])max(imum)?[[:space:]]+(of[[:space:]]+)?6[[:space:]_-]*(concurrent[[:space:]_-]*)?writers?([^[:alnum:]]|$)'
+for policy_source in "${DOCUMENTED_POLICY_SOURCES[@]}"; do
+  stale_policy="$(grep -Ein "$STALE_POLICY_PATTERN" "$policy_source" || true)"
+  if [[ -n "$stale_policy" ]]; then
+    fail "$(basename "$policy_source") contains stale 12/6 or 6/6 policy text: $stale_policy"
+    policy_errors=1
+  else
+    pass "$(basename "$policy_source") contains no stale 12/6 or 6/6 policy text"
+  fi
+done
+
+# Writer references in policy prose are checked against the permissions-derived
+# writer index.  This deliberately accepts ingenium-docs and browser-agent;
+# hard-coding only the two software engineers was the original QA defect.
+writer_agents="$(grep -Ei 'Writers[[:space:]]*\(count|\(writer([,)]|[[:space:]])' "$ORCHESTRATOR" | grep -Eo '@[[:alnum:]-]+' | sort -u || true)"
+unexpected_writers=""
+while IFS= read -r writer_ref; do
+  [[ -z "$writer_ref" ]] && continue
+  writer_name="${writer_ref#@}"
+  if [[ -z "${WRITER_NAMES[$writer_name]:-}" ]]; then
+    unexpected_writers+="$writer_ref\n"
+  fi
+done <<< "$writer_agents"
+if [[ -n "$unexpected_writers" ]]; then
+  fail "orchestrator references non-writer profiles as writers: $(printf '%b' "$unexpected_writers")"
+  policy_errors=1
+else
+  pass "orchestrator writer references match permissions-derived writer profiles"
+fi
+
+capture_example() {
+  local source="$1"
+  local start_marker="$2"
+  local end_marker="$3"
+  awk -v start="$start_marker" -v end="$end_marker" '
+    index($0, start) { capture = 1 }
+    capture { print }
+    capture && index($0, end) { exit }
+  ' "$source"
+}
+
+validate_wave_block() {
+  local label="$1"
+  local block="$2"
+  local active_count=0
+  local writer_count=0
+  local agent_line agent_ref agent_name
+  local -a agent_lines=()
+  mapfile -t agent_lines < <(
+    printf '%s\n' "$block" | grep -E '^[[:space:]]+@[[:alnum:]-]+' || true
+  )
+
+  for agent_line in "${agent_lines[@]}"; do
+    active_count=$((active_count + 1))
+    while IFS= read -r agent_ref; do
+      [[ -z "$agent_ref" ]] && continue
+      agent_name="${agent_ref#@}"
+      if [[ -z "${NAMES[$agent_name]:-}" ]]; then
+        fail "$label references unknown agent $agent_ref"
+        policy_errors=1
+      elif [[ -n "${WRITER_NAMES[$agent_name]:-}" ]]; then
+        writer_count=$((writer_count + 1))
+        if [[ "$agent_line" != *"(writer"* ]]; then
+          fail "$label omits writer annotation for permissions-derived writer $agent_ref"
+          policy_errors=1
+        fi
+      elif [[ "$agent_line" == *"(writer"* ]]; then
+        fail "$label marks permissions-derived non-writer $agent_ref as a writer"
+        policy_errors=1
+      fi
+    done < <(printf '%s\n' "$agent_line" | grep -Eo '@[[:alnum:]-]+' || true)
+  done
+
+  if [[ "$active_count" -le "$MAX_ACTIVE_SUBAGENTS" && "$writer_count" -le "$MAX_CONCURRENT_WRITERS" ]]; then
+    pass "$label stays within max 6 active agents and max 3 permission-derived writers ($active_count/$writer_count)"
+  else
+    fail "$label exceeds max 6 active/3 permission-derived writers ($active_count/$writer_count)"
+    policy_errors=1
+  fi
+
+  local declared_active="" declared_writers=""
+  if [[ "$block" =~ \(([0-9]+)[[:space:]]+active,[[:space:]]*([0-9]+)[[:space:]]+writers ]]; then
+    declared_active="${BASH_REMATCH[1]}"
+    declared_writers="${BASH_REMATCH[2]}"
+  elif [[ "$block" =~ Active:[[:space:]]*([0-9]+),[[:space:]]*Writers:[[:space:]]*([0-9]+) ]]; then
+    declared_active="${BASH_REMATCH[1]}"
+    declared_writers="${BASH_REMATCH[2]}"
+  fi
+  if [[ -n "$declared_active" ]]; then
+    if [[ "$declared_active" -eq "$active_count" && "$declared_writers" -eq "$writer_count" ]]; then
+      pass "$label declaration matches observed agents ($declared_active/$declared_writers)"
+    else
+      fail "$label declares $declared_active/$declared_writers but contains $active_count/$writer_count"
+      policy_errors=1
+    fi
+  fi
+  return 0
+}
+
+validate_example_block() {
+  local source="$1"
+  local label="$2"
+  local start_marker="$3"
+  local end_marker="$4"
+  local block
+  block="$(capture_example "$source" "$start_marker" "$end_marker")"
+
+  if [[ -z "$block" ]]; then
+    fail "$label is missing or unreadable"
+    policy_errors=1
+    return
+  fi
+
+  # A single captured example can contain several serialized waves.  Validate
+  # each wave independently so the writer cap is measured concurrently, while
+  # still checking every dispatch line in the example.
+  local line wave_block="" wave_index=0 saw_wave=0
+  while IFS= read -r line; do
+    if [[ "$line" == Phase:*Wave* || "$line" == "Post-writer wave:"* || "$line" =~ ^[[:space:]]*Wave[[:space:]][0-9]+ || "$line" =~ ^[[:space:]]*Post-writer ]]; then
+      if [[ "$saw_wave" -eq 1 ]]; then
+        wave_index=$((wave_index + 1))
+        validate_wave_block "$label wave $wave_index" "$wave_block"
+      fi
+      saw_wave=1
+      wave_block="$line"
+    elif [[ "$saw_wave" -eq 1 ]]; then
+      wave_block+=$'\n'"$line"
+    else
+      wave_block+="$line"$'\n'
+    fi
+  done <<< "$block"
+  if [[ "$saw_wave" -eq 1 ]]; then
+    wave_index=$((wave_index + 1))
+    validate_wave_block "$label wave $wave_index" "$wave_block"
+  else
+    validate_wave_block "$label" "$wave_block"
+  fi
+}
+
+if [[ -f "$ORCHESTRATOR" ]]; then
+  validate_example_block "$ORCHESTRATOR" \
+    "orchestrator dispatch example" \
+    'Phase: "Auth + Email + Dashboard changes"' \
+    '→ orchestrator receives all results'
+  validate_example_block "$ORCHESTRATOR" \
+    "orchestrator serialized-writer example" \
+    'Phase: "Refactor auth.ts"' \
+    '→ serialized example complete'
+fi
+if [[ -f "$AGENT_LIMITS_SOURCE" ]]; then
+  validate_example_block "$AGENT_LIMITS_SOURCE" \
+    "agent-limits full-parallel example" \
+    'Phase: "Implement auth + email + dashboard widgets"' \
+    'Active:'
+fi
+
+if [[ "$policy_errors" -eq 0 ]]; then
+  pass "all canonical policy sources and recognizable examples passed"
+fi
+
+# ============================================================
+# 5. Chat read-only safety boundary — canonical profile in chat/ subdirectory
+# ============================================================
+CHAT_FILE="$AGENTS_DIR/chat/ingenium-chat.md"
+if [[ ! -f "$CHAT_FILE" ]]; then
+  fail "no chat agent profile found at $CHAT_FILE"
+elif ! grep -q '^  edit: deny$' "$CHAT_FILE" || ! grep -q '^  write: deny$' "$CHAT_FILE" || ! grep -q '^  bash: deny$' "$CHAT_FILE" || ! grep -q '"\*": "deny"' "$CHAT_FILE"; then
+  fail "canonical chat safety boundary is invalid"
+else
+  pass "canonical chat remains read-only and cannot delegate"
+fi
+
+if [[ "$FAILED" -ne 0 ]]; then exit 1; fi

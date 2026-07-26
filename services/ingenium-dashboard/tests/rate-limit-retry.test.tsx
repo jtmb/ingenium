@@ -314,6 +314,22 @@ describe("REL-001: Chat rate-limit recovery", () => {
     expect(screen.queryByText(/retrying in/)).toBeNull();
   });
 
+  it("shows the authentication gateway error without presenting a retry affordance", async () => {
+    mockChatConfig.mockRejectedValue(new ApiError(401, "Dashboard authentication required", null));
+
+    render(<ChatShell />);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Failed to load chat config: Dashboard authentication required/),
+      ).not.toBeNull();
+    });
+
+    expect(screen.queryByRole("button", { name: "Retry Now" })).toBeNull();
+    expect(screen.queryByText(/retrying in/)).toBeNull();
+    expect((screen.getByTestId("chat-header-provider") as HTMLSelectElement).disabled).toBe(true);
+  });
+
   // ── Generic Error (non-ApiError) still works ──────────────────────
 
   it("handles generic Error objects (non-ApiError) gracefully", async () => {

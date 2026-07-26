@@ -11,7 +11,7 @@ import { test, expect } from "@playwright/test";
  * test conventions (no data-testid attributes on most pages yet).
  */
 
-const BASE = "http://localhost:3000";
+const BASE = process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000";
 const PROJECT = "gh-llm-bootstrap";
 
 /* ------------------------------------------------------------------ */
@@ -23,8 +23,11 @@ async function goto(page: any, path: string) {
     waitUntil: "domcontentloaded",
   });
   expect(res?.ok()).toBeTruthy();
-  // Allow page JS to render dynamic content
-  await page.waitForTimeout(1500);
+  await expect(page.locator("main")).toBeVisible({ timeout: 15_000 });
+}
+
+async function waitForClientState(page: any): Promise<void> {
+  await expect(page.locator("main")).toBeVisible({ timeout: 10_000 });
 }
 
 /* ------------------------------------------------------------------ */
@@ -74,8 +77,7 @@ test.describe("Archive Page", () => {
     // Either shows "No archived projects" or a list with Restore buttons
     const emptyState = page.getByText("No archived projects");
     const restoreBtn = page.getByRole("button", { name: /Restore/i });
-    const hasContent = await emptyState.isVisible().catch(() => false) ||
-                       await restoreBtn.isVisible().catch(() => false);
+    const hasContent = await emptyState.isVisible() || await restoreBtn.isVisible();
     expect(hasContent).toBeTruthy();
   });
 });
@@ -110,7 +112,7 @@ test.describe("Skills Page", () => {
 
     const searchBox = page.getByPlaceholder("Search skills...");
     await searchBox.fill("database");
-    await page.waitForTimeout(500);
+    await waitForClientState(page);
 
     // Should show matching results
     await expect(page.getByText("database-conventions").first()).toBeVisible({ timeout: 3000 });
@@ -121,7 +123,7 @@ test.describe("Skills Page", () => {
 
     const sortSelect = page.locator("select").first();
     await sortSelect.selectOption("Newest first");
-    await page.waitForTimeout(500);
+    await waitForClientState(page);
 
     // Verify the sort changed - heading still shows skills count
     await expect(page.getByRole("heading", { name: /^Skills / })).toBeVisible();
@@ -163,7 +165,7 @@ test.describe("Tasks Page", () => {
     const advanceBtn = page.getByRole("button", { name: /Advance/i }).first();
     if (await advanceBtn.isVisible()) {
       await advanceBtn.click();
-      await page.waitForTimeout(500);
+      await waitForClientState(page);
       await expect(page.getByText(taskTitle).first()).toBeVisible();
     }
   });
@@ -185,7 +187,7 @@ test.describe("Plugins Page", () => {
     await goto(page, "/plugins");
 
     // Wait for plugin cards
-    await page.waitForTimeout(1000);
+    await waitForClientState(page);
 
     // Check for plugin action buttons
     const editBtn = page.getByRole("button", { name: "Edit" }).first();
@@ -203,12 +205,12 @@ test.describe("Plugins Page", () => {
   test("edit button shows textarea with source code", async ({ page }) => {
     await goto(page, "/plugins");
 
-    await page.waitForTimeout(1000);
+    await waitForClientState(page);
     const editBtn = page.getByRole("button", { name: "Edit" }).first();
     await editBtn.click();
 
     // Should show a textarea or similar editor after edit click
-    await page.waitForTimeout(500);
+    await waitForClientState(page);
     const textarea = page.locator("textarea").first();
     await expect(textarea).toBeVisible({ timeout: 3000 });
   });
@@ -227,8 +229,7 @@ test.describe("Mail Page", () => {
     // Either shows "No email accounts" or account list
     const noAccounts = page.getByText("No email accounts configured");
     const addAccountBtn = page.getByRole("button", { name: "Add Account" });
-    const hasContent = await noAccounts.isVisible().catch(() => false) ||
-                       await addAccountBtn.isVisible().catch(() => false);
+    const hasContent = await noAccounts.isVisible() || await addAccountBtn.isVisible();
     expect(hasContent).toBeTruthy();
   });
 });
@@ -245,7 +246,7 @@ test.describe("Agents Page", () => {
     await expect(page.getByRole("button", { name: "Add Agent" })).toBeVisible();
 
     // Agent cards should be grouped by category
-    await page.waitForTimeout(1000);
+    await waitForClientState(page);
 
     // Check for agent names (they have "Enabled" badge)
     const agentCard = page.getByText("Enabled").first();
@@ -265,7 +266,7 @@ test.describe("Agents Page", () => {
   test("agent cards have preview content toggle", async ({ page }) => {
     await goto(page, "/agents");
 
-    await page.waitForTimeout(1000);
+    await waitForClientState(page);
 
     // Click first agent card to toggle preview content
     const previewBtn = page.getByText("Preview content").first();
@@ -273,7 +274,7 @@ test.describe("Agents Page", () => {
     await previewBtn.click();
 
     // Verify content expands (or at least button state changes)
-    await page.waitForTimeout(300);
+    await waitForClientState(page);
   });
 });
 
@@ -331,7 +332,7 @@ test.describe("Config Page", () => {
     await goto(page, "/config");
 
     await page.getByRole("button", { name: "Global Config" }).click();
-    await page.waitForTimeout(500);
+    await waitForClientState(page);
 
     // Should show global config content
     const textarea = page.locator("textarea").first();
@@ -364,7 +365,7 @@ test.describe("Observations Page", () => {
   test("shows observation cards with type badges", async ({ page }) => {
     await goto(page, "/observations");
 
-    await page.waitForTimeout(2000);
+    await waitForClientState(page);
 
     // Should have observation cards with type badges
     const typeBadge = page.locator("span:has-text('pattern')").first();
@@ -397,7 +398,7 @@ test.describe("Personality Page", () => {
   test("shows trait cards grouped by type", async ({ page }) => {
     await goto(page, "/personality");
 
-    await page.waitForTimeout(2000);
+    await waitForClientState(page);
 
     // Trait cards with confidence percentages
     const traitCard = page.getByText("%").first();
@@ -407,11 +408,11 @@ test.describe("Personality Page", () => {
   test("sort dropdown switches mode", async ({ page }) => {
     await goto(page, "/personality");
 
-    await page.waitForTimeout(1000);
+    await waitForClientState(page);
 
     const sortSelect = page.locator("select").first();
     await sortSelect.selectOption("Newest first");
-    await page.waitForTimeout(500);
+    await waitForClientState(page);
 
     // Should still show traits
     await expect(page.getByText("trait(s)").first()).toBeVisible({ timeout: 3000 });
@@ -420,7 +421,7 @@ test.describe("Personality Page", () => {
   test("dismiss button exists on trait cards", async ({ page }) => {
     await goto(page, "/personality");
 
-    await page.waitForTimeout(2000);
+    await waitForClientState(page);
 
     // Each trait card should have a dismiss (×) button
     const dismissBtn = page.getByRole("button", { name: "×" }).first();
@@ -450,7 +451,7 @@ test.describe("Pipeline Page", () => {
     await goto(page, "/pipeline");
 
     // Wait for initial load
-    await page.waitForTimeout(2000);
+    await waitForClientState(page);
 
     // All filter pills
     await expect(page.getByRole("button", { name: "All" })).toBeVisible();
@@ -465,11 +466,11 @@ test.describe("Pipeline Page", () => {
   test("pause button toggles to resume", async ({ page }) => {
     await goto(page, "/pipeline");
 
-    await page.waitForTimeout(2000);
+    await waitForClientState(page);
 
     const pauseBtn = page.locator("button:has-text('Pause')");
     await pauseBtn.click();
-    await page.waitForTimeout(500);
+    await waitForClientState(page);
 
     await expect(page.locator("button:has-text('Resume')")).toBeVisible();
   });
@@ -478,7 +479,7 @@ test.describe("Pipeline Page", () => {
     await goto(page, "/pipeline");
 
     // Wait for events to load
-    await page.waitForTimeout(3000);
+    await waitForClientState(page);
 
     // Should have event entries in the timeline
     const eventEntry = page.locator("text=Synthesis").or(page.locator("text=Agent")).or(page.locator("text=Plugin"));

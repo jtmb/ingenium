@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import SmartSuggest from "./SmartSuggest";
 import RichTextEditor, { RichTextEditorHandle } from "./RichTextEditor";
-import { getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase } from "@/lib/api";
 
 const API_BASE = getApiBase();
 
@@ -135,9 +135,8 @@ export default function EmailComposer({
     setReviewError(null);
     setReviewResult(null);
     try {
-      const res = await fetch(`${API_BASE}/emails/review-draft?project=${project || "global-default"}`, {
+      const res = await dashboardFetch(`${API_BASE}/emails/review-draft?project=${project || "global-default"}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: plainText, subject }),
       });
       const data = await res.json().catch(() => ({ data: null }));

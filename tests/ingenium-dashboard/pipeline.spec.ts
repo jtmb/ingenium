@@ -1,114 +1,145 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type APIRequestContext, type Page } from "@playwright/test";
+import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
-/**
- * E2E tests for the Pipeline, Observations, Personality, and Learnings pages.
- *
- * These tests run against a live Next.js dev server (port 3000) and real API
- * server (port 4097). Each test navigates to a management page and verifies
- * that interactions work end-to-end.
- *
- * Selectors use roles, labels, and text content since the pages currently
- * don't have data-testid attributes. If refactoring later, prefer
- * data-testid selectors for stability (see useful-tests skill).
- */
+const runtime = getDefaultSuiteRuntime();
+const projectQuery = encodeURIComponent(runtime.project);
 
+async function createPipelineEvent(request: APIRequestContext, title: string, source = "agent"): Promise<void> {
+  const response = await request.post(
+    `${runtime.apiBase}/pipeline/events?project=${projectQuery}`,
+    {
+      headers: runtime.apiHeaders,
+      data: {
+        event_type: "observation_created",
+        event_source: source,
+        title,
+        description: "Created by the isolated Playwright fixture run",
+      },
+    },
+  );
+  expect(response.status()).toBe(201);
+}
+
+async function openPipeline(page: Page): Promise<void> {
+  const eventsResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v1/pipeline/events"
+      && response.request().method() === "GET"
+      && response.status() === 200;
+  });
+  await page.goto("/pipeline", { waitUntil: "domcontentloaded" });
+  await eventsResponse;
+}
+
+async function createObservation(request: APIRequestContext, content: string): Promise<void> {
+  const response = await request.post(
+    `${runtime.apiBase}/observations?project=${projectQuery}`,
+    {
+      headers: runtime.apiHeaders,
+      data: { observation_type: "pattern", content, importance: 5, source: "playwright" },
+    },
+  );
+  expect(response.status()).toBe(201);
+}
+
+async function openObservations(page: Page): Promise<void> {
+  const listResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v1/observations"
+      && response.request().method() === "GET"
+      && response.status() === 200;
+  });
+  await page.goto("/observations", { waitUntil: "domcontentloaded" });
+  await listResponse;
+}
+
+async function openPersonality(page: Page): Promise<void> {
+  const listResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v1/personality"
+      && response.request().method() === "GET"
+      && response.status() === 200;
+  });
+  await page.goto("/personality", { waitUntil: "domcontentloaded" });
+  await listResponse;
+}
+
+/** E2E coverage for the isolated Pipeline, Observations, Personality, and Learnings pages. */
 test.describe("Pipeline Dashboard", () => {
   test("pipeline page loads with stats bar and filter pills", async ({ page }) => {
-    await page.goto("http://localhost:3000/pipeline");
-    
-    // The page title is displayed as an <h1>
+    await openPipeline(page);
+
     await expect(page.locator("h1")).toContainText("Pipeline Activity");
-    
-    // Stats bar - all four stats should be visible in the top-right area
-    // Use more specific selectors to avoid matching other "Observations:" text on the page
     await expect(page.locator("text=Total:")).toBeVisible();
     await expect(page.locator("span", { hasText: "Observations:" })).toBeVisible();
     await expect(page.locator("span", { hasText: "Syntheses:" })).toBeVisible();
     await expect(page.locator("span", { hasText: "Traits:" })).toBeVisible();
-    
-    // Filter pills - all six buttons should be visible
-    await expect(page.locator("button:has-text('All')")).toBeVisible();
-    await expect(page.locator("button:has-text('Agent')")).toBeVisible();
-    await expect(page.locator("button:has-text('Plugin')")).toBeVisible();
-    await expect(page.locator("button:has-text('Synthesis')")).toBeVisible();
-    await expect(page.locator("button:has-text('Trait')")).toBeVisible();
-    await expect(page.locator("button:has-text('Pause')")).toBeVisible();
+
+    for (const label of ["All", "Agent", "Plugin", "Synthesis", "Trait", "Pause"]) {
+      await expect(page.getByRole("button", { name: label, exact: label !== "Pause" })).toBeVisible();
+    }
   });
 
-  test("pipeline page shows events when data exists", async ({ page }) => {
-    await page.goto("http://localhost:3000/pipeline");
-    
-    // Wait for events to load (polling interval is 3 seconds)
-    await page.waitForTimeout(3000);
-    
-    // Should show events in the timeline (seeded data)
-    const eventCards = page.locator("text=Agent observed").or(page.locator("text=Synthesis")).or(page.locator("text=Trait"));
-    await expect(eventCards.first()).toBeVisible({ timeout: 5000 });
+  test("pipeline page shows an event created in the isolated project", async ({ page, request }) => {
+    const title = `E2E pipeline event ${Date.now()}`;
+    await createPipelineEvent(request, title);
+    await openPipeline(page);
+    await expect(page.getByText(title, { exact: true })).toBeVisible();
   });
 
-  test("filter pills filter events", async ({ page }) => {
-    await page.goto("http://localhost:3000/pipeline");
-    
-    // Wait for initial load
-    await page.waitForTimeout(2000);
-    
-    // Click Agent filter - should change the active filter
-    await page.locator("button:has-text('Agent')").click();
-    await page.waitForTimeout(1000);
-    
-    // Verify Agent filter is now active (different styling)
-    const agentBtn = page.locator("button:has-text('Agent')");
-    await expect(agentBtn).toBeVisible();
-    
-    // Click Synthesis filter - should change the active filter
-    await page.locator("button:has-text('Synthesis')").click();
-    await page.waitForTimeout(1000);
-    
-    // Verify Synthesis filter is now active
-    const synthesisBtn = page.locator("button:has-text('Synthesis')");
-    await expect(synthesisBtn).toBeVisible();
+  test("filter pills filter events without arbitrary delays", async ({ page, request }) => {
+    await createPipelineEvent(request, `E2E filter event ${Date.now()}`);
+    await openPipeline(page);
+
+    const agentResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/pipeline/events"
+        && url.searchParams.get("source") === "agent"
+        && response.request().method() === "GET"
+        && response.status() === 200;
+    });
+    const agentButton = page.getByRole("button", { name: "Agent", exact: true });
+    await agentButton.click();
+    await agentResponse;
+    await expect(agentButton).toHaveClass(/bg-gray-800/);
+
+    const synthesisResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/pipeline/events"
+        && url.searchParams.get("source") === "synthesis"
+        && response.request().method() === "GET"
+        && response.status() === 200;
+    });
+    const synthesisButton = page.getByRole("button", { name: "Synthesis", exact: true });
+    await synthesisButton.click();
+    await synthesisResponse;
+    await expect(synthesisButton).toHaveClass(/bg-gray-800/);
   });
 
   test("pause button toggles polling", async ({ page }) => {
-    await page.goto("http://localhost:3000/pipeline");
-    
-    // Wait for initial load
-    await page.waitForTimeout(2000);
-    
-    const pauseBtn = page.locator("button:has-text('Pause')");
-    await expect(pauseBtn).toBeVisible();
-    
-    // Click Pause button
-    await pauseBtn.click();
-    
-    // Should now show Resume (with play icon)
-    await expect(page.locator("button:has-text('Resume')")).toBeVisible();
+    await openPipeline(page);
+
+    const pauseButton = page.getByRole("button", { name: /Pause/ });
+    await expect(pauseButton).toBeVisible();
+    await pauseButton.click();
+    await expect(page.getByRole("button", { name: /Resume/ })).toBeVisible();
   });
 });
 
 test.describe("Observations Page", () => {
-  test("observations page lists seeded observations", async ({ page }) => {
-    await page.goto("http://localhost:3000/observations");
-    
-    // The page title is displayed as an <h1>
+  test("observations page lists an observation from the isolated project", async ({ page, request }) => {
+    await createObservation(request, `E2E observation ${Date.now()}`);
+    await openObservations(page);
+
     await expect(page.locator("h1")).toContainText("Observations");
-    
-    // Wait for observations to load (API call happens on mount)
-    await page.waitForTimeout(2000);
-    
-    // Should have observation cards with type badges visible
-    await expect(page.locator("span:has-text('pattern')").first()).toBeVisible({ timeout: 5000 });
-    const cards = page.locator("[class*='cursor-pointer']");
-    await expect(cards.first()).toBeVisible({ timeout: 3000 });
+    await expect(page.locator("span", { hasText: "pattern" }).first()).toBeVisible();
+    await expect(page.locator("[class*='cursor-pointer']").first()).toBeVisible();
   });
 
-  test("observations stats show total and pending counts", async ({ page }) => {
-    await page.goto("http://localhost:3000/observations");
-    
-    // Wait for stats to load
-    await page.waitForTimeout(2000);
-    
-    // Stats should be visible in the top right
+  test("observations stats show total and pending counts", async ({ page, request }) => {
+    await createObservation(request, `E2E stats observation ${Date.now()}`);
+    await openObservations(page);
+
     await expect(page.locator("text=Total:")).toBeVisible();
     await expect(page.locator("text=Pending:")).toBeVisible();
   });
@@ -116,31 +147,17 @@ test.describe("Observations Page", () => {
 
 test.describe("Personality Page", () => {
   test("personality page loads with trait groups", async ({ page }) => {
-    await page.goto("http://localhost:3000/personality");
-    
-    // The page title is displayed as an <h1>
+    await openPersonality(page);
     await expect(page.locator("h1")).toContainText("Personality Profile");
-    
-    // Wait for traits to load (API call happens on mount)
-    await page.waitForTimeout(2000);
-    
-    // Should show trait count or trait type badges
-    await expect(page.locator("text=trait(s)").first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator("text=trait(s)").first()).toBeVisible();
   });
 });
 
 test.describe("Legacy Learnings Page", () => {
   test("learnings page shows deprecation notice", async ({ page }) => {
-    await page.goto("http://localhost:3000/learnings");
-    
-    // The page title is displayed as an <h1>
+    await page.goto("/learnings", { waitUntil: "domcontentloaded" });
     await expect(page.locator("h1")).toContainText("Learnings");
-    
-    // Should have a yellow deprecation notice banner
     await expect(page.locator("text=Learnings are deprecated")).toBeVisible();
-    
-    // Should have link to observations page (use exact text match in the main content area)
-    const obsLink = page.locator("a", { hasText: "Observations" }).first();
-    await expect(obsLink).toHaveAttribute("href", "/observations");
+    await expect(page.locator("a", { hasText: "Observations" }).first()).toHaveAttribute("href", "/observations");
   });
 });

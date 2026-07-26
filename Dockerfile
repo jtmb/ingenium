@@ -1,6 +1,13 @@
-# Stage 1: Build all monorepo workspaces
-FROM node:22-alpine AS builder
+# Stage 1: Build all monorepo workspaces. Keep this glibc-based image aligned
+# with runtime: native Node modules compiled or selected here are copied there.
+FROM node:22-slim AS builder
 WORKDIR /app
+
+# Native modules such as better-sqlite3 can fall back to node-gyp when a
+# prebuilt binary is unavailable. These build-only tools never enter runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ && \
+    rm -rf /var/lib/apt/lists/*
 
 # Copy workspace root config
 COPY package.json package-lock.json ./
@@ -19,6 +26,16 @@ RUN npm ci --workspaces --include-workspace-root
 
 # Copy source and build
 COPY . .
+RUN sh scripts/validate-deployment-config.sh
+# These values are intentionally public browser configuration. They must be
+# present before the Next.js build because NEXT_PUBLIC_* values are inlined into
+# the dashboard bundle; setting them only on the running container is too late.
+# The default uses the two local loopback gateway origins, never the
+# private OpenCode/ttyd listeners.
+ARG NEXT_PUBLIC_OPENCODE_WEB_URL="http://opencode.localhost:3000/"
+ARG NEXT_PUBLIC_OPENCODE_CLI_URL="http://cli.localhost:3000/"
+ENV NEXT_PUBLIC_OPENCODE_WEB_URL=${NEXT_PUBLIC_OPENCODE_WEB_URL}
+ENV NEXT_PUBLIC_OPENCODE_CLI_URL=${NEXT_PUBLIC_OPENCODE_CLI_URL}
 RUN npm run build
 
 # Prune dev dependencies for smaller runtime image
@@ -30,7 +47,7 @@ FROM node:22-slim AS runtime
 ARG OPENCODE_VERSION=1.18.3
 ARG OPENCODE_SHA256=60f27b2679f00a511b6539f97e02448afaf58d9c66e2448285ea0c517ca84583
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor curl ca-certificates tzdata python3 make g++ git sudo && \
+    supervisor nginx curl ca-certificates tzdata git && \
     rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
     echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
@@ -43,17 +60,15 @@ RUN curl -fsSL -o /tmp/ttyd.x86_64 "https://github.com/tsl0922/ttyd/releases/dow
     chmod +x /usr/local/bin/ttyd && \
     ttyd --version && \
     rm /tmp/ttyd.x86_64 2>/dev/null || true
-RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appuser && \
-    adduser appuser sudo && \
-    echo "appuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/appuser && \
-    chmod 0440 /etc/sudoers.d/appuser
+RUN userdel -r node && adduser --uid 1000 --disabled-password --comment "" appuser
 
 WORKDIR /app
 
 # Copy production dependencies (pruned, dev-free)
 COPY --from=builder --chown=appuser:appuser /app/node_modules ./node_modules
-
-# Rebuild native addons for this runtime's libc (glibc now, no need to remove build tools)
+# Fail the image build if the copied native binding cannot load on the runtime
+# libc. This protects the API from a delayed better-sqlite3 startup failure.
+RUN node -e 'require("better-sqlite3")'
 
 # Copy built artifacts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-core/dist ./packages/ingenium-core/dist
@@ -65,23 +80,33 @@ COPY --from=builder --chown=appuser:appuser /app/services/ingenium-api/package.j
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-server/dist ./services/ingenium-server/dist
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-server/package.json ./services/ingenium-server/
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/.next/standalone ./
+COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/public ./services/ingenium-dashboard/public
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/.next/static ./services/ingenium-dashboard/.next/static
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ ./packages/ingenium-extension/
 
 # Copy process management config
 COPY --chown=appuser:appuser supervisord.conf ./supervisord.conf
 COPY --chown=appuser:appuser scripts/docker-entrypoint.sh ./entrypoint.sh
+COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/
+COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf ./nginx/
+# Validate the rendered Nginx configuration as its production user. Runtime
+# startup recreates these ephemeral directories before Nginx starts.
+RUN install -d -o appuser -g appuser -m 0700 \
+      /run/ingenium-gateway \
+      /run/ingenium-gateway/client_body \
+      /run/ingenium-gateway/proxy \
+      /run/ingenium-gateway/fastcgi \
+      /run/ingenium-gateway/uwsgi \
+      /run/ingenium-gateway/scgi && \
+    runuser -u appuser -- sh -ec 'for directory in /run/ingenium-gateway /run/ingenium-gateway/client_body /run/ingenium-gateway/proxy /run/ingenium-gateway/fastcgi /run/ingenium-gateway/uwsgi /run/ingenium-gateway/scgi; do test -w "$directory"; done' && \
+    runuser -u appuser -- sh /app/scripts/validate-gateway-config.sh
 # Copy agent definitions, commands, and skills (excluded from .dockerignore)
 COPY --chown=appuser:appuser .opencode/agents ./.opencode/agents
 COPY --chown=appuser:appuser .opencode/commands ./.opencode/commands
 COPY --chown=appuser:appuser .opencode/skills ./.opencode/skills
 # Copy database migrations (needed for incremental DB upgrades)
 COPY packages/ingenium-core/data/migrations/ /app/packages/ingenium-core/data/migrations/
-ARG NEXT_PUBLIC_OPENCODE_WEB_URL=""
-ARG NEXT_PUBLIC_OPENCODE_CLI_URL=""
-ENV NEXT_PUBLIC_OPENCODE_WEB_URL=${NEXT_PUBLIC_OPENCODE_WEB_URL}
-ENV NEXT_PUBLIC_OPENCODE_CLI_URL=${NEXT_PUBLIC_OPENCODE_CLI_URL}
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/scripts/*.sh
 
 # Create shared config and data directories with proper ownership
 RUN mkdir -p /app/config /app/.ingenium/logs /app/.opencode/skills /workspace && chown -R appuser:appuser /app/config /app/.ingenium /app/.opencode /app/.opencode/skills /workspace
@@ -92,6 +117,6 @@ RUN mkdir -p /home/appuser/.config/opencode /home/appuser/.local/share/opencode/
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 
-EXPOSE 3000 4097 4098 4099 1455
+EXPOSE 3000 4097 1455
 
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -4,21 +4,34 @@
  * Verifies:
  *   1. Timing-safe comparison using crypto.timingSafeEqual
  *   2. Length-differing token handling (padding avoids throw)
- *   3. 401 vs 403 distinction
- *   4. Development pass-through when no token is set
+ *   3. Mandatory authentication when the API token is not configured
+ *   4. 401 vs 403 distinction
+ *   5. Exact OAuth callback public allowlist
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Request, Response, NextFunction } from "express";
+import { authMiddleware, isPublicOAuthCallbackRequest } from "../lib/middleware/auth.js";
+import {
+  ApiTokenConfigurationError,
+  isValidApiToken,
+  loadApiToken,
+} from "../lib/middleware/api-token.js";
 
 // We test the middleware in isolation — mock Express req/res/next
 // and the timing-safe crypto primitive.
 
 describe("authMiddleware — timing-safe comparison", () => {
   const originalEnv = process.env.INGENIUM_API_TOKEN;
+  const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
+  const validToken = "a".repeat(32);
 
   beforeEach(() => {
     delete process.env.INGENIUM_API_TOKEN;
+    delete process.env.INGENIUM_API_TOKEN_FILE;
   });
 
   afterEach(() => {
@@ -27,12 +40,23 @@ describe("authMiddleware — timing-safe comparison", () => {
     } else {
       delete process.env.INGENIUM_API_TOKEN;
     }
+    if (originalTokenFile !== undefined) {
+      process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
+    } else {
+      delete process.env.INGENIUM_API_TOKEN_FILE;
+    }
   });
 
-  function makeReq(authHeader?: string): Partial<Request> {
+  function makeReq(
+    authHeader?: string,
+    method = "GET",
+    path = "/api/v1/health",
+  ): Partial<Request> {
     return {
       ip: "127.0.0.1",
-      headers: authHeader ? { authorization: authHeader } : {},
+      method,
+      path,
+      headers: authHeader === undefined ? {} : { authorization: authHeader },
     } as Partial<Request>;
   }
 
@@ -40,20 +64,27 @@ describe("authMiddleware — timing-safe comparison", () => {
     return {} as Partial<Response>;
   }
 
-  it("passes through when INGENIUM_API_TOKEN is not set (dev mode)", async () => {
-    const { authMiddleware } = await import("../lib/middleware/auth.js");
+  it("fails closed when INGENIUM_API_TOKEN is not configured", () => {
     const req = makeReq();
     const res = makeRes();
-    let called = false;
-    const next: NextFunction = () => { called = true; };
+    const next = vi.fn<NextFunction>();
 
-    authMiddleware(req as Request, res as Response, next);
-    expect(called).toBe(true);
+    let thrown: any;
+    try {
+      authMiddleware(req as Request, res as Response, next);
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(thrown).toMatchObject({
+      statusCode: 503,
+      code: "API_AUTH_NOT_CONFIGURED",
+    });
+    expect(next).not.toHaveBeenCalled();
   });
 
-  it("throws 401 when header is missing but token is configured", async () => {
-    process.env.INGENIUM_API_TOKEN = "secret-token-123";
-    const { authMiddleware } = await import("../lib/middleware/auth.js");
+  it("throws 401 when bearer header is missing but token is configured", () => {
+    process.env.INGENIUM_API_TOKEN = validToken;
     const req = makeReq();
     const res = makeRes();
     const next = vi.fn();
@@ -67,9 +98,8 @@ describe("authMiddleware — timing-safe comparison", () => {
     }
   });
 
-  it("throws 401 when header does not start with 'Bearer '", async () => {
-    process.env.INGENIUM_API_TOKEN = "secret-token-123";
-    const { authMiddleware } = await import("../lib/middleware/auth.js");
+  it("throws 401 when authorization scheme is not Bearer", () => {
+    process.env.INGENIUM_API_TOKEN = validToken;
     const req = { ...makeReq(), headers: { authorization: "Basic dXNlcjpwYXNz" } };
     const res = makeRes();
     const next = vi.fn();
@@ -82,9 +112,8 @@ describe("authMiddleware — timing-safe comparison", () => {
     }
   });
 
-  it("throws 403 when token does not match (wrong token)", async () => {
-    process.env.INGENIUM_API_TOKEN = "correct-token-abc";
-    const { authMiddleware } = await import("../lib/middleware/auth.js");
+  it("throws 403 when bearer token does not match", () => {
+    process.env.INGENIUM_API_TOKEN = validToken;
     const req = makeReq("Bearer wrong-token-xyz");
     const res = makeRes();
     const next = vi.fn();
@@ -98,10 +127,9 @@ describe("authMiddleware — timing-safe comparison", () => {
     }
   });
 
-  it("calls next() when correct token is provided", async () => {
-    process.env.INGENIUM_API_TOKEN = "correct-token-abc";
-    const { authMiddleware } = await import("../lib/middleware/auth.js");
-    const req = makeReq("Bearer correct-token-abc");
+  it("calls next() when the correct bearer token is provided", () => {
+    process.env.INGENIUM_API_TOKEN = validToken;
+    const req = makeReq(`Bearer ${validToken}`);
     const res = makeRes();
     let called = false;
     const next: NextFunction = () => { called = true; };
@@ -110,9 +138,8 @@ describe("authMiddleware — timing-safe comparison", () => {
     expect(called).toBe(true);
   });
 
-  it("handles tokens of different lengths without throwing (padding)", async () => {
-    process.env.INGENIUM_API_TOKEN = "long-token-value-here-12345";
-    const { authMiddleware } = await import("../lib/middleware/auth.js");
+  it("handles tokens of different lengths without throwing (padding)", () => {
+    process.env.INGENIUM_API_TOKEN = "b".repeat(64);
     const reqShort = makeReq("Bearer short");
     const res = makeRes();
     const next = vi.fn();
@@ -135,9 +162,8 @@ describe("authMiddleware — timing-safe comparison", () => {
     }
   });
 
-  it("handles empty token string in Bearer header", async () => {
-    process.env.INGENIUM_API_TOKEN = "some-token";
-    const { authMiddleware } = await import("../lib/middleware/auth.js");
+  it("handles empty token string in Bearer header", () => {
+    process.env.INGENIUM_API_TOKEN = validToken;
     const req = makeReq("Bearer ");
     const res = makeRes();
     const next = vi.fn();
@@ -150,12 +176,128 @@ describe("authMiddleware — timing-safe comparison", () => {
     }
   });
 
-  it("is resistant to timing attacks — uses crypto.timingSafeEqual", async () => {
+  it("is resistant to timing attacks — uses crypto.timingSafeEqual", () => {
     // Verify the import uses timingSafeEqual by checking the module source
     // This test is documentation: the import exists and the comparison is timing-safe
-    const authModule = await import("../lib/middleware/auth.js");
     // The module should exist and export authMiddleware
-    expect(authModule.authMiddleware).toBeDefined();
-    expect(typeof authModule.authMiddleware).toBe("function");
+    expect(authMiddleware).toBeDefined();
+    expect(typeof authMiddleware).toBe("function");
+  });
+
+  describe("token configuration", () => {
+    it("accepts only 32 to 128 base64url characters", () => {
+      expect(isValidApiToken("a".repeat(32))).toBe(true);
+      expect(isValidApiToken("a".repeat(128))).toBe(true);
+      expect(isValidApiToken("a".repeat(31))).toBe(false);
+      expect(isValidApiToken("a".repeat(129))).toBe(false);
+      expect(isValidApiToken(`${"a".repeat(31)}=`)).toBe(false);
+      expect(isValidApiToken(`${"a".repeat(31)} `)).toBe(false);
+    });
+
+    it("prefers a mode-0600 token file over an inline environment value", () => {
+      const directory = mkdtempSync(join(tmpdir(), "ingenium-api-token-"));
+      const tokenFile = join(directory, "api-token");
+      const tokenFromFile = "f".repeat(32);
+      try {
+        writeFileSync(tokenFile, `${tokenFromFile}\n`, { mode: 0o600 });
+        chmodSync(tokenFile, 0o600);
+        expect(loadApiToken({
+          INGENIUM_API_TOKEN: validToken,
+          INGENIUM_API_TOKEN_FILE: tokenFile,
+        })).toBe(tokenFromFile);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects group-readable token files", () => {
+      const directory = mkdtempSync(join(tmpdir(), "ingenium-api-token-"));
+      const tokenFile = join(directory, "api-token");
+      try {
+        writeFileSync(tokenFile, `${validToken}\n`, { mode: 0o644 });
+        chmodSync(tokenFile, 0o644);
+        expect(() => loadApiToken({ INGENIUM_API_TOKEN_FILE: tokenFile }))
+          .toThrow(ApiTokenConfigurationError);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects token files not owned by the current process user on non-Windows hosts", () => {
+      if (process.platform === "win32" || typeof process.getuid !== "function") return;
+
+      const directory = mkdtempSync(join(tmpdir(), "ingenium-api-token-"));
+      const tokenFile = join(directory, "api-token");
+      const currentUid = process.getuid();
+      const getuidSpy = vi.spyOn(process, "getuid").mockReturnValue(currentUid + 1);
+      try {
+        writeFileSync(tokenFile, `${validToken}\n`, { mode: 0o600 });
+        chmodSync(tokenFile, 0o600);
+        expect(() => loadApiToken({ INGENIUM_API_TOKEN_FILE: tokenFile }))
+          .toThrow(ApiTokenConfigurationError);
+      } finally {
+        getuidSpy.mockRestore();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects token-file symlinks rather than following them", () => {
+      const directory = mkdtempSync(join(tmpdir(), "ingenium-api-token-"));
+      const targetFile = join(directory, "target");
+      const tokenFile = join(directory, "api-token");
+      try {
+        writeFileSync(targetFile, `${validToken}\n`, { mode: 0o600 });
+        chmodSync(targetFile, 0o600);
+        symlinkSync(targetFile, tokenFile);
+        expect(() => loadApiToken({ INGENIUM_API_TOKEN_FILE: tokenFile }))
+          .toThrow(ApiTokenConfigurationError);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("OAuth callback public allowlist", () => {
+    it.each([
+      ["GET", "/auth/callback", true],
+      ["POST", "/auth/callback", false],
+      ["GET", "/auth/callback/", false],
+      ["GET", "/api/v1/auth/callback", false],
+    ] as const)("matches only %s %s", (method, path, expected) => {
+      expect(isPublicOAuthCallbackRequest(makeReq(undefined, method, path) as Request)).toBe(expected);
+    });
+
+    it("allows the exact OAuth callback without a bearer token", () => {
+      const next = vi.fn<NextFunction>();
+
+      authMiddleware(
+        makeReq(undefined, "GET", "/auth/callback") as Request,
+        makeRes() as Response,
+        next,
+      );
+
+      expect(next).toHaveBeenCalledOnce();
+    });
+
+    it("does not allow callback-like requests to bypass mandatory auth", () => {
+      const next = vi.fn<NextFunction>();
+      let thrown: any;
+
+      try {
+        authMiddleware(
+          makeReq(undefined, "POST", "/auth/callback") as Request,
+          makeRes() as Response,
+          next,
+        );
+      } catch (err) {
+        thrown = err;
+      }
+
+      expect(thrown).toMatchObject({
+        statusCode: 503,
+        code: "API_AUTH_NOT_CONFIGURED",
+      });
+      expect(next).not.toHaveBeenCalled();
+    });
   });
 });

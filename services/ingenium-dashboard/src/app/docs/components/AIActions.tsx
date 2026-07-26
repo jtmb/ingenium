@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase } from "@/lib/api";
 
 export type AIAction =
   | "outline"
@@ -57,9 +57,8 @@ async function callDocAI(
   title: string,
   selectedText?: string,
 ): Promise<string> {
-  const res = await fetch(`${API_BASE}/docs/ai`, {
+  const res = await dashboardFetch(`${API_BASE}/docs/ai`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, content, title, selectedText }),
   });
 

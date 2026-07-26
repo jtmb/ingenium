@@ -8,7 +8,7 @@ description: Iframe sandbox configuration, risk assessment, and deferred securit
 > **Status**: Baseline was implemented in W2 — all four OpenCode iframes previously had
 > `sandbox="allow-scripts allow-same-origin"`. The `sandbox` attribute has been **removed**
 > from all OpenCode iframes in Phase 2: OpenCode is trusted first-party content embedded
-> via direct loopback ports or configured HTTPS origins. The same-origin proxy rewrites
+> via local loopback gateway roots or configured HTTPS origins. The same-origin proxy rewrites
 > (`/opencode-web/`, `/opencode-cli/`) were also removed. The Email HTML iframe retains
 > its separate sandbox policy (no `allow-scripts`). CSP/frame-ancestor policy remains
 > deferred pending runtime testing.
@@ -22,7 +22,7 @@ The dashboard embeds two iframes on the `/opencode` page, rendered by
 `services/ingenium-dashboard/src/app/components/OpenCodeFrame.tsx`, plus two
 additional standalone iframes in `services/ingenium-dashboard/src/app/standalone/page.tsx`.
 **All four OpenCode iframes have had the `sandbox` attribute removed** — OpenCode is
-trusted first-party content embedded via direct loopback ports or configured HTTPS origins.
+trusted first-party content embedded via local gateway roots or configured HTTPS origins.
 
 | Iframe | Source | Sandbox | Purpose |
 |--------|--------|---------|---------|
@@ -43,11 +43,14 @@ Resolution is deferred from SSR to post-hydration via `useState(null)` + `useEff
 
 | Dashboard Environment | Web iframe src | CLI iframe src |
 |-----------------------|----------------|----------------|
-| **Loopback HTTP** | `http://localhost:4098/` | `http://localhost:4099/` |
-| **Remote HTTPS (with NEXT_PUBLIC_OPENCODE_WEB_URL set)** | Configured root HTTPS origin | Configured root HTTPS origin |
+| **Default loopback deployment** | `http://opencode.localhost:3000/` | `http://cli.localhost:3000/` |
+| **Authenticated remote HTTPS profile (with both NEXT_PUBLIC_* values set at build time)** | Configured root HTTPS origin | Configured root HTTPS origin |
 | **LAN HTTP or HTTPS without override** | `null` — shows guidance overlay | `null` — shows guidance overlay |
 
 Overrides are available via `NEXT_PUBLIC_OPENCODE_WEB_URL` and `NEXT_PUBLIC_OPENCODE_CLI_URL`.
+They must be supplied before the Next.js image build; changing them only at runtime
+does not change the browser bundle. The Windows helper verifies existing loopback
+transport only and does not create secure transport.
 Only root HTTPS origins are accepted (e.g., `https://opencode.example.com/`). Relative
 same-origin paths are no longer supported.
 
@@ -55,7 +58,7 @@ same-origin paths are no longer supported.
 
 ```html
 <iframe
-  src="<dynamically-resolved>"    <!-- :4098/:4099 or configured HTTPS origin -->
+  src="<dynamically-resolved>"    <!-- local gateway root or configured HTTPS origin -->
   class="absolute inset-0 w-full h-full border-0"
   style="{{ opacity, visibility, pointerEvents }}"
   aria-hidden="{{ condition }}"
@@ -69,6 +72,23 @@ same-origin paths are no longer supported.
 > trusted first-party content from our own services (opencode-web, ttyd), not third-party content.
 > The same-origin proxy path is no longer used, so the sandbox is not needed for origin isolation.
 > The Email HTML iframe retains a separate `sandbox` policy (no `allow-scripts`) — see §Service-Specific Note.
+
+### Gateway security boundary
+
+The iframe origins are separate from the dashboard, but the upstream services
+are also protected by the local gateway boundary. Dashboard and OpenCode
+traffic use separate Nginx rate-limit buckets (`30r/s`, burst `60`); assets and
+upgrade handshakes are excluded from the dynamic OpenCode bucket so dashboard
+prefetch bursts cannot starve iframe startup. The gateway limits connections
+to 16 per client address.
+
+The OpenCode Web and ttyd listeners remain private container upstreams on
+`4098` and `4099`; they are not host endpoints. Before proxying, the gateway
+clears browser authorization, identity, and forwarding headers. The CLI route
+adds only its fixed gateway identity, and the gateway owns the CSP framing
+policy. Direct IPv6 loopback dashboard requests are canonicalized to
+`http://localhost:3000/` because the supported CSP sources are
+`localhost:3000` and `127.0.0.1:3000`, not an IPv6 literal.
 
 ### What's present — `allow="clipboard-write"`
 
@@ -154,7 +174,7 @@ Only `allow="clipboard-write"` (Permissions Policy) remains:
 
 ```html
 <iframe
-  src="<dynamically-resolved>"    <!-- :4098/:4099 or configured HTTPS origin -->
+  src="<dynamically-resolved>"    <!-- local gateway root or configured HTTPS origin -->
   allow="clipboard-write"
   ...
 />
@@ -165,8 +185,8 @@ Only `allow="clipboard-write"` (Permissions Policy) remains:
 | Reason | Detail |
 |--------|--------|
 | Trust boundary | OpenCode Web and ttyd are first-party services running in our own container, not third-party content. The sandbox was originally added with the same-origin proxy path to prevent the iframe from accessing the dashboard origin during the proxy era. |
-| Proxy path removed | The `/opencode-web/` and `/opencode-cli/` same-origin proxy rewrites have been removed. OpenCode iframes now load from direct loopback ports or configured HTTPS origins — they are on separate origins from the dashboard, making the sandbox redundant. |
-| Origin isolation | Direct port URLs (`localhost:4098`/`:4099`) are inherently different origins from the dashboard (`localhost:3000`). Same-origin access to the dashboard's cookies, localStorage, and DOM is already prevented by the browser's same-origin policy without requiring a sandbox attribute. |
+| Proxy path removed | The `/opencode-web/` and `/opencode-cli/` same-origin proxy rewrites have been removed. OpenCode iframes now load from local gateway roots or configured HTTPS origins — they are on separate origins from the dashboard, making the sandbox redundant. |
+| Origin isolation | Gateway origins (`opencode.localhost:3000`/`cli.localhost:3000`) differ from the dashboard (`localhost:3000`). Same-origin access to dashboard cookies, localStorage, and DOM is prevented without a sandbox attribute. |
 | Chromium warning | The previous `allow-scripts allow-same-origin` combination triggered a Chromium warning about potential sandbox escape. Removing the sandbox attribute resolves this warning for trusted first-party content. |
 
 ### Clipboard Permission Preserved
@@ -220,7 +240,7 @@ Expected:
 
 ```html
 <iframe
-  src="http://localhost:4098/"
+  src="http://opencode.localhost:3000/"
   allow="clipboard-write"
   ...
 />
@@ -233,7 +253,7 @@ from the dashboard:
 
 | Dashboard origin | Iframe origin | Isolation mechanism |
 |-----------------|---------------|---------------------|
-| `localhost:3000` | `localhost:4098` / `localhost:4099` | Browser same-origin policy — cross-origin access blocked automatically |
+| `localhost:3000` | `opencode.localhost:3000` / `cli.localhost:3000` | Browser same-origin policy plus private upstream ports |
 | `https://dashboard.example.com` | `https://opencode.example.com` | Browser same-origin policy — different hostname, access blocked |
 
 ### Step 3: Test functional behavior
@@ -268,11 +288,11 @@ page still works:
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| ttyd is exposed on host loopback only (`127.0.0.1:4099`) | Low | Already isolated by Compose port mapping. |
-| OpenCode Web is exposed on host loopback only (`127.0.0.1:4098`) | Low | Already isolated by Compose port mapping. Remote deployments require explicit HTTPS origin configuration. |
+| ttyd is reached through `cli.localhost:3000` | Low | Direct 4099 publication is not supported; the normal local gateway injects only a fixed internal ttyd identity. |
+| OpenCode Web is reached through `opencode.localhost:3000` | Low | Direct 4098 publication is not supported. Remote deployments require explicit HTTPS root configuration. |
 | OpenCode iframes are on separate origins from dashboard | Low | Browser same-origin policy prevents iframe from accessing dashboard's cookies, localStorage, or DOM without a sandbox attribute. No sandbox required because the origin difference provides the isolation. |
 | HTTPS origin configured for remote access | Medium | The configured HTTPS origin must be a trusted deployment. The `NEXT_PUBLIC_OPENCODE_WEB_URL` env var accepts only root HTTPS origins (validated by regex). No relative paths or non-HTTPS origins are accepted. |
-| Dashboard is a management UI — compromise of dashboard origin is critical | High | The iframe's separate origin (different port or hostname) is the primary isolation mechanism. The dashboard does not share cookies, localStorage, or auth state with the OpenCode iframe's origin. |
+| Dashboard is a management UI — compromise of dashboard origin is critical | High | The default gateway is local-only; remote profiles must add operator-managed TLS authentication. The iframe's separate origin (different hostname) also prevents sharing cookies, localStorage, or DOM state. |
 | Compromise of the embedded OpenCode service | Medium | An attacker who compromises the opencode-web or ttyd service could operate within that service's own origin. Mitigated by: (a) loopback-only deployment in Docker, (b) HTTPS origin must be explicitly configured for remote access, (c) the compromised service would still be on a separate origin from the dashboard. |
 
 ---
@@ -294,13 +314,14 @@ page still works:
 ### ✅ Phase 2 Changes
 
 1. **Sandbox attribute removed** from all OpenCode iframes — OpenCode is trusted
-   first-party content embedded via direct loopback ports or configured HTTPS origins.
+   first-party content embedded via local gateway roots or configured HTTPS origins.
    The browser same-origin policy (different port/hostname) provides isolation
    without needing a sandbox attribute.
-2. **Same-origin proxy rewrites removed** — `/opencode-web/` and `/opencode-cli/`
+2. **Same-origin subpath proxy is unsupported** — `/opencode-web/` and `/opencode-cli/`
    reverse-proxy paths are eliminated. OpenCode v1.18.3+ serves root-relative assets
    and cannot be proxied under a sub-path.
-3. **Two-tier embedding model** — Loopback HTTP uses direct ports; remote HTTPS
+3. **Authenticated host-gateway model** — local browser access uses the protected
+   `.localhost:3000` roots; remote HTTPS
    requires explicit `NEXT_PUBLIC_OPENCODE_WEB_URL` / `NEXT_PUBLIC_OPENCODE_CLI_URL`;
    unsupported LAN shows guidance overlay.
 4. **Chromium sandbox-escape warning resolved** — removing the `allow-scripts

@@ -14,6 +14,7 @@
  */
 import { tool } from "@opencode-ai/plugin"
 import { ensureExtensionProject } from "./project-resolver.js"
+import { apiRequestHeaders } from "./api-auth.js"
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1"
 
@@ -31,7 +32,7 @@ async function triggerExtraction(worktree: string): Promise<{ triggered: boolean
     const project = await ensureExtensionProject(worktree, API_BASE)
     const res = await fetch(`${API_BASE}/extraction/run?project=${encodeURIComponent(project)}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiRequestHeaders(worktree, { "Content-Type": "application/json" }),
     })
     if (!res.ok) {
       return { triggered: false, message: `API ${res.status}` }
@@ -39,9 +40,9 @@ async function triggerExtraction(worktree: string): Promise<{ triggered: boolean
     const json = await res.json()
     const created = json?.data?.created ?? "unknown"
     return { triggered: true, message: `Extraction triggered: created ${created} observations` }
-  } catch (err: any) {
+  } catch {
     // Swallow errors — server may be down; API scheduler covers extraction anyway
-    return { triggered: false, message: err.message }
+    return { triggered: false, message: "Extraction request failed" }
   }
 }
 

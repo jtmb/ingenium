@@ -159,14 +159,15 @@ describe("SettingsOverlay — all panels rendered, active visible", () => {
     document.body.style.overflow = "";
   });
 
-  it("renders all four panels in the DOM when any tab is active", async () => {
+  it("renders all fourteen registered panels in the DOM when any tab is active", async () => {
     navigationMock.searchParams = new URLSearchParams("settings=providers");
     render(React.createElement(SettingsOverlay));
 
-    // All four panels are in the DOM — accessible via data-testid with hidden:true
+    // The four embedded panels are in the DOM alongside ten route-linked panels.
     await waitFor(() => {
       const panels = screen.getAllByTestId("test-panel", { hidden: true });
       expect(panels).toHaveLength(4);
+      expect(screen.getAllByTestId(/^settings-panel-/)).toHaveLength(14);
     });
   });
 
@@ -187,16 +188,16 @@ describe("SettingsOverlay — all panels rendered, active visible", () => {
       const panelsContainer = firstHiddenPanel!.parentElement;
       expect(panelsContainer).not.toBeNull();
 
-      // The panels container has 4 direct children (panel wrappers)
+      // The panels container has 14 direct children (one per declared tab).
       const allPanelWrappers = panelsContainer!.children;
-      expect(allPanelWrappers).toHaveLength(4);
+      expect(allPanelWrappers).toHaveLength(14);
 
-      // Count hidden panel wrappers (3 — all except the active providers panel)
+      // Count hidden panel wrappers (13 — all except the active providers panel).
       let hiddenCount = 0;
       for (const wrapper of allPanelWrappers) {
         if ((wrapper as HTMLElement).hidden) hiddenCount++;
       }
-      expect(hiddenCount).toBe(3);
+      expect(hiddenCount).toBe(13);
     });
   });
 

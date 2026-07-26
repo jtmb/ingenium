@@ -2,7 +2,6 @@
 name: ingenium-software-engineer-fast
 description: "Budget-tier implementation agent. Use for standard, low-risk coding tasks — bug fixes, simple refactors, documentation code examples. Runs on a faster/cheaper model."
 mode: subagent
-model: deepseek/deepseek-v4-flash
 permission:
   read: allow
   edit:

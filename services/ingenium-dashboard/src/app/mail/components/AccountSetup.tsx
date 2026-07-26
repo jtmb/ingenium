@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase } from "@/lib/api";
 
 /**
  * AccountSetup — two modes: provider selection grid and manual (app password) form.
@@ -104,9 +104,8 @@ export default function AccountSetup({
       const credentialUrl = reconnectAccount
         ? `${apiBase}/emails/accounts/${reconnectAccount.id}/credentials?project=${project}`
         : `${apiBase}/emails/accounts?project=${project}`;
-      const createRes = await fetch(credentialUrl, {
+      const createRes = await dashboardFetch(credentialUrl, {
         method: reconnectAccount ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(reconnectAccount ? { appPassword: password } : payload),
       });
       const createData = await createRes.json();
@@ -123,7 +122,7 @@ export default function AccountSetup({
         return;
       }
 
-      const testRes = await fetch(`${apiBase}/emails/accounts/${accountId}/test?project=${project}`, {
+      const testRes = await dashboardFetch(`${apiBase}/emails/accounts/${accountId}/test?project=${project}`, {
         method: "POST",
       });
       const testData = await testRes.json();
@@ -131,7 +130,7 @@ export default function AccountSetup({
         setTestResult("Connection successful");
       } else if (!reconnectAccount) {
         setTestResult(testData.data?.error || testData.error?.message || "Connection failed");
-        await fetch(`${apiBase}/emails/accounts/${accountId}?project=${project}`, {
+        await dashboardFetch(`${apiBase}/emails/accounts/${accountId}?project=${project}`, {
           method: "DELETE",
         });
       }
@@ -147,9 +146,8 @@ export default function AccountSetup({
       const url = reconnectAccount
         ? `${apiBase}/emails/accounts/${reconnectAccount.id}/credentials?project=${project}`
         : `${apiBase}/emails/accounts?project=${project}`;
-      const res = await fetch(url, {
+      const res = await dashboardFetch(url, {
         method: reconnectAccount ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(reconnectAccount ? { appPassword: password } : {
           email,
           name: email.split("@")[0],

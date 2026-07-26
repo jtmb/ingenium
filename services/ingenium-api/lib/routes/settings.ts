@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { settings, logger, projects, configs, getDb, execTransaction, checkpointAfterWrite, validateEndpointUrl, safeLlmFetch } from "ingenium-core";
+import { settings, logger, projects, configs, getDb, execTransaction, checkpointAfterWrite, protectedSettings, validateEndpointUrl, safeLlmFetch } from "ingenium-core";
 import * as core from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { opencodeClient, isOpenCodeError } from "../opencode-client.js";
@@ -17,14 +17,81 @@ function isSensitiveSettingKey(key: string): boolean {
   return SENSITIVE_SETTING_KEYS.has(key);
 }
 
+function sendProtectedOAuthSecretError(
+  res: import("express").Response,
+  result: ReturnType<typeof protectedSettings.updateOAuthClientSecret>,
+): void {
+  if (result.status === "invalid") {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "A replacement OAuth client secret must be a non-empty string" } });
+    return;
+  }
+  if (result.status === "legacy_conflict") {
+    res.status(409).json({ error: { code: "SECRET_MIGRATION_CONFLICT", message: "A saved OAuth client secret needs operator review before it can be migrated" } });
+    return;
+  }
+  res.status(409).json({ error: { code: "VAULT_REQUIRED", message: "Unseal and initialize the vault before changing an OAuth client secret" } });
+}
+
+/**
+ * OAuth client secrets are mail-service credentials, not dashboard-project
+ * settings. Resolve them through the active global project on the server and
+ * deliberately ignore the selected dashboard project.
+ */
+function requireActiveGlobalOAuthProject(res: import("express").Response): string | null {
+  try {
+    const globalProject = projects.getGlobalProject();
+    if (globalProject) return globalProject.id;
+  } catch {
+    // Do not disclose database integrity details through a credential route.
+    logger.warn("settings", "OAuth client-secret request rejected because active global project resolution failed");
+    res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage is unavailable until the active global project is repaired" } });
+    return null;
+  }
+  res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "OAuth client-secret storage requires an active global project" } });
+  return null;
+}
+
+function resolveOAuthSecretAction(
+  body: Record<string, unknown>,
+): { action: "preserve" | "replace" | "clear"; value?: string } | null {
+  const requestedAction = body.action;
+  if (requestedAction !== undefined) {
+    if (requestedAction !== "preserve" && requestedAction !== "replace" && requestedAction !== "clear") return null;
+    if (body.value !== undefined && typeof body.value !== "string") return null;
+    if (requestedAction === "replace" && typeof body.value !== "string") return null;
+    // Clear is action-driven. Reject an accompanying non-empty replacement so
+    // a client cannot accidentally discard a secret it meant to save.
+    if (requestedAction === "clear" && typeof body.value === "string" && body.value.trim()) return null;
+    return { action: requestedAction, value: typeof body.value === "string" ? body.value : undefined };
+  }
+
+  // Legacy Settings clients send blank values after a sanitized GET. Treat a
+  // blank implicit value as preserve; clear is intentionally explicit.
+  if (body.value === undefined) return { action: "preserve" };
+  if (typeof body.value !== "string") return null;
+  return body.value.trim() ? { action: "replace", value: body.value } : { action: "preserve" };
+}
+
 settingsRouter.get("/", (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
-  const key = req.query.key as string;
+  const key = typeof req.query.key === "string" ? req.query.key : "";
   if (!key) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "key query parameter is required" } });
     return;
   }
+  if (protectedSettings.isOAuthClientSecretKey(key)) {
+    const projectId = requireActiveGlobalOAuthProject(res);
+    if (!projectId) return;
+    const migration = protectedSettings.migrateLegacyOAuthClientSecret(projectId, key);
+    if (migration.status === "legacy_conflict") {
+      res.status(409).json({ error: { code: "SECRET_MIGRATION_CONFLICT", message: "A saved OAuth client secret needs operator review before it can be migrated" } });
+      return;
+    }
+    const metadata = protectedSettings.getOAuthClientSecretMetadata(projectId, key);
+    res.json({ data: { key, isSet: metadata.isSet, masked: metadata.masked } });
+    return;
+  }
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
   const value = settings.getSetting(projectId, key);
   if (isSensitiveSettingKey(key)) {
     const providerId = key === "synthesis_api_key"
@@ -39,10 +106,31 @@ settingsRouter.get("/", (req, res) => {
 });
 
 settingsRouter.post("/", (req, res) => {
+  const body = req.body as Record<string, unknown>;
+  const { key, value } = body;
+  if (typeof key !== "string" || !key) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "key is required" } });
+    return;
+  }
+  if (protectedSettings.isOAuthClientSecretKey(key)) {
+    const projectId = requireActiveGlobalOAuthProject(res);
+    if (!projectId) return;
+    const request = resolveOAuthSecretAction(body);
+    if (!request) {
+      res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "OAuth client-secret action must be preserve, replace, or clear" } });
+      return;
+    }
+    const result = protectedSettings.updateOAuthClientSecret(projectId, key, request.action, request.value);
+    if (result.status !== "ok") {
+      sendProtectedOAuthSecretError(res, result);
+      return;
+    }
+    res.json({ data: { key, isSet: result.metadata.isSet, masked: result.metadata.masked } });
+    return;
+  }
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const { key, value } = req.body;
-  if (!key || typeof value !== "string") {
+  if (typeof value !== "string") {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "key and value are required" } });
     return;
   }

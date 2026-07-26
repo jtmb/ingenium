@@ -28,6 +28,7 @@ import {
 } from "./gmail-api.js";
 import { getFreshGmailToken } from "../oauth.js";
 import { simpleParser } from "mailparser";
+import { providerErrorDiagnostic, sanitizeProviderError } from "../provider-errors.js";
 
 // ── Label ↔ Folder mapping ──────────────────────────────────────────────────
 
@@ -276,7 +277,10 @@ export const GmailProvider: MailProvider = {
     // Resolve folder name → label ID
     const labelId = await findLabelId(token, folder);
     if (!labelId) {
-      console.warn(`GmailProvider: no label found for folder "${folder}" on account ${account.email}`);
+      console.warn("GmailProvider folder is unavailable", {
+        folder,
+        ...providerErrorDiagnostic({ status: 404 }, "api"),
+      });
       return [];
     }
 
@@ -320,9 +324,8 @@ export const GmailProvider: MailProvider = {
       try {
         const profile = await getProfile(token);
         return { upserts: [], deletes: [], newCursor: profile.historyId, fullResyncRequired: true };
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`GmailProvider: failed to get profile historyId for ${account.email}: ${msg}`);
+      } catch (error: unknown) {
+        console.warn("GmailProvider profile lookup failed", providerErrorDiagnostic(error, "api"));
         return { upserts: [], deletes: [], newCursor: "", fullResyncRequired: true };
       }
     }
@@ -358,9 +361,8 @@ export const GmailProvider: MailProvider = {
               cached.changeType = "added";
               upserts.push(cached);
             }
-          } catch (err: unknown) {
-            const emsg = err instanceof Error ? err.message : String(err);
-            console.warn(`GmailProvider: failed to get message ${added.message.id} during changesSince: ${emsg}`);
+          } catch (error: unknown) {
+            console.warn("GmailProvider delta message lookup failed", providerErrorDiagnostic(error, "api"));
           }
         }
 
@@ -400,9 +402,8 @@ export const GmailProvider: MailProvider = {
               cached.changeType = "label";
               upserts.push(cached);
             }
-          } catch (err: unknown) {
-            const emsg = err instanceof Error ? err.message : String(err);
-            console.warn(`GmailProvider: failed to get label-changed message ${mid}: ${emsg}`);
+          } catch (error: unknown) {
+            console.warn("GmailProvider label-change lookup failed", providerErrorDiagnostic(error, "api"));
           }
         }
       }
@@ -412,14 +413,16 @@ export const GmailProvider: MailProvider = {
         deletes,
         newCursor: history.historyId,
       };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+    } catch (error: unknown) {
+      const safe = sanitizeProviderError(error, "api");
       // 404 from Gmail means historyId expired
-      if (msg.includes("404")) {
-        console.warn(`GmailProvider: historyId ${cursor} expired for ${account.email}, full resync required`);
+      if (safe.code === "PROVIDER_NOT_FOUND") {
+        console.warn("GmailProvider history cursor expired; full resync required", {
+          ...providerErrorDiagnostic(safe, "api"),
+        });
         return { upserts: [], deletes: [], newCursor: "", fullResyncRequired: true };
       }
-      throw err;
+      throw safe;
     }
   },
 

@@ -1,10 +1,8 @@
 import { test, expect } from "@playwright/test";
 
-const BASE = "http://localhost:3000";
-
 test.describe("Jobs — Create Job Modal", () => {
   test("Create Job modal opens with form fields", async ({ page }) => {
-    await page.goto(`${BASE}/jobs`, { waitUntil: "domcontentloaded" });
+    await page.goto("/jobs", { waitUntil: "domcontentloaded" });
 
     // Wait for page title
     await expect(page.locator("h1")).toContainText("Jobs");
@@ -28,7 +26,7 @@ test.describe("Jobs — Create Job Modal", () => {
 
 test.describe("Jobs — Edit from Detail View", () => {
   test("Edit from detail view opens prepopulated overlay", async ({ page }) => {
-    await page.goto(`${BASE}/jobs`, { waitUntil: "domcontentloaded" });
+    await page.goto("/jobs", { waitUntil: "domcontentloaded" });
     await expect(page.locator("h1")).toContainText("Jobs");
 
     // Generate unique job names to avoid conflicts across test runs
@@ -39,13 +37,10 @@ test.describe("Jobs — Edit from Detail View", () => {
     await page.getByRole("button", { name: "Create Job" }).first().click();
     await expect(page.getByRole("heading", { name: "Create Job" })).toBeVisible({ timeout: 5000 });
 
-    // Check if agents are available; skip if none
+    // A configured agent is a required precondition for creating a job.
     const agentOptions = page.locator("select").first().locator("option");
     const agentCount = await agentOptions.count();
-    if (agentCount <= 1) {
-      test.skip(true, "No agents configured — cannot create job");
-      return;
-    }
+    expect(agentCount, "At least one configured agent is required").toBeGreaterThan(1);
 
     // Fill required fields
     await page.getByPlaceholder("e.g., Nightly Security Scan").fill(jobName);
@@ -93,7 +88,7 @@ test.describe("Jobs — Edit from Detail View", () => {
   });
 
   test("Edit overlay closes and reopens cleanly (no stale errors)", async ({ page }) => {
-    await page.goto(`${BASE}/jobs`, { waitUntil: "domcontentloaded" });
+    await page.goto("/jobs", { waitUntil: "domcontentloaded" });
     await expect(page.locator("h1")).toContainText("Jobs");
 
     const jobName = `E2E Reopen Test ${Date.now()}`;
@@ -104,10 +99,7 @@ test.describe("Jobs — Edit from Detail View", () => {
 
     const agentOptions = page.locator("select").first().locator("option");
     const agentCount = await agentOptions.count();
-    if (agentCount <= 1) {
-      test.skip(true, "No agents configured — cannot create job");
-      return;
-    }
+    expect(agentCount, "At least one configured agent is required").toBeGreaterThan(1);
 
     await page.getByPlaceholder("e.g., Nightly Security Scan").fill(jobName);
     await page.locator("select").first().selectOption({ index: 1 });

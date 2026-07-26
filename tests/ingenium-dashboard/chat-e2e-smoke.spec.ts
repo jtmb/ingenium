@@ -54,10 +54,23 @@ test.describe("Chat — end-to-end smoke", () => {
   test("rich fixture: reasoning, tool call, and response stream correctly", async ({ page }) => {
     test.setTimeout(90000);
 
+    const conversationCreated = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/v1/opencode/sessions"
+        && response.request().method() === "POST",
+    );
     await page.goto("/chat", { waitUntil: "domcontentloaded" });
 
     // Wait for provider selector
     await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 20000 });
+
+    // This direct, dynamically-ported fixture request must pass the dashboard
+    // proxy's mutation contract before the rich stream can begin.
+    await page.getByRole("button", { name: /New conversation/i }).first().click();
+    const createdResponse = await conversationCreated;
+    expect(
+      createdResponse.status(),
+      `conversation creation request headers: ${JSON.stringify(await createdResponse.request().allHeaders())}`,
+    ).toBe(201);
 
     // Send a message
     const composer = page.locator('[data-testid="chat-composer"]');
@@ -71,11 +84,20 @@ test.describe("Chat — end-to-end smoke", () => {
     // Reasoning content should contain the fixture text
     await expect(page.locator('[data-testid="chat-reasoning-content"]')).toContainText("think about this");
 
-    // Tool call card should render
-    await expect(page.locator('[data-testid="chat-tool-call"]')).toBeVisible({ timeout: 10000 });
+    // Tool call should render as a non-interactive inline trace.
+    const toolTrace = page.locator('[data-testid="chat-tool-call"]');
+    await expect(toolTrace).toBeVisible({ timeout: 10000 });
 
     // Tool name should show
-    await expect(page.locator('[data-testid="chat-tool-name"]')).toContainText("Shell");
+    await expect(toolTrace.locator('[data-testid="chat-tool-name"]')).toContainText("Shell");
+    await expect(toolTrace.locator('[data-testid="chat-tool-summary"]')).toContainText(
+      "echo 'Hello from tool'",
+    );
+
+    // The OpenCode-style trace has no card chrome, controls, or status UI.
+    await expect(toolTrace.locator("button")).toHaveCount(0);
+    await expect(toolTrace.locator('[data-testid="chat-tool-status"]')).toHaveCount(0);
+    await expect(toolTrace).not.toHaveClass(/\b(?:border|rounded|bg-)/);
 
     // Streaming should complete — send button visible (stop button hidden)
     await expect(page.locator('[data-testid="chat-send-btn"]')).toBeVisible({ timeout: 30000 });

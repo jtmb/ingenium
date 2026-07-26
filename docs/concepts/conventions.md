@@ -8,12 +8,14 @@ description: Naming, file organization, error handling, git practices, and datab
 ## OpenCode Web/CLI Embedded in Dashboard
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web/CLI dual-mode interface**. The conversational chat interface has been separated to its own page at `/chat`.
 
-- **Web mode** — Embeds the OpenCode Web UI in a full-viewport iframe. The iframe `src` is dynamically resolved: loopback HTTP → `http://localhost:4098/`, LAN HTTP / HTTPS → `/opencode-web/` (same-origin proxy path). Overridable via `NEXT_PUBLIC_OPENCODE_WEB_URL` (relative same-origin paths only).
-- **CLI mode** — Embeds a ttyd terminal in a full-viewport iframe. URL resolution follows the same pattern: loopback HTTP → `http://localhost:4099/`, LAN HTTP / HTTPS → `/opencode-cli/` (overridable via `NEXT_PUBLIC_OPENCODE_CLI_URL`, relative same-origin paths only). Runs `opencode attach http://localhost:4098 --dir /workspace`, sharing session state.
+- **Web mode** — Uses the local root gateway `http://opencode.localhost:3000/` (or a dedicated root HTTPS origin configured with `NEXT_PUBLIC_OPENCODE_WEB_URL`).
+- **CLI mode** — Uses the local root gateway `http://cli.localhost:3000/` (or a dedicated root HTTPS origin configured with `NEXT_PUBLIC_OPENCODE_CLI_URL`). OpenCode is not served under a shared dashboard subpath because its root-relative assets and WebSockets require a root origin.
+- **Deployment boundary** — The default dashboard and gateway roots are published on port `3000`, which supports Windows-to-WSL localhost forwarding; the bearer API boundary on `4097` remains host-loopback-only and ports `4098`/`4099` remain private upstreams. LAN/remote use requires an operator-managed authenticated TLS profile and both public origins at build time.
+- **Authentication** — The default Windows↔WSL gateway does not use HTTP Basic Auth or browser bearer tokens. It is a local plain-HTTP profile, not a LAN/remote security profile; remote access requires an operator-managed authenticated TLS profile.
 - **Mode switch** — On the main `/opencode` page, a **segmented Web/CLI toggle** is integrated into the `OpenCodeToolbar` (a compact top toolbar with fullscreen, pop-out, and a green/red status indicator). The old floating right-edge `OpenCodeSwitch` component is deprecated in the main page but persists for the standalone pop-out (`/standalone?page=opencode`), which uses its own simplified right-edge floating toggle. Inactive iframes are hidden via `opacity`/`visibility`/`pointer-events` (not `display:none`) to prevent xterm dimension zeroing — both iframes remain in the DOM at full size once mounted.
 - **Keyboard shortcut**: `Ctrl+Shift+\`` toggles modes from anywhere on the page.
 - **Persistence**: The chosen mode is saved in `localStorage`.
-- **Session sharing**: All sessions (Web iframe, CLI ttyd, direct terminal attachments) share the same backend process state.
+- **Session sharing**: Web iframe and CLI ttyd sessions share the same backend process state; direct host attachment to the private upstream ports is not part of the browser-facing contract.
 - **Workspace** (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 
 ## DB Isolation
@@ -57,7 +59,7 @@ Observations are **DB-primary** with a **file fallback**: if the API is down, ob
 | `error` | User encountered error |
 | `goal` | Stated or implied goal |
 
-The `engineering-workflow` canonical skill (which absorbed the former orchestrator-primer training) requires the orchestrator to call `ingenium_observe(observation_type="preference", ...)` after every subagent task that modifies files (🔴 HARD RULE). The `development-conventions` skill extends this to all agents for any code change. The `skill-maintenance` skill adds auto-trigger instructions for logging when detection signals fire.
+The `engineering-workflow` canonical skill (which absorbed the former orchestrator-primer training) requires the primary engineering agent to call `ingenium_observe(observation_type="preference", ...)` after code changes (🔴 HARD RULE). The `development-conventions` skill extends this to all agents for any code change. The `skill-maintenance` skill adds auto-trigger instructions for logging when detection signals fire.
 
 > 🔴 **Note:** The old `ingenium_learning_log` tool is deprecated but still functional for backward compatibility. New code should use `ingenium_observe`.
 
@@ -119,9 +121,13 @@ export default function PortalComponent() {
 
 The `Overlay.tsx` shared component does NOT include this guard — it relies on callers passing `isOpen={false}` during SSR. For directly rendered portals (always in the DOM tree), the `mounted` guard is mandatory.
 
-## SSR Iframe Guard — Deferred `src` Resolution
+## SSR Browser-Only State Guard — Deferred Resolution Pattern
 
-Iframes with a dynamically-resolved `src` that depends on `window.location` **must defer URL resolution to after client hydration** to prevent the iframe from navigating to the SSR-generated fallback URL before React hydration replaces it. The pattern:
+Any state derived from browser-only APIs (`window`, `document`, `navigator`) **must be deferred to post-hydration** via `useState` + `useEffect`. Calling browser-only functions during render produces different SSR vs. client trees, causing React hydration error #418 ("Text content did not match").
+
+### Pattern 1: Iframe `src` Deferred Resolution
+
+Iframes with a dynamically-resolved `src` that depends on `window.location` **must defer URL resolution to after client hydration** to prevent the iframe from navigating to the SSR-generated fallback URL before React hydration replaces it.
 
 ```tsx
 "use client";
@@ -140,13 +146,43 @@ export default function DynamicIframe() {
 }
 ```
 
+### Pattern 2: Branching State Deferred (Availability / Feature Detection)
+
+Browser-only query functions that determine **which component branch renders** (e.g., availability checks, feature detection) must also be deferred. During SSR the initial `useState` value must match the first client render. Both produce `null`/default → hydration matches; the effect resolves the real value on the client after hydration.
+
+```tsx
+"use client";
+import { useState, useEffect } from "react";
+
+export default function DynamicComponent() {
+  // Availability starts as null on BOTH server and first client render,
+  // producing identical DOM. The effect resolves post-hydration.
+  const [availability, setAvailability] = useState<"ok" | "unavailable" | null>(null);
+
+  useEffect(() => {
+    setAvailability(getBrowserOnlyAvailability());
+  }, []);
+
+  if (availability === "unavailable") {
+    return <GuidanceBanner />;
+  }
+
+  return <MainContent />;
+}
+```
+
+**Failure scenario (hydrate #418):** If `getBrowserOnlyAvailability()` is called during render:
+- SSR: `window` is undefined → returns `"unavailable"` → renders `<GuidanceBanner />`
+- Client (first hydration render): `window` exists → returns `"ok"` → renders `<MainContent />`
+- React detects mismatched DOM trees → throws error #418
+
 **When to use this pattern:**
-- Iframe `src` is computed from `window.location.protocol`, `hostname`, or `port`
-- The computation falls back to a same-origin proxy path during SSR (when `window` is undefined)
-- Navigating the iframe to the proxy path before hydration would cause a spurious redirect or mixed-content request
+- Browser-only APIs called during render to determine which JSX branch to show
+- Feature detection that differs between server and client environments
+- Any state that depends on `typeof window === "undefined"` branching
 
 **Components using this pattern:**
-- `OpenCodeFrame.tsx` — OpenCode Web/CLI iframe URLs resolved post-hydration
+- `OpenCodeFrame.tsx` — OpenCode Web/CLI iframe URLs resolved post-hydration (Pattern 1); availability guard (`getOpenCodeAvailability()`) deferred via `useState(null)` + `useEffect` (Pattern 2)
 
 ## 🔴 Skill Data Integrity & Security Rules
 

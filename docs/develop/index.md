@@ -13,6 +13,7 @@ Technical documentation for developers working with the Ingenium codebase.
 |----------|-------------|
 | [API](api.md) | REST API design reference and endpoint catalog |
 | [Database](database.md) | Database migrations, WAL safety, manual repair |
+| [Testing](testing.md) | Default fixture E2E, explicit external suites, isolation, cleanup, and audits |
 | [Variables](variables.md) | Environment variables per service |
 
 ## Related

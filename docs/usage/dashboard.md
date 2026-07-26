@@ -5,7 +5,7 @@ description: Complete user guide for the Ingenium dashboard — all features, pa
 
 # Ingenium Dashboard User Guide
 
-Ingenium's dashboard provides visual management for all your AI agent development tools, including email client integration with Gmail and Outlook OAuth2 + IMAP/SMTP support. Access it at **http://localhost:3000** after starting the app.
+Ingenium's dashboard provides visual management for all your AI agent development tools, including email client integration with Gmail and Outlook OAuth2 + IMAP/SMTP support. Access it at **http://localhost:3000** after starting the app. Port `3000` is the local gateway and is reachable from Windows through WSL localhost forwarding without an HTTP Basic Auth prompt. The dashboard proxy authenticates to the private bearer-protected API server-side; the browser does not receive an API token. Do not use this plain-HTTP profile for LAN or remote access.
 
 ## Getting Started
 
@@ -14,7 +14,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-web (binds **0.0.0.0**:4098 inside container, Compose publishes to host `127.0.0.1:4098`), and ttyd-opencode (binds **0.0.0.0**:4099 inside container by default, Compose publishes to host `127.0.0.1:4099`). Both bind 0.0.0.0 inside the container so Docker port forwarding and supervisord health checks work — host access is restricted to 127.0.0.1 by Docker Compose. The MCP server registers **243 tools** across **28 categories**; 2 extension tools bring the catalog to 245. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-web (internal :4098), and ttyd-opencode (internal :4099). Browser access uses the local `localhost:3000` dashboard root and `opencode.localhost:3000` / `cli.localhost:3000` OpenCode roots without browser credentials. Direct 4098/4099 access is not supported. The MCP server registers **243 tools** across **28 categories**; 2 extension tools bring the catalog to 245. Build-time UID matching ensures write access to workspace.
 
 ### Connecting an MCP Client
 
@@ -163,22 +163,46 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 - Use the **Instructions** toggle (gear icon) to set a system prompt for the conversation.
 - Session management via collapsible sidebar: create, rename (double-click title), and delete sessions. On mobile (<768px) the sidebar becomes a drawer overlay.
 - Fork, share (copy link to clipboard), and compact conversations via header action buttons.
+- Tool calls appear as compact trace rows with a friendly tool label and short argument summary. **Web Search is the sole exception**: its row provides an accessible inline disclosure of the search query (including keyboard and `aria-expanded` state). All other tools remain non-interactive compact traces; detailed payload, status, timing, output, and error metadata are not shown in the trace.
 - Footer reads "OpenCode Chat".
 
 **API**: Uses `GET /api/v1/opencode/chat-config` to fetch sanitized provider/agent/model data. Messages are sent through OpenCode's native session `send()` API with provider/model selection.
 
 ## Settings
 
-**What it does**: Global application settings management. Configure archive retention, an arbitrary OpenCode-compatible provider catalog, Ingenium provider roles, and synthesis interval.
+**What it does**: Opens the full-screen Settings overlay on the current dashboard route. The overlay is URL-driven, so a panel can be bookmarked or shared with `/?settings=<panel>` (or the same query on another dashboard route).
 
 **How to use**:
-- Navigate to `/settings` in the dashboard
-- **Archive retention**: Set the number of days projects stay in the archive (1-365)
-- **Providers**: Add, reorder, collapse, enable, and remove provider blocks. Each block owns its OpenCode ID, npm package, base URL, API key, and model list
-- **Provider drafts**: Changes made in the PipelinePanel (Providers tab) are local state — they survive tab switches within the Settings overlay (e.g., switching from Providers → General → back to Providers) because inactive tab panels are hidden (via `hidden` + `inert`), not unmounted. However, closing the overlay discards all unsaved provider edits. Click "Save providers" to persist to the API.
-- **Provider roles**: Mark one block as Ingenium primary and one as backup; all remaining blocks stay available in OpenCode
-- **Credentials**: API keys are never returned by the API or written to OpenCode config; saved keys are represented by an `apiKeySet` placeholder
-- **Synthesis Interval**: Set how often the synthesis pipeline runs
+- Open the gear from a supported dashboard route. The launcher selects the tab associated with that route; explicit `settings` values take precedence.
+- Select a tab in the desktop sidebar or the category dropdown on smaller screens. Changing tabs replaces only the query parameter and preserves the current pathname and other query parameters.
+- Close the overlay with the close button, the backdrop, or `Escape`. Closing removes `settings` and returns focus to the previous element. `/settings` is a compatibility entrypoint that redirects to `/?settings=general`.
+- Without a `settings` parameter the overlay is closed. An unknown panel ID keeps the overlay open and falls back to the tab associated with the current pathname.
+
+### Settings deep links
+
+All 14 supported panel IDs are:
+
+| Deep link | Panel behavior | Full workspace |
+|---|---|---|
+| `general` | Edit theme and archive-retention days (1–365). | — |
+| `projects` | Route-linked summary for project management. | `/projects` |
+| `skills` | Route-linked summary for skills, governance, versions, and sync. | `/skills` |
+| `tasks` | Route-linked summary for task creation, prioritization, and tracking. | [`/tasks`](./tasks.md) |
+| `jobs` | Route-linked summary for scheduled jobs, runs, and execution logs. | [`/jobs`](../operations/jobs.md) |
+| `plugins` | Route-linked summary for plugin creation and lifecycle management. | [`/plugins`](../configure/plugins.md) |
+| `mail` | Configure global mail OAuth credentials, sync/cache windows, and smart replies. | — |
+| `agents` | Route-linked summary for agent profiles, categories, content, and availability. | [`/agents`](../configure/agents.md) |
+| `mcp-servers` | Route-linked summary for MCP servers and the enabled tool catalog. | [`/mcp-servers`](../configure/mcp-servers.md) |
+| `config` | Open the project/global OpenCode configuration editor. | [`/config`](../configure/config.md) |
+| `observations` | Route-linked read-only view of self-learning observations with filters. | `/observations` |
+| `personality` | Route-linked view for learned personality traits. | `/personality` |
+| `providers` | Manage native OpenCode connections, custom provider blocks, Ingenium primary/backup roles, and synthesis interval. | — |
+| `logs` | Route-linked live system-log and diagnostics view. | `/logs` |
+
+Use a deep link such as `/?settings=providers`. Route-linked panels intentionally do not duplicate their management UI: **Open workspace** navigates to the dedicated route, which retains that route's data loading, authorization, mutation flows, and responsive behavior. The `config` panel is also a compact launcher for `/config`.
+
+**Provider drafts**: Changes made in the Providers panel are local state and survive tab switches because inactive panels remain mounted but hidden/inert. Closing the overlay discards unsaved provider edits; click **Save providers** to persist them.
+**Provider credentials**: API keys are never returned by the API or written to OpenCode config; saved keys are represented by an `apiKeySet` placeholder.
 
 ## Agents
 
@@ -186,7 +210,7 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 
 **How to use**:
 - Navigate to `/agents` in the dashboard
-- View all 10 agent profiles with their model, mode, and enabled status
+- View all agent profiles with their model, mode, and enabled status
 - Enable/disable agents to control which are active
 
 ## Config
@@ -222,26 +246,35 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 
 ## API Access
 
-All dashboard features are backed by a REST API on port 4097. You can use the API directly:
+All dashboard features are backed by the authenticated bearer boundary on
+`127.0.0.1:4097` (Nginx forwards to private Express port `4096` in Docker).
+Direct calls require a token. Keep the bearer header in an owner-only curl
+config file (mode `0600`) or an equivalent secret-store helper; never put
+token bytes in shell arguments or history:
 
 ```bash
+API_CURL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ingenium/api-curl.conf"
+
 # List all projects
-curl http://localhost:4097/api/v1/projects
+curl --config "$API_CURL_CONFIG" http://localhost:4097/api/v1/projects
 
 # Get all skills
-curl http://localhost:4097/api/v1/skills
+curl --config "$API_CURL_CONFIG" http://localhost:4097/api/v1/skills
 
 # Search observations
-curl "http://localhost:4097/api/v1/observations/search?q=indentation"
+curl --config "$API_CURL_CONFIG" "http://localhost:4097/api/v1/observations/search?q=indentation"
 
 # Get personality profile
-curl http://localhost:4097/api/v1/personality/profile
+curl --config "$API_CURL_CONFIG" http://localhost:4097/api/v1/personality/profile
 
 # Get pipeline timeline
-curl "http://localhost:4097/api/v1/pipeline/timeline?limit=20"
+curl --config "$API_CURL_CONFIG" "http://localhost:4097/api/v1/pipeline/timeline?limit=20"
 
 # Trigger synthesis
-curl -X POST http://localhost:4097/api/v1/synthesis/run
+curl --config "$API_CURL_CONFIG" -X POST http://localhost:4097/api/v1/synthesis/run
 ```
+
+Provision the curl config from the secret store rather than interpolating the
+token into a command. Keep it local, ignored, and mode `0600`.
 
 See each HOW-TO doc for the full API reference for each feature.

@@ -84,6 +84,22 @@ const MOCK_PROMPT_RESPONSE = {
   ],
 };
 
+const OVERFLOW_MESSAGES = Array.from({ length: 160 }, (_, index) => ({
+  info: {
+    id: `overflow-message-${index}`,
+    sessionID: SESSION_ID,
+    role: index % 2 === 0 ? "user" as const : "assistant" as const,
+    time: { created: NOW + index, completed: NOW + index },
+  },
+  parts: [{
+    id: `overflow-part-${index}`,
+    sessionID: SESSION_ID,
+    messageID: `overflow-message-${index}`,
+    type: "text",
+    text: `Overflow regression message ${index}: ${"bounded local scrolling ".repeat(18)}`,
+  }],
+}));
+
 /* ──────────────────────────────────────────────────────────────────────── */
 /*  Route-matching helpers                                                  */
 /* ──────────────────────────────────────────────────────────────────────── */
@@ -162,7 +178,7 @@ function mockChatConfig(page: Page, config: typeof NO_PROVIDERS_CONFIG) {
 /*  Returns safe default responses so fetches don't throw.                  */
 /* ──────────────────────────────────────────────────────────────────────── */
 
-function mockSessionSubRoutes(page: Page) {
+function mockSessionSubRoutes(page: Page, messages: typeof OVERFLOW_MESSAGES = []) {
   // Prompt
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/prompt$/.test(url.pathname),
@@ -181,7 +197,7 @@ function mockSessionSubRoutes(page: Page) {
   // Messages (list for a session)
   page.route(
     (url) => /\/api\/v1\/opencode\/sessions\/[^/]+\/messages$/.test(url.pathname),
-    (route) => json200([])(route),
+    (route) => json200(messages)(route),
   );
   // Fork
   page.route(
@@ -264,10 +280,14 @@ function mockAgentsEndpoint(page: Page) {
 /*  Convenience: apply all mocks for a given scenario                       */
 /* ──────────────────────────────────────────────────────────────────────── */
 
-async function applyMocks(page: Page, config: typeof NO_PROVIDERS_CONFIG) {
+async function applyMocks(
+  page: Page,
+  config: typeof NO_PROVIDERS_CONFIG,
+  messages: typeof OVERFLOW_MESSAGES = [],
+) {
   mockSessionListCreate(page);
   mockChatConfig(page, config);
-  mockSessionSubRoutes(page);
+  mockSessionSubRoutes(page, messages);
   mockAgentsEndpoint(page);
 }
 
@@ -275,8 +295,8 @@ function mockHappyPath(page: Page) {
   return applyMocks(page, WITH_PROVIDERS_CONFIG);
 }
 
-function mockNoProviders(page: Page) {
-  return applyMocks(page, NO_PROVIDERS_CONFIG);
+function mockNoProviders(page: Page, messages: typeof OVERFLOW_MESSAGES = []) {
+  return applyMocks(page, NO_PROVIDERS_CONFIG, messages);
 }
 
 /* ──────────────────────────────────────────────────────────────────────── */
@@ -285,17 +305,6 @@ function mockNoProviders(page: Page) {
 
 test.describe("Chat UI — /chat page", () => {
   test.describe.configure({ mode: "serial" });
-
-  test.beforeAll(async ({ request }) => {
-    try {
-      const apiHealth = await request.get("http://localhost:4097/api/v1/health");
-      if (!apiHealth.ok()) {
-        test.skip(true, "API not reachable — skipping tests");
-      }
-    } catch {
-      test.skip(true, "Services not running — skipping tests");
-    }
-  });
 
   /* ────────────────────────────────────────────────────────────────────── */
   /*  1. No providers — disabled UI                                        */
@@ -468,6 +477,40 @@ test.describe("Chat UI — /chat page", () => {
     await expect(hamburger).toBeVisible();
   });
 
+  test("long histories stay in the message scroller and keep the composer in the viewport", async ({ page }) => {
+    mockNoProviders(page, OVERFLOW_MESSAGES);
+
+    for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await page.goto("/chat", { waitUntil: "domcontentloaded" });
+      await expect(page.locator('[data-testid="chat-messages-container"]')).toBeVisible();
+      await expect(page.locator('[data-testid="chat-composer"]')).toBeVisible();
+
+      const geometry = await page.evaluate(() => {
+        const messages = document.querySelector<HTMLElement>('[data-testid="chat-messages-container"]');
+        const composer = document.querySelector<HTMLElement>('[data-testid="chat-composer"]');
+        if (!messages || !composer) throw new Error("Chat layout fixtures did not render");
+
+        const composerBox = composer.getBoundingClientRect();
+        return {
+          documentHeight: document.documentElement.scrollHeight,
+          viewportHeight: window.innerHeight,
+          messagesClientHeight: messages.clientHeight,
+          messagesScrollHeight: messages.scrollHeight,
+          messagesOverflowY: getComputedStyle(messages).overflowY,
+          composerTop: composerBox.top,
+          composerBottom: composerBox.bottom,
+        };
+      });
+
+      expect(geometry.documentHeight).toBeLessThanOrEqual(geometry.viewportHeight + 2);
+      expect(geometry.messagesScrollHeight).toBeGreaterThan(geometry.messagesClientHeight);
+      expect(geometry.messagesOverflowY).toMatch(/auto|scroll/);
+      expect(geometry.composerTop).toBeGreaterThanOrEqual(0);
+      expect(geometry.composerBottom).toBeLessThanOrEqual(geometry.viewportHeight);
+    }
+  });
+
   /* ────────────────────────────────────────────────────────────────────── */
   /*  4. Enter sends, Shift+Enter adds newline                              */
   /* ────────────────────────────────────────────────────────────────────── */
@@ -507,15 +550,9 @@ test.describe("Chat UI — /chat page", () => {
     await composer.fill("Test message");
     await composer.press("Enter");
 
-    // The composer clears after a successful send
-    try {
-      await expect(composer).toHaveValue("", { timeout: 8000 });
-    } catch {
-      test.info().annotations.push({
-        type: "warning",
-        description: "Composer did not clear after Enter — the send cycle may not have completed fully.",
-      });
-    }
+    // The composer must clear after a successful send; a timeout is a real
+    // regression, not an optional warning.
+    await expect(composer).toHaveValue("", { timeout: 8000 });
   });
 
   /* ────────────────────────────────────────────────────────────────────── */

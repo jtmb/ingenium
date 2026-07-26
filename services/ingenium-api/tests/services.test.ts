@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,10 +8,25 @@ import type { AddressInfo } from "node:net";
 import { projects, docs, tasks } from "ingenium-core";
 import { servicesRouter } from "../lib/routes/services.js";
 
+const emailMocks = vi.hoisted(() => ({
+  getGlobalProjectId: vi.fn(),
+  listAccounts: vi.fn(),
+  getEngineStatus: vi.fn(),
+}));
+
+vi.mock("ingenium-email", () => emailMocks);
+
 let tempDir: string;
 let globalProjectId: string;
 let server: Server | null = null;
 let baseUrl: string;
+const nativeFetch = globalThis.fetch;
+
+function supervisorResponse(): string {
+  return ["ingenium-api", "ingenium-dashboard", "opencode-web", "ttyd-opencode"]
+    .map((name) => `<struct><member><name>name</name><value><string>${name}</string></value></member><member><name>statename</name><value><string>RUNNING</string></value></member><member><name>start</name><value><i4>1</i4></value></member><member><name>spawnerr</name><value><string></string></value></member><member><name>pid</name><value><i4>1</i4></value></member><member><name>exitstatus</name><value><i4>0</i4></value></member><member><name>stop</name><value><i4>0</i4></value></member></struct>`)
+    .join("");
+}
 
 function buildApp(): express.Express {
   const app = express();
@@ -41,9 +56,27 @@ beforeAll(async () => {
       resolve();
     });
   });
+
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === "http://127.0.0.1:9001/RPC2") {
+      return new Response(supervisorResponse(), { status: 200 });
+    }
+    return nativeFetch(input, init);
+  });
+});
+
+beforeEach(() => {
+  emailMocks.getGlobalProjectId.mockReturnValue(globalProjectId);
+  emailMocks.listAccounts.mockReturnValue([]);
+  emailMocks.getEngineStatus.mockReturnValue({
+    running: false,
+    heartbeatAt: null,
+    accounts: [],
+  });
 });
 
 afterAll(async () => {
+  vi.unstubAllGlobals();
   if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
   if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 });
@@ -63,6 +96,38 @@ describe("GET /api/v1/services/status — applications", () => {
 
     const names = body.data.applications.map((a: { name: string }) => a.name).sort();
     expect(names).toEqual(["docs-workspace", "email-client", "synthesis-engine", "tasks-board"]);
+  });
+
+  it("keeps aggregate health healthy when no optional email accounts exist", async () => {
+    const res = await fetch(`${baseUrl}/api/v1/services/status`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    const emailApp = body.data.applications.find(
+      (app: { name: string }) => app.name === "email-client",
+    );
+    expect(emailApp).toMatchObject({ state: "idle", required: false });
+    expect(body.data.overall).toBe("healthy");
+  });
+
+  it("degrades aggregate health for a configured email client with a stale heartbeat", async () => {
+    emailMocks.listAccounts.mockReturnValue([{ id: "mail-1" }]);
+    emailMocks.getEngineStatus.mockReturnValue({
+      running: true,
+      heartbeatAt: new Date(Date.now() - 121_000).toISOString(),
+      accounts: [{ accountId: "mail-1", email: "mail@example.com", folders: [] }],
+    });
+
+    const res = await fetch(`${baseUrl}/api/v1/services/status`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    const emailApp = body.data.applications.find(
+      (app: { name: string }) => app.name === "email-client",
+    );
+    expect(emailApp).toMatchObject({ state: "degraded", required: true });
+    expect(emailApp.detail).toContain("Heartbeat stale");
+    expect(body.data.overall).toBe("degraded");
   });
 
   it("docs-workspace is idle when no docs exist", async () => {

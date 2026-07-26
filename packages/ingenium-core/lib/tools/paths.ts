@@ -10,7 +10,9 @@ export function resolveProjectBase(projectId?: string): string {
   if (projectId) {
     try {
       const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-      const project = db.prepare("SELECT is_global FROM projects WHERE id = ?").get(projectId) as { is_global: number } | undefined;
+      const project = db.prepare(
+        "SELECT is_global FROM projects WHERE id = ? AND archived_at IS NULL",
+      ).get(projectId) as { is_global: number } | undefined;
       if (project?.is_global) {
         return process.env.INGENIUM_GLOBAL_CONFIG_PATH
           ?? resolve(process.env.HOME ?? "/home/appuser", ".config", "opencode");
@@ -29,7 +31,9 @@ export function isGlobal(projectId?: string): boolean {
   if (!projectId) return false;
   try {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-    const project = db.prepare("SELECT is_global FROM projects WHERE id = ?").get(projectId) as { is_global: number } | undefined;
+    const project = db.prepare(
+      "SELECT is_global FROM projects WHERE id = ? AND archived_at IS NULL",
+    ).get(projectId) as { is_global: number } | undefined;
     return project?.is_global === 1;
   } catch { return false; }
 }
@@ -67,7 +71,9 @@ export function getCommandsBase(projectId?: string): string {
 export function getConfigPath(projectId?: string): string {
   const base = resolveProjectBase(projectId);
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./data");
-  const project = projectId ? db.prepare("SELECT is_global FROM projects WHERE id = ?").get(projectId) as { is_global: number } | undefined : undefined;
+  const project = projectId ? db.prepare(
+    "SELECT is_global FROM projects WHERE id = ? AND archived_at IS NULL",
+  ).get(projectId) as { is_global: number } | undefined : undefined;
   // Global project uses opencode.jsonc (comment-supporting JSONC), project uses opencode.json
   if (project?.is_global) {
     return resolve(base, "opencode.jsonc");

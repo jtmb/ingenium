@@ -1,23 +1,34 @@
 import { defineConfig } from "@playwright/test";
 
 /**
- * Docker-backed Playwright config for OpenCode integration tests.
- * Assumes Docker is running the full stack (API :4097, Dashboard :3000, OpenCode :4098).
- * Does NOT start its own web servers — tests run against the Docker-managed services.
+ * Docker-backed Playwright config for live-system integration tests.
+ *
+ * This config never starts Docker itself. It is explicit opt-in and fails in
+ * global setup if the requested Docker services are not reachable.
  */
 export default defineConfig({
-  testDir: "./ingenium-dashboard",
-  testMatch: "opencode*.spec.ts",
-  timeout: 30000,
+  testDir: ".",
+  testMatch: [
+    "**/ingenium-dashboard/opencode.spec.ts",
+    "**/ingenium-dashboard/opencode-chat.spec.ts",
+    "**/ingenium-dashboard/opencode-switch.spec.ts",
+    "**/ingenium-dashboard/ttyd-websocket.spec.ts",
+    "**/ingenium-dashboard/integration.spec.ts",
+    "**/ingenium-dashboard/all-pages.spec.ts",
+    "**/ingenium-dashboard/secrets-production.spec.ts",
+  ],
+  globalSetup: "./ingenium-dashboard/docker-global-setup.ts",
+  timeout: 60000,
   retries: 0,
+  workers: 1,
   fullyParallel: false,
-  outputDir: "test-results", // resolves to tests/test-results/ (relative to config dir tests/)
+  outputDir: "artifacts/playwright/docker",
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL: process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000",
     headless: true,
     viewport: { width: 1280, height: 720 },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  // No webServer config — Docker provides all services
+  // No webServer config — an already-running Docker deployment provides all services.
 });

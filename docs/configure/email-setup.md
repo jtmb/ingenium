@@ -32,6 +32,28 @@ These are passed through to `docker compose` via the `${VAR:-}` expansion in `do
 
 ## OAuth2 Credential Setup
 
+OAuth application client secrets (`oauth_gmail_client_secret` and
+`oauth_outlook_client_secret`) are protected settings backed by the encrypted
+vault and belong only to the sole active global project. The selected dashboard
+project does not change their storage scope. The Settings API returns only
+masked presence metadata (`isSet` and `masked`), never the secret value. Use
+explicit `preserve`, `replace`, or `clear` actions; a blank value from a
+sanitized settings form preserves the existing secret. The dashboard requires
+confirmation before it sends `clear`.
+
+If the vault is sealed or unavailable, OAuth client-secret reads and writes
+fail closed. After unseal, legacy values are reconciled for both supported
+providers. A legacy plaintext value is removed only after an encrypted vault
+copy is successfully created and decrypted/verified. Conflicting or
+undecryptable values remain in place for operator review; protected values are
+never overwritten by a conflicting legacy value. Duplicate active global
+projects also fail closed.
+
+OAuth callback diagnostics are redacted. User-facing callback failures use
+constant safe messages, while server diagnostics retain only safe status/error
+codes or error names. Provider URLs, response bodies, headers, authorization
+codes, tokens, and raw library error text are not returned or logged.
+
 ### Google Cloud Console (Gmail)
 
 1. Go to https://console.cloud.google.com/apis/credentials

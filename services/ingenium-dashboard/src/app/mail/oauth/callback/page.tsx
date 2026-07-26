@@ -3,7 +3,8 @@
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { getApiBase } from "@/lib/api";
+import { dashboardFetch, getApiBase } from "@/lib/api";
+import { getOAuthCallbackErrorMessage } from "./messages";
 
 const API_BASE = getApiBase();
 
@@ -17,16 +18,14 @@ function OAuthCallbackInner() {
   const code = searchParams.get("code");
   const state = searchParams.get("state");
   const error = searchParams.get("error");
-  const errorDesc = searchParams.get("error_description");
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    // Surface provider-disclosed errors (e.g. Google's access_denied) directly to the user
     if (error) {
       setStatus("error");
-      setErrorMsg(`${error}${errorDesc ? ": " + errorDesc : ""}`);
+      setErrorMsg(getOAuthCallbackErrorMessage(error));
       return;
     }
 
@@ -43,9 +42,8 @@ function OAuthCallbackInner() {
 
     const exchangeCode = async () => {
       try {
-        const res = await fetch(`${API_BASE}/emails/accounts/oauth?project=${encodeURIComponent(project)}`, {
+        const res = await dashboardFetch(`${API_BASE}/emails/accounts/oauth?project=${encodeURIComponent(project)}`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             provider,
             code,
@@ -61,18 +59,21 @@ function OAuthCallbackInner() {
           localStorage.removeItem("oauth_account_id");
           setStatus("success");
         } else {
-          const data = await res.json().catch(() => ({ error: { message: "OAuth exchange failed" } }));
+          const data = await res.json().catch(() => ({}));
           setStatus("error");
-          setErrorMsg(data.error?.message || "Failed to complete OAuth with provider.");
+          // Only the server error code is eligible for display. Never surface
+          // its message because provider diagnostics may contain URLs or
+          // sensitive request details.
+          setErrorMsg(getOAuthCallbackErrorMessage(data.error?.code));
         }
-      } catch (err: any) {
+      } catch {
         setStatus("error");
-        setErrorMsg(err.message || "Network error during OAuth exchange.");
+        setErrorMsg("The OAuth service could not be reached. Try again.");
       }
     };
 
     exchangeCode();
-  }, [code, state]);
+  }, [code, state, error]);
 
   return (
     <div className="max-w-lg mx-auto mt-12">

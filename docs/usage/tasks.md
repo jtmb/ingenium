@@ -46,6 +46,9 @@ Toggle "Bulk Edit" mode to select multiple task cards and update column, assigne
 ### View Switcher
 Three views: **Board** (Kanban columns), **List** (flat list), **Timeline** (chronological).
 
+### Responsive Behavior
+On narrow screens, the search field and **+ Add Task** control stack vertically so both remain usable without widening the page. The Kanban board keeps its column width and uses an intentional, bounded horizontal scroll region; on mobile, the **“Swipe horizontally to view all columns.”** hint identifies that region. Focus the **Kanban board** region with the keyboard before using horizontal scrolling when touch input is unavailable.
+
 ## MCP Tools
 
 | Tool | Purpose |

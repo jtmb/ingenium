@@ -12,4 +12,6 @@ export declare const config: {
     mcpName: string;
     mcpVersion: string;
 };
+/** Add API authentication without exposing the configured token to callers. */
+export declare function apiRequestHeaders(headers?: HeadersInit): Headers;
 //# sourceMappingURL=index.d.ts.map

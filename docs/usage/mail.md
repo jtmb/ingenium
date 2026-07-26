@@ -9,6 +9,64 @@ description: Using the Ingenium email client — reading, composing, searching, 
 
 The email client provides Gmail REST API inbox viewing via thin `fetch()` client, email composition through SMTP (nodemailer), MIME parsing, and search functionality.
 
+## Durable account identity
+
+Mail accounts are shared service resources owned by the active global project
+(the project marked `is_global=1`, normally `global-default`), not by an
+external worktree project. The engine resolves that global project on each
+operation. Account metadata, cache, OAuth values, and encrypted app-password
+values are stored in the canonical SQLite database on the `ingenium-data`
+volume. Rebuilds preserve them; changing the Compose project name or using
+`down -v` does not.
+
+### Encryption continuity
+
+Credentials and OAuth tokens are encrypted with AES-256-GCM using
+`INGENIUM_EMAIL_ENCRYPTION_KEY`. Ingenium stores only a non-reversible SHA-256
+fingerprint of the normalized encryption key to detect continuity; it never
+returns or logs the key, plaintext credentials, or ciphertext. A missing,
+malformed, or changed key blocks writes rather than replacing recoverable data.
+Account discovery remains available, while credential reads fail closed and the
+mail service reports a reconnect/degraded state.
+
+There must be exactly one active global project. If project integrity is
+ambiguous, mail resolution fails closed rather than choosing a project by name
+or row order.
+
+### Legacy Account Migration
+
+The project-scoped-to-global migration is an all-or-nothing operation. Its
+preflight groups account metadata with its OAuth token record, decrypts every
+credential with the active key, checks account identity and destination
+collisions, and verifies the destination before deleting any source row.
+
+- A malformed, orphaned, plaintext, or undecryptable group is skipped.
+- Source rows are retained when preflight or destination verification fails.
+- Collisions are left for operator review rather than overwritten.
+- Transient OAuth CSRF state is not migrated as durable account data.
+
+Run preflight only after deploying the release containing the migration guards;
+do not trigger a live migration against an older running API.
+
+Provider and OAuth failures are redacted at the mail boundary: responses and
+durable diagnostics contain only a stable code, safe message, operation, and
+retryability. Provider URLs, response bodies, headers, token values, and raw
+library error text are not returned or logged.
+
+### Global OAuth application secrets
+
+OAuth application client secrets are stored as protected vault settings under
+the sole active global project. After the vault is unsealed, legacy plaintext
+settings are reconciled for Gmail and Outlook. The encrypted copy is
+decrypted/verified before the legacy row is removed. Conflicts, unavailable
+vaults, and decryptability failures retain the source and do not overwrite a
+protected value. An ambiguous duplicate-global state fails closed.
+
+The settings contract is masked (`isSet`, `masked`) and supports `preserve`,
+`replace` with a non-empty value, and explicit `clear`. Blank sanitized input
+preserves the existing secret; the dashboard sends `clear` only after the user
+confirms the destructive action.
+
 ## Cache-First Architecture
 
 The email client uses a **cache-first** pattern to ensure the UI never blocks on live API calls:
@@ -57,6 +115,15 @@ The FolderSidebar allows you to **hide** accounts from the left sidebar while ke
 ## Recovery Behavior
 
 The sync engine and dashboard work together to handle restarts, late account discovery, and authentication failures gracefully. This section documents the recovery paths and how accounts transition between states.
+
+### Watcher authentication in a cleared environment
+
+The IMAP watcher authenticates its direct API observation requests with the
+protected API token file when the runtime has deliberately removed token values
+from service environments. It resolves the credential at request time, adds
+the bearer header only to Ingenium API calls, and does not pass it to email
+providers. Invalid, missing, symlinked, or broadly readable token files fail
+closed without writing credential material to watcher observations or logs.
 
 ### Reconnect Button
 
@@ -217,6 +284,11 @@ The sync engine implements a per-folder **auth-error circuit breaker** to preven
 - New valid tokens from a successful OAuth flow clear the circuit breaker via `resetAuthCircuit()` (`oauth.ts:144-149`).
 - A successful `PATCH /emails/accounts/:id/credentials` (app-password) also clears the circuit breaker — the engine restart triggered by `stopAccountWorker()` + `startEngine()` resets auth error counters for the account (`sync-engine.ts:995-1001`).
 - Worker stop (`stopAccountWorker()`) also cleans up auth error counters for the account.
+
+This is a safe degraded state, not an instruction to remove the account. Cached
+metadata/mail remains available where possible. Restore the original encryption
+key if continuity is the issue, or use **Reconnect**: OAuth accounts complete a
+new provider consent flow; app-password accounts replace the password in place.
 
 ### Engine Health and Status
 

@@ -255,6 +255,62 @@ describe("request() — headers", () => {
     expect(headers["x-ingenium-ui"]).toBe("dashboard");
     expect(headers["X-Custom"]).toBe("value");
   });
+
+  it("canonicalizes the dashboard marker and removes browser auth overrides", async () => {
+    const { request } = await getApi();
+
+    await request("/projects", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer browser-controlled-token",
+        "Proxy-Authorization": "Basic browser-controlled-token",
+        "X-Ingenium-UI": "spoofed-marker",
+      },
+      body: JSON.stringify({ name: "test" }),
+    });
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers.authorization).toBeUndefined();
+    expect(headers["Proxy-Authorization"]).toBeUndefined();
+    expect(headers["X-Ingenium-UI"]).toBeUndefined();
+    expect(headers["x-ingenium-ui"]).toBe("dashboard");
+  });
+
+  it("does not add a JSON content type to multipart browser uploads", async () => {
+    const { request } = await getApi();
+    const formData = new FormData();
+    formData.append("file", "fixture");
+
+    await request("/upload", {
+      method: "POST",
+      body: formData,
+    });
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBeUndefined();
+    expect(headers["x-ingenium-ui"]).toBe("dashboard");
+  });
+
+  it("applies the same canonical marker and browser-auth stripping to raw dashboardFetch calls", async () => {
+    const { dashboardFetch } = await getApi();
+
+    await dashboardFetch("/api/v1/docs/pages/fixture/draft", {
+      method: "PUT",
+      headers: {
+        Authorization: "Bearer browser-controlled-token",
+        "Proxy-Authorization": "Basic browser-controlled-token",
+        "X-Ingenium-UI": "spoofed-marker",
+      },
+      body: JSON.stringify({ content: "isolated fixture" }),
+    });
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers.authorization).toBeUndefined();
+    expect(headers["Proxy-Authorization"]).toBeUndefined();
+    expect(headers["X-Ingenium-UI"]).toBeUndefined();
+    expect(headers["x-ingenium-ui"]).toBe("dashboard");
+    expect(headers["Content-Type"]).toBe("application/json");
+  });
 });
 
 describe("request() — method passthrough", () => {
@@ -341,6 +397,64 @@ describe("request() — response handling", () => {
     await expect((request as any)("/projects")).rejects.toThrow(
       "Server Error",
     );
+  });
+
+  it("preserves an authentication gateway failure as an ApiError", async () => {
+    fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      statusText: "Unauthorized",
+      headers: new Headers(),
+      json: () => Promise.resolve({ error: { message: "Dashboard authentication required" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { request, ApiError } = await getApi();
+    const error = await (request as any)("/opencode/health").catch((reason: unknown) => reason);
+    expect(error).toMatchObject({
+      name: "ApiError",
+      status: 401,
+      message: "Dashboard authentication required",
+      retryAfterSeconds: null,
+    });
+    // This verifies the public instanceof contract used by dashboard error boundaries.
+    expect(error).toBeInstanceOf(ApiError);
+  });
+
+  it("preserves a gateway Retry-After value and caps it at 60 seconds", async () => {
+    fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      statusText: "Too Many Requests",
+      headers: new Headers({ "Retry-After": "120" }),
+      json: () => Promise.resolve({ error: { message: "Rate limited by gateway" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { request } = await getApi();
+    await expect((request as any)("/opencode/chat-config")).rejects.toMatchObject({
+      status: 429,
+      message: "Rate limited by gateway",
+      retryAfterSeconds: 60,
+    });
+  });
+
+  it("does not invent a retry delay for an invalid Retry-After value", async () => {
+    fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+      headers: new Headers({ "Retry-After": "later" }),
+      json: () => Promise.resolve({ error: { message: "OpenCode unavailable" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { request } = await getApi();
+    await expect((request as any)("/opencode/health")).rejects.toMatchObject({
+      status: 503,
+      message: "OpenCode unavailable",
+      retryAfterSeconds: null,
+    });
   });
 });
 

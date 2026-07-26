@@ -14,7 +14,7 @@ Use this template when creating or auditing agent definitions:
 name: agent-name
 description: "Short description of what this agent does"
 mode: subagent|primary
-model: provider/model-id
+# Runtime model/variant is assigned centrally in opencode.json; do not add model frontmatter.
 permission:
   # --- Tool permissions ---
   read: allow
@@ -22,21 +22,22 @@ permission:
   bash: allow|deny
   glob: allow|deny
   grep: allow|deny
-  skill: allow
   webfetch: allow|deny
   websearch: allow|deny
   task: allow|deny  (or specific subagent: allow)
   playwright_*: allow|deny
   # --- Skill permissions ---
   skill:
-    "development-conventions": allow
-    "devops-conventions": allow
-    "mcp-tooling": allow
+    "@development-conventions": allow
+    "@devops-conventions": allow
+    "@mcp-tooling": allow
     "*": deny
 ---
 ```
 
 ### Role-Specific Templates
+
+Agents with `edit: allow` or `write: allow` are writers for orchestration accounting, including documentation and browser agents. They count toward the maximum of three concurrent writers even when their task is not source-code work. In this topology, Fast, Premium, Docs, and Browser are writers; Browser is dispatchable.
 
 ### 🔴 Playwright Permission Warning
 
@@ -49,26 +50,24 @@ permission:
   bash: allow
   glob: deny
   grep: deny
-  skill: allow
   task:
     "*": deny
     "ingenium-software-engineer-fast": allow
     "ingenium-software-engineer-premium": allow
     "ingenium-qa": allow
     "ingenium-docs": allow
+    "browser-agent": allow
     "ingenium-explore": allow
     "ingenium-scout": allow
     "ingenium-security-auditor": allow
-  playwright_*: allow
+  playwright_*: deny
   skill:
-    "development-conventions": allow
-    "devops-conventions": allow
-    "@engineering-workflow": allow
-    "local-models": allow
-    "@engineering-workflow": allow
-    "skill-maintenance": allow
-    "mcp-tooling": allow
+    "@development-conventions": allow
     "@devops-conventions": allow
+    "@engineering-workflow": allow
+    "@local-models": allow
+    "@skill-maintenance": allow
+    "@mcp-tooling": allow
     "*": deny
 ```
 
@@ -80,13 +79,12 @@ permission:
   bash: allow
   glob: allow
   grep: allow
-  skill: allow
   webfetch: allow
   skill:
-    "development-conventions": allow
-    "devops-conventions": allow
+    "@development-conventions": allow
+    "@devops-conventions": allow
     "@engineering-workflow": allow
-    "mcp-tooling": allow
+    "@mcp-tooling": allow
     "*": deny
 ```
 
@@ -96,11 +94,10 @@ permission:
   read: allow
   glob: allow|deny
   grep: allow|deny
-  skill: allow
   bash: deny
   edit: deny
   skill:
-    "development-conventions": allow
-    "mcp-tooling": deny
+    "@development-conventions": allow
+    "@mcp-tooling": deny
     "*": deny
 ```

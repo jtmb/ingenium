@@ -2,7 +2,6 @@
 name: ingenium-qa-vision
 description: "Visual QA-only agent. Uses Playwright evidence to assess rendered UI without changing application data or implementing fixes."
 mode: subagent
-model: openai/gpt-5.6-luna
 permission:
   read: allow
   edit: deny
@@ -64,6 +63,7 @@ permission:
     "*": "deny"
   skill:
     "@development-conventions": allow
+    "@devops-conventions": allow
     "@engineering-workflow": allow
     "@mcp-tooling": allow
     "*": deny

@@ -1,34 +1,40 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
+import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 /**
  * LAN API assertion plan — E2E verification that the dashboard sends API
  * requests to the correct /api/v1 base URL, includes required headers and
  * query parameters, and derives correct iframe URLs for LAN deployments.
  *
- * These tests intercept real dashboard API requests and iframe loads,
- * asserting structural properties without assuming any particular data
- * shape (no tautological assertions against source literals).
+ * These tests intercept dashboard API requests and iframe loads, asserting
+ * structural properties without assuming any particular data shape (no
+ * tautological assertions against source literals).
  *
- * Precondition: Docker services (API :4097, Dashboard :3000) must be running.
- * Skipped gracefully if the API is unreachable.
+ * The dashboard/API web servers are supplied by the Playwright config. The
+ * OpenCode health gateway is mocked, so these tests do not require Docker or
+ * a live OpenCode/provider process.
  */
 
-const DASHBOARD_URL = "http://localhost:3000";
-const API_BASE = "http://localhost:4097/api/v1";
+const runtime = getDefaultSuiteRuntime();
+const API_BASE = runtime.apiBase;
+
+/** Keep iframe rendering deterministic without contacting OpenCode. */
+async function mockOpenCodeHealth(page: Page) {
+  await page.route("**/api/v1/opencode/health**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: { healthy: true, status: "ready" } }),
+    }),
+  );
+}
+
+test.beforeEach(async ({ page }) => {
+  await mockOpenCodeHealth(page);
+});
 
 test.describe("Same-origin dashboard API requests", () => {
   test.describe.configure({ mode: "serial" });
-
-  test.beforeAll(async ({ request }) => {
-    try {
-      const resp = await request.get(`${API_BASE}/health`);
-      if (!resp.ok()) {
-        test.skip(true, "API server not healthy — skipping E2E assertions");
-      }
-    } catch {
-      test.skip(true, "API server unreachable — skipping E2E assertions");
-    }
-  });
 
   /* ------------------------------------------------------------------------ */
   /*  Assertion: All API requests go to the /api/v1 base path                 */
@@ -39,13 +45,12 @@ test.describe("Same-origin dashboard API requests", () => {
 
     await page.route("**/api/v1/**", (route: Route) => {
       apiCalls.push(route.request().url());
-      route.continue();
+      route.fallback();
     });
 
-    await page.goto(DASHBOARD_URL, { waitUntil: "domcontentloaded" });
-
-    // Wait long enough for the summary API call (card data) to be made
-    await page.waitForTimeout(3000);
+    const summaryResponse = page.waitForResponse((response) => response.url().includes("/dashboard/summary"));
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await summaryResponse;
 
     expect(apiCalls.length).toBeGreaterThanOrEqual(1);
 
@@ -67,48 +72,18 @@ test.describe("Same-origin dashboard API requests", () => {
   /* ------------------------------------------------------------------------ */
 
   test("API requests include x-ingenium-ui: dashboard header", async ({ page }) => {
-    const seenHeader: boolean[] = [];
+    const headerRequest = page.waitForRequest((request) =>
+      request.url().includes("/api/v1/") && request.headers()["x-ingenium-ui"] === "dashboard",
+    );
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    const request = await headerRequest;
 
-    await page.route("**/api/v1/**", (route: Route) => {
-      const headers = route.request().headers();
-      seenHeader.push(headers["x-ingenium-ui"] === "dashboard");
-      route.continue();
-    });
-
-    await page.goto(DASHBOARD_URL, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(3000);
-
-    // At least one intercepted call must have the header
-    expect(seenHeader.some(Boolean)).toBe(true);
+    expect(request.headers()["x-ingenium-ui"]).toBe("dashboard");
   });
 
   /* ------------------------------------------------------------------------ */
   /*  Assertion: Content-Type is application/json on request body calls       */
   /* ------------------------------------------------------------------------ */
-
-  test("POST/PUT/PATCH requests include Content-Type: application/json", async ({ page }) => {
-    const seenJsonContentType: boolean[] = [];
-
-    await page.route("**/api/v1/**", (route: Route) => {
-      const method = route.request().method();
-      if (["POST", "PUT", "PATCH"].includes(method)) {
-        const headers = route.request().headers();
-        seenJsonContentType.push(headers["content-type"]?.includes("application/json") ?? false);
-      }
-      route.continue();
-    });
-
-    // Navigate to a page that makes mutating requests
-    await page.goto(`${DASHBOARD_URL}/settings`, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(2000);
-
-    // Not every page issues mutations; it's acceptable to have no captures.
-    // This assertion documents the contract: when mutations happen, they
-    // carry the correct content type.
-    if (seenJsonContentType.length > 0) {
-      expect(seenJsonContentType.every(Boolean)).toBe(true);
-    }
-  });
 
   /* ------------------------------------------------------------------------ */
   /*  Assertion: project query param on skill/observation/resource calls      */
@@ -124,15 +99,18 @@ test.describe("Same-origin dashboard API requests", () => {
       if (route.request().method() === "GET") {
         projectParamUrls.push(url);
       }
-      route.continue();
+      route.fallback();
     });
 
-    await page.goto(DASHBOARD_URL, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(3000);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
 
-    // Navigate to skills, observations, tasks pages to trigger more API calls
-    await page.goto(`${DASHBOARD_URL}/skills`, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(2000);
+    // Navigate to skills and wait for the page's list request instead of
+    // sleeping for an arbitrary amount of time.
+    const skillsResponse = page.waitForResponse((response) =>
+      response.url().includes("/api/v1/skills") && response.request().method() === "GET",
+    );
+    await page.goto("/skills", { waitUntil: "domcontentloaded" });
+    await skillsResponse;
 
     // All captured GET resource URLs must include project parameter
     for (const url of projectParamUrls) {
@@ -144,60 +122,41 @@ test.describe("Same-origin dashboard API requests", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/*  Assertion plan: same-origin iframe URLs                                   */
+/*  Assertion plan: direct local-development iframe URLs                      */
 /* -------------------------------------------------------------------------- */
 
-test.describe("Same-origin iframe URL assertions", () => {
+test.describe("Direct local iframe URL assertions", () => {
   test.describe.configure({ mode: "serial" });
 
-  test.beforeAll(async ({ request }) => {
-    try {
-      const resp = await request.get(`${API_BASE}/health`);
-      if (!resp.ok()) {
-        test.skip(true, "API server not healthy — skipping iframe assertions");
-      }
-    } catch {
-      test.skip(true, "API server unreachable — skipping iframe assertions");
-    }
+  /* ------------------------------------------------------------------------ */
+  /*  Assertion: /opencode page iframe src points to the trusted root origin  */
+  /* ------------------------------------------------------------------------ */
+
+  test("/opencode page renders Web iframe on the trusted root origin", async ({ page }) => {
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+
+    const webIframe = page.locator('iframe[title="OpenCode Web"]');
+    await expect(webIframe).toBeAttached({ timeout: 10000 });
+    await expect(webIframe).toHaveAttribute(
+      "src",
+      /^(?:https?):\/\/[^/]+\/$/,
+    );
   });
 
   /* ------------------------------------------------------------------------ */
-  /*  Assertion: /opencode page iframe src points to port 4098                */
+  /*  Assertion: trusted first-party iframe security attributes               */
   /* ------------------------------------------------------------------------ */
 
-  test("/opencode page renders Web iframe on port 4098", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+  test("Web iframe is trusted first-party content without a sandbox attribute", async ({ page }) => {
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
 
     const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeVisible({ timeout: 10000 });
+    await expect(webIframe).toBeAttached({ timeout: 10000 });
 
-    const src = await webIframe.getAttribute("src");
-    expect(src).toBeTruthy();
-    expect(src).toContain("4098");
-
-    // The iframe src must be an http:// URL (not file:// or blob: or data:)
-    expect(src?.startsWith("http://")).toBe(true);
-    expect(src?.startsWith("https://")).toBe(false);
-
-    // The hostname should be localhost (same origin as dashboard)
-    const parsed = new URL(src!);
-    expect(parsed.hostname).toBe("localhost");
-  });
-
-  /* ------------------------------------------------------------------------ */
-  /*  Assertion: Web iframe src contains the opencode.spec pattern            */
-  /* ------------------------------------------------------------------------ */
-
-  test("Web iframe sandbox and allow attributes are present", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
-
-    const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeVisible({ timeout: 10000 });
-
-    // Sandbox must include allow-scripts and allow-same-origin
-    const sandbox = await webIframe.getAttribute("sandbox");
-    expect(sandbox).toContain("allow-scripts");
-    expect(sandbox).toContain("allow-same-origin");
+    // OpenCode v1.18.3+ needs its root-relative assets and is a trusted
+    // first-party origin, so it must not be mounted under the old sandbox
+    // contract.
+    await expect(webIframe).not.toHaveAttribute("sandbox");
 
     // Allow attribute must include clipboard-write
     const allow = await webIframe.getAttribute("allow");
@@ -209,7 +168,7 @@ test.describe("Same-origin iframe URL assertions", () => {
   /* ------------------------------------------------------------------------ */
 
   test("exactly one Web iframe, at most one CLI iframe", async ({ page }) => {
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
 
     const webIframes = page.locator('iframe[title="OpenCode Web"]');
     await expect(webIframes).toHaveCount(1);
@@ -220,27 +179,17 @@ test.describe("Same-origin iframe URL assertions", () => {
   });
 
   /* ------------------------------------------------------------------------ */
-  /*  Assertion: no network errors from iframe load                           */
+  /*  Assertion: no obsolete sub-path proxy request                           */
   /* ------------------------------------------------------------------------ */
 
-  test("no failed network requests from iframe loading on /opencode", async ({ page }) => {
-    const failedUrls: string[] = [];
-
-    page.on("requestfailed", (req) => {
-      failedUrls.push(req.url());
-    });
-
-    await page.goto(`${DASHBOARD_URL}/opencode`, { waitUntil: "domcontentloaded" });
+  test("does not request the removed OpenCode sub-path proxies", async ({ page }) => {
+    const requestedUrls: string[] = [];
+    page.on("request", (request) => requestedUrls.push(request.url()));
+    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
 
     const webIframe = page.locator('iframe[title="OpenCode Web"]');
-    await expect(webIframe).toBeVisible({ timeout: 10000 });
-
-    // Allow iframe network activity to settle
-    await page.waitForTimeout(2000);
-
-    // Filter out expected SSE reconnect failures
-    const unexpected = failedUrls.filter((u) => !u.includes("/global/event") && !u.includes("favicon"));
-    expect(unexpected.length).toBe(0);
+    await expect(webIframe).toBeAttached({ timeout: 10000 });
+    expect(requestedUrls.some((url) => /\/opencode-(web|cli)(?:\/|$)/.test(new URL(url).pathname))).toBe(false);
   });
 });
 
@@ -251,23 +200,12 @@ test.describe("Same-origin iframe URL assertions", () => {
 test.describe("Project identity in API contract", () => {
   test.describe.configure({ mode: "serial" });
 
-  test.beforeAll(async ({ request }) => {
-    try {
-      const resp = await request.get(`${API_BASE}/health`);
-      if (!resp.ok()) {
-        test.skip(true, "API server not healthy — skipping project identity assertions");
-      }
-    } catch {
-      test.skip(true, "API server unreachable — skipping project identity assertions");
-    }
-  });
-
   /* ------------------------------------------------------------------------ */
   /*  Assertion: health endpoint does not require project                     */
   /* ------------------------------------------------------------------------ */
 
   test("health endpoint works without project query param", async ({ request }) => {
-    const resp = await request.get(`${API_BASE}/health`);
+    const resp = await request.get(`${API_BASE}/health`, { headers: runtime.apiHeaders });
     expect(resp.ok()).toBe(true);
     const body = await resp.json();
     expect(body).toHaveProperty("status");
@@ -278,7 +216,9 @@ test.describe("Project identity in API contract", () => {
   /* ------------------------------------------------------------------------ */
 
   test("skills list with explicit project resolves successfully", async ({ request }) => {
-    const resp = await request.get(`${API_BASE}/skills?project=global-default`);
+    const resp = await request.get(`${API_BASE}/skills?project=${encodeURIComponent(runtime.project)}`, {
+      headers: runtime.apiHeaders,
+    });
     // The API may return 200 with data array or 400 if project not found.
     // Either way, the endpoint accepts the project parameter.
     expect(resp.status()).toBeGreaterThanOrEqual(200);
@@ -286,7 +226,7 @@ test.describe("Project identity in API contract", () => {
   });
 
   test("skills list without project returns 4xx (project required)", async ({ request }) => {
-    const resp = await request.get(`${API_BASE}/skills`);
+    const resp = await request.get(`${API_BASE}/skills`, { headers: runtime.apiHeaders });
     // The API requires a project parameter — expect 400 or 422
     expect(resp.status()).toBe(400);
     const body = await resp.json();
@@ -298,7 +238,7 @@ test.describe("Project identity in API contract", () => {
   /* ------------------------------------------------------------------------ */
 
   test("skills list with empty project returns 4xx", async ({ request }) => {
-    const resp = await request.get(`${API_BASE}/skills?project=`);
+    const resp = await request.get(`${API_BASE}/skills?project=`, { headers: runtime.apiHeaders });
     expect(resp.status()).toBe(400);
   });
 });

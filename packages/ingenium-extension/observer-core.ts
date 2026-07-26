@@ -9,18 +9,20 @@
  */
 
 import { ensureExtensionProject } from "./project-resolver.js";
+import { apiRequestHeaders } from "./api-auth.js";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
 
-async function apiFetch(path: string, options?: RequestInit): Promise<any> {
+async function apiFetch(worktree: string, path: string, options?: RequestInit): Promise<any> {
   const url = `${API_BASE}${path}`;
+  const headers = apiRequestHeaders(worktree, options?.headers);
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API ${res.status} for ${url}: ${text}`);
+    throw new Error(`API request failed (HTTP ${res.status})`);
   }
   return res.json();
 }
@@ -40,7 +42,7 @@ export async function logPipelineEvent(
 ): Promise<void> {
   try {
     const project = await ensureExtensionProject(worktree, API_BASE);
-    await apiFetch(`/pipeline/events?project=${encodeURIComponent(project)}`, {
+    await apiFetch(worktree, `/pipeline/events?project=${encodeURIComponent(project)}`, {
       method: "POST",
       body: JSON.stringify({
         event_type: eventType,
@@ -100,7 +102,7 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
       const obsContent = parts[2]?.trim() || entry;
       const importance = parseInt(parts[3]?.trim() || "5");
       
-        await apiFetch(`/observations?project=${encodeURIComponent(project)}`, {
+      await apiFetch(worktree, `/observations?project=${encodeURIComponent(project)}`, {
         method: "POST",
         body: JSON.stringify({
           observation_type: obsType,
@@ -157,11 +159,11 @@ export async function triggerSynthesis(worktree: string, sessionId?: string): Pr
 
     const params = new URLSearchParams({ project });
     if (sessionId) params.set("session_id", sessionId);
-    const result = await apiFetch(`/synthesis/run?${params}`, {
+    const result = await apiFetch(worktree, `/synthesis/run?${params}`, {
       method: "POST",
     });
     return { triggered: true, message: JSON.stringify(result.data) };
-  } catch (err: any) {
-    return { triggered: false, message: err.message };
+  } catch {
+    return { triggered: false, message: "Synthesis request failed" };
   }
 }

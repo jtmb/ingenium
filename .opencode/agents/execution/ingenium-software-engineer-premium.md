@@ -2,7 +2,6 @@
 name: ingenium-software-engineer-premium
 description: "Premium-tier implementation agent. Use for complex, high-risk, or architecture-level coding tasks. Runs on a more capable model for deep reasoning."
 mode: subagent
-model: deepseek/deepseek-v4-pro
 permission:
   read: allow
   edit:

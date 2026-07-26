@@ -149,6 +149,25 @@ function applyRetention(projectId: string): void {
 let lastHourlyAt = 0;
 /** Track the last daily backup timestamp. */
 let lastDailyAt = 0;
+let backupSchedulerRunning = false;
+let backupSchedulerGeneration = 0;
+let scheduledTimer: ReturnType<typeof setTimeout> | null = null;
+let activeTick: Promise<void> | null = null;
+
+function isBackupSchedulerActive(generation: number): boolean {
+  return backupSchedulerRunning && backupSchedulerGeneration === generation;
+}
+
+function scheduleTimeout(generation: number, delayMs: number, callback: () => void): void {
+  if (!isBackupSchedulerActive(generation)) return;
+  if (scheduledTimer) clearTimeout(scheduledTimer);
+
+  scheduledTimer = setTimeout(() => {
+    scheduledTimer = null;
+    if (!isBackupSchedulerActive(generation)) return;
+    callback();
+  }, delayMs);
+}
 
 /** Check whether we should run an hourly backup. */
 function shouldRunHourly(): boolean {
@@ -172,11 +191,12 @@ function getGlobalProjectId(): string | null {
   return global?.id ?? null;
 }
 
-async function schedulerTick(): Promise<void> {
+async function schedulerTick(generation: number): Promise<void> {
+  if (!isBackupSchedulerActive(generation)) return;
   const projectId = getGlobalProjectId();
   if (!projectId) {
     // No global project — skip but keep scheduler alive
-    scheduleNext();
+    scheduleNext(generation);
     return;
   }
 
@@ -188,12 +208,12 @@ async function schedulerTick(): Promise<void> {
 
   if (!acquired) {
     logger.debug("backup-scheduler", "Backup lock held by another owner — skipping this cycle");
-    scheduleNext();
+    scheduleNext(generation);
     return;
   }
 
   try {
-    if (schedule.hourly.enabled && shouldRunHourly()) {
+    if (isBackupSchedulerActive(generation) && schedule.hourly.enabled && shouldRunHourly()) {
       logger.info("backup-scheduler", "Starting hourly backup");
       const created = await createBackup(projectId, "hourly");
       if (created) {
@@ -201,7 +221,7 @@ async function schedulerTick(): Promise<void> {
       }
     }
 
-    if (schedule.daily.enabled && shouldRunDaily()) {
+    if (isBackupSchedulerActive(generation) && schedule.daily.enabled && shouldRunDaily()) {
       logger.info("backup-scheduler", "Starting daily backup");
       const created = await createBackup(projectId, "daily");
       if (created) {
@@ -210,10 +230,10 @@ async function schedulerTick(): Promise<void> {
     }
 
     // Run retention cleanup after any backup activity
-    applyRetention(projectId);
+    if (isBackupSchedulerActive(generation)) applyRetention(projectId);
 
     // WAL checkpoint to keep DB healthy
-    checkpointAfterWrite();
+    if (isBackupSchedulerActive(generation)) checkpointAfterWrite();
   } catch (err: any) {
     logger.error("backup-scheduler", `Scheduler tick failed: ${err.message}`, {
       error: err.message,
@@ -223,28 +243,37 @@ async function schedulerTick(): Promise<void> {
     maintenanceLocks.releaseLock(LOCK_RESOURCE, projectId, ownerToken);
   }
 
-  scheduleNext();
+  if (isBackupSchedulerActive(generation)) scheduleNext(generation);
 }
 
 /** Chain the next timeout — same pattern as the main scheduler. */
-function scheduleNext(): void {
+function scheduleNext(generation: number): void {
+  if (!isBackupSchedulerActive(generation)) return;
   const schedule = getSchedule();
   const anyEnabled = schedule.hourly.enabled || schedule.daily.enabled;
 
   if (anyEnabled) {
     logger.debug("backup-scheduler", `Next backup check in ${SCHEDULER_TICK_MS / 1000}s`);
-    setTimeout(() => {
-      schedulerTick().catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        logger.error("backup-scheduler", `Unhandled tick error: ${msg}`);
-        scheduleNext();
-      });
-    }, SCHEDULER_TICK_MS);
+    scheduleTimeout(generation, SCHEDULER_TICK_MS, () => runTick(generation));
   } else {
     // No scheduling enabled — check again in 60s in case settings changed
     logger.debug("backup-scheduler", "Backup scheduling disabled — recheck in 60s");
-    setTimeout(scheduleNext, 60_000);
+    scheduleTimeout(generation, 60_000, () => scheduleNext(generation));
   }
+}
+
+function runTick(generation: number): void {
+  if (!isBackupSchedulerActive(generation)) return;
+
+  const tick = schedulerTick(generation);
+  activeTick = tick;
+  void tick.catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("backup-scheduler", `Unhandled tick error: ${msg}`);
+    if (isBackupSchedulerActive(generation)) scheduleNext(generation);
+  }).finally(() => {
+    if (activeTick === tick) activeTick = null;
+  });
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -259,6 +288,13 @@ function scheduleNext(): void {
  * Called from the API server's listen callback.
  */
 export function startBackupScheduler(): void {
+  if (backupSchedulerRunning) {
+    logger.warn("backup-scheduler", "Backup scheduler start ignored because it is already running");
+    return;
+  }
+
+  backupSchedulerRunning = true;
+  const generation = ++backupSchedulerGeneration;
   const schedule = getSchedule();
   const gid = getGlobalProjectId();
 
@@ -278,11 +314,21 @@ export function startBackupScheduler(): void {
   // Initial delay: 15s to avoid startup stampede
   const INITIAL_DELAY_MS = 15_000;
 
-  setTimeout(() => {
-    schedulerTick().catch((err: unknown) => {
-      const msg = err instanceof Error ? err.message : String(err);
-      logger.error("backup-scheduler", `Initial tick failed: ${msg}`);
-      scheduleNext();
-    });
-  }, INITIAL_DELAY_MS);
+  scheduleTimeout(generation, INITIAL_DELAY_MS, () => runTick(generation));
+}
+
+/** Stop the chained backup timer and wait for the current snapshot operation. */
+export async function stopBackupScheduler(): Promise<void> {
+  if (!backupSchedulerRunning) return;
+
+  backupSchedulerRunning = false;
+  ++backupSchedulerGeneration;
+  if (scheduledTimer) clearTimeout(scheduledTimer);
+  scheduledTimer = null;
+  if (activeTick) await activeTick.catch(() => undefined);
+  logger.info("backup-scheduler", "Backup scheduler stopped");
+}
+
+export function isBackupSchedulerRunning(): boolean {
+  return backupSchedulerRunning;
 }

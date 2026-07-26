@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { apiRequestHeaders } from "./api-auth.js";
 
 const MAX_PROJECT_NAME_LENGTH = 64;
 const ensuredProjects = new Map<string, Promise<string>>();
@@ -45,7 +46,7 @@ export async function ensureExtensionProject(worktree: string, apiBase: string):
   const pending = (async () => {
     const response = await fetch(`${normalizedApiBase}/projects`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiRequestHeaders(worktree, { "Content-Type": "application/json" }),
       body: JSON.stringify({ name: project, is_global: project === "global-default" }),
       signal: AbortSignal.timeout(apiTimeoutMs()),
     });

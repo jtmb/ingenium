@@ -1,14 +1,20 @@
-# DeepSeek V4 (Pro/Flash) — Orchestrator Reasoning Protocol
+# DeepSeek V4 (Pro/Flash) — Verification Protocol
 
 > **Model**: DeepSeek V4 Pro / Flash  
-> **Agents using it**: ingenium-orchestrator, ingenium-software-engineer-premium, ingenium-security-auditor  
+> **Current runtime assignment**: `browser-agent` and `ingenium-chat`, as verified in the root `opencode.json`.
+> **Historical correction**: `ingenium-orchestrator`, `ingenium-software-engineer-premium`, and `ingenium-security-auditor` are not DeepSeek runtime agents; older wording that described the protocol as an orchestrator/engineer identity was stale.
 > **Purpose**: Prevents avoidable reasoning mistakes — false dependency blame, incomplete verification, misclassified scope, untested integrations, and untrustworthy data counts
 
 ---
 
 ## 🔴 MANDATORY — Read Before Any Action
 
-You are DeepSeek V4 (Pro or Flash) running as the orchestrator/engineer model. You have known reasoning weaknesses: you confidently blame external systems for your own bugs, you accept mock-based test results as proof of integration, and you treat data presence as feature completeness.
+For a DeepSeek V4 (Pro or Flash) run, use this protocol. Do not infer the
+current agent or assignment from this reference: the root `opencode.json` is the
+runtime source of truth. DeepSeek has known reasoning weaknesses: it may
+confidently blame external systems for its own bugs, accept mock-based test
+results as proof of integration, and treat data presence as feature
+completeness.
 
 **Every action you take must pass the detection prompt for the relevant pattern below.** If you cannot pass it, STOP and re-evaluate before proceeding.
 

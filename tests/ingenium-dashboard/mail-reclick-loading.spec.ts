@@ -1,6 +1,6 @@
 import { test, expect, Page } from "@playwright/test";
 import path from "path";
-import fs from "fs";
+import { visualQaArtifactDirectory } from "./visual-qa-artifacts";
 
 /**
  * E2E test for DP#32 — re-clicking the same email must NOT flash the loading skeleton.
@@ -19,12 +19,10 @@ import fs from "fs";
  */
 
 const BASE = "http://localhost:3000";
-const SCREENSHOTS_DIR = "tests/artifacts/visual-qa";
+const SCREENSHOTS_DIR = visualQaArtifactDirectory("mail-reclick-loading");
 const GMAIL_EMAIL = "james.branco@gmail.com";
 const ACCOUNT_ID = "5a214d5b-1d89-4e89-9bd9-7a857495efa7";
 const EMAIL_LOAD_DELAY = 350; // ms delay to make loading skeleton observable
-
-fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
 
 /* ------------------------------------------------------------------ */
 /*  Mock data                                                          */
@@ -79,7 +77,7 @@ const MOCK_EMAILS = generateMockEmails(25);
 /* ------------------------------------------------------------------ */
 
 async function setupMocks(page: Page) {
-  await page.unroute();
+  await page.unrouteAll();
 
   // 1. Projects (for useMailProject hook)
   await page.route("**/api/v1/projects*", async (route) => {

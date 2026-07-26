@@ -125,4 +125,19 @@ describe("MainContainer — immersive route overflow (UX-002)", () => {
     // in the grid grid-rows-[1fr] context that causes the overflow
     expect(main!.className).toBe("p-6");
   });
+
+  it("bounds the Tasks route so board overflow stays inside the page content", () => {
+    pathnameRef.current = "/tasks";
+
+    const { container } = render(
+      <MainContainer>
+        <div style={{ width: "1000px" }}>kanban content</div>
+      </MainContainer>,
+    );
+
+    const main = container.querySelector("main");
+    expect(main).not.toBeNull();
+    expect(main!.className).toContain("min-w-0");
+    expect(main!.className).toContain("p-6");
+  });
 });
