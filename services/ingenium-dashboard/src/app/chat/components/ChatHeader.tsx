@@ -46,6 +46,8 @@ interface ChatHeaderProps {
   permissionCount?: number;
   /** Disable all selectors (loading, error, or no selectable model). */
   disabled?: boolean;
+  /** The selected provider has no valid model yet; provider recovery stays available. */
+  modelDisabled?: boolean;
 }
 
 /**
@@ -79,6 +81,7 @@ export default function ChatHeader({
   onMcpOpen,
   permissionCount = 0,
   disabled = false,
+  modelDisabled = false,
 }: ChatHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState(sessionTitle);
@@ -192,7 +195,7 @@ export default function ChatHeader({
         <select
           value={modelId}
           onChange={(e) => onModelChange(e.target.value)}
-          disabled={disabled}
+          disabled={disabled || modelDisabled}
           className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[160px] disabled:opacity-40 disabled:cursor-not-allowed"
           aria-label="Select model"
           data-testid="chat-header-model"
@@ -247,7 +250,7 @@ export default function ChatHeader({
           <button
             type="button"
             onClick={onMcpOpen}
-            className="relative p-1.5 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors"
+            className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors"
             aria-label="MCP servers"
             title="MCP servers"
           >
@@ -461,7 +464,7 @@ export default function ChatHeader({
       </div>
     </header>
     {/* Mobile provider/model/agent selectors — horizontal scroll below header */}
-    <div className="sm:hidden flex gap-2 px-4 py-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] min-w-0">
+    <div data-testid="chat-header-mobile-selectors" className="sm:hidden flex gap-2 px-4 py-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] min-w-0">
       {/* Provider */}
       <select
         value={providerId}
@@ -469,6 +472,7 @@ export default function ChatHeader({
         disabled={disabled}
         className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[120px] disabled:opacity-40 disabled:cursor-not-allowed"
         aria-label="Select provider"
+        data-testid="chat-header-mobile-provider"
       >
         {providers.length === 0 && <option value="">No providers available</option>}
         {providers.map((p) => (
@@ -482,9 +486,10 @@ export default function ChatHeader({
       <select
         value={modelId}
         onChange={(e) => onModelChange(e.target.value)}
-        disabled={disabled}
+        disabled={disabled || modelDisabled}
         className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[100px] disabled:opacity-40 disabled:cursor-not-allowed"
         aria-label="Select model"
+        data-testid="chat-header-mobile-model"
       >
         {availableModels.length === 0 && <option value="">No models available</option>}
         {availableModels.map((m) => (
@@ -501,6 +506,7 @@ export default function ChatHeader({
           onChange={(e) => onVariantChange?.(e.target.value)}
           className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[90px] disabled:opacity-40 disabled:cursor-not-allowed"
           aria-label="Select variant"
+          data-testid="chat-header-mobile-variant"
         >
           {variantKeys.map((key) => (
             <option key={key} value={key}>
@@ -517,6 +523,7 @@ export default function ChatHeader({
         disabled={disabled}
         className="shrink-0 border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] cursor-pointer px-2 py-1.5 max-w-[110px] disabled:opacity-40 disabled:cursor-not-allowed"
         aria-label="Select agent"
+        data-testid="chat-header-mobile-agent"
       >
         {agents.length === 0 && <option value="">No agents available</option>}
         {agents.map((a) => (

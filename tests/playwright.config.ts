@@ -54,6 +54,7 @@ export default defineConfig({
     "**/ingenium-dashboard/dashboard.spec.ts",
     "**/ingenium-dashboard/chat-states.spec.ts",
     "**/ingenium-dashboard/chat-e2e-smoke.spec.ts",
+    "**/ingenium-dashboard/opencode-chat.spec.ts",
     "**/ingenium-dashboard/jobs.spec.ts",
     "**/ingenium-dashboard/pipeline.spec.ts",
     "**/ingenium-dashboard/settings-providers.spec.ts",

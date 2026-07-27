@@ -6,6 +6,7 @@ import WorkspaceControl from "../components/WorkspaceControl";
 import type { WorkspaceControlProps } from "../components/WorkspaceControl";
 import OpenCodeFrame from "../components/OpenCodeFrame";
 import { api, type DocSpace } from "@/lib/api";
+import { buildStandaloneDocsHandoffUrl } from "../docs/docs-navigation";
 
 /**
  * StandalonePage — Renders page content WITHOUT the full layout chrome
@@ -102,7 +103,7 @@ function StandaloneContent() {
         {page === "opencode" && <StandaloneOpenCode />}
         {page === "chat" && <StandaloneChat />}
         {page === "mail" && <StandaloneMail />}
-        {page === "docs" && <StandaloneDocs />}
+        {page === "docs" && <StandaloneDocs standaloneSearchParams={searchParams} />}
       </div>
     </div>
   );
@@ -266,7 +267,7 @@ function StandaloneMail() {
  * a space is selected. Supports loading, empty, error, and create-flow
  * states. Does NOT duplicate the full rich editor or mock data.
  */
-function StandaloneDocs() {
+function StandaloneDocs({ standaloneSearchParams }: { standaloneSearchParams: Pick<URLSearchParams, "toString"> }) {
   const router = useRouter();
 
   const [spaces, setSpaces] = useState<DocSpace[]>([]);
@@ -320,9 +321,9 @@ function StandaloneDocs() {
   // ── Space selection — navigate to /docs workspace ──────────────────────
   const handleSelect = useCallback(
     (spaceId: number) => {
-      router.push(`/docs?space=${spaceId}`);
+      router.push(buildStandaloneDocsHandoffUrl(standaloneSearchParams, spaceId));
     },
-    [router],
+    [router, standaloneSearchParams],
   );
 
   // ── Create space ───────────────────────────────────────────────────────
@@ -338,13 +339,13 @@ function StandaloneDocs() {
         slugify(name),
         newDescription.trim() || undefined,
       );
-      router.push(`/docs?space=${data.id}`);
+      router.push(buildStandaloneDocsHandoffUrl(standaloneSearchParams, data.id));
     } catch (err: unknown) {
       setCreateError(err instanceof Error ? err.message : "Failed to create space");
     } finally {
       setCreating(false);
     }
-  }, [newName, newDescription, slugify, router]);
+  }, [newName, newDescription, slugify, router, standaloneSearchParams]);
 
   const handleCancelCreate = useCallback(() => {
     setShowCreate(false);

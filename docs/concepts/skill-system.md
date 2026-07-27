@@ -70,7 +70,7 @@ The system uses a **Resource Sync Engine** (`packages/ingenium-extension/resourc
 | DB → Disk | After API create/update | `writeSkillToDisk()` — reads `file_tree` JSON, writes all files |
 | Disk → DB | `session.created`, `session.idle` | Resource sync engine — hashed manifest comparison |
 | Bidirectional | `/sync-skills` command | Two-phase sync: disk imports → DB writes → disk writes |
-| Scheduled | Every 15 min (API scheduler) | Runs extraction → synthesis → sync-all for all active projects |
+| Scheduled | Every 15 min (API scheduler) | Runs extraction → synthesis for all active projects; resource sync runs separately in the extension on session events |
 
 ## Maintenance Locks
 

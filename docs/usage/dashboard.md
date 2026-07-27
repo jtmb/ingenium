@@ -39,13 +39,13 @@ Point your MCP client to the `@ingenium/extension` package:
 }
 ```
 
-The extension package ships three OpenCode plugins — `observer.ts` (session event handling + synthesis triggering), `skill-sync.ts` (bidirectional skill sync), and `auto-observer.ts` (automatic behavior pattern detection from OpenCode message history). Reference them in your OpenCode config:
+The extension package ships three OpenCode plugins — `observer.ts` (session event handling + synthesis triggering), `resource-sync.ts` (manifest-based bidirectional sync for skills, agents, plugins, commands, and config), and `auto-observer.ts` (automatic behavior pattern detection from OpenCode message history). Reference them in your OpenCode config:
 
 ```jsonc
 {
   "plugin": [
     "packages/ingenium-extension/observer.ts",
-    "packages/ingenium-extension/skill-sync.ts",
+    "packages/ingenium-extension/resource-sync.ts",
     "packages/ingenium-extension/auto-observer.ts"
   ]
 }
@@ -157,7 +157,7 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 
 **How to use**:
 - Navigate to `/chat` in the dashboard
-- Select a **Provider**, **Model**, and **Agent** from the header selectors. Selectors are disabled (`opacity-40 cursor-not-allowed`) when loading, when the chat config API failed, or when no providers are available. Providers with `source === "builtin"` show a **"(Free)"** badge — these are auto-discovered from the OpenCode Zen built-in provider (free tier, no API key required).
+- Select a **Provider**, **Model**, and **Agent** from the header selectors. The provider/model pair is persisted only through the authenticated Chat-selection endpoint after exact validation against the current server catalog; browser localStorage is not authoritative. Selectors are disabled (`opacity-40 cursor-not-allowed`) when loading, when the chat config API failed, or when no providers are available. Providers with `source === "builtin"` show a **"(Free)"** badge — these are auto-discovered from the OpenCode Zen built-in provider (free tier, no API key required).
 - **No LLM configured state**: When no providers exist (`isConfigured === false`), a blue info banner links to Settings → Providers. The send button is blocked, all selectors are disabled, and the composer has `hasSelectableModel={false}` preventing sends. Once a provider is configured and saved, selectors populate dynamically from `GET /api/v1/opencode/chat-config`. OpenCode live-reloads provider config changes — no restart required.
 - Attach files via the paperclip button (max 5, 10MB each) or drag-and-drop. Images show inline previews; text files show code-block previews; binary files show download links.
 - Use the **Instructions** toggle (gear icon) to set a system prompt for the conversation.
@@ -168,7 +168,7 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 - Assistant prose, reasoning, stream activity/errors, generated attachments, Chat-only Markdown callouts, and agent permission/question prompts use borderless, background-free plain flow. User-message bubbles retain their selected-surface styling; Docs Markdown callouts are unaffected.
 - Footer reads "OpenCode Chat".
 
-**API**: Uses `GET /api/v1/opencode/chat-config` to fetch sanitized provider/agent/model data. Chat opens the per-session SSE stream before posting a prompt; the prompt endpoint returns HTTP `202` as an acceptance acknowledgement, while SSE is the authoritative channel for response content and terminal status.
+**API**: Uses `GET /api/v1/opencode/chat-config` to fetch allowlisted provider/model and agent data, then `PUT /api/v1/opencode/chat-selection` for the authenticated, catalog-gated global selection. Chat opens the per-session SSE stream before posting a prompt; the prompt endpoint returns HTTP `202` as an acceptance acknowledgement, while SSE is the authoritative channel for response content and terminal status. Docs AI resolves this server-owned global selection and does not accept a browser provider/model override.
 
 ## Settings
 

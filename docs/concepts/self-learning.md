@@ -150,14 +150,15 @@ User interacts with OpenCode (:4098)
   │     logged to stderr instead of silently swallowed; the
   │     scheduled 15min maintenance cycle provides coverage
   │
-  ├─ Skill Sync Plugin (skill-sync.ts, session.created / session.idle)
-  │   → fetches skills from API
-  │   → writes missing skills to .opencode/skills/<name>/ (SKILL.md + metadata.json + references/)
+   ├─ Resource Sync Plugin (resource-sync.ts, session.created / throttled session.idle)
+   │   → reconciles skills, agents, plugins, commands, and config with the API
+   │   → uses a SHA-256 manifest for conflict-aware bidirectional sync
+   │   → preserves unresolved conflicts and writes a broker only after full canonical-template validation
   │
-  ├─ Scheduled Scheduler (every 15 min in API server)
-  │   → runs extraction BEFORE synthesis for ALL active projects
-  │   → then synthesis (consolidation → skill synthesis)
-  │   → then POST /api/v1/skills/sync-all (bidirectional disk↔DB)
+   ├─ Scheduled Scheduler (every 15 min in API server)
+   │   → runs extraction BEFORE synthesis for ALL active projects
+   │   → then synthesis (consolidation → skill synthesis)
+   │   → resource sync is handled separately by the extension on session events
   │
   └─ Synthesis Pipeline (consolidateTraits + runSynthesis)
       Phase 1: LLM Trait Consolidation
@@ -187,7 +188,7 @@ User interacts with OpenCode (:4098)
 | **Extraction Engine** (extraction.ts) | **Server-side**: Reads OpenCode messages via API, watermark-gated + content-hash dedup, regex pre-filter selects candidates, LLM batch extraction creates durable behavior rule observations. Runs in the scheduler. |
 | **Observer Plugin** (observer.ts) | Monitors session events, imports file fallbacks, triggers synthesis |
 | **Auto-Observer Plugin** (auto-observer.ts) | **Thin trigger only**: On session.idle, POSTs `/api/v1/extraction/run`. Zero detection logic — all extraction is server-side. If plugin fails to load, scheduler covers extraction. |
-| **Skill Sync Plugin** (skill-sync.ts) | Fetches skills from API on session events, writes missing skills to `.opencode/skills/<name>/` |
+| **Resource Sync Plugin** (resource-sync.ts) | Reconciles skills, agents, plugins, commands, and config on session events using a SHA-256 manifest; preserves unresolved conflicts and writes the reserved broker only after full canonical-template validation |
 | **Synthesis Pipeline** | Processes observations via LLM consolidation (CONFIRM/CREATE/IGNORE), generates normalized personality traits (Phase 1), optionally runs LLM skill synthesis (Phase 2 with backup provider fallback), and cross-project skill promotion |
 | **API Layer** | REST endpoints for all operations (sole DB authority). New: `POST /api/v1/extraction/run`, DELETE observations/personality endpoints |
 | **MCP Server** | Tool handlers that forward to API layer |
@@ -242,7 +243,7 @@ The system uses two LLM dispatch modes depending on the feature:
 | Mode | Mechanism | Timeout | Used By | Configuration Source |
 |------|-----------|---------|---------|---------------------|
 | **Direct** | `callSynthesisLLM()` / `safeLlmFetch()` — calls LLM endpoint directly via HTTP | 60s | Self-learning pipeline (Phase 0 extraction, Phase 1 consolidation, Phase 2 skill synthesis), Email suggestions/summaries | `resolveLLMConfig()` — global→project→env vars chain |
-| **Broker** | `executeSynthesisBroker()` — creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s hard cap** (`Math.min(Math.max(timeoutMs, 0), 30_000)`) | Docs AI, RAG Ask, Job Suggestions | `synthesis_provider` + `synthesis_model` settings (primary/backup fallback chain with dedup) |
+| **Broker** | `executeSynthesisBroker()` — creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s hard cap** (`Math.min(Math.max(timeoutMs, 0), 30_000)`) | Docs AI, RAG Ask, Job Suggestions | Docs AI uses the server-owned validated global Chat selection or server-derived default; RAG Ask and Job Suggestions use the synthesis primary/backup chain with dedup |
 
 The core pipeline uses direct calls (60s timeout) for batch processing. Interactive features use the broker (30s cap) for responsiveness and OpenCode model routing.
 

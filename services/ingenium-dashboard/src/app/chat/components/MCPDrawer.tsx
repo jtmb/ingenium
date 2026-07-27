@@ -1,20 +1,42 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
-
-interface MCPServer {
-  name: string;
-  connected: boolean;
-  toolCount?: number;
-}
+import { useEffect, useId, useRef } from "react";
+import {
+  getMcpStatusLabel,
+  type McpServerView,
+} from "./mcp-status";
 
 interface MCPDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  servers: MCPServer[];
-  onConnect: (name: string) => void;
-  onDisconnect: (name: string) => void;
+  servers: McpServerView[];
+  error?: string | null;
+  isRefreshing?: boolean;
+  pendingServerName?: string | null;
+  onRefresh: () => Promise<boolean> | void;
+  onConnect: (name: string) => Promise<void> | void;
+  onDisconnect: (name: string) => Promise<void> | void;
 }
+
+function statusDotClass(status: McpServerView["status"]): string {
+  switch (status) {
+    case "connected": return "bg-green-500";
+    case "failed": return "bg-red-500";
+    case "needs_auth":
+    case "needs_client_registration": return "bg-amber-500";
+    case "disabled": return "bg-slate-400";
+    default: return "bg-slate-500";
+  }
+}
+
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
 
 /**
  * MCPDrawer — slide-out panel from the right showing MCP server status.
@@ -31,23 +53,63 @@ export default function MCPDrawer({
   isOpen,
   onClose,
   servers,
+  error,
+  isRefreshing = false,
+  pendingServerName,
+  onRefresh,
   onConnect,
   onDisconnect,
 }: MCPDrawerProps) {
-  // Close on Escape key
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isOpen) {
-        onClose();
-      }
-    },
-    [isOpen, onClose],
-  );
+  const dialogId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
 
   useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    previouslyFocusedElementRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [],
+      );
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [handleKeyDown]);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      const trigger = previouslyFocusedElementRef.current;
+      if (trigger?.isConnected) trigger.focus();
+    };
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -58,10 +120,17 @@ export default function MCPDrawer({
         className="absolute inset-0 bg-black/50"
         onClick={onClose}
         aria-hidden="true"
+        data-testid="mcp-drawer-backdrop"
       />
 
       {/* Panel */}
-      <div className="fixed right-0 top-0 bottom-0 z-50 w-[360px] bg-[var(--color-surface)] border-l border-[var(--color-border)] shadow-2xl flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={dialogId}
+        className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-[360px] sm:w-[360px] bg-[var(--color-surface)] border-l border-[var(--color-border)] shadow-2xl flex flex-col"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--color-border)] shrink-0">
           <div className="flex items-center gap-2.5">
@@ -98,14 +167,20 @@ export default function MCPDrawer({
                 rx="1.12"
               />
             </svg>
-            <h2 className="text-base font-semibold text-[var(--color-text-primary)]">
+            <h2 id={dialogId} className="text-base font-semibold text-[var(--color-text-primary)]">
               MCP Servers
             </h2>
+            {isRefreshing && (
+              <span className="text-xs text-[var(--color-text-muted)]" aria-live="polite">
+                Refreshing…
+              </span>
+            )}
           </div>
           <button
+            ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors"
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
             aria-label="Close MCP drawer"
           >
             <svg
@@ -125,6 +200,22 @@ export default function MCPDrawer({
             </svg>
           </button>
         </div>
+
+        {error && (
+          <div className="mx-3 mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300" role="alert">
+            <div className="flex items-center justify-between gap-2">
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => { void onRefresh(); }}
+                disabled={isRefreshing}
+                className="shrink-0 min-h-11 rounded border border-red-300 px-3 py-1 font-medium hover:bg-red-100 disabled:opacity-50 dark:border-red-800 dark:hover:bg-red-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Server list */}
         <div className="flex-1 overflow-y-auto px-3 py-3 space-y-1.5">
@@ -175,9 +266,7 @@ export default function MCPDrawer({
                 {/* Connection dot */}
                 <span className="relative flex shrink-0">
                   <span
-                    className={`block w-2.5 h-2.5 rounded-full ${
-                      server.connected ? "bg-green-500" : "bg-red-500"
-                    }`}
+                    className={`block w-2.5 h-2.5 rounded-full ${statusDotClass(server.status)}`}
                   />
                   {server.connected && (
                     <span className="absolute inset-0 w-2.5 h-2.5 rounded-full bg-green-500 animate-ping opacity-40" />
@@ -191,7 +280,7 @@ export default function MCPDrawer({
                   </p>
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-xs text-[var(--color-text-muted)]">
-                      {server.connected ? "Connected" : "Disconnected"}
+                      {getMcpStatusLabel(server.status)}
                     </span>
                     {server.connected && server.toolCount != null && (
                       <span className="text-xs px-1.5 py-0.5 rounded-full bg-[var(--color-surface-selected)] text-[var(--color-text-secondary)] font-mono">
@@ -199,24 +288,32 @@ export default function MCPDrawer({
                       </span>
                     )}
                   </div>
+                  {server.error && (
+                    <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+                      {server.error}
+                    </p>
+                  )}
                 </div>
 
                 {/* Connect/Disconnect toggle */}
                 <button
                   type="button"
-                  onClick={() =>
-                    server.connected
-                      ? onDisconnect(server.name)
-                      : onConnect(server.name)
-                  }
+                  onClick={() => {
+                    if (server.connected) void onDisconnect(server.name);
+                    else void onConnect(server.name);
+                  }}
+                  disabled={pendingServerName === server.name || isRefreshing}
                   className={[
-                    "shrink-0 rounded-md px-3 py-1 text-xs font-medium transition-colors border",
+                    "shrink-0 min-h-11 rounded-md px-3 py-2 text-xs font-medium transition-colors border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]",
                     server.connected
                       ? "border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]"
                       : "border-[var(--color-border)] bg-blue-600 text-white hover:bg-blue-500 border-blue-600",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
                   ].join(" ")}
                 >
-                  {server.connected ? "Disconnect" : "Connect"}
+                  {pendingServerName === server.name
+                    ? "Working…"
+                    : server.connected ? "Disconnect" : "Connect"}
                 </button>
               </div>
             ))

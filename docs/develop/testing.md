@@ -110,6 +110,7 @@ default command.
 | Real provider | `npx playwright test --config=tests/playwright.real-provider.config.ts` | `RUN_DASHBOARD_PROVIDER=1` |
 | Mail | `npx playwright test --config=tests/playwright.mail.config.ts` | `RUN_DASHBOARD_MAIL=1` |
 | Manual visual evidence | `npx playwright test --config=tests/playwright.manual.config.ts` | `RUN_DASHBOARD_MANUAL=1` |
+| Live OpenCode API (broker + proxy, API workspace) | `npm run test:live-opencode --workspace=services/ingenium-api` | `RUN_OPENCODE_LIVE=1` and `OPENCODE_SERVER_PASSWORD` |
 
 Examples:
 

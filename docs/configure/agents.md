@@ -7,7 +7,7 @@ description: Agent profiles, model configuration, and invocation for the Ingeniu
 
 ## Overview
 
-**12 agents total: 2 primary + 10 subagents (2 hidden).** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it reads plans from conversation context, decomposes work into parallel subagent tasks, verifies output, and encodes patterns into skills. It never writes code directly. A dedicated **chat agent** (`ingenium-chat`, hidden) handles conversational interactions with read-only access. Ten subagents handle exploration, QA, documentation, engineering, security, web automation, and the system-internal LLM broker. The hidden `ingenium-llm-broker` is reserved for system use (never invoked directly).
+**12 agents total: 2 primary + 10 subagents (2 hidden).** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, delegates bounded work, and returns terminal outcomes. It never writes code directly. A dedicated **chat agent** (`ingenium-chat`, hidden) handles conversational interactions with read-only access. Ten subagents handle exploration, QA, documentation, engineering, security, web automation, and the system-internal LLM broker. The hidden `ingenium-llm-broker` is reserved for system use (never invoked directly).
 
 ### Orchestrator Agent Model
 
@@ -16,6 +16,19 @@ The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents 
 - **Model** — Defined in `opencode.json` (not the Markdown profile). The orchestrator routes writer tasks to Fast and Premium tiers based on task complexity and risk, with Premium handling critical/high-risk work.
 - **`hidden: true`** — Prevents agents from appearing in non-Chat selectors where appropriate.
 - **Provider from Settings** — Providers and models come from Settings → Providers (via `GET /api/v1/opencode/chat-config`), not from the full OpenCode provider catalog.
+
+Agent frontmatter metadata is persisted with the agent record. The internal
+`ingenium-llm-broker` is an API-owned, reserved profile: disk-only copies are
+never imported, and sync accepts an API row only when it matches the complete
+static canonical template before rewriting the one canonical disk profile.
+Migration 058 backfills historical records and installs non-recursive `BEFORE
+INSERT`/`BEFORE UPDATE` guards, so raw `INSERT OR REPLACE` and `UPDATE OR
+REPLACE` cannot replace or mutate a broker even with `PRAGMA
+recursive_triggers=0`. Only the dedicated internal core bootstrap can create
+the canonical row; public core/API lifecycle functions reject broker create,
+enable, disable, update, and delete operations. The normal project lifecycle
+remains child-safe: it refuses projects with child rows, and broker protection
+neither introduces nor bypasses FK cascade semantics.
 
 The diagram below is **serialized**: Wave 2 starts only after Wave 1 has
 returned and its verification has completed. The waves are not simultaneous;
@@ -29,18 +42,16 @@ flowchart TB
 
     REQ --> ORCH["⚡ @ingenium-orchestrator<br/><i>Coordination Agent</i><br/>Delegates, never writes directly"]
 
-    subgraph Wave1["Dispatch Wave 1 — 5 active, 2 writers (first)"]
+    subgraph Wave1["Dispatch Wave 1 — 4 active, 2 writers (first)"]
         FAST["⚡ ingenium-software-engineer-fast<br/>Routine isolated work · writer"]
         PREM["💎 ingenium-software-engineer-premium<br/>Critical and complex work · writer"]
         EXPLORE["🔬 ingenium-explore · research"]
         SCOUT["🔎 ingenium-scout · docs RAG"]
-        QA["🔍 ingenium-qa · reviews changes"]
     end
 
-    subgraph Wave2["Dispatch Wave 2 — 3 active, 2 writers (after Wave 1)"]
-        DOCS["📝 ingenium-docs · updates docs · writer"]
-        BROWSER["🌐 browser-agent · browser automation · writer"]
-        VISION["👁️ ingenium-qa-vision · visual QA"]
+    subgraph Wave2["Dispatch Wave 2 — 2 active, 1 writer when docs are affected"]
+        QA["🔍 ingenium-qa · one targeted review"]
+        DOCS["📝 ingenium-docs · directly affected docs only · writer"]
     end
 
     ORCH --> Wave1
@@ -61,11 +72,11 @@ flowchart TB
 | **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling` |
 | **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
-| **ingenium-qa** | Subagent | Quality assurance — reviews changes, runs tests, verifies quality | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
+| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
 | **ingenium-docs** | Subagent | **Writer** — documentation updates (AGENTS.md, SKILL-INDEX.md, docs workspace) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
-| **ingenium-security-auditor** | Subagent | Security audit — git history leak scanning, dependency review | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
+| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
 | **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `mcp-tooling`, `engineering-workflow` |
-| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`) | — |
+| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`), wildcard-denied with no tool allowances | — |
 
 > **Model configuration**: Agent model mappings are defined centrally in `opencode.json` under the `"agent"` key. Markdown profiles intentionally omit the `model:` field — the root config is the sole source of runtime model assignment.
 >
@@ -94,15 +105,15 @@ This classification is permission-derived rather than based on task type: Docs a
 | # | Phase | Agent | Action |
 |---|-------|-------|--------|
 | 1 | **Plan** | User / Plan mode | Define the task or generate plan |
-| 2 | **Route** | `@ingenium-orchestrator` | Decompose task, select writer tier, declare phase (counts, territories, dependencies, verification owners) |
+| 2 | **Route** | `@ingenium-orchestrator` | Declare IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, verification budget, escalation rule, counts, territories, dependencies, and targeted verification owner |
 | 3 | **Fast** | `ingenium-software-engineer-fast` | Routine isolated work — single-package scope |
 | 4 | **Premium** | `ingenium-software-engineer-premium` | 🔴 Critical and complex work — auth, migrations, Docker, multi-service, cross-package, high-risk |
-| 5 | **Verify** | `@ingenium-qa` | Review changes, run tests, verify quality |
-| 6 | **Visual QA** | `@ingenium-qa-vision` | Playwright screenshots at 1440x900 and 390x844 |
-| 7 | **Document** | `@ingenium-docs` | Update AGENTS.md, SKILL-INDEX.md, docs workspace |
+| 5 | **Verify** | `@ingenium-qa` | One targeted QA pass after an implementation wave; sole owner of a declared full E2E/container suite |
+| 6 | **Visual QA** | `@ingenium-qa-vision` | One changed-route gate after final UI change and one sweep per user-requested UI batch |
+| 7 | **Document** | `@ingenium-docs` | Directly affected canonical documentation or explicit user request only |
 | 8 | **Browser** | `@browser-agent` | Browser automation and self-healing site interaction; counts as a writer |
-| 9 | **Audit** | `@ingenium-security-auditor` | Git history leak scanning, dependency review |
-| 10 | **Encode** | `@ingenium-orchestrator` | Detect + encode patterns into skills |
+| 9 | **Audit** | `@ingenium-security-auditor` | Current diff/relevant dependency review; one history scan only for confirmed secret or critical explicit trigger |
+| 10 | **Result** | `@ingenium-orchestrator` | Report bounded outcome and classifications; no recursive dispatch |
 | 11 | **Observations** | Extraction engine (automatic) | Observations captured automatically from OpenCode messages |
 
 ---
@@ -137,11 +148,15 @@ phase has completed and been verified. Writer tiers:
 | **Docs** | `ingenium-docs` | Documentation and skill-system work |
 | **Browser** | `browser-agent` | Browser automation and self-healing site interaction |
 
-Example phase: **6 active, 3 writers** — Fast owns `dashboard/`, Docs owns `docs/`, Browser owns browser recipes; QA, Explore, and QA Vision are the three non-writers. This is valid because writer status follows `edit: allow`/`write: allow`, and no more than three such agents run concurrently.
+Example implementation phase: **5 active, 3 writers** — Fast owns `dashboard/`, Docs owns directly affected `docs/`, Browser owns browser recipes, and Explore/Scout handle scoped research. QA and visual gates are later verification phases. This is valid because writer status follows `edit: allow`/`write: allow`, and no more than three such agents run concurrently.
 
-### Phase Declaration
+### Finite Task and Phase Declaration
 
-Every orchestration phase MUST declare: active count (max 6), writer count (max 3), exclusive territories (zero overlap), dependencies (serialization order), and verification owners.
+Before dispatch, every task declares **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification budget, and escalation rule. The budget permits a maximum of **3 verification phases**, each individual check at most **2 executions**, and maximum **1 writer remediation round**. A second failed in-scope BLOCKING check returns **ESCALATE_USER** with evidence and no retry.
+
+Every orchestration phase also declares active count (max 6), writer count (max 3), exclusive territories (zero overlap), dependencies (serialization order), and the targeted verification owner/checks. Findings are **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**; only in-scope BLOCKING findings reopen work. FOLLOW_UP findings are reported separately and never auto-dispatched.
+
+QA runs once after an implementation wave, Docs runs only for directly affected canonical docs or explicit user request, and neither role recursively triggers QA/Docs work. UI gets one changed-route gate after final UI change and one sweep per user-requested UI batch; a route receives one fix/recheck maximum before ESCALATE_USER. Docs/non-UI work never opens visual gates. Security defaults to current-diff/dependency review; history scans are once-only for a confirmed secret or critical explicit trigger. STOP/CANCELLED is terminal: preserve evidence and report skipped work without spawning new agents or gates.
 
 ### Restart Required for New Agent Profiles
 
@@ -180,4 +195,4 @@ Full details for each agent are available in the agent definition files at `.ope
 | ingenium-docs | `@ingenium-docs` | Full R/W/Bash | Subagent — writer for documentation |
 | ingenium-security-auditor | `@ingenium-security-auditor` | Bash + read-only | Subagent — security audit |
 | browser-agent | `@browser-agent` | Full R/W/Bash | Subagent — writer for web automation and self-healing site interaction |
-| ingenium-llm-broker | `@ingenium-llm-broker` | All denied | Subagent — system-internal (`hidden: true`, never invoke directly) |
+| ingenium-llm-broker | `@ingenium-llm-broker` | Wildcard deny; no tool allowances | Subagent — system-internal (`hidden: true`, never invoke directly) |

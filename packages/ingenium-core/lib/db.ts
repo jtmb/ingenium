@@ -75,6 +75,26 @@ const WRITE_RETRY_MAX_MS = 150;
 let db: Database.Database | null = null;
 
 /**
+ * Migration 058 owns the connection-independent reserved-broker trigger set.
+ * Re-applying it at startup repairs partial historical migrations and backfills
+ * the complete immutable canonical template before normal application use.
+ */
+function enforceReservedBrokerInvariant(db: Database.Database): void {
+  const agentsTable = db.prepare(
+    "SELECT count(*) as count FROM sqlite_master WHERE type = 'table' AND name = 'agents'",
+  ).get() as { count: number };
+  if (agentsTable.count === 0) return;
+
+  const metadataColumn = db.prepare(
+    "SELECT count(*) as count FROM pragma_table_info('agents') WHERE name = 'metadata'",
+  ).get() as { count: number };
+  if (metadataColumn.count === 0) return;
+
+  const migrationsDir = resolve(import.meta.dirname ?? __dirname, "../data/migrations");
+  db.exec(readFileSync(resolve(migrationsDir, "058_reserved_broker_connection_independent.sql"), "utf-8"));
+}
+
+/**
  * Returns the singleton SQLite database connection, creating it on first call.
  *
  * Pragma rationale:
@@ -129,7 +149,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh database — apply every migration in dependency order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql", "054_agent_frontmatter_metadata.sql", "055_reserved_broker_delete_protection.sql", "056_reserved_broker_rename_protection.sql", "057_reserved_broker_immutable.sql", "058_reserved_broker_connection_independent.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -796,7 +816,52 @@ function runMigrations(db: Database.Database): void {
         throw new Error(`Migration 053 is in a PARTIAL state: protected_settings is missing required columns: ${missingColumns.join(", ")}`);
       }
     }
+
+    // Migration 054: retain non-runtime agent frontmatter metadata (currently
+    // `hidden`) independently of the markdown file. The file can legitimately
+    // disappear while an agent is disabled, so it cannot be the source of truth.
+    const agentMetadataCheck = db.prepare(
+      "SELECT count(*) as count FROM pragma_table_info('agents') WHERE name = 'metadata'",
+    ).get() as { count: number };
+    if (agentMetadataCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "054_agent_frontmatter_metadata.sql"), "utf-8"));
+      logger.info("db", "Applied migration 054_agent_frontmatter_metadata.sql");
+    }
+
+    // Migration 055: direct SQL must not be able to remove the reserved broker
+    // while its project is still present. Keep the check trigger-based so it
+    // also protects maintenance scripts that bypass the API layer.
+    const brokerDeleteTriggerCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'trigger' AND name = 'agents_broker_delete_protection'",
+    ).get() as { count: number };
+    if (brokerDeleteTriggerCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "055_reserved_broker_delete_protection.sql"), "utf-8"));
+      logger.info("db", "Applied migration 055_reserved_broker_delete_protection.sql");
+    }
+
+    // Migration 056: a direct rename would evade the name-scoped invariant
+    // trigger from 054, so reject it before a reserved broker row can change.
+    const brokerRenameTriggerCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'trigger' AND name = 'agents_broker_rename_protection'",
+    ).get() as { count: number };
+    if (brokerRenameTriggerCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "056_reserved_broker_rename_protection.sql"), "utf-8"));
+      logger.info("db", "Applied migration 056_reserved_broker_rename_protection.sql");
+    }
+
+    // Migration 058 replaces the recursive-trigger-dependent 057 protection
+    // with BEFORE INSERT/UPDATE collision and template guards that also hold
+    // for raw connections configured with recursive_triggers = 0.
+    const brokerConnectionIndependentTriggerCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'trigger' AND name = 'agents_broker_insert_template_protection'",
+    ).get() as { count: number };
+    if (brokerConnectionIndependentTriggerCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "058_reserved_broker_connection_independent.sql"), "utf-8"));
+      logger.info("db", "Applied migration 058_reserved_broker_connection_independent.sql");
+    }
   }
+
+  enforceReservedBrokerInvariant(db);
 }
 
 function reconcileDuplicateActiveGlobals(db: Database.Database): void {

@@ -368,6 +368,7 @@ export const AgentSchema = z.object({
   model: z.string().optional(),
   reasoning_effort: z.string().optional(),
   permissions: z.string().default("{}"),
+  metadata: z.string().default("{}"),
   skills: z.string().default("[]"),
   content: z.string().min(1),
   enabled: z.coerce.boolean().default(true),

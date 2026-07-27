@@ -95,6 +95,8 @@ export interface DocsShellProps {
   topBarActions?: ReactNode;
   /** Whether spaces are loading */
   spacesLoading?: boolean;
+  /** Query state to preserve when opening the Docs standalone workspace. */
+  workspaceStateParams?: Record<string, string>;
 }
 
 /**
@@ -124,6 +126,7 @@ export default function DocsShell({
   onToggleSidebar,
   topBarActions,
   spacesLoading,
+  workspaceStateParams,
 }: DocsShellProps) {
   /** treeDrawerOpen: mobile-only overlay drawer for the left page tree */
   const [treeDrawerOpen, setTreeDrawerOpen] = useState(false);
@@ -263,7 +266,7 @@ export default function DocsShell({
               </button>
             </>
           )}
-          <WorkspaceControl pageId="docs" />
+          <WorkspaceControl pageId="docs" stateParams={workspaceStateParams} />
         </div>
       </div>
 

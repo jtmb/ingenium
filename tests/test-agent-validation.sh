@@ -938,13 +938,9 @@ validate_example_block() {
 
 if [[ -f "$ORCHESTRATOR" ]]; then
   validate_example_block "$ORCHESTRATOR" \
-    "orchestrator dispatch example" \
-    'Phase: "Auth + Email + Dashboard changes"' \
-    '→ orchestrator receives all results'
-  validate_example_block "$ORCHESTRATOR" \
-    "orchestrator serialized-writer example" \
-    'Phase: "Refactor auth.ts"' \
-    '→ serialized example complete'
+    "orchestrator bounded dispatch example" \
+    'Phase: "Validation message"' \
+    '→ The writer completes the declared implementation and self-verification.'
 fi
 if [[ -f "$AGENT_LIMITS_SOURCE" ]]; then
   validate_example_block "$AGENT_LIMITS_SOURCE" \
@@ -967,6 +963,123 @@ elif ! grep -q '^  edit: deny$' "$CHAT_FILE" || ! grep -q '^  write: deny$' "$CH
   fail "canonical chat safety boundary is invalid"
 else
   pass "canonical chat remains read-only and cannot delegate"
+fi
+
+# ============================================================
+# 6. Finite-execution policy contract.  These checks intentionally inspect
+#    canonical profiles and policy references, not archives or historical
+#    examples. They make recursive QA/Docs/security/visual execution a static
+#    regression rather than a runtime surprise.
+# ============================================================
+FINITE_TASK_CONTRACT_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/finite-task-contract.md"
+ORCHESTRATOR_PRIMER_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/source-index.md"
+ORCHESTRATOR_FLOW_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/references/orchestrator-flow.md"
+QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
+DOCS_PROFILE="$AGENTS_DIR/execution/ingenium-docs.md"
+VISION_PROFILE="$AGENTS_DIR/execution/ingenium-qa-vision.md"
+SECURITY_PROFILE="$AGENTS_DIR/security/ingenium-security-auditor.md"
+SECURITY_POLICY="$REPO_ROOT/.opencode/skills/security-audit/SKILL.md"
+FINITE_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+  "$REPO_ROOT/AGENTS.md"
+  "$REPO_ROOT/docs/configure/agents.md"
+  "$WORKFLOW_POLICY_SOURCE"
+  "$AGENT_LIMITS_SOURCE"
+  "$FINITE_TASK_CONTRACT_SOURCE"
+  "$ORCHESTRATOR_PRIMER_SOURCE"
+  "$ORCHESTRATOR_FLOW_SOURCE"
+)
+RECURSION_POLICY_SOURCES=(
+  "${FINITE_POLICY_SOURCES[@]}"
+  "$QA_PROFILE"
+  "$DOCS_PROFILE"
+  "$VISION_PROFILE"
+  "$SECURITY_PROFILE"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/visual-validation.md"
+  "$SECURITY_POLICY"
+)
+
+finite_policy_errors=0
+
+require_contract_pattern() {
+  local source="$1"
+  local label="$2"
+  local pattern="$3"
+  local description="$4"
+  if grep -Eqi "$pattern" "$source"; then
+    pass "$label $description"
+  else
+    fail "$label is missing $description"
+    finite_policy_errors=1
+  fi
+}
+
+for policy_source in "${FINITE_POLICY_SOURCES[@]}"; do
+  if [[ ! -r "$policy_source" ]]; then
+    fail "finite policy source is missing or unreadable: $policy_source"
+    finite_policy_errors=1
+    continue
+  fi
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" 'IN_SCOPE' 'IN_SCOPE declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'OUT_OF_SCOPE' 'OUT_OF_SCOPE declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'acceptance criteria' 'acceptance criteria declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'STOP_CONDITION' 'STOP_CONDITION declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'verification budget' 'verification budget declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'escalation rule' 'escalation rule declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'maximum( of)? .*3.*verification phases' 'maximum three verification phases'
+  require_contract_pattern "$policy_source" "$policy_label" 'each individual check.*(at most|may execute).*2' 'two executions per individual check'
+  require_contract_pattern "$policy_source" "$policy_label" 'maximum( of)? .*1.*writer remediation' 'one writer remediation round'
+  require_contract_pattern "$policy_source" "$policy_label" 'second failed.*ESCALATE_USER' 'second-failure escalation'
+  require_contract_pattern "$policy_source" "$policy_label" 'BLOCKING' 'BLOCKING finding classification'
+  require_contract_pattern "$policy_source" "$policy_label" 'FOLLOW_UP' 'FOLLOW_UP finding classification'
+  require_contract_pattern "$policy_source" "$policy_label" 'INFORMATIONAL' 'INFORMATIONAL finding classification'
+  require_contract_pattern "$policy_source" "$policy_label" 'STOP.*CANCELLED.*terminal' 'terminal STOP/CANCELLED handling'
+done
+
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" 'Only an .*in-scope.*BLOCKING.*reopen' 'in-scope blocker-only reopening'
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" 'never auto-dispatch' 'out-of-scope dispatch prohibition'
+require_contract_pattern "$QA_PROFILE" "QA profile" 'targeted QA invocation' 'single targeted QA invocation'
+require_contract_pattern "$QA_PROFILE" "QA profile" 'sole owner.*full E2E.*container suite' 'single full-suite owner'
+require_contract_pattern "$QA_PROFILE" "QA profile" 'never dispatch remediation, Docs, another QA pass' 'no recursive QA/Docs dispatch'
+require_contract_pattern "$DOCS_PROFILE" "Docs profile" 'directly affected canonical documentation or the user explicitly requests' 'conditional documentation scope'
+require_contract_pattern "$DOCS_PROFILE" "Docs profile" 'never dispatch or request QA, Docs' 'no recursive Docs dispatch'
+require_contract_pattern "$VISION_PROFILE" "Vision profile" 'one changed-route visual gate.*final UI change' 'post-final-change route gate'
+require_contract_pattern "$VISION_PROFILE" "Vision profile" 'one passive full-site sweep.*user-requested UI batch' 'one batch sweep'
+require_contract_pattern "$VISION_PROFILE" "Vision profile" 'one visual writer-fix/recheck maximum' 'single visual recheck'
+require_contract_pattern "$VISION_PROFILE" "Vision profile" 'Docs-only and non-UI work never opens or reopens' 'non-UI visual-gate prohibition'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" 'current diff.*relevant dependency' 'current-diff/dependency default'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" 'history scan may run.*once' 'one-time history scan'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" 'confirmed secret exposure.*critical explicit trigger' 'history-scan trigger boundary'
+require_contract_pattern "$SECURITY_PROFILE" "security profile" 'outside scope.*FOLLOW_UP.*immediately exploitable' 'out-of-scope security classification'
+require_contract_pattern "$SECURITY_POLICY" "security policy" 'history scan may run.*once' 'one-time history scan'
+
+# Reject phrasing that previously made downstream work automatic or unbounded.
+# Keep this narrowly scoped to policy language; historical/security terminology
+# outside these canonical sources is not an execution instruction.
+STALE_RECURSION_PATTERNS=(
+  'after[[:space:]]+every[[:space:]]+(subagent[[:space:]]+)?(task|change)'
+  'mandatory[[:space:]]+after[[:space:]]+every[[:space:]]+change'
+  'all[[:space:]]+sub-agent[[:space:]]+outputs[[:space:]]+must[[:space:]]+be[[:space:]]+audited'
+  'every[[:space:]]+sub-agent[[:space:]]+finding[[:space:]]+must[[:space:]]+be[[:space:]]+added'
+  'iterative[[:space:]]+testing[[:space:]]+required[[:space:]]+until'
+  'before[[:space:]]+final[[:space:]]+completion[[:space:]]+or[[:space:]]+commit.*full-site'
+  'automatically[[:space:]]+escalate.*git[[:space:]-]*history'
+  'automatically[[:space:]]+scan[[:space:]]+git[[:space:]-]*history'
+)
+for policy_source in "${RECURSION_POLICY_SOURCES[@]}"; do
+  [[ -r "$policy_source" ]] || continue
+  for stale_pattern in "${STALE_RECURSION_PATTERNS[@]}"; do
+    stale_match="$(grep -Ein "$stale_pattern" "$policy_source" || true)"
+    if [[ -n "$stale_match" ]]; then
+      fail "$(basename "$policy_source") contains unbounded recursive policy text: $stale_match"
+      finite_policy_errors=1
+    fi
+  done
+done
+
+if [[ "$finite_policy_errors" -eq 0 ]]; then
+  pass "finite task contracts, bounded gates, cancellation, and non-recursive policy invariants hold"
 fi
 
 if [[ "$FAILED" -ne 0 ]]; then exit 1; fi

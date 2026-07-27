@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { logger, settings } from "ingenium-core";
+import { logger, projects, settings } from "ingenium-core";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   opencodeClient,
@@ -12,6 +12,18 @@ import {
   type SendPromptBody,
 } from "../opencode-client.js";
 import { requireProject } from "../helpers.js";
+import {
+  CHAT_SELECTION_SETTING,
+  getBuiltinChatProvider,
+  getChatProviderCatalog,
+  getAllowedLegacyChatSelection,
+  getStoredOrDefaultChatSelection,
+  isAllowedChatSelection,
+  isValidChatSelectionIdentifier,
+  type ExpandedChatProviderInfo,
+} from "../chat-provider-catalog.js";
+import { normalizeMcpStatusResponse } from "../mcp-status.js";
+import { isSafeBrowserIdentifier, isSafeBrowserLabel, isSafeMcpServerName } from "../browser-safe-scalars.js";
 
 /* ── File upload configuration ── */
 
@@ -284,29 +296,116 @@ function sendResult(req: any, res: any, result: any, statusOnSuccess = 200): voi
   res.status(statusOnSuccess).json({ data: result });
 }
 
-/* ── Sanitization ── */
+/* ── Browser provider catalog DTO ────────────────────────────────────────── */
 
-const SENSITIVE_KEY_PATTERN = /api[_-]?key|secret|token|password/i;
+/**
+ * `/providers` is browser-facing. Project the upstream OpenCode response into
+ * this deliberately small DTO rather than attempting to recursively redact a
+ * provider object whose nested fields evolve independently of this API.
+ */
+interface BrowserProviderModelDto {
+  id: string;
+  label: string;
+}
 
-/** Recursively walk an object and redact values whose keys match sensitive patterns. */
-function sanitizeOptions(obj: unknown): unknown {
-  if (Array.isArray(obj)) {
-    return obj.map(sanitizeOptions);
+interface BrowserProviderDto {
+  id: string;
+  label: string;
+  models: BrowserProviderModelDto[];
+  defaultModel: string | null;
+  connected: boolean;
+}
+
+interface BrowserProviderCatalogDto {
+  providers: BrowserProviderDto[];
+}
+
+function isBrowserProviderRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBrowserProviderIdentifier(value: unknown): value is string {
+  return isSafeBrowserIdentifier(value);
+}
+
+/** Use an upstream name only when it is safe as a non-secret display label. */
+function browserProviderLabel(value: unknown, fallback: string): string {
+  return isSafeBrowserLabel(value) ? value : fallback;
+}
+
+/** Strict property allowlist for the browser-visible provider catalog. */
+function toBrowserProviderCatalog(result: unknown): BrowserProviderCatalogDto {
+  if (!isBrowserProviderRecord(result) || !Array.isArray(result.all)) {
+    return { providers: [] };
   }
-  if (obj !== null && typeof obj === "object") {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
-      if (SENSITIVE_KEY_PATTERN.test(key)) {
-        result[key] = "***REDACTED***";
-      } else if (typeof value === "object" && value !== null) {
-        result[key] = sanitizeOptions(value);
-      } else {
-        result[key] = value;
-      }
+
+  const defaults = isBrowserProviderRecord(result.default) ? result.default : {};
+  const connected = new Set(
+    Array.isArray(result.connected)
+      ? result.connected.filter(isBrowserProviderIdentifier)
+      : [],
+  );
+  const providerIds = new Set<string>();
+  const providers: BrowserProviderDto[] = [];
+
+  for (const candidate of result.all) {
+    if (!isBrowserProviderRecord(candidate) || !isBrowserProviderIdentifier(candidate.id)
+      || providerIds.has(candidate.id) || !isBrowserProviderRecord(candidate.models)) {
+      continue;
     }
-    return result;
+
+    const modelIds = new Set<string>();
+    const models: BrowserProviderModelDto[] = [];
+    for (const model of Object.values(candidate.models)) {
+      if (!isBrowserProviderRecord(model) || !isBrowserProviderIdentifier(model.id)
+        || modelIds.has(model.id)) {
+        continue;
+      }
+      modelIds.add(model.id);
+      models.push({
+        id: model.id,
+        label: browserProviderLabel(model.name, model.id),
+      });
+    }
+
+    const configuredDefault = defaults[candidate.id];
+    providers.push({
+      id: candidate.id,
+      label: browserProviderLabel(candidate.name, candidate.id),
+      models,
+      defaultModel: isBrowserProviderIdentifier(configuredDefault)
+        && modelIds.has(configuredDefault)
+        ? configuredDefault
+        : null,
+      connected: connected.has(candidate.id),
+    });
+    providerIds.add(candidate.id);
   }
-  return obj;
+
+  return { providers };
+}
+
+function sendBrowserProviderCatalogError(res: Response, result: unknown): void {
+  const isNetworkFailure = isOpenCodeError(result) && result.error.code === "NETWORK_ERROR";
+  logger.warn(SOURCE, "Browser provider catalog unavailable", {
+    failure: isNetworkFailure ? "network" : "upstream",
+  });
+  if (isNetworkFailure) {
+    res.setHeader("Retry-After", "5");
+    res.status(503).json({
+      error: {
+        code: "OPENCODE_UNAVAILABLE",
+        message: "OpenCode is starting up. Please wait a moment and try again.",
+      },
+    });
+    return;
+  }
+  res.status(502).json({
+    error: {
+      code: "PROVIDER_CATALOG_UNAVAILABLE",
+      message: "OpenCode provider catalog is unavailable.",
+    },
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -457,113 +556,21 @@ interface ChatConfigResponse {
   defaultSelection: { providerId: string; modelId: string } | null;
 }
 
-interface ChatModelInfo {
-  id: string;
-  label: string;
-}
-
-interface ExpandedChatProviderInfo {
-  providerId: string;
-  label: string;
-  models: ChatModelInfo[];
-  defaultModel: string;
-  source: "managed" | "builtin";
-}
-
-interface ManagedProviderConfig {
-  id?: unknown;
-  name?: unknown;
-  models?: unknown;
-  defaultModel?: unknown;
-  roles?: unknown;
-  role?: unknown;
-  enabled?: unknown;
-}
-
-function hasAvailableRole(provider: ManagedProviderConfig): boolean {
-  if (Array.isArray(provider.roles)) return provider.roles.includes("available");
-  return provider.role === "available" || provider.role === "primary" || provider.role === "backup";
-}
-
-function getManagedChatProviders(projectId: string): ExpandedChatProviderInfo[] {
-  const stored = settings.getSetting(projectId, "llm_provider_configs");
-  let providers: ManagedProviderConfig[] = [];
-
-  try {
-    const parsed = stored ? JSON.parse(stored) : [];
-    providers = Array.isArray(parsed) ? parsed : [];
-  } catch {
-    providers = [];
-  }
-
-  if (providers.length === 0) {
-    const primaryProvider = settings.getSetting(projectId, "synthesis_provider") || "";
-    const primaryModel = settings.getSetting(projectId, "synthesis_model") || "";
-    const backupProvider = settings.getSetting(projectId, "synthesis_backup_provider") || "";
-    const backupModel = settings.getSetting(projectId, "synthesis_backup_model") || "";
-    if (primaryProvider && primaryModel) {
-      providers.push({
-        id: primaryProvider === "__custom__" ? "ingenium-primary" : primaryProvider,
-        name: primaryProvider === "__custom__" ? "Custom" : primaryProvider,
-        models: [primaryModel],
-        defaultModel: primaryModel,
-        roles: ["available", "primary"],
-        enabled: true,
-      });
-    }
-    if (backupProvider && backupModel) {
-      providers.push({
-        id: backupProvider === "__custom__" ? "ingenium-backup" : backupProvider,
-        name: backupProvider === "__custom__" ? "Custom Backup" : backupProvider,
-        models: [backupModel],
-        defaultModel: backupModel,
-        roles: ["available", "backup"],
-        enabled: true,
-      });
-    }
-  }
-
-  return providers.flatMap((provider) => {
-    if (provider.enabled !== true || !hasAvailableRole(provider)
-      || typeof provider.id !== "string" || typeof provider.name !== "string"
-      || !Array.isArray(provider.models) || typeof provider.defaultModel !== "string") {
-      return [];
-    }
-    const models = provider.models
-      .filter((model): model is string => typeof model === "string" && model.length > 0)
-      .map((id) => ({ id, label: id }));
-    if (models.length === 0) return [];
-    return [{
-      providerId: provider.id,
-      label: provider.name,
-      models,
-      defaultModel: models.some((model) => model.id === provider.defaultModel)
-        ? provider.defaultModel
-        : models[0]!.id,
-      source: "managed" as const,
-    }];
-  });
-}
-
-function getBuiltinChatProvider(result: unknown): ExpandedChatProviderInfo | null {
-  if (isOpenCodeError(result)) return null;
-  const response = result as { all?: any[]; default?: Record<string, string> };
-  const opencodeZen = response.all?.find((provider) => provider.id === "opencode");
-  if (!opencodeZen) return null;
-
-  const models = Object.values(opencodeZen.models || {})
-    .filter((model: any) => model.status === "active" && model.cost?.input === 0 && model.cost?.output === 0)
-    .map((model: any) => ({ id: model.id, label: model.name || model.id }))
-    .filter((model: ChatModelInfo) => typeof model.id === "string" && model.id.length > 0);
-  if (models.length === 0) return null;
-
-  const runtimeDefault = response.default?.opencode;
+function legacyChatDto(
+  projectId: string,
+  providers: ExpandedChatProviderInfo[],
+  role: "primary" | "backup",
+): ChatProviderInfo | null {
+  const selection = getAllowedLegacyChatSelection(projectId, providers, role);
+  if (!selection) return null;
+  const provider = providers.find((candidate) => candidate.providerId === selection.providerId);
+  const model = provider?.models.find((candidate) => candidate.id === selection.modelId);
+  if (!provider || !model) return null;
   return {
-    providerId: "opencode",
-    label: opencodeZen.name || "OpenCode Zen",
-    models,
-    defaultModel: models.some((model) => model.id === runtimeDefault) ? runtimeDefault! : models[0]!.id,
-    source: "builtin",
+    providerId: provider.providerId,
+    modelId: model.id,
+    label: `${provider.label}: ${model.label}`,
+    isCustom: provider.providerId === "ingenium-primary" || provider.providerId === "ingenium-backup",
   };
 }
 
@@ -571,77 +578,108 @@ opencodeRouter.get("/chat-config", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
-  const provider = settings.getSetting(projectId, "synthesis_provider") || "";
-  const model = settings.getSetting(projectId, "synthesis_model") || "";
-  const endpoint = settings.getSetting(projectId, "synthesis_endpoint") || "";
-
-  const backupProvider = settings.getSetting(projectId, "synthesis_backup_provider") || "";
-  const backupModel = settings.getSetting(projectId, "synthesis_backup_model") || "";
-
-  const configured = !!(provider && model);
-
-  const primary: ChatProviderInfo | null = configured
-    ? {
-        providerId: provider === "__custom__" ? "ingenium-primary" : provider,
-        modelId: model,
-        label: `${provider === "__custom__" ? "Custom" : provider}: ${model}${endpoint ? ` (${endpoint})` : ""}`,
-        isCustom: provider === "__custom__",
+  let providers: ExpandedChatProviderInfo[];
+  try {
+    const catalog = await getChatProviderCatalog(projectId);
+    if (catalog.unavailable) {
+      if (catalog.unavailable === "network") {
+        res.status(503).json({
+          error: {
+            code: "OPENCODE_UNAVAILABLE",
+            message: "OpenCode is starting up. Provider list will be available shortly.",
+          },
+        });
+      } else {
+        res.status(503).json({
+          error: {
+            code: "LLM_CATALOG_UNAVAILABLE",
+            message: "The Chat model catalog is temporarily unavailable. Try again later.",
+          },
+        });
       }
-    : null;
-
-  const backup: ChatProviderInfo | null =
-    configured && backupProvider && backupModel
-      ? {
-          providerId: backupProvider === "__custom__" ? "ingenium-backup" : backupProvider,
-          modelId: backupModel,
-          label: `${backupProvider === "__custom__" ? "Custom Backup" : backupProvider}: ${backupModel}`,
-          isCustom: backupProvider === "__custom__",
-        }
-      : null;
-
-  const managedProviders = getManagedChatProviders(projectId);
-  const builtinResult = await opencodeClient.listProviders();
-  const builtinProvider = getBuiltinChatProvider(builtinResult);
-
-  // When no managed providers are configured and OpenCode's builtin provider is
-  // unavailable (e.g. OpenCode is still starting up), return a clear status
-  // instead of an empty provider list that causes a false "No model available" banner.
-  if (managedProviders.length === 0 && !builtinProvider && isOpenCodeError(builtinResult) && builtinResult.error.code === "NETWORK_ERROR") {
+      return;
+    }
+    providers = catalog.providers;
+  } catch {
+    // Provider discovery can fail while OpenCode is unavailable. Never expose
+    // transport details, endpoints, or credentials through this browser DTO.
+    logger.warn(SOURCE, "Chat provider catalog unavailable");
     res.status(503).json({
       error: {
-        code: "OPENCODE_UNAVAILABLE",
-        message: "OpenCode is starting up. Provider list will be available shortly.",
+        code: "LLM_CATALOG_UNAVAILABLE",
+        message: "The Chat model catalog is temporarily unavailable. Try again later.",
       },
     });
     return;
   }
 
-  const providers = builtinProvider ? [...managedProviders, builtinProvider] : managedProviders;
-  const managedPrimary = managedProviders.find((candidate) => {
-    try {
-      const stored = settings.getSetting(projectId, "llm_provider_configs");
-      const configuredProviders = stored ? JSON.parse(stored) : [];
-      return Array.isArray(configuredProviders)
-        && configuredProviders.some((item: ManagedProviderConfig) => item.id === candidate.providerId
-          && (Array.isArray(item.roles) ? item.roles.includes("primary") : item.role === "primary"));
-    } catch {
-      return candidate.providerId === primary?.providerId;
-    }
-  });
-  const defaultProvider = managedPrimary || builtinProvider || providers[0];
+  // Legacy synthesis fields are server-side runtime settings, not browser DTO
+  // inputs. Project them only after the exact provider/model pair is found in
+  // the current allowlisted catalog, and derive labels from that catalog.
+  const primary = legacyChatDto(projectId, providers, "primary");
+  const backup = primary ? legacyChatDto(projectId, providers, "backup") : null;
 
   const response: ChatConfigResponse = {
-    configured,
+    configured: primary !== null,
     primary,
     backup,
     providers,
     agents: [{ name: "ingenium-chat", label: "Ingenium Chat" }],
-    defaultSelection: defaultProvider
-      ? { providerId: defaultProvider.providerId, modelId: defaultProvider.defaultModel }
-      : null,
+    defaultSelection: getStoredOrDefaultChatSelection(projectId, providers),
   };
 
   res.json({ data: response });
+});
+
+function resolveGlobalChatProject(res: Response): string | null {
+  try {
+    const globalProject = projects.getGlobalProject();
+    if (globalProject) return globalProject.id;
+  } catch {
+    logger.warn(SOURCE, "Chat selection rejected because global project resolution failed");
+    res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "Chat model selection is unavailable until the global project is repaired." } });
+    return null;
+  }
+  res.status(503).json({ error: { code: "GLOBAL_PROJECT_UNAVAILABLE", message: "Chat model selection requires an active global project." } });
+  return null;
+}
+
+/**
+ * Persist the one global, non-secret Chat selection. This route is mounted
+ * behind the API auth and dashboard CSRF middleware; clients cannot choose a
+ * project, and only an exact current global-catalog pair is saved.
+ */
+opencodeRouter.put("/chat-selection", async (req, res) => {
+  if (req.query.project !== undefined || req.body?.project !== undefined) {
+    res.status(422).json({ error: { code: "CHAT_SELECTION_PROJECT_CONFLICT", message: "Chat model selection is owned by the active global project." } });
+    return;
+  }
+  const providerId = req.body?.providerId;
+  const modelId = req.body?.modelId;
+  if (!isValidChatSelectionIdentifier(providerId) || !isValidChatSelectionIdentifier(modelId)) {
+    res.status(422).json({ error: { code: "INVALID_CHAT_SELECTION", message: "A valid Chat provider and model are required." } });
+    return;
+  }
+
+  const projectId = resolveGlobalChatProject(res);
+  if (!projectId) return;
+  try {
+    const catalog = await getChatProviderCatalog(projectId);
+    if (catalog.unavailable) {
+      res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The Chat model catalog is temporarily unavailable. Try again later." } });
+      return;
+    }
+    const selection = { providerId, modelId };
+    if (!isAllowedChatSelection(catalog.providers, selection)) {
+      res.status(422).json({ error: { code: "CHAT_SELECTION_UNAVAILABLE", message: "The selected Chat provider or model is not currently available." } });
+      return;
+    }
+    settings.setSetting(projectId, CHAT_SELECTION_SETTING, JSON.stringify(selection));
+    res.json({ data: selection });
+  } catch {
+    logger.warn(SOURCE, "Chat selection validation failed while loading the global catalog");
+    res.status(503).json({ error: { code: "LLM_CATALOG_UNAVAILABLE", message: "The Chat model catalog is temporarily unavailable. Try again later." } });
+  }
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1059,14 +1097,11 @@ opencodeRouter.get("/providers", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const directory = req.query.directory as string | undefined;
   const result = await opencodeClient.listProviders(directory);
-  // Sanitize sensitive fields from provider options before responding
-  if (!isOpenCodeError(result) && result.all) {
-    result.all = result.all.map((provider: any) => ({
-      ...provider,
-      options: sanitizeOptions(provider.options),
-    }));
+  if (isOpenCodeError(result)) {
+    sendBrowserProviderCatalogError(res, result);
+    return;
   }
-  sendResult(req, res, result);
+  res.json({ data: toBrowserProviderCatalog(result) });
 });
 
 opencodeRouter.get("/builtin-providers", async (req, res) => {
@@ -1107,7 +1142,7 @@ opencodeRouter.get("/integrations", async (req, res) => {
 });
 
 function isSafeIdentifier(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9._-]{1,128}$/.test(value);
+  return isSafeBrowserIdentifier(value);
 }
 
 function isValidProviderKey(value: unknown): value is string {
@@ -1269,17 +1304,75 @@ opencodeRouter.get("/mcp", async (req, res) => {
   if (!guardPassword(req, res)) return;
   const directory = req.query.directory as string | undefined;
   const result = await opencodeClient.getMCPStatus(directory);
-  sendResult(req, res, result);
+  if (!isOpenCodeError(result)) {
+    const normalized = normalizeMcpStatusResponse(result);
+    if (!normalized) {
+      logger.warn(SOURCE, "OpenCode returned an invalid MCP status response");
+      res.status(502).json({
+        error: {
+          code: "MCP_STATUS_INVALID",
+          message: "OpenCode returned an invalid MCP status response.",
+        },
+      });
+      return;
+    }
+    res.json({ data: normalized });
+    return;
+  }
+  // GET status is a browser contract just like the mutation routes. Upstream
+  // codes can be opaque diagnostic identifiers, so neither log nor reflect
+  // them even when they match the otherwise-valid proxy error-code regex.
+  logger.warn(SOURCE, "MCP status request failed");
+  res.status(502).json({
+    error: {
+      code: "MCP_STATUS_FAILED",
+      message: "Unable to retrieve MCP server status.",
+    },
+  });
 });
 
 opencodeRouter.post("/mcp/:name/connect", async (req, res) => {
   if (!guardPassword(req, res)) return;
+  if (!isSafeMcpServerName(req.params.name)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid MCP server name" } });
+    return;
+  }
   const result = await opencodeClient.connectMCP(req.params.name!);
-  sendResult(req, res, result);
+  if (isOpenCodeError(result)) {
+    // Mutation responses are a route-owned contract. Do not pass an upstream
+    // error code into a response or log context: provider codes may encode
+    // credentials, topology, or opaque diagnostic identifiers.
+    logger.warn(SOURCE, "MCP connect request failed");
+    res.status(502).json({
+      error: {
+        code: "MCP_CONNECT_FAILED",
+        message: "Unable to connect to the MCP server.",
+      },
+    });
+    return;
+  }
+  // Upstream success bodies are not a browser contract and can contain
+  // credentials, endpoint topology, or implementation diagnostics.
+  res.status(200).json({ data: { accepted: true } });
 });
 
 opencodeRouter.post("/mcp/:name/disconnect", async (req, res) => {
   if (!guardPassword(req, res)) return;
+  if (!isSafeMcpServerName(req.params.name)) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "Invalid MCP server name" } });
+    return;
+  }
   const result = await opencodeClient.disconnectMCP(req.params.name!);
-  sendResult(req, res, result);
+  if (isOpenCodeError(result)) {
+    logger.warn(SOURCE, "MCP disconnect request failed");
+    res.status(502).json({
+      error: {
+        code: "MCP_DISCONNECT_FAILED",
+        message: "Unable to disconnect from the MCP server.",
+      },
+    });
+    return;
+  }
+  // See connect: do not proxy arbitrary upstream success payloads.
+  res.status(200).json({ data: { accepted: true } });
 });

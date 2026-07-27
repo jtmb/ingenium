@@ -247,6 +247,58 @@ function isSafeName(name: unknown): name is string {
 }
 
 const AGENT_CATEGORIES = ["primary", "execution", "research", "security", "chat"] as const;
+const LLM_BROKER_AGENT = "ingenium-llm-broker";
+const LLM_BROKER_DESCRIPTION = "Internal agent for Ingenium LLM broker — never invoke directly";
+const LLM_BROKER_CATEGORY = "execution";
+const LLM_BROKER_MODE = "subagent";
+const LLM_BROKER_PERMISSIONS = '{"*":"deny"}';
+const LLM_BROKER_METADATA = '{"hidden":true}';
+const LLM_BROKER_SKILLS = "[]";
+const LLM_BROKER_CONTENT = `This agent is reserved for system use. Do not invoke directly.
+
+Its wildcard-deny permission boundary intentionally has no exceptions: it has no
+file, shell, browser, MCP, task, skill, or other tool access. The API always
+selects this profile for broker requests; request-level tool selections cannot
+grant capabilities that this profile denies.
+`;
+
+interface AgentSyncRecord {
+  name: string;
+  content: string;
+  description?: string;
+  category?: string;
+  mode?: string;
+  model?: string | null;
+  reasoning_effort?: string | null;
+  permissions?: string;
+  metadata?: string;
+  skills?: string;
+  /** API rows preserve SQLite's raw 0/1 representation in some deployments. */
+  enabled?: boolean | 0 | 1;
+}
+
+function isReservedBroker(name: string): boolean {
+  return name === LLM_BROKER_AGENT;
+}
+
+/**
+ * The extension has no database access, so it carries the same fixed template
+ * that migration 058 and the core bootstrap enforce. A broker API row is never
+ * a source of content: it is accepted only when every material field matches.
+ */
+function isCanonicalBrokerRecord(agent: AgentSyncRecord): boolean {
+  return agent.name === LLM_BROKER_AGENT
+    && agent.description === LLM_BROKER_DESCRIPTION
+    && agent.category === LLM_BROKER_CATEGORY
+    && agent.mode === LLM_BROKER_MODE
+    && agent.model == null
+    && agent.reasoning_effort == null
+    && agent.permissions === LLM_BROKER_PERMISSIONS
+    && agent.metadata === LLM_BROKER_METADATA
+    && agent.skills === LLM_BROKER_SKILLS
+    && agent.content === LLM_BROKER_CONTENT
+    && (agent.enabled === true || agent.enabled === 1);
+}
 
 function isSafeAgentName(name: unknown): name is string {
   return typeof name === "string"
@@ -529,9 +581,14 @@ function scanDiskAgents(worktree: string): Map<string, string> {
         const filePath = safeAgentFilePath(worktree, name, category);
         if (!filePath || !existsSync(filePath) || lstatSync(filePath).isSymbolicLink()) continue;
         const rawContent = readFileSync(filePath, "utf-8");
-        // Hash only the body (without YAML frontmatter) to match API representation
-        const { body } = parseYamlFrontmatter(rawContent);
-        map.set(name, hashContent(body));
+        // Include security-relevant frontmatter in the baseline. Hashing only the
+        // body would hide a wildcard-deny or hidden-state edit from sync.
+        const { body, frontmatter } = parseYamlFrontmatter(rawContent);
+        map.set(name, hashAgentDefinition(
+          body,
+          JSON.stringify(parseAgentPermissionFrontmatter(rawContent)),
+          JSON.stringify(parseAgentMetadata(frontmatter)),
+        ));
       }
     }
   } catch {
@@ -542,10 +599,19 @@ function scanDiskAgents(worktree: string): Map<string, string> {
 
 export function writeAgentToDisk(
   worktree: string,
-  agent: { name: string; content: string; description?: string; category?: string; mode?: string; model?: string; permissions?: string },
+  agent: {
+    name: string;
+    content: string;
+    description?: string;
+    category?: string;
+    mode?: string;
+    model?: string | null;
+    permissions?: string;
+    metadata?: string;
+  },
 ): boolean {
   if (!isSafeAgentName(agent.name)) return false;
-  const category = agent.category || "execution";
+  const category = isReservedBroker(agent.name) ? LLM_BROKER_CATEGORY : agent.category || "execution";
   if (!isAgentCategory(category)) return false;
   const filePath = safeAgentFilePath(worktree, agent.name, category, true);
   if (!filePath) return false;
@@ -555,12 +621,25 @@ export function writeAgentToDisk(
 
   const parts: string[] = [];
   parts.push(`name: ${agent.name}`);
-  if (agent.description) parts.push(`description: "${agent.description.replace(/"/g, '\\"')}"`);
-  if (agent.mode) parts.push(`mode: ${agent.mode}`);
-  if (agent.permissions) parts.push(`permissions: ${agent.permissions}`);
+  const description = isReservedBroker(agent.name) ? LLM_BROKER_DESCRIPTION : agent.description;
+  const mode = isReservedBroker(agent.name) ? LLM_BROKER_MODE : agent.mode;
+  if (description) parts.push(`description: "${description.replace(/"/g, '\\"')}"`);
+  if (mode) parts.push(`mode: ${mode}`);
+  const metadata = isReservedBroker(agent.name)
+    ? { hidden: true }
+    : parseSerializedAgentObject(agent.metadata);
+  if (metadata.hidden === true) parts.push("hidden: true");
+  const permissions = isReservedBroker(agent.name)
+    ? { "*": "deny" }
+    : parseSerializedAgentObject(agent.permissions);
+  if (Object.keys(permissions).length > 0) {
+    parts.push("permission:");
+    appendAgentYamlObject(parts, permissions, 2);
+  }
   const frontmatter = `---\n${parts.join("\n")}\n---\n`;
 
-  writeFileSync(filePath, frontmatter + "\n" + (agent.content || ""));
+  const content = isReservedBroker(agent.name) ? LLM_BROKER_CONTENT : agent.content || "";
+  writeFileSync(filePath, frontmatter + "\n" + content);
   return true;
 }
 
@@ -832,6 +911,9 @@ async function pushSkillToApi(worktree: string, project: string, name: string, l
 }
 
 async function pushAgentToApi(worktree: string, project: string, name: string, category: string): Promise<boolean> {
+  // The reserved broker is provisioned only by the core bootstrap. No disk
+  // content, including an exact-looking template, may cross this boundary.
+  if (isReservedBroker(name)) return false;
   const filePath = safeAgentFilePath(worktree, name, category);
   if (!filePath || !existsSync(filePath)) return false;
   try {
@@ -843,17 +925,101 @@ async function pushAgentToApi(worktree: string, project: string, name: string, c
     // Runtime config is the only model source. Legacy markdown model metadata
     // must not be pushed back into the API or reintroduced on a later sync.
     const model = configuredAgentModel(worktree, name) || "";
+    const permissions = isReservedBroker(name)
+      ? LLM_BROKER_PERMISSIONS
+      : JSON.stringify(parseAgentPermissionFrontmatter(rawContent));
+    const metadata = isReservedBroker(name)
+      ? LLM_BROKER_METADATA
+      : JSON.stringify(parseAgentMetadata(frontmatter));
+    if (isReservedBroker(name)) {
+      // A local file is untrusted input. Rewrite it before the API import so a
+      // root-level allow cannot briefly evaluate a stale permissive profile.
+      writeAgentToDisk(worktree, {
+        name,
+        content: body,
+        description,
+        category,
+        mode,
+        permissions,
+        metadata,
+      });
+    }
     const res = await fetch(`${API_BASE}/agents?${encodeProject(project)}`, {
       method: "POST",
       headers: apiHeaders(worktree),
       // Disk-only agents are imported disabled. An API deletion therefore cannot
       // be silently undone by a stale local markdown file on a later initial sync.
-      body: JSON.stringify({ name, content: body, description, category, mode, model, enabled: false }),
+      body: JSON.stringify({
+        name,
+        content: body,
+        description,
+        category,
+        mode,
+        model,
+        // Preserve frontmatter state for ordinary agents. The reserved broker
+        // uses its canonical values above regardless of disk input.
+        permissions,
+        metadata,
+        enabled: false,
+      }),
     });
     return res.ok;
   } catch {
     return false;
   }
+}
+
+/** Capture the normalized disk definition after a successful initial import. */
+function readAgentSnapshot(worktree: string, name: string, category: string): AgentSyncRecord | null {
+  const filePath = safeAgentFilePath(worktree, name, category);
+  if (!filePath || !existsSync(filePath)) return null;
+  try {
+    if (lstatSync(filePath).isSymbolicLink()) return null;
+    const rawContent = readFileSync(filePath, "utf-8");
+    const { body, frontmatter } = parseYamlFrontmatter(rawContent);
+    return {
+      name,
+      content: body,
+      description: frontmatter.description || "",
+      category,
+      mode: frontmatter.mode || "subagent",
+      model: configuredAgentModel(worktree, name),
+      permissions: isReservedBroker(name)
+        ? LLM_BROKER_PERMISSIONS
+        : JSON.stringify(parseAgentPermissionFrontmatter(rawContent)),
+      metadata: isReservedBroker(name)
+        ? LLM_BROKER_METADATA
+        : JSON.stringify(parseAgentMetadata(frontmatter)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function canonicalAgentRecord(agent: AgentSyncRecord): AgentSyncRecord {
+  if (!isReservedBroker(agent.name)) return agent;
+  return {
+    name: LLM_BROKER_AGENT,
+    content: LLM_BROKER_CONTENT,
+    description: LLM_BROKER_DESCRIPTION,
+    category: LLM_BROKER_CATEGORY,
+    mode: LLM_BROKER_MODE,
+    model: null,
+    reasoning_effort: null,
+    permissions: LLM_BROKER_PERMISSIONS,
+    metadata: LLM_BROKER_METADATA,
+    skills: LLM_BROKER_SKILLS,
+    enabled: true,
+  };
+}
+
+function agentRecordHash(agent: AgentSyncRecord): string {
+  const canonical = canonicalAgentRecord(agent);
+  return hashAgentDefinition(
+    canonical.content || "",
+    canonical.permissions || "{}",
+    canonical.metadata || "{}",
+  );
 }
 
 async function pushPluginToApi(worktree: string, project: string, name: string, filePathRel: string): Promise<boolean> {
@@ -935,6 +1101,113 @@ function parseYamlFrontmatter(content: string): { body: string; frontmatter: Rec
     body = body.slice(1);
   }
   return { body, frontmatter: fm };
+}
+
+type AgentJsonObject = Record<string, unknown>;
+
+function isAgentJsonObject(value: unknown): value is AgentJsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseSerializedAgentObject(value: string | undefined): AgentJsonObject {
+  if (!value) return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isAgentJsonObject(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function agentYamlKey(key: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_-]*$/.test(key) ? key : JSON.stringify(key);
+}
+
+function agentYamlScalar(value: unknown): string {
+  if (typeof value === "string" && /^[A-Za-z0-9._:/-]+$/.test(value)) return value;
+  return JSON.stringify(value);
+}
+
+function appendAgentYamlObject(lines: string[], value: AgentJsonObject, indent: number): void {
+  const prefix = " ".repeat(indent);
+  for (const [key, child] of Object.entries(value)) {
+    if (isAgentJsonObject(child)) {
+      lines.push(`${prefix}${agentYamlKey(key)}:`);
+      appendAgentYamlObject(lines, child, indent + 2);
+    } else {
+      lines.push(`${prefix}${agentYamlKey(key)}: ${agentYamlScalar(child)}`);
+    }
+  }
+}
+
+function unquoteAgentYamlScalar(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      return typeof parsed === "string" ? parsed : trimmed;
+    } catch {
+      return trimmed.slice(1, -1);
+    }
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'")) return trimmed.slice(1, -1);
+  return trimmed;
+}
+
+function parseAgentYamlKeyAndValue(value: string): { key: string; value: string } | null {
+  const match = value.match(/^(?:"((?:[^"\\]|\\.)*)"|([^:]+)):\s*(.*)$/);
+  if (!match) return null;
+  const key = match[1] === undefined ? match[2]!.trim() : unquoteAgentYamlScalar(`"${match[1]}"`);
+  return { key, value: match[3] ?? "" };
+}
+
+function parseAgentPermissionFrontmatter(content: string): AgentJsonObject {
+  const block = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
+  if (!block) return {};
+  const lines = block.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^permission:\s*$/.test(line));
+  if (start === -1) return {};
+
+  const permissions: AgentJsonObject = {};
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    const indent = line.match(/^\s*/)?.[0].length ?? 0;
+    if (indent < 2) break;
+    if (indent !== 2) continue;
+    const entry = parseAgentYamlKeyAndValue(line.slice(2));
+    if (!entry) continue;
+    if (entry.value) {
+      permissions[entry.key] = unquoteAgentYamlScalar(entry.value);
+      continue;
+    }
+
+    const nested: AgentJsonObject = {};
+    for (index += 1; index < lines.length; index += 1) {
+      const nestedLine = lines[index]!;
+      if (!nestedLine.trim() || nestedLine.trimStart().startsWith("#")) continue;
+      const nestedIndent = nestedLine.match(/^\s*/)?.[0].length ?? 0;
+      if (nestedIndent <= 2) {
+        index -= 1;
+        break;
+      }
+      if (nestedIndent !== 4) continue;
+      const nestedEntry = parseAgentYamlKeyAndValue(nestedLine.slice(4));
+      if (nestedEntry) nested[nestedEntry.key] = unquoteAgentYamlScalar(nestedEntry.value);
+    }
+    permissions[entry.key] = nested;
+  }
+  return permissions;
+}
+
+function parseAgentMetadata(frontmatter: Record<string, string>): AgentJsonObject {
+  return frontmatter.hidden === "true" ? { hidden: true }
+    : frontmatter.hidden === "false" ? { hidden: false }
+      : {};
+}
+
+function hashAgentDefinition(content: string, permissions: string, metadata: string): string {
+  return hashContent(JSON.stringify({ content, permissions, metadata }));
 }
 
 /**
@@ -1228,10 +1501,10 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
   const result = emptyResult();
   const diskMap = scanDiskAgents(worktree);
 
-  const listRes = await apiGet<{ data: Array<{ name: string; content: string; description?: string; category?: string; mode?: string; model?: string; permissions?: string; enabled?: boolean }> }>(worktree, `/agents?${encodeProject(project)}`);
+  const listRes = await apiGet<{ data: AgentSyncRecord[] }>(worktree, `/agents?${encodeProject(project)}`);
   if (!listRes || !Array.isArray(listRes.data)) return result;
 
-  const apiMap = new Map<string, { hash: string; data: (typeof listRes.data)[number] }>();
+  const apiMap = new Map<string, { hash: string; data: AgentSyncRecord }>();
   for (const agent of listRes.data) {
     if (!isSafeAgentName(agent.name) || !isAgentCategory(agent.category || "execution")) {
       result.errors++;
@@ -1239,34 +1512,105 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
     }
     // Disabled API records are authoritative tombstones for disk sync. Never
     // rewrite them and remove any stale local markdown before it can be pushed.
-    if (agent.enabled === false) {
-      if (diskMap.has(agent.name) && removeAgentFromAllCategories(worktree, agent.name)) result.removed++;
+    if (agent.enabled === false || agent.enabled === 0) {
+      const quarantined = diskMap.has(agent.name) && removeAgentFromAllCategories(worktree, agent.name);
+      if (quarantined) result.removed++;
+      if (isReservedBroker(agent.name) && (diskMap.has(agent.name) || quarantined)) {
+        result.skipped++;
+        logSync("agents", project, "SKIPPED — no enabled trusted API broker; quarantined disk-only broker profiles");
+      }
       diskMap.delete(agent.name);
       delete manifest.resources.agents[agent.name];
       continue;
     }
-    const h = hashContent(agent.content || "");
-    apiMap.set(agent.name, { hash: h, data: agent });
+    if (isReservedBroker(agent.name) && !isCanonicalBrokerRecord(agent)) {
+      // Treat a malformed API row exactly like untrusted disk state. Do not
+      // rewrite it from its own fields and do not preserve a local copy.
+      const quarantined = diskMap.has(agent.name) && removeAgentFromAllCategories(worktree, agent.name);
+      if (quarantined) result.removed++;
+      result.errors++;
+      result.skipped++;
+      diskMap.delete(agent.name);
+      delete manifest.resources.agents[agent.name];
+      logSync("agents", project, "ERROR — rejected non-canonical API broker profile");
+      continue;
+    }
+    const trustedAgent = canonicalAgentRecord(agent);
+    apiMap.set(agent.name, { hash: agentRecordHash(trustedAgent), data: trustedAgent });
   }
 
   if (opts.isInitialSync) {
     for (const [name] of diskMap) {
-      if (!apiMap.has(name)) {
-        const category = findAgentCategory(worktree, name);
-        if (!category) { result.errors++; continue; }
-        const ok = await pushAgentToApi(worktree, project, name, category);
-        if (ok) result.pushed++;
-        else result.errors++;
+      if (apiMap.has(name)) continue;
+      // The broker is API-owned. A disk copy is never a trusted source and
+      // must not cross the API boundary during initial import.
+      if (isReservedBroker(name)) continue;
+      const category = findAgentCategory(worktree, name);
+      if (!category) { result.errors++; continue; }
+      if (!await pushAgentToApi(worktree, project, name, category)) {
+        result.errors++;
+        continue;
       }
+
+      // A successful initial POST is the common ancestor for this pass. Record
+      // the post-write disk state in both maps so it cannot immediately become
+      // a false three-way conflict.
+      const snapshot = readAgentSnapshot(worktree, name, category);
+      const postPushHash = scanDiskAgents(worktree).get(name);
+      if (!snapshot || !postPushHash) {
+        result.errors++;
+        continue;
+      }
+      apiMap.set(name, { hash: postPushHash, data: canonicalAgentRecord(snapshot) });
+      diskMap.set(name, postPushHash);
+      manifest.resources.agents[name] = postPushHash;
+      result.pushed++;
     }
+  }
+
+  // The broker is never eligible for generic conflict preservation. A complete
+  // template check above established that the API record is canonical; remove
+  // every disk copy before writing the sole local canonical file.
+  const brokerEntry = apiMap.get(LLM_BROKER_AGENT);
+  if (brokerEntry) {
+    const diskHashBeforeRepair = diskMap.get(LLM_BROKER_AGENT);
+    const trustedBroker = canonicalAgentRecord(brokerEntry.data);
+    removeAgentFromAllCategories(worktree, LLM_BROKER_AGENT);
+    if (writeAgentToDisk(worktree, trustedBroker)) {
+      const canonicalHash = agentRecordHash(trustedBroker);
+      apiMap.set(LLM_BROKER_AGENT, { hash: canonicalHash, data: trustedBroker });
+      diskMap.set(LLM_BROKER_AGENT, canonicalHash);
+      manifest.resources.agents[LLM_BROKER_AGENT] = canonicalHash;
+      if (diskHashBeforeRepair !== canonicalHash) result.synced++;
+    } else {
+      result.errors++;
+    }
+  } else {
+    // With no enabled API broker row, local broker definitions have no trusted
+    // source of truth. Quarantine every category copy, prune the baseline, and
+    // report the skipped import rather than silently recreating a broker row.
+    const quarantined = removeAgentFromAllCategories(worktree, LLM_BROKER_AGENT);
+    if (diskMap.has(LLM_BROKER_AGENT) || quarantined) {
+      result.skipped++;
+      if (quarantined) result.removed++;
+      logSync("agents", project, "SKIPPED — no enabled trusted API broker; quarantined disk-only broker profiles");
+    }
+    diskMap.delete(LLM_BROKER_AGENT);
+    delete manifest.resources.agents[LLM_BROKER_AGENT];
   }
 
   const allNames = new Set([...apiMap.keys(), ...diskMap.keys()]);
   for (const name of allNames) {
+    if (isReservedBroker(name)) continue;
     const apiEntry = apiMap.get(name);
     const apiHash = apiEntry?.hash;
     const diskHash = diskMap.get(name);
     const baselineHash = manifest.resources.agents[name];
+    const syncedBefore = result.synced;
+    const pushedBefore = result.pushed;
+    const removedBefore = result.removed;
+    const errorsBefore = result.errors;
+    const conflictsBefore = result.conflicts;
 
     await resolveResource(
       name,
@@ -1274,10 +1618,7 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
       diskHash,
       baselineHash,
       {
-        writeToDisk: () => {
-          if (apiEntry) return writeAgentToDisk(worktree, apiEntry.data);
-          return false;
-        },
+        writeToDisk: () => apiEntry ? writeAgentToDisk(worktree, apiEntry.data) : false,
         removeFromDisk: () => { removeAgentFromAllCategories(worktree, name); },
         pushToApi: async () => {
           const category = findAgentCategory(worktree, name);
@@ -1288,19 +1629,26 @@ export async function syncAgents(worktree: string, project: string, manifest: Sy
       result,
     );
 
-    if (apiEntry) {
+    const synced = result.synced > syncedBefore;
+    const pushed = result.pushed > pushedBefore;
+    const removed = result.removed > removedBefore;
+    const errored = result.errors > errorsBefore;
+    const conflicted = result.conflicts > conflictsBefore;
+    if (synced && apiEntry) {
       manifest.resources.agents[name] = apiEntry.hash;
-    } else {
+    } else if (pushed && diskHash !== undefined) {
+      manifest.resources.agents[name] = diskHash;
+    } else if (removed) {
       delete manifest.resources.agents[name];
+    } else if (errored || conflicted) {
+      // Preserve unresolved baselines until a later successful sync.
+    } else if (apiEntry) {
+      manifest.resources.agents[name] = apiEntry.hash;
     }
   }
 
-  // Prune stale manifest entries: names that exist in the manifest but
-  // neither on disk nor in the API.
   for (const name of Object.keys(manifest.resources.agents)) {
-    if (!allNames.has(name)) {
-      delete manifest.resources.agents[name];
-    }
+    if (!allNames.has(name)) delete manifest.resources.agents[name];
   }
 
   return result;
@@ -1326,12 +1674,18 @@ export async function syncPlugins(worktree: string, project: string, manifest: S
   }
 
   if (opts.isInitialSync) {
-    for (const [name] of diskMap) {
+    for (const [name, diskHash] of diskMap) {
       if (!apiMap.has(name)) {
         const filePath = `.opencode/plugins/${name}.ts`;
         const ok = await pushPluginToApi(worktree, project, name, filePath);
-        if (ok) result.pushed++;
-        else result.errors++;
+        if (ok && diskHash) {
+          // The initial POST is authoritative for this pass. Populate both the
+          // transient API map and baseline so it cannot be misclassified as a
+          // conflict before the next list request.
+          apiMap.set(name, { hash: diskHash, data: { name, file_path: filePath } });
+          manifest.resources.plugins[name] = diskHash;
+          result.pushed++;
+        } else result.errors++;
       }
     }
   }
@@ -1342,6 +1696,12 @@ export async function syncPlugins(worktree: string, project: string, manifest: S
     const apiHash = apiEntry?.hash;
     const diskHash = diskMap.get(name);
     const baselineHash = manifest.resources.plugins[name];
+
+    const syncedBefore = result.synced;
+    const pushedBefore = result.pushed;
+    const removedBefore = result.removed;
+    const errorsBefore = result.errors;
+    const conflictsBefore = result.conflicts;
 
     await resolveResource(
       name,
@@ -1360,10 +1720,21 @@ export async function syncPlugins(worktree: string, project: string, manifest: S
       result,
     );
 
-    if (apiEntry) {
+    const synced = result.synced > syncedBefore;
+    const pushed = result.pushed > pushedBefore;
+    const removed = result.removed > removedBefore;
+    const errored = result.errors > errorsBefore;
+    const conflicted = result.conflicts > conflictsBefore;
+    if (synced && apiEntry) {
       manifest.resources.plugins[name] = apiEntry.hash;
-    } else {
+    } else if (pushed && diskHash !== undefined) {
+      manifest.resources.plugins[name] = diskHash;
+    } else if (removed) {
       delete manifest.resources.plugins[name];
+    } else if (errored || conflicted) {
+      // Preserve an unresolved item's prior baseline.
+    } else if (apiEntry) {
+      manifest.resources.plugins[name] = apiEntry.hash;
     }
   }
 
@@ -1403,12 +1774,15 @@ export async function syncCommands(worktree: string, project: string, manifest: 
   }
 
   if (opts.isInitialSync) {
-    for (const [name] of diskMap) {
+    for (const [name, diskHash] of diskMap) {
       if (!apiMap.has(name)) {
         const filePath = `.opencode/commands/${name}.md`;
         const ok = await pushCommandToApi(worktree, project, name, filePath);
-        if (ok) result.pushed++;
-        else result.errors++;
+        if (ok && diskHash) {
+          apiMap.set(name, { hash: diskHash, data: { name, file_path: filePath } });
+          manifest.resources.commands[name] = diskHash;
+          result.pushed++;
+        } else result.errors++;
       }
     }
   }
@@ -1419,6 +1793,12 @@ export async function syncCommands(worktree: string, project: string, manifest: 
     const apiHash = apiEntry?.hash;
     const diskHash = diskMap.get(name);
     const baselineHash = manifest.resources.commands[name];
+
+    const syncedBefore = result.synced;
+    const pushedBefore = result.pushed;
+    const removedBefore = result.removed;
+    const errorsBefore = result.errors;
+    const conflictsBefore = result.conflicts;
 
     await resolveResource(
       name,
@@ -1437,10 +1817,21 @@ export async function syncCommands(worktree: string, project: string, manifest: 
       result,
     );
 
-    if (apiEntry) {
+    const synced = result.synced > syncedBefore;
+    const pushed = result.pushed > pushedBefore;
+    const removed = result.removed > removedBefore;
+    const errored = result.errors > errorsBefore;
+    const conflicted = result.conflicts > conflictsBefore;
+    if (synced && apiEntry) {
       manifest.resources.commands[name] = apiEntry.hash;
-    } else {
+    } else if (pushed && diskHash !== undefined) {
+      manifest.resources.commands[name] = diskHash;
+    } else if (removed) {
       delete manifest.resources.commands[name];
+    } else if (errored || conflicted) {
+      // Preserve an unresolved item's prior baseline.
+    } else if (apiEntry) {
+      manifest.resources.commands[name] = apiEntry.hash;
     }
   }
 
@@ -1466,16 +1857,27 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
 
   const configRes = await apiGet<{ data: { content: string } | null }>(worktree, `/config?${encodeProject(project)}&type=project`);
   const apiContent = configRes?.data?.content || null;
-  const apiHash = apiContent ? hashContent(apiContent) : undefined;
-  const baselineHash = manifest.resources.config.hash;
+  let apiHash = apiContent ? hashContent(apiContent) : undefined;
+  let baselineHash = manifest.resources.config.hash;
 
   if (opts.isInitialSync) {
     if (diskHash && !apiContent) {
       const ok = await pushConfigToApi(worktree, project);
-      if (ok) result.pushed++;
-      else result.errors++;
+      if (ok) {
+        // Avoid treating a successful first push as an API/disk conflict before
+        // the following full sync can fetch the persisted config again.
+        apiHash = diskHash;
+        manifest.resources.config.hash = diskHash;
+        baselineHash = diskHash;
+        result.pushed++;
+      } else result.errors++;
     }
   }
+
+  const syncedBefore = result.synced;
+  const pushedBefore = result.pushed;
+  const errorsBefore = result.errors;
+  const conflictsBefore = result.conflicts;
 
   await resolveResource(
     "config",
@@ -1494,7 +1896,17 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
     result,
   );
 
-  if (apiHash) {
+  const synced = result.synced > syncedBefore;
+  const pushed = result.pushed > pushedBefore;
+  const errored = result.errors > errorsBefore;
+  const conflicted = result.conflicts > conflictsBefore;
+  if (synced && apiHash) {
+    manifest.resources.config.hash = apiHash;
+  } else if (pushed && diskHash) {
+    manifest.resources.config.hash = diskHash;
+  } else if (errored || conflicted) {
+    // Keep the last resolved baseline until a later sync succeeds.
+  } else if (apiHash) {
     manifest.resources.config.hash = apiHash;
   } else {
     delete manifest.resources.config.hash;

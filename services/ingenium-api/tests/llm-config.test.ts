@@ -29,6 +29,10 @@ let tempDir: string;
 let projectName: string;
 let server: Server | null = null;
 let baseUrl: string;
+// Keep the real transport outside individual tests. A test that temporarily
+// intercepts the provider request must still be able to call its local Express
+// fixture even if another test has restored or replaced global fetch.
+const nativeFetch = globalThis.fetch.bind(globalThis);
 
 /** MUST be a function — evaluates projectName at call time, not module load time. */
 function projectQ(name?: string): string {
@@ -56,6 +60,10 @@ beforeAll(async () => {
   expect(vault.initializeVault(projectId, "test-vault-passphrase", "test-vault-passphrase").ok).toBe(true);
   vi.spyOn(opencodeClient, "addAuth").mockResolvedValue({});
   vi.spyOn(opencodeClient, "deleteAuth").mockResolvedValue({});
+  // Chat config always performs runtime provider discovery. Keep this fixture
+  // isolated from the real OpenCode password/configuration state unless a test
+  // explicitly exercises an unavailable catalog.
+  vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({ all: [] });
 
   // Start a local server for fetch-based testing
   const app = buildApp();
@@ -143,6 +151,14 @@ function runtimeProviderList() {
     default: { opencode: "big-pickle" },
     connected: ["opencode"],
   } as any;
+}
+
+function setManagedChatCatalog(entries: Array<Record<string, unknown>>, name = projectName): void {
+  settings.setSetting(
+    projects.getProject(name)!.id,
+    "llm_provider_configs",
+    JSON.stringify(entries),
+  );
 }
 
 function putProviderConfigs(providers: Array<Record<string, unknown>>) {
@@ -342,6 +358,18 @@ describe("managed provider blocks", () => {
       }),
     });
     expect(overlappingRolesResponse.status).toBe(200);
+  });
+
+  it("rejects the builtin opencode ID from managed provider configuration", async () => {
+    const response = await putProviderConfigs([{ ...providers[0]!, id: "opencode" }]);
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "providers[0].id is reserved for a built-in provider",
+      },
+    });
   });
 
   it("rejects identical primary and secondary provider-model selections", async () => {
@@ -758,6 +786,14 @@ describe("GET /opencode/chat-config — configured state", () => {
       },
     });
     expect(postRes.status).toBe(200);
+    setManagedChatCatalog([{
+      id: "deepseek",
+      name: "DeepSeek",
+      models: ["deepseek-v4-pro"],
+      defaultModel: "deepseek-v4-pro",
+      roles: ["available", "primary"],
+      enabled: true,
+    }]);
 
     const { body } = await getChatConfig();
 
@@ -767,7 +803,7 @@ describe("GET /opencode/chat-config — configured state", () => {
     expect(body.data.primary).not.toBeNull();
     expect(body.data.primary.providerId).toBe("deepseek");
     expect(body.data.primary.modelId).toBe("deepseek-v4-pro");
-    expect(body.data.primary.label).toContain("deepseek");
+    expect(body.data.primary.label).toContain("DeepSeek");
     expect(body.data.primary.label).toContain("deepseek-v4-pro");
     expect(body.data.primary.isCustom).toBe(false);
 
@@ -803,6 +839,24 @@ describe("GET /opencode/chat-config — configured state", () => {
         endpoint: "",
       },
     });
+    setManagedChatCatalog([
+      {
+        id: "deepseek",
+        name: "DeepSeek",
+        models: ["deepseek-v4-pro"],
+        defaultModel: "deepseek-v4-pro",
+        roles: ["available", "primary"],
+        enabled: true,
+      },
+      {
+        id: "openai",
+        name: "OpenAI",
+        models: ["gpt-4o"],
+        defaultModel: "gpt-4o",
+        roles: ["available", "backup"],
+        enabled: true,
+      },
+    ]);
 
     const { body } = await getChatConfig();
 
@@ -841,6 +895,14 @@ describe("GET /opencode/chat-config — configured state", () => {
         endpoint: "https://custom-api.example.com/v1",
       },
     });
+    setManagedChatCatalog([{
+      id: "ingenium-primary",
+      name: "Custom",
+      models: ["my-custom-model"],
+      defaultModel: "my-custom-model",
+      roles: ["available", "primary"],
+      enabled: true,
+    }]);
 
     const { body } = await getChatConfig();
 
@@ -900,6 +962,51 @@ describe("GET /opencode/chat-config — unconfigured state", () => {
 });
 
 describe("runtime OpenCode providers", () => {
+  it("restores validated legacy llm-config selections to the Chat catalog", async () => {
+    const legacyProjectName = "llm-config-legacy-catalog-compatibility";
+    projects.createProject(legacyProjectName);
+
+    const save = await fetch(`${baseUrl}/api/v1/settings/llm-config${projectQ(legacyProjectName)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        primary: { provider: "openai", model: "gpt-4.1", endpoint: "https://api.openai.com/v1" },
+        backup: { provider: "anthropic", model: "claude-sonnet-4-6", endpoint: "https://api.anthropic.com/v1" },
+      }),
+    });
+    expect(save.status).toBe(200);
+
+    const { res, body } = await fetch(
+      `${baseUrl}/api/v1/opencode/chat-config${projectQ(legacyProjectName)}`,
+    ).then(async (response) => ({ res: response, body: await response.json() }));
+
+    expect(res.status).toBe(200);
+    expect(body.data).toMatchObject({
+      configured: true,
+      primary: {
+        providerId: "openai",
+        modelId: "gpt-4.1",
+        label: "OpenAI: gpt-4.1",
+      },
+      backup: {
+        providerId: "anthropic",
+        modelId: "claude-sonnet-4-6",
+        label: "Anthropic: claude-sonnet-4-6",
+      },
+      providers: [
+        {
+          providerId: "openai",
+          models: [{ id: "gpt-4.1", label: "gpt-4.1" }],
+        },
+        {
+          providerId: "anthropic",
+          models: [{ id: "claude-sonnet-4-6", label: "claude-sonnet-4-6" }],
+        },
+      ],
+      defaultSelection: { providerId: "openai", modelId: "gpt-4.1" },
+    });
+  });
+
   it("returns sanitized free builtin models only", async () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
     const providerSpy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue(runtimeProviderList());
@@ -938,17 +1045,22 @@ describe("runtime OpenCode providers", () => {
     vi.unstubAllEnvs();
   });
 
-  it("returns managed and builtin providers without exposing API keys", async () => {
+  it("returns managed and builtin providers without exposing provider secrets or topology", async () => {
     const managedProject = projects.createProject("llm-config-managed-runtime");
     settings.setSetting(managedProject.id, "llm_provider_configs", JSON.stringify([{
       id: "managed-primary",
       name: "Managed Primary",
+      npm: "@internal/provider-package",
+      baseURL: "http://127.0.0.1:11434/private-provider",
+      endpoint: "http://internal.example.invalid/never-expose",
       models: ["managed-model"],
       defaultModel: "managed-model",
       roles: ["available", "primary"],
       enabled: true,
       apiKey: "managed-api-key-must-not-leak",
+      headers: { authorization: "Bearer managed-header-token" },
     }]));
+    settings.setSetting(managedProject.id, "synthesis_endpoint", "http://127.0.0.1:9999/synthesis-internal");
     const providerSpy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue(runtimeProviderList());
 
     const res = await fetch(`${baseUrl}/api/v1/opencode/chat-config${projectQ("llm-config-managed-runtime")}`);
@@ -971,8 +1083,23 @@ describe("runtime OpenCode providers", () => {
       },
     ]);
     expect(body.data.defaultSelection).toEqual({ providerId: "managed-primary", modelId: "managed-model" });
-    expect(JSON.stringify(body)).not.toContain("managed-api-key-must-not-leak");
-    expect(JSON.stringify(body)).not.toContain("apiKey");
+    const serialized = JSON.stringify(body);
+    for (const forbidden of [
+      "managed-api-key-must-not-leak",
+      "managed-header-token",
+      "127.0.0.1:11434",
+      "127.0.0.1:9999",
+      "internal.example.invalid",
+      "@internal/provider-package",
+      "synthesis_endpoint",
+      "baseURL",
+      "endpoint",
+      "apiKey",
+      "headers",
+      "authorization",
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
 
     providerSpy.mockRestore();
   });
@@ -986,6 +1113,58 @@ describe("runtime OpenCode providers", () => {
     const body = await res.json();
 
     expect(body.data.defaultSelection).toEqual({ providerId: "opencode", modelId: "big-pickle" });
+    providerSpy.mockRestore();
+  });
+
+  it("omits arbitrary legacy synthesis settings from the browser DTO", async () => {
+    const legacyOnlyProject = "llm-config-legacy-chat-omit";
+    const project = projects.createProject(legacyOnlyProject);
+    settings.setSetting(project.id, "synthesis_provider", "untrusted-provider");
+    settings.setSetting(project.id, "synthesis_model", "untrusted-model");
+    settings.setSetting(project.id, "synthesis_backup_provider", "untrusted-backup");
+    settings.setSetting(project.id, "synthesis_backup_model", "untrusted-backup-model");
+    const providerSpy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue(runtimeProviderList());
+
+    const res = await fetch(`${baseUrl}/api/v1/opencode/chat-config${projectQ(legacyOnlyProject)}`);
+    const body = await res.json();
+
+    expect(body.data).toMatchObject({ configured: false, primary: null, backup: null });
+    const serialized = JSON.stringify(body);
+    for (const value of ["untrusted-provider", "untrusted-model", "untrusted-backup", "untrusted-backup-model"]) {
+      expect(serialized).not.toContain(value);
+    }
+    providerSpy.mockRestore();
+  });
+
+  it("projects legacy selections only when the exact pair exists in the current catalog", async () => {
+    const managedProject = "llm-config-legacy-chat-allowed";
+    const project = projects.createProject(managedProject);
+    setManagedChatCatalog([{
+      id: "managed-provider",
+      name: "Managed Provider",
+      models: ["allowed-model"],
+      defaultModel: "allowed-model",
+      roles: ["available", "primary"],
+      enabled: true,
+    }], managedProject);
+    settings.setSetting(project.id, "synthesis_provider", "managed-provider");
+    settings.setSetting(project.id, "synthesis_model", "allowed-model");
+    settings.setSetting(project.id, "synthesis_backup_provider", "managed-provider");
+    settings.setSetting(project.id, "synthesis_backup_model", "not-allowed");
+    const providerSpy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue(runtimeProviderList());
+
+    const res = await fetch(`${baseUrl}/api/v1/opencode/chat-config${projectQ(managedProject)}`);
+    const body = await res.json();
+
+    expect(body.data).toMatchObject({
+      configured: true,
+      primary: {
+        providerId: "managed-provider",
+        modelId: "allowed-model",
+        label: "Managed Provider: allowed-model",
+      },
+      backup: null,
+    });
     providerSpy.mockRestore();
   });
 });
@@ -1044,15 +1223,28 @@ describe("POST /settings/test-llm — requires project context", () => {
   });
 
   it("returns a sanitized transport failure without reflecting the endpoint", async () => {
-    const endpoint = "https://does-not-exist.invalid/v1";
-    const res = await fetch(`${baseUrl}/api/v1/settings/test-llm${projectQ()}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ endpoint, model: "test-model" }),
+    // A public literal IP bypasses resolver timing, so this test exercises the
+    // transport-error branch rather than turning a DNS retry into a flaky test.
+    const endpoint = "https://1.1.1.1/v1";
+    const transport = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url.startsWith(endpoint)) {
+        return Promise.reject(new TypeError("mocked transport failure"));
+      }
+      return nativeFetch(input, init);
     });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.data).toEqual({ ok: false, status: 0, message: "Unable to reach LLM endpoint" });
-    expect(JSON.stringify(body)).not.toContain(endpoint);
+    try {
+      const res = await fetch(`${baseUrl}/api/v1/settings/test-llm${projectQ()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint, model: "test-model" }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data).toEqual({ ok: false, status: 0, message: "Unable to reach LLM endpoint" });
+      expect(JSON.stringify(body)).not.toContain(endpoint);
+    } finally {
+      transport.mockRestore();
+    }
   });
 });

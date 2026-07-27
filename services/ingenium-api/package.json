@@ -8,6 +8,7 @@
     "start": "npm run build && node dist/scripts/api-server.js",
     "dev": "tsx watch scripts/api-server.ts",
     "test": "vitest run",
+    "test:live-opencode": "RUN_OPENCODE_LIVE=1 vitest run --config vitest.live.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

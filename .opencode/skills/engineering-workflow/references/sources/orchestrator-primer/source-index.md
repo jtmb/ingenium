@@ -1,50 +1,24 @@
 # Orchestrator Primer
 
-This skill primes coordination agents with the pattern recognition and delegation template used in the Ingenium system.
+This reference preserves the coordination pattern used by Ingenium. The canonical finite-execution rules are in `../agent-workflow-patterns/references/finite-task-contract.md`.
 
 ## 🔴 HARD RULEs
 
-- **Never work directly — always delegate** to a subagent. The orchestrator's job is coordination, not execution.
-- **Independent verification** — never trust a subagent's self-report. Always run `git diff`, build, or tests to confirm.
-- **Document every change** — after every subagent completes, spawn `@ingenium-docs` to update documentation.
-- **Pattern encoding** — every failure reveals a gap. Always encode into a skill or update an existing one.
+- Never work directly; delegate bounded work to the appropriate subagent.
+- Before dispatch, declare **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification budget, and escalation rule.
+- The verification budget allows a maximum of **3 verification phases**; each individual check executes at most **2 times**; and a maximum of **1 writer remediation round**. The second failed in-scope BLOCKING check returns **ESCALATE_USER** with evidence.
+- Classify every finding as **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. Only an in-scope BLOCKING finding reopens work. FOLLOW_UP is reported separately and never auto-dispatched.
+- QA runs one targeted pass after an implementation wave. Docs runs only for directly affected canonical documentation or an explicit user request. Neither role triggers QA/Docs work.
+- STOP and CANCELLED are terminal: preserve evidence, report skipped work, and spawn no new agents or gates.
 
-## Delegation Patterns
+## Delegation Pattern
 
-### Parallel Independent Work
-When tasks have no dependencies, spawn all subagents in a single message:
-```
-@ingenium-software-engineer-fast → implement feature A
-@ingenium-software-engineer-premium → implement feature B (critical path)
-@ingenium-qa → write tests for feature A
-@ingenium-security-auditor → audit feature A
-```
-
-### Sequential Dependent Work
-When task B depends on task A:
-1. Spawn task A, wait for result
-2. Verify task A (build + test)
-3. Spawn task B with task A's output as context
-
-### Research → Implementation
-1. `@ingenium-explore` finds the relevant file/pattern
-2. `@ingenium-scout` retrieves past decisions from Docs RAG
-3. `@ingenium-software-engineer-premium` or `@ingenium-software-engineer-fast` implements based on research
-4. `@ingenium-qa` reviews the implementation
-
-## Checkpointing
-
-For multi-session work, persist state to `memories/session/coach.json`:
-```json
-{
-  "project": "{name}",
-  "currentTask": "{description}",
-  "completedTasks": [],
-  "patternsDiscovered": [],
-  "startedAt": "{ISO timestamp}"
-}
-```
+1. Declare the finite task contract and phase counts/territories.
+2. Delegate independent, non-overlapping in-scope work within the 6-active/3-writer limit.
+3. Run the declared targeted verification phase; `@ingenium-qa` solely owns a declared full E2E/container suite.
+4. Report the bounded result. Do not create a new task for FOLLOW_UP or INFORMATIONAL findings.
 
 ## References
 
-See `references/orchestrator-flow.md` for detailed 6-step execution protocol.
+- `../agent-workflow-patterns/references/finite-task-contract.md` — scope, budgets, cancellation, and escalation
+- `references/orchestrator-flow.md` — compact bounded execution flow

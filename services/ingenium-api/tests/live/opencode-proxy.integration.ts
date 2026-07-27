@@ -1,5 +1,5 @@
 /**
- * opencode-proxy.test.ts — Real integration tests for OpenCode HTTP API proxy routes.
+ * Explicit opt-in integration tests for OpenCode HTTP API proxy routes.
  *
  * Tests the /api/v1/opencode/* proxy by routing through an in-process Express app
  * that forwards requests to the REAL OpenCode server at http://localhost:4098.
@@ -17,7 +17,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { opencodeRouter } from "../lib/routes/opencode.js";
+import { opencodeRouter } from "../../lib/routes/opencode.js";
 
 /* ── Test server setup ───────────────────────────────────────────────────── */
 
@@ -37,9 +37,9 @@ function buildApp(): express.Express {
 }
 
 beforeAll(async () => {
-  if (!SAVED_PASSWORD) {
+  if (process.env.RUN_OPENCODE_LIVE !== "1" || !SAVED_PASSWORD) {
     throw new Error(
-      "OPENCODE_SERVER_PASSWORD must be set in environment for integration tests",
+      "Live OpenCode tests require RUN_OPENCODE_LIVE=1 and OPENCODE_SERVER_PASSWORD",
     );
   }
 

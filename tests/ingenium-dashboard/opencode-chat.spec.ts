@@ -166,10 +166,28 @@ function mockSessionListCreate(page: Page) {
 /*  Chat-config route                                                       */
 /* ──────────────────────────────────────────────────────────────────────── */
 
-function mockChatConfig(page: Page, config: typeof NO_PROVIDERS_CONFIG) {
+type MockChatConfig = typeof NO_PROVIDERS_CONFIG | typeof WITH_PROVIDERS_CONFIG;
+
+function mockChatConfig(page: Page, config: MockChatConfig) {
   return page.route(
     (url) => pathStarts("/api/v1/opencode/chat-config")(url),
     (route) => json200(config)(route),
+  );
+}
+
+/** The chat shell fetches MCP status as soon as it mounts. */
+function mockMcpStatus(page: Page) {
+  return page.route(
+    (url) => pathExact("/api/v1/opencode/mcp")(url),
+    (route) => json200({})(route),
+  );
+}
+
+/** Server-owned Chat selection persistence is separate from Docs AI requests. */
+function mockChatSelection(page: Page) {
+  return page.route(
+    (url) => pathExact("/api/v1/opencode/chat-selection")(url),
+    (route) => json200({ accepted: true })(route),
   );
 }
 
@@ -282,11 +300,13 @@ function mockAgentsEndpoint(page: Page) {
 
 async function applyMocks(
   page: Page,
-  config: typeof NO_PROVIDERS_CONFIG,
+  config: MockChatConfig,
   messages: typeof OVERFLOW_MESSAGES = [],
 ) {
   mockSessionListCreate(page);
   mockChatConfig(page, config);
+  mockMcpStatus(page);
+  mockChatSelection(page);
   mockSessionSubRoutes(page, messages);
   mockAgentsEndpoint(page);
 }
@@ -396,9 +416,17 @@ test.describe("Chat UI — /chat page", () => {
     await expect(modelOptions.nth(0)).toHaveText("deepseek-v4-pro");
     await expect(modelOptions.nth(1)).toHaveText("deepseek-v4-flash");
 
-    // Switch provider to OpenAI — model list should update
+    // Switch provider to OpenAI — model list should update and persist the
+    // exact pair only through the dedicated server selection endpoint.
+    const providerSelectionRequest = page.waitForRequest(
+      (request) => request.url().includes("/api/v1/opencode/chat-selection")
+        && request.method() === "PUT",
+    );
     await providerSelect.selectOption("openai");
     await expect(modelSelect).toHaveValue("gpt-4o");
+    const providerSelection = await providerSelectionRequest;
+    expect(new URL(providerSelection.url()).search).toBe("");
+    expect(providerSelection.postDataJSON()).toEqual({ providerId: "openai", modelId: "gpt-4o" });
 
     const openaiModelOptions = modelSelect.locator("option");
     await expect(openaiModelOptions).toHaveCount(2);
@@ -406,8 +434,16 @@ test.describe("Chat UI — /chat page", () => {
     await expect(openaiModelOptions.nth(1)).toHaveText("GPT-5.6 Luna");
 
     // Switch model within the provider
+    const modelSelectionRequest = page.waitForRequest(
+      (request) => request.url().includes("/api/v1/opencode/chat-selection")
+        && request.method() === "PUT",
+    );
     await modelSelect.selectOption("gpt-5.6-luna");
     await expect(modelSelect).toHaveValue("gpt-5.6-luna");
+    expect((await modelSelectionRequest).postDataJSON()).toEqual({
+      providerId: "openai",
+      modelId: "gpt-5.6-luna",
+    });
 
     // Switch back to DeepSeek
     await providerSelect.selectOption("deepseek");

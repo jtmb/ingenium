@@ -59,7 +59,14 @@ async function callDocAI(
 ): Promise<string> {
   const res = await dashboardFetch(`${API_BASE}/docs/ai`, {
     method: "POST",
-    body: JSON.stringify({ action, content, title, selectedText }),
+    // The API resolves both the global project and server-owned Chat selection.
+    // Provider/model IDs must never come from the browser or localStorage.
+    body: JSON.stringify({
+      action,
+      content,
+      title,
+      selectedText,
+    }),
   });
 
   if (!res.ok) {
@@ -104,8 +111,8 @@ const AIActions: React.FC<AIActionsProps> = ({ selectedText, fullContent, pageTi
         selectedText,
       );
       setResult(text);
-    } catch (err: any) {
-      const msg = err.message || "AI request failed";
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "AI request failed";
       setError(msg);
     } finally {
       setLoading(null);

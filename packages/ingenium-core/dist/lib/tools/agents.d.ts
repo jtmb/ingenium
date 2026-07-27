@@ -1,6 +1,24 @@
 import { Agent } from "../schema.js";
 export declare const AGENT_CATEGORIES: readonly ["primary", "execution", "research", "security", "chat"];
 export type AgentCategory = typeof AGENT_CATEGORIES[number];
+export declare const LLM_BROKER_AGENT = "ingenium-llm-broker";
+export declare const LLM_BROKER_DESCRIPTION = "Internal agent for Ingenium LLM broker \u2014 never invoke directly";
+export declare const LLM_BROKER_CATEGORY = "execution";
+export declare const LLM_BROKER_MODE = "subagent";
+export declare const LLM_BROKER_PERMISSIONS = "{\"*\":\"deny\"}";
+export declare const LLM_BROKER_METADATA = "{\"hidden\":true}";
+export declare const LLM_BROKER_SKILLS = "[]";
+export declare const LLM_BROKER_CONTENT = "This agent is reserved for system use. Do not invoke directly.\n\nIts wildcard-deny permission boundary intentionally has no exceptions: it has no\nfile, shell, browser, MCP, task, skill, or other tool access. The API always\nselects this profile for broker requests; request-level tool selections cannot\ngrant capabilities that this profile denies.\n";
+/** Public route guard for serialized agent permissions and metadata. */
+export declare function isSerializedAgentObject(value: unknown): value is string;
+/** The broker is a system profile whose permission and visibility state is not user-configurable. */
+export declare function isReservedAgentName(value: unknown): value is typeof LLM_BROKER_AGENT;
+/** API guard: an explicit broker permission payload may only repeat its invariant. */
+export declare function isCanonicalBrokerPermissions(value: unknown): boolean;
+/** API guard: an explicit broker metadata payload may only repeat its invariant. */
+export declare function isCanonicalBrokerMetadata(value: unknown): boolean;
+/** Exact broker row shape permitted by migration 058's connection-independent trigger set. */
+export declare function isCanonicalBrokerAgent(agent: Agent): boolean;
 export declare function isSafeAgentName(name: unknown): name is string;
 export declare function isAgentCategory(category: unknown): category is AgentCategory;
 /**
@@ -16,7 +34,13 @@ export declare function getAgent(projectId: string, name: string): Agent | undef
  *
  * Defaults: category="execution", mode="subagent", model=null (no model override).
  */
-export declare function createAgent(projectId: string, name: string, content: string, description?: string, category?: string, mode?: string, model?: string, enabled?: boolean): Agent;
+export declare function createAgent(projectId: string, name: string, content: string, description?: string, category?: string, mode?: string, model?: string, enabled?: boolean, permissions?: string, metadata?: string): Agent;
+/**
+ * Provision the system-owned LLM broker with the sole template accepted by
+ * migration 058. This is intentionally separate from createAgent(): public
+ * API, MCP, and resource-sync callers must never be able to author the broker.
+ */
+export declare function bootstrapReservedBroker(projectId: string): Agent;
 /**
  * Update an existing agent's metadata and/or content.
  * Handles category changes by removing the old `.md` file and writing to the new category directory.
@@ -29,6 +53,8 @@ export declare function updateAgent(projectId: string, name: string, updates: {
     mode?: string;
     model?: string | null;
     content?: string;
+    permissions?: string;
+    metadata?: string;
 }): Agent | undefined;
 /** Delete an agent: removes from DB and deletes the `.md` file from disk. Returns false if not found. */
 export declare function deleteAgent(projectId: string, name: string): boolean;

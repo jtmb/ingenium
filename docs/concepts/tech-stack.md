@@ -27,7 +27,7 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 
 ## Database Migrations
 
-Ingenium currently has 52 numbered migrations (`001`–`052`):
+Ingenium currently has 58 numbered migrations (`001`–`058`):
 
 - `001`–`028`: platform, self-learning, tasks/jobs, skill project isolation, and email persistence
 - `029`–`040`: documentation workspace schema and integrity repair
@@ -36,5 +36,11 @@ Ingenium currently has 52 numbered migrations (`001`–`052`):
 - `049`: workspace project migration — `project_migration_manifests` table for the DB-only `/workspace` → `global-default` migration audit trail
 - `050`–`051`: Phase 3 context/RAG metadata and post-gate retirement of the verified-empty legacy RAG import schema
 - `052`: agent category normalization and CHECK constraint (`primary`, `execution`, `research`, `security`, `chat`)
+- `053`: active-global-project integrity and protected settings storage
+- `054`: persisted agent frontmatter metadata (`hidden`) for lifecycle-safe agent disk sync
+- `055`: reserved LLM broker direct-deletion protection
+- `056`: reserved LLM broker direct-rename protection
+- `057`: reserved LLM broker enabled-state backfill and immutable direct-SQL/REPLACE protection
+- `058`: connection-independent reserved broker canonical-template and REPLACE collision protection
 
 The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.

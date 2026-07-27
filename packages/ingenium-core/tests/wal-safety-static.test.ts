@@ -41,6 +41,65 @@ function findCheckpointInsideTransaction(filePath: string): number[] {
   return violations;
 }
 
+/** Extract simple `execTransaction(() => { ... });` callback bodies for static guards. */
+function transactionBodies(filePath: string): string[] {
+  const content = readFileSync(filePath, "utf-8");
+  return [...content.matchAll(/execTransaction\(\(\) => \{([\s\S]*?)\n\s*\}\);/g)]
+    .map((match) => match[1]!);
+}
+
+const FILESYSTEM_CALLS = [
+  "readFileSync",
+  "writeFileSync",
+  "unlinkSync",
+  "existsSync",
+  "lstatSync",
+  "mkdirSync",
+] as const;
+
+/**
+ * Return the body of every locally declared helper. This lets the static guard
+ * follow transaction → helper → filesystem paths instead of only rejecting a
+ * filesystem import that appears directly in a callback.
+ */
+function localFunctionBodies(source: string): Map<string, string> {
+  const functions = new Map<string, string>();
+  const declaration = /function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::[^\{]+)?\{/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = declaration.exec(source)) !== null) {
+    let depth = 1;
+    let cursor = declaration.lastIndex;
+    for (; cursor < source.length && depth > 0; cursor += 1) {
+      if (source[cursor] === "{") depth += 1;
+      if (source[cursor] === "}") depth -= 1;
+    }
+    if (depth === 0) functions.set(match[1]!, source.slice(declaration.lastIndex, cursor - 1));
+  }
+
+  return functions;
+}
+
+function containsCall(body: string, name: string): boolean {
+  return new RegExp(`\\b${name}\\s*\\(`).test(body);
+}
+
+function reachesFilesystem(
+  name: string,
+  functions: Map<string, string>,
+  seen = new Set<string>(),
+): boolean {
+  if (seen.has(name)) return false;
+  seen.add(name);
+  const body = functions.get(name);
+  if (!body) return false;
+  if (FILESYSTEM_CALLS.some((call) => containsCall(body, call))) return true;
+  return [...functions.keys()].some((helper) => containsCall(body, helper)
+    && reachesFilesystem(helper, functions, new Set(seen)));
+}
+
+const workspaceRoot = pathResolve(import.meta.dirname ?? __dirname, "../../..");
+
 describe("Static WAL safety — no checkpointAfterWrite inside execTransaction callbacks", () => {
   // Owned source files that must never have checkpointAfterWrite inside execTransaction
   const OWNED_FILES = [
@@ -48,8 +107,6 @@ describe("Static WAL safety — no checkpointAfterWrite inside execTransaction c
     "packages/ingenium-core/lib/tools/context.ts",
     "packages/ingenium-core/lib/tools/maintenance-locks.ts",
   ];
-
-  const workspaceRoot = pathResolve(import.meta.dirname ?? __dirname, "../../..");
 
   for (const relativePath of OWNED_FILES) {
     it(`${relativePath} has zero checkpoint-inside-transaction violations`, () => {
@@ -61,6 +118,26 @@ describe("Static WAL safety — no checkpointAfterWrite inside execTransaction c
       ).toEqual([]);
     });
   }
+});
+
+describe("Static WAL safety — agent lifecycle disk writes happen after commit", () => {
+  it("keeps direct and helper-mediated agent filesystem mutations outside execTransaction callbacks", () => {
+    const filePath = pathResolve(workspaceRoot, "packages/ingenium-core/lib/tools/agents.ts");
+    const source = readFileSync(filePath, "utf-8");
+    const functions = localFunctionBodies(source);
+    const filesystemHelpers = [...functions.keys()].filter((helper) =>
+      reachesFilesystem(helper, functions),
+    );
+    const violations = transactionBodies(filePath).flatMap((body, transactionIndex) => {
+      const directCalls = FILESYSTEM_CALLS.filter((call) => containsCall(body, call))
+        .map((call) => `transaction ${transactionIndex + 1} directly calls ${call}`);
+      const indirectCalls = filesystemHelpers.filter((helper) => containsCall(body, helper))
+        .map((helper) => `transaction ${transactionIndex + 1} reaches filesystem through ${helper}`);
+      return [...directCalls, ...indirectCalls];
+    });
+
+    expect(violations).toEqual([]);
+  });
 });
 
 // ============================================================

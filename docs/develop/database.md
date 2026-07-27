@@ -84,7 +84,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–052)
+### Feature Migrations (045–058)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -96,8 +96,21 @@ another Compose project volume.
 | 050 | `050_context_rag_phase3.sql` | Adds `source`, `metadata`, `updated_at` to `context_entries` with source CHECK constraint and index; adds unique index `idx_rag_sources_project_path` for canonical path-based idempotency in `rag_sources` — Phase 3 context/RAG ingestion and validation |
 | 051 | `051_thread_retirement.sql` | Removes the verified-empty legacy checkpoint table and rebuilds `rag_sources` without the retired source type; the runner refuses non-zero legacy data before schema changes |
 | 052 | `052_agent_category_integrity.sql` | Normalizes historical agent categories and adds a `CHECK(category IN ('primary','execution','research','security','chat'))` constraint via the `RENAME → CREATE → COPY → DROP` safe pattern; adds `chat` to the Zod schema enum; updates `enabled`-aware agents tooling with safe-name validation and `opencode.json`-based runtime model assignment — disabled agents are excluded from disk writes |
+| 053 | `053_global_project_integrity_and_protected_settings.sql` | Enforces at most one active global project and creates protected settings metadata for vault-backed OAuth application secrets |
+| 054 | `054_agent_frontmatter_metadata.sql` | Adds persisted agent metadata; backfills `ingenium-llm-broker` to exact `hidden: true` and `{"*":"deny"}` state, then installs `AFTER INSERT`/`AFTER UPDATE` triggers that retain those reserved fields across direct persistence writes. Agent lifecycle code separately refuses broker deletion. |
+| 055 | `055_reserved_broker_delete_protection.sql` | Adds a `BEFORE DELETE` trigger that rejects direct deletion of the reserved broker while its project row exists. Normal project deletion remains child-safe: Ingenium refuses projects with child rows before the parent delete, so the trigger does not replace or bypass project lifecycle checks. |
+| 056 | `056_reserved_broker_rename_protection.sql` | Adds a `BEFORE UPDATE OF name` trigger that rejects direct renames of `ingenium-llm-broker`, preventing a low-level SQL write from bypassing the canonical broker invariant and escaping under a permissive new name. |
+| 057 | `057_reserved_broker_immutable.sql` | Historical broker immutability migration. It remains in the upgrade sequence for prior installations; migration 058 supersedes its recursive-trigger-dependent protections. |
+| 058 | `058_reserved_broker_connection_independent.sql` | Backfills every broker to the exact canonical bootstrap template and installs non-recursive `BEFORE INSERT`/`BEFORE UPDATE` collision and immutable guards. `INSERT OR REPLACE` and `UPDATE OR REPLACE` are rejected even when a raw SQLite connection has `recursive_triggers=0`. Only the dedicated internal core bootstrap emits the admitted template; public API and resource sync cannot provision a broker. |
 
 *See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
+
+The reserved broker is normalized at database startup and remains enabled; it
+does not support the ordinary lifecycle. Resource sync accepts an API broker
+only after every material field matches the static canonical template, then
+rewrites the static disk profile. Disk-only or arbitrary API broker content is
+quarantined. Do not repair this profile by editing markdown or issuing direct
+SQL.
 
 ## 🔴 WAL Safety — checkpointAfterWrite Outside Transaction
 

@@ -307,7 +307,8 @@ allowlist — see [Public Endpoint (Auth Allowlist)](#public-endpoint-auth-allow
 | POST | `/integrations/attempts/:id/cancel` | Cancel a pending OAuth attempt. |
 | GET | `/integrations/attempts/:id` | Poll OAuth attempt status. Returns `{ status: "pending"\|"complete"\|"failed"\|"expired", message? }`. |
 | GET | `/builtin-providers` | Runtime OpenCode Zen free model discovery — queries OpenCode runtime provider catalog, filters to only free models. |
-| GET | `/chat-config` | Sanitized merged provider catalog for the Chat page (managed + builtin). |
+| GET | `/chat-config` | Sanitized merged provider catalog for the Chat page (managed + builtin); selection defaults are server-owned and catalog-gated. |
+| PUT | `/chat-selection` | Authenticated global Chat selection; validates an exact provider/model pair against the active server catalog before persistence. |
 
 ## OpenCode Proxy Routes
 
@@ -345,13 +346,14 @@ itself remains private and bearer-protected. SSE routes stream
 | POST | `/api/v1/opencode/sessions/:id/init` | Initialize a session |
 | GET | `/api/v1/opencode/sessions/:id/events` | SSE event stream (per-session). The dashboard-owned route is a dedicated unbuffered Node handler that forwards the persistent upstream readable stream directly; it sets `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`. Do not send this path through the generic compressed Next rewrite, which can buffer or transform an open SSE response and prevent live frames from reaching Chat. |
 | GET | `/api/v1/opencode/events` | Global SSE event stream (no session filter) |
-| GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, defaultSelection }`. The `providers[]` array merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). `defaultSelection` picks the managed primary provider first, falls back to the OpenCode Zen runtime default, then the first provider. No API keys are exposed. OpenCode live-reloads provider config changes — no restart required. The `primary` and `backup` fields reflect the explicit synthesis provider+model selection from `llm_provider_configs`, which may differ from the role-derived defaults. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. |
+| GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, defaultSelection }`. The allowlisted DTO merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). It excludes API keys, `synthesis_endpoint`, base URLs, headers, packages, and provider/internal topology. `defaultSelection` prefers a valid server-owned Chat selection, then the managed primary or OpenCode Zen runtime default. OpenCode live-reloads provider config changes — no restart required. Legacy `primary` and `backup` DTO fields are emitted only when their exact stored provider/model pair exists in this current allowlisted catalog; raw legacy setting values are otherwise omitted. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. Recognized OpenCode network-startup failures return fixed `503 OPENCODE_UNAVAILABLE`; other catalog lookup failures return fixed `503 LLM_CATALOG_UNAVAILABLE`, without upstream diagnostics. |
+| PUT | `/api/v1/opencode/chat-selection` | **Authenticated global Chat selection** — accepts `{ providerId, modelId }`, rejects project overrides, validates the exact pair against the active global server catalog, then saves the non-secret selection under the active global project. Docs AI never accepts this pair in its request DTO. |
 | GET | `/api/v1/opencode/builtin-providers` | **Runtime OpenCode Zen free model discovery** — queries the OpenCode runtime provider catalog, filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. Response: `{ data: { providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" } }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`. Sanitized — no `apiKey`, `options`, or `env` fields leak through. |
 | GET | `/api/v1/opencode/providers` | List providers + models |
 | GET | `/api/v1/opencode/agents` | List agents |
-| GET | `/api/v1/opencode/mcp` | MCP server status |
-| POST | `/api/v1/opencode/mcp/:name/connect` | Connect MCP server |
-| POST | `/api/v1/opencode/mcp/:name/disconnect` | Disconnect MCP server |
+| GET | `/api/v1/opencode/mcp` | **Sanitized MCP status DTO** — returns normalized `status`, compatibility `connected`, optional non-negative `toolCount`, and fixed browser-safe error text only; malformed root responses return `502 MCP_STATUS_INVALID` instead of an empty list |
+| POST | `/api/v1/opencode/mcp/:name/connect` | Connect MCP server; success is fixed `{ data: { accepted: true } }`, failure is fixed `502 MCP_CONNECT_FAILED` |
+| POST | `/api/v1/opencode/mcp/:name/disconnect` | Disconnect MCP server; success is fixed `{ data: { accepted: true } }`, failure is fixed `502 MCP_DISCONNECT_FAILED` |
 | GET | `/api/v1/opencode/permissions` | Pending permissions (global) |
 | POST | `/api/v1/opencode/sessions/:id/permissions/:permId` | Reply to a permission request (session-scoped) |
 | POST | `/api/v1/opencode/upload` | File upload for chat attachments (multipart, validated MIME allowlist) |
@@ -373,7 +375,19 @@ handler rather than the generic `/api/v1/*` rewrite. That handler forwards the
 stream without buffering or transformation so the connection can remain open
 after `session.idle` for future events.
 
-> **Security**: The Chat and provider-config endpoints return only provider metadata and key-presence flags. **API keys are never exposed or written to OpenCode config files.** Credentials are stored in the encrypted vault (`vault_items` table with AES-256-GCM), separated from provider metadata, synchronized to OpenCode through its auth API, and mirrored into the selected synthesis settings for runtime resolution. Legacy plaintext settings (`synthesis_api_key`, `synthesis_backup_api_key`, `llm_provider_api_keys`) are auto-migrated into the vault on first read and then deleted from the settings table.
+> **Security**: The Chat config endpoint is an allowlisted provider/model DTO: it excludes API keys, endpoints, base URLs, headers, packages, and internal topology. **API keys are never exposed or written to OpenCode config files.** Credentials are stored in the encrypted vault (`vault_items` table with AES-256-GCM), separated from provider metadata, synchronized to OpenCode through its auth API, and mirrored into the selected synthesis settings for runtime resolution. Legacy plaintext settings (`synthesis_api_key`, `synthesis_backup_api_key`, `llm_provider_api_keys`) are auto-migrated into the vault on first read and then deleted from the settings table.
+
+Provider-catalog failures are also sanitized at the OpenCode client boundary:
+server logs retain only request status and route context, while browser-facing
+responses use the fixed catalog error contract and omit upstream codes,
+messages, endpoints, and credential-related diagnostics.
+
+Browser-facing scalar fields are validated before they enter these DTOs. Provider
+and model IDs, display labels, and MCP server names must match their dedicated
+compact allowlists and must not resemble API keys, tokens, passwords, bearer
+values, endpoints, headers, cookies, sessions, or other credentials. Unsafe
+scalars are rejected or replaced with a safe fallback; they are never partially
+redacted and returned as opaque identifiers.
 
 > **Known gap**: Questions cannot be replied to via the REST API in v1.18.3. They are TUI-only — delivered through the control channel. There is no `POST /questions/:id/reply` endpoint.
 

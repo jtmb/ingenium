@@ -138,17 +138,51 @@ When an agent asks a structured question, the question and its radio/checkbox op
 
 ## MCP Drawer
 
-The MCP drawer (triggered by the server icon button in the header) shows connected MCP servers with their connection status and tool counts. Each server has a connect/disconnect toggle.
+The MCP drawer (triggered by the server icon button in the header) shows MCP
+servers with normalized connection status and tool counts. The API endpoint is
+`GET /api/v1/opencode/mcp`; successful responses are returned under `data`.
+The dashboard accepts these status values:
+
+| Status | Meaning | Connected |
+|--------|---------|-----------|
+| `connected` | The server is connected | Yes |
+| `disabled` | The server is disabled | No |
+| `failed` | The server failed to connect | No |
+| `needs_auth` | Authentication is required | No |
+| `needs_client_registration` | Client registration is required | No |
+| `unknown` | The upstream status was unrecognized or malformed | No |
+
+The legacy boolean `connected` field remains available for compatibility, but
+the normalized `status` field is authoritative. Fixed browser-safe messages are
+used for error states; upstream diagnostics are not exposed. An invalid root
+response produces `502 MCP_STATUS_INVALID` rather than an empty server list.
+Each server has a connect/disconnect toggle and the drawer provides refresh and
+retry feedback when status loading fails. Connect and disconnect success is the
+fixed `{ data: { accepted: true } }` DTO; raw upstream mutation bodies are never
+returned to the browser.
 
 ## API
 
 The chat page fetches configuration from `GET /api/v1/opencode/chat-config`. This endpoint returns:
-- Sanitized provider list (no API keys)
+- Allowlisted provider/model metadata (no API keys, endpoints, base URLs,
+  headers, packages, or internal topology)
 - Models per provider
 - Available agents
 - Default selection
 - Configured state plus sanitized primary/backup provider metadata
-- Backend capabilities flag
+
+If catalog discovery fails, the endpoint returns a fixed `503` error: recognized
+OpenCode network-startup failures use `OPENCODE_UNAVAILABLE` with
+`OpenCode is starting up. Provider list will be available shortly.`; other
+catalog failures use `LLM_CATALOG_UNAVAILABLE` with `The Chat model catalog is
+temporarily unavailable. Try again later.` Neither response exposes an
+upstream endpoint, transport diagnostic, or provider credential.
+
+When a user changes provider or model, Chat sends the exact pair only to the
+authenticated `PUT /api/v1/opencode/chat-selection` endpoint. The server
+validates it against the active global catalog before persisting the non-secret
+global selection. Browser localStorage is not a provider/model authority, and
+Docs AI never receives provider/model IDs from the browser.
 
 The dashboard opens the session SSE stream before sending a prompt. The prompt
 request returns HTTP `202` with `{ data: { accepted: true } }` as soon as the

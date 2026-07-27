@@ -232,6 +232,7 @@ interface ManagedProvider extends Omit<ManagedProviderInput, "apiKey" | "role" |
 }
 
 const PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const RESERVED_MANAGED_PROVIDER_IDS = new Set(["opencode"]);
 const ALLOWED_PROVIDER_PACKAGES = new Set([
   "@ai-sdk/openai-compatible",
   "@ai-sdk/openai",
@@ -632,6 +633,9 @@ async function validateManagedProviders(providersToSave: ManagedProviderInput[])
     if (!provider || typeof provider !== "object") return `${label} must be an object`;
     if (!PROVIDER_ID_PATTERN.test(provider.id || "")) {
       return `${label}.id must use lowercase letters, numbers, dots, underscores, or hyphens`;
+    }
+    if (RESERVED_MANAGED_PROVIDER_IDS.has(provider.id)) {
+      return `${label}.id is reserved for a built-in provider`;
     }
     if (ids.has(provider.id)) return `${label}.id must be unique`;
     ids.add(provider.id);

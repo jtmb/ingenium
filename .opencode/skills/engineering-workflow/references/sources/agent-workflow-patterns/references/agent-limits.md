@@ -6,129 +6,82 @@
 |-------|-------|-------|
 | **Max active subagents per phase** | 6 | Total subagents spawned simultaneously in a single orchestration phase |
 | **Max concurrent writers** | 3 | Subagents holding `edit: allow` or `write: allow` permission |
-| **Remaining capacity** | 3 | Available to non-writer/research/QA agents |
-| **Write territories** | Exclusive | No two writers may touch the same file path concurrently |
+| **Remaining capacity** | 3 | Available to non-writer/research/QA/security agents |
+| **Write territories** | Exclusive | No two writers may touch the same path concurrently |
+
+## Task Contract Before Every Phase
+
+Every task must declare **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification budget, and escalation rule before execution. The verification budget is finite: maximum **3 verification phases per task**, each individual check may execute at most **2 times**, and maximum **1 writer remediation round**. The second failed execution of an in-scope BLOCKING check is **ESCALATE_USER** with evidence, not a new retry.
+
+Every finding is **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. Only an in-scope BLOCKING finding can reopen work. Out-of-scope findings are FOLLOW_UP, reported separately, and never auto-dispatched. STOP and CANCELLED are terminal: preserve evidence and run no new agents, QA, Docs, security review, visual gate, or sweep.
 
 ## Writer Classification
 
 A **writer** is any subagent with `edit: allow` or `write: allow` in its permission block:
+
 - `@ingenium-software-engineer-fast` — writer
 - `@ingenium-software-engineer-premium` — writer
 - `@ingenium-docs` — writer
 - `@browser-agent` — writer
 
-**Non-writers** (read-only agents — always count toward active limit, never toward writer limit):
+**Non-writers** count toward the active limit but not the writer limit:
+
 - `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`, `@ingenium-qa-vision`, `@ingenium-security-auditor`
 
 ## Mandatory Phase Declarations
 
-Every orchestration phase MUST declare before execution:
+Every orchestration phase must declare:
 
 1. **Active count** — total subagents to spawn in this phase (max 6)
 2. **Writer count** — total writers among them (max 3)
-3. **Ownership paths** — each writer's exclusive file/directory territory
-4. **Dependencies** — which writers must complete before others start
-5. **Verification owners** — which QA/Docs agent reviews which writer's output
+3. **Ownership paths** — each writer's exclusive territory
+4. **Dependencies** — writers that must complete before others start
+5. **Verification owner and budget** — targeted checks, owner, phase number, and remaining executions
 
 ## Safe Parallelism Examples
 
 ### ✅ Safe — Full parallel (3 writers, non-overlapping territories)
 
-```
-Phase: "Implement auth + email + dashboard widgets"
+```text
+Phase: "Implement auth + email + dashboard widgets" — Wave 1 (5 active, 3 writers)
   @ingenium-software-engineer-premium → packages/ingenium-core/auth/     (writer)
   @ingenium-software-engineer-premium → services/ingenium-api/email/    (writer)
   @ingenium-software-engineer-fast    → services/ingenium-dashboard/components/ (writer)
-  @ingenium-qa                        → review all                       (non-writer)
-  @ingenium-explore                   → search patterns                  (non-writer)
+  @ingenium-explore                   → scoped pattern search (non-writer)
+  @ingenium-scout                     → scoped context retrieval (non-writer)
 ```
 
 Active: 5, Writers: 3. Non-overlapping territories. ✅
 
 ### ✅ Safe — Docs and Browser are permission-derived writers
 
-```
-Phase: "Implementation + documentation + browser automation"
+```text
+Phase: "Implementation + direct documentation + browser automation" — Wave 1 (5 active, 3 writers)
   @ingenium-software-engineer-fast → dashboard/       (writer)
   @ingenium-docs                   → docs/            (writer)
   @browser-agent                   → browser-recipes/ (writer)
-  @ingenium-qa                     → review all       (non-writer)
-  @ingenium-explore                → search patterns  (non-writer)
-  @ingenium-qa-vision              → visual review    (non-writer)
+  @ingenium-explore                → scoped search    (non-writer)
+  @ingenium-scout                  → scoped context   (non-writer)
 ```
 
-Active: 6, Writers: 3. Docs and Browser count because their permission blocks allow `edit`/`write`; Browser is dispatchable. ✅
+Active: 5, Writers: 3. Docs and Browser count because their permission blocks allow `edit`/`write`; QA and visual gates run after final implementation. ✅
 
-### ❌ Conflicting — Overlapping write territories
+## Bounded Gates
 
-```
-  @ingenium-software-engineer-fast → src/auth.ts (writer)
-  @ingenium-software-engineer-fast → src/auth.ts (writer)  ← CONFLICT
-```
-
-This must be serialized: one writer completes + verified, then the next begins.
-
-### ✅ Safe — Serialized overlapping writers
-
-```
-Phase: "Refactor auth.ts (two sub-changes)"
-  Wave 1:
-    @ingenium-software-engineer-premium → src/auth.ts (writer, part A)
-  → Wait for completion + QA verification
-  Wave 2:
-    @ingenium-software-engineer-fast    → src/auth.ts (writer, part B)
-```
-
-Same file, serialized writes. ✅
-
-### ✅ Safe — 4 writers split across 2 waves
-
-```
-Phase: "Multi-package refactor"
-  Wave 1:
-    @ingenium-software-engineer-premium → packages/ingenium-core/      (writer)
-    @ingenium-software-engineer-premium → services/ingenium-api/       (writer)
-    @ingenium-software-engineer-fast    → tests/core/                  (writer)
-  → QA, verify, docs
-  Wave 2:
-    @ingenium-software-engineer-fast    → services/ingenium-dashboard/ (writer)
-    @ingenium-software-engineer-fast    → packages/ingenium-email/     (writer)
-  → QA, verify, docs
-```
-
-Wave 1: 3 writers, Wave 2: 2 writers. Never exceeds 3 per wave. ✅
+- QA runs targeted checks once after an implementation wave and never schedules QA/Docs work.
+- Docs runs only for directly affected canonical documentation or an explicit user request; Docs never schedules QA/Docs work.
+- `@ingenium-qa` solely owns a declared full E2E/container suite.
+- UI work gets one changed-route visual gate after its final UI change and one batch sweep per user-requested UI batch. Each route permits one writer fix/recheck; a failed/BLOCKED recheck is ESCALATE_USER.
+- Docs and non-UI work never open visual gates.
 
 ## Territory Reservation Protocol
 
-Before spawning any writer, the orchestrator MUST:
-
-1. **List territories** — enumerate all files/directories each writer will touch
-2. **Check conflicts** — cross-reference against already-reserved territories for the current phase
-3. **Resolve overlaps** — if overlap detected, serialize writes across waves; document the serialization order
-4. **Document assignments** — record territory assignments in the phase declaration
-
-## Collision Resolution
-
-When an emergency requires two writers to touch overlapping areas:
-
-1. **Highest-capability writer resolves** — Premium resolves ahead of Fast
-2. **QA verifies the merge** — spawn `@ingenium-qa` to review the combined output
-3. **Document the exception** — log the collision, reason, resolution, and verification to pipeline events
-
-## Phase Gates
-
-| Gate | Requirement |
-|------|-------------|
-| **Pre-execution** | Phase declaration complete (active count, writer count, territories, dependencies, verification owners) |
-| **Post-writer** | Each writer's output verified by its assigned QA owner before next wave |
-| **Post-wave** | All writers in wave verified; documentation agent spawned |
-| **Phase complete** | All waves done; QA + Docs + Security audit complete; summary table produced |
+Before spawning a writer, list territories, check conflicts, serialize overlaps, and record the ownership in the phase declaration. A new wave does not reset the task's verification or remediation budget.
 
 ## 🔴 HARD RULEs
 
 - **Never exceed 6 active subagents in any single phase**
 - **Never exceed 3 concurrent writers per wave**
-- **Never overlap write territories** — if two writers touch the same file, serialize them
-- **Always declare the phase before executing** — active count, writers, territories, dependencies, verification owners
-- **Remaining active slots may be used for non-writer agents only** — research, QA, or security
-- **Duplicate writer instances (same agent type) are valid only for separate territories** — never spawn two Fast instances targeting the same directory
+- **Never overlap write territories** — serialize writers targeting the same file or directory
+- **Always declare the finite task contract and phase before execution**
+- **Never auto-dispatch FOLLOW_UP or INFORMATIONAL findings**

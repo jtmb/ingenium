@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 
+const LOADING_SKELETON_WIDTHS = [64, 78, 70, 84] as const;
+
 interface ChatSessionSidebarProps {
   sessions: { id: string; title: string; updatedAt: number }[];
   activeId: string | null;
@@ -240,16 +242,16 @@ export default function ChatSessionSidebar({
         {isLoading ? (
           /* Loading skeleton */
           <div className="px-2 space-y-1.5">
-            {[1, 2, 3, 4].map((i) => (
+            {LOADING_SKELETON_WIDTHS.map((width) => (
               <div
-                key={i}
+                key={width}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg animate-pulse"
                 aria-hidden="true"
               >
                 <div className="w-4 h-4 rounded bg-[var(--color-border)] shrink-0" />
                 <div
                   className="flex-1 h-3 rounded bg-[var(--color-border)]"
-                  style={{ width: `${60 + Math.random() * 30}%` }}
+                  style={{ width: `${width}%` }}
                 />
               </div>
             ))}
@@ -307,41 +309,42 @@ export default function ChatSessionSidebar({
                       />
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => onSelect(session.id)}
-                      onDoubleClick={() =>
-                        startRename(session.id, session.title)
-                      }
+                    <div
                       className={[
                         "group flex items-center w-full gap-2 px-3 py-2 rounded-lg text-sm text-left transition-colors",
                         isActive
                           ? "bg-[var(--color-surface-selected)] text-[var(--color-text-primary)]"
                           : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]",
-                      ].join(" ")}
+                        ].join(" ")}
                     >
-                      {/* Conversation icon */}
-                      <svg
-                        width="16"
-                        height="16"
-                        viewBox="0 0 16 16"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        aria-hidden="true"
-                        className="shrink-0"
+                      <button
+                        type="button"
+                        onClick={() => onSelect(session.id)}
+                        onDoubleClick={() => startRename(session.id, session.title)}
+                        className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                        aria-current={isActive ? "page" : undefined}
                       >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M2.67 3.33h10.66c.74 0 1.34.6 1.34 1.34v6.66c0 .74-.6 1.34-1.34 1.34H5.5l-2.83 2.83V4.67c0-.74.6-1.34 1.34-1.34z"
-                        />
-                      </svg>
+                        {/* Conversation icon */}
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          aria-hidden="true"
+                          className="shrink-0"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M2.67 3.33h10.66c.74 0 1.34.6 1.34 1.34v6.66c0 .74-.6 1.34-1.34 1.34H5.5l-2.83 2.83V4.67c0-.74.6-1.34 1.34-1.34z"
+                          />
+                        </svg>
 
-                      {/* Title */}
-                      <span className="flex-1 truncate">
-                        {session.title}
-                      </span>
+                        {/* Title */}
+                        <span className="truncate">{session.title}</span>
+                      </button>
 
                       {/* Delete button — always visible on touch, hover-reveal on desktop */}
                       <button
@@ -373,7 +376,7 @@ export default function ChatSessionSidebar({
                           />
                         </svg>
                       </button>
-                    </button>
+                    </div>
                   )}
                 </li>
               );

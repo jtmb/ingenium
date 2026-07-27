@@ -24,6 +24,15 @@ function validCategory(category: unknown): boolean {
   return category === undefined || agents.isAgentCategory(category);
 }
 
+function rejectReservedAgentMutation(res: import("express").Response): void {
+  res.status(403).json({
+    error: {
+      code: "RESERVED_AGENT",
+      message: "The system LLM broker is always enabled and immutable.",
+    },
+  });
+}
+
 agentsRouter.get("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -46,19 +55,49 @@ agentsRouter.get("/:name", (req, res) => {
 agentsRouter.post("/", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  const { name, content, description, category, mode, model, enabled } = req.body;
-  if (!validName(name) || !content || !validCategory(category)) {
+  const { name, content, description, category, mode, model, enabled, permissions, metadata } = req.body;
+  if (agents.isReservedAgentName(name)) {
+    rejectReservedAgentMutation(res);
+    return;
+  }
+  if (!validName(name) || !content || !validCategory(category)
+    || (permissions !== undefined && !agents.isSerializedAgentObject(permissions))
+    || (metadata !== undefined && !agents.isSerializedAgentObject(metadata))) {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "name and content are required" } });
     return;
   }
-  const agent = agents.createAgent(projectId, name, content, description, category, mode, model, enabled !== false);
+  const agent = agents.createAgent(
+    projectId,
+    name,
+    content,
+    description,
+    category,
+    mode,
+    model,
+    enabled !== false,
+    permissions,
+    metadata,
+  );
   res.status(201).json({ data: agent });
 });
 
 agentsRouter.put("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
-  if (!validName(req.params.name) || !validCategory(req.body.category)) { invalidAgentInput(res, "Invalid agent name or category"); return; }
+  if (!validName(req.params.name)) {
+    invalidAgentInput(res, "Invalid agent name");
+    return;
+  }
+  if (agents.isReservedAgentName(req.params.name)) {
+    rejectReservedAgentMutation(res);
+    return;
+  }
+  if (!validCategory(req.body.category)
+    || (req.body.permissions !== undefined && !agents.isSerializedAgentObject(req.body.permissions))
+    || (req.body.metadata !== undefined && !agents.isSerializedAgentObject(req.body.metadata))) {
+    invalidAgentInput(res, "Invalid agent name, category, permissions, or metadata");
+    return;
+  }
   // Accepts partial body — only provided fields are updated
   const agent = agents.updateAgent(projectId, req.params.name, req.body);
   if (!agent) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
@@ -69,6 +108,15 @@ agentsRouter.delete("/:name", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   if (!validName(req.params.name)) { invalidAgentInput(res, "Invalid agent name"); return; }
+  if (agents.isReservedAgentName(req.params.name)) {
+    res.status(403).json({
+      error: {
+        code: "RESERVED_AGENT",
+        message: "The system LLM broker cannot be deleted.",
+      },
+    });
+    return;
+  }
   const deleted = agents.deleteAgent(projectId, req.params.name);
   if (!deleted) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
   res.status(204).send();
@@ -78,6 +126,10 @@ agentsRouter.post("/:name/enable", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   if (!validName(req.params.name)) { invalidAgentInput(res, "Invalid agent name"); return; }
+  if (agents.isReservedAgentName(req.params.name)) {
+    rejectReservedAgentMutation(res);
+    return;
+  }
   const agent = agents.enableAgent(projectId, req.params.name);
   if (!agent) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
   res.json({ data: agent });
@@ -87,6 +139,10 @@ agentsRouter.post("/:name/disable", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   if (!validName(req.params.name)) { invalidAgentInput(res, "Invalid agent name"); return; }
+  if (agents.isReservedAgentName(req.params.name)) {
+    rejectReservedAgentMutation(res);
+    return;
+  }
   const agent = agents.disableAgent(projectId, req.params.name);
   if (!agent) { res.status(404).json({ error: { code: "NOT_FOUND", message: `Agent '${req.params.name}' not found` } }); return; }
   res.json({ data: agent });

@@ -101,7 +101,7 @@ describe("Phase 4C core database boundaries", () => {
 
   it("keeps the migration runner inventory aligned with all numbered SQL files", () => {
     const migrationDir = resolve(__dirname, "../data/migrations");
-    const expected = Array.from({ length: 53 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
+    const expected = Array.from({ length: 58 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
       .map((number) => {
         const files = readdirSync(migrationDir).filter((file) => file.startsWith(`${number}_`) && file.endsWith(".sql"));
         expect(files, `migration ${number} must have exactly one SQL file`).toHaveLength(1);
@@ -117,6 +117,11 @@ describe("Phase 4C core database boundaries", () => {
     expect(expected).toContain("051_thread_retirement.sql");
     expect(expected).toContain("052_agent_category_integrity.sql");
     expect(expected).toContain("053_global_project_integrity_and_protected_settings.sql");
+    expect(expected).toContain("054_agent_frontmatter_metadata.sql");
+    expect(expected).toContain("055_reserved_broker_delete_protection.sql");
+    expect(expected).toContain("056_reserved_broker_rename_protection.sql");
+    expect(expected).toContain("057_reserved_broker_immutable.sql");
+    expect(expected).toContain("058_reserved_broker_connection_independent.sql");
 
     const dbSource = readFileSync(resolve(__dirname, "../lib/db.ts"), "utf8");
     for (const migration of expected) {

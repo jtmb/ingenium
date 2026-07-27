@@ -1035,6 +1035,13 @@ export const api = {
     /** Sanitized Chat config — returns the configured providers/agents for the Chat page without exposing API keys. */
     chatConfig: (project = DEFAULT_PROJECT) =>
       request<{ data: ChatConfigResponse }>(`/opencode/chat-config?project=${project}`),
+
+    /** Persist an exact, server-validated global Chat provider/model selection. */
+    saveChatSelection: (selection: { providerId: string; modelId: string }) =>
+      request<{ data: { providerId: string; modelId: string } }>("/opencode/chat-selection", {
+        method: "PUT",
+        body: JSON.stringify(selection),
+      }),
   },
   configs: {
     get: (type: string = "project", project = DEFAULT_PROJECT) =>

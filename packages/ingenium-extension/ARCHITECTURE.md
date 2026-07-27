@@ -34,9 +34,9 @@ Container runs via `docker compose up --build`. These are server-side processes 
   │    session.created → POST /synthesis │  ├─ ingenium-api :4097
   │    writes observations.md locally    │  │  ├─ skills CRUD
   │                                      │  │  ├─ plugins CRUD
-  ├─ Plugin: skill-sync.ts              │  │  ├─ synthesis pipeline
-  │    session.created → GET /skills     │  │  ├─ extraction engine
-  │    writes to host .opencode/skills/  │  │  ├─ scheduler (every 15 min)
+  ├─ Plugin: resource-sync.ts            │  │  ├─ synthesis pipeline
+  │    session.created / throttled idle  │  │  ├─ extraction engine
+  │    reconciles local resources        │  │  ├─ scheduler (every 15 min)
   │                                      │  │  ├─ observations
   ├─ Plugin: auto-observer.ts           │  │  ├─ personality traits
   │    session.idle → POST /extraction   │  │  ├─ pipeline events

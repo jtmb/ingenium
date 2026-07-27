@@ -7,6 +7,10 @@ import ChatHeader from "./ChatHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput, { type Attachment } from "./ChatInput";
 import MCPDrawer from "./MCPDrawer";
+import {
+  normalizeMcpServers,
+  type McpServerView,
+} from "./mcp-status";
 import { useOpenCodeSessions } from "../../../lib/use-opencode-sessions";
 import { useOpenCodeChat } from "../../../lib/use-opencode-chat";
 import { opencode } from "../../../lib/opencode";
@@ -51,9 +55,10 @@ export default function ChatShell() {
   const drawerTitleId = useId();
 
   const [mcpDrawerOpen, setMcpDrawerOpen] = useState(false);
-  const [mcpServers, setMcpServers] = useState<
-    Array<{ name: string; connected: boolean; toolCount?: number }>
-  >([]);
+  const [mcpServers, setMcpServers] = useState<McpServerView[]>([]);
+  const [mcpError, setMcpError] = useState<string | null>(null);
+  const [mcpRefreshing, setMcpRefreshing] = useState(false);
+  const [mcpActionPending, setMcpActionPending] = useState<string | null>(null);
 
   /* ---- OpenCode hooks ---- */
   const {
@@ -104,12 +109,14 @@ export default function ChatShell() {
   }, []);
 
   /* ---- Provider / Model / Agent selection ---- */
-  const [providerId, setProviderId] = useState<string>("");
-  const [modelId, setModelId] = useState<string>("");
+  const [selection, setSelection] = useState({ providerId: "", modelId: "" });
+  const { providerId, modelId } = selection;
   const [agentName, setAgentName] = useState("ingenium-chat");
+  // Server writes are serialized so a rapid A → B selection cannot arrive at
+  // the API as B → A and leave Docs AI with an obsolete persisted selection.
+  const selectionSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // Fetch sanitized chat config from the API
-  const providersInitialized = useRef(false);
 
   const fetchChatConfig = useCallback(async (isRetry = false) => {
     try {
@@ -179,21 +186,33 @@ export default function ChatShell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Initialize provider/model from chat config once loaded
+  // Recover a usable pair whenever a refreshed catalog invalidates the current
+  // selection. Provider and model share one state update so a provider switch
+  // cannot render or persist a transient cross-provider model pairing.
   useEffect(() => {
-    if (providersInitialized.current) return;
     if (!chatConfig || chatConfigLoading) return;
-    providersInitialized.current = true;
-
-    if (chatConfig.defaultSelection) {
-      setProviderId(chatConfig.defaultSelection.providerId);
-      setModelId(chatConfig.defaultSelection.modelId);
-    } else if (chatConfig.configured && chatConfig.primary) {
-      // Fallback to legacy primary for backward compat
-      setProviderId(chatConfig.primary.providerId);
-      setModelId(chatConfig.primary.modelId);
+    const currentProvider = chatConfig.providers.find((candidate) => candidate.providerId === providerId);
+    if (currentProvider?.models.some((model) => model.id === modelId)) return;
+    const preferred = chatConfig.defaultSelection
+      ?? (chatConfig.configured && chatConfig.primary
+        ? { providerId: chatConfig.primary.providerId, modelId: chatConfig.primary.modelId }
+        : null);
+    const provider = chatConfig.providers.find((candidate) => candidate.providerId === preferred?.providerId)
+      ?? chatConfig.providers.find((candidate) => candidate.models.length > 0);
+    if (!provider) {
+      if (providerId || modelId) setSelection({ providerId: "", modelId: "" });
+      return;
     }
-  }, [chatConfig, chatConfigLoading]);
+    const preferredModelId = provider.providerId === preferred?.providerId ? preferred.modelId : undefined;
+    const nextModelId = provider.models.some((model) => model.id === preferredModelId)
+      ? preferredModelId!
+      : provider.models.some((model) => model.id === provider.defaultModel)
+        ? provider.defaultModel
+        : provider.models[0]!.id;
+    if (providerId !== provider.providerId || modelId !== nextModelId) {
+      setSelection({ providerId: provider.providerId, modelId: nextModelId });
+    }
+  }, [chatConfig, chatConfigLoading, modelId, providerId]);
 
   /* ---- Attachment state ---- */
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -222,8 +241,45 @@ export default function ChatShell() {
   /** A prompt can run only when the selected provider exposes the selected model. */
   const hasSelectableModel = currentModels.some((model) => model.id === modelId);
 
-  /** Disable selectors during loading, errors, rate-limiting, or when no selectable model. */
-  const selectorsDisabled = chatConfigLoading || !!chatConfigError || !hasSelectableModel || rateLimitSeconds !== null;
+  /** Persist a manually selected catalog pair for global Docs AI resolution. */
+  const saveChatSelection = useCallback((nextProviderId: string, nextModelId: string) => {
+    const provider = (chatConfig?.providers ?? []).find((candidate) => candidate.providerId === nextProviderId);
+    if (!provider?.models.some((model) => model.id === nextModelId)) return;
+    const persist = async () => {
+      try {
+        await api.settings.saveChatSelection({ providerId: nextProviderId, modelId: nextModelId });
+      } catch {
+        // The local Chat turn remains usable. Docs AI will use the last
+        // validated server selection or server-derived default until a later
+        // queued selection succeeds.
+      }
+    };
+    selectionSaveQueueRef.current = selectionSaveQueueRef.current.then(persist, persist);
+  }, [chatConfig]);
+
+  /** Provider recovery remains available when only the selected model is stale. */
+  // A missing default must not disable recovery when the catalog still offers
+  // providers. Only an empty catalog disables the provider and agent selectors.
+  const selectorsDisabled = chatConfigLoading || !!chatConfigError
+    || rateLimitSeconds !== null || availableProviders.length === 0;
+
+  const handleProviderChange = useCallback((nextProviderId: string) => {
+    const provider = (chatConfig?.providers ?? []).find((candidate) => candidate.providerId === nextProviderId);
+    if (!provider || provider.models.length === 0) {
+      setSelection({ providerId: nextProviderId, modelId: "" });
+      return;
+    }
+    const nextModelId = provider.models.some((model) => model.id === provider.defaultModel)
+      ? provider.defaultModel
+      : provider.models[0]!.id;
+    setSelection({ providerId: nextProviderId, modelId: nextModelId });
+    saveChatSelection(nextProviderId, nextModelId);
+  }, [chatConfig, saveChatSelection]);
+
+  const handleModelChange = useCallback((nextModelId: string) => {
+    setSelection((current) => ({ ...current, modelId: nextModelId }));
+    saveChatSelection(providerId, nextModelId);
+  }, [providerId, saveChatSelection]);
 
   /* ---- Derived session data ---- */
   const activeSession = sessions.find((s) => s.id === activeId);
@@ -248,35 +304,46 @@ export default function ChatShell() {
   /* ---- MCP status ---- */
 
   /** Fetch MCP server status from OpenCode and derive drawer shape. */
-  const refreshMcpStatus = useCallback(async () => {
+  const refreshMcpStatus = useCallback(async (clearError = true): Promise<boolean> => {
+    if (clearError) setMcpError(null);
+    setMcpRefreshing(true);
     try {
       const raw = await opencode.mcp.status();
-      if (!raw || Object.keys(raw).length === 0) {
-        setMcpServers([]);
-        return;
-      }
-      const servers = Object.entries(raw).map(([name, info]) => {
-        const serverInfo = info as Record<string, unknown>;
-        return {
-          name,
-          connected: Boolean(serverInfo.connected),
-          toolCount:
-            typeof serverInfo.tools === "number"
-              ? serverInfo.tools
-              : typeof serverInfo.toolCount === "number"
-                ? serverInfo.toolCount
-                : undefined,
-        };
-      });
+      const servers = normalizeMcpServers(raw);
+      if (!servers) throw new Error("invalid MCP status response");
       setMcpServers(servers);
+      return true;
     } catch {
-      // MCP endpoint may not be available — silently ignore
+      setMcpError("Unable to refresh MCP server status. Try again.");
+      return false;
+    } finally {
+      setMcpRefreshing(false);
     }
   }, []);
 
   // Refresh on mount and after drawer closes (covers connect/disconnect)
   useEffect(() => {
-    refreshMcpStatus();
+    void refreshMcpStatus();
+  }, [refreshMcpStatus]);
+
+  const changeMcpConnection = useCallback(async (name: string, action: "connect" | "disconnect") => {
+    setMcpActionPending(name);
+    setMcpError(null);
+    try {
+      if (action === "connect") await opencode.mcp.connect(name);
+      else await opencode.mcp.disconnect(name);
+    } catch {
+      setMcpError(
+        action === "connect"
+          ? `Unable to connect to ${name}. Try again.`
+          : `Unable to disconnect from ${name}. Try again.`,
+      );
+    } finally {
+      // Refresh after every mutation, including an upstream failure: the remote
+      // operation may have completed even if the response was interrupted.
+      await refreshMcpStatus(false);
+      setMcpActionPending(null);
+    }
   }, [refreshMcpStatus]);
 
   /** Auto-focus the first focusable element in the mobile drawer when it opens. */
@@ -528,22 +595,15 @@ export default function ChatShell() {
           providerId={providerId}
           modelId={modelId}
           agentName={agentName}
-          onProviderChange={(p) => {
-            setProviderId(p);
-            const provider = (chatConfig?.providers ?? []).find(
-              (pr) => pr.providerId === p,
-            );
-            if (provider && provider.models.length > 0) {
-              setModelId(provider.defaultModel || provider.models[0]!.id);
-            }
-          }}
-          onModelChange={setModelId}
+          onProviderChange={handleProviderChange}
+          onModelChange={handleModelChange}
           onAgentChange={setAgentName}
           providers={availableProviders}
           agents={availableAgents}
           availableModels={currentModels}
           isBusy={chat.isStreaming || chat.isLoading}
           disabled={selectorsDisabled}
+          modelDisabled={!hasSelectableModel}
           onMobileMenuOpen={() => setMobileDrawerOpen(true)}
           onMcpOpen={() => setMcpDrawerOpen(true)}
           permissionCount={chat.permissions.length}
@@ -807,22 +867,12 @@ export default function ChatShell() {
         isOpen={mcpDrawerOpen}
         onClose={() => setMcpDrawerOpen(false)}
         servers={mcpServers}
-        onConnect={async (name) => {
-          try {
-            await opencode.mcp.connect(name);
-          } catch {
-            // Best-effort — non-fatal
-          }
-          await refreshMcpStatus();
-        }}
-        onDisconnect={async (name) => {
-          try {
-            await opencode.mcp.disconnect(name);
-          } catch {
-            // Best-effort — non-fatal
-          }
-          await refreshMcpStatus();
-        }}
+        error={mcpError}
+        isRefreshing={mcpRefreshing}
+        pendingServerName={mcpActionPending}
+        onRefresh={() => refreshMcpStatus()}
+        onConnect={(name) => changeMcpConnection(name, "connect")}
+        onDisconnect={(name) => changeMcpConnection(name, "disconnect")}
       />
     </div>
   );

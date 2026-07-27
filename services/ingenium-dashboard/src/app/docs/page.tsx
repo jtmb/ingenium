@@ -13,6 +13,7 @@ import BacklinksPanel from "./components/BacklinksPanel";
 import CommentsPanel from "./components/CommentsPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import TrashPanel from "./components/TrashPanel";
+import { buildDocsUrl, buildDocsWorkspacePopoutState } from "./docs-navigation";
 import { api, type DocSpace, type DocPage } from "@/lib/api";
 import type { DocProjectLink, DocAttachment, DocPageTree } from "@/lib/docs-types";
 
@@ -893,6 +894,10 @@ function DocsContent() {
 
   const selectedSpaceId = spaceIdParam ? Number(spaceIdParam) : null;
   const selectedPageId = pageIdParam ? Number(pageIdParam) : null;
+  const workspaceStateParams = useMemo(
+    () => buildDocsWorkspacePopoutState(searchParams),
+    [searchParams],
+  );
 
   // ---- Data state ----
   const [spaces, setSpaces] = useState<DocSpace[]>([]);
@@ -985,12 +990,9 @@ function DocsContent() {
   // ---- Navigation helpers ----
   const navigate = useCallback(
     (spaceId: number | null, pageId: number | null) => {
-      const params = new URLSearchParams();
-      if (spaceId) params.set("space", String(spaceId));
-      if (pageId) params.set("page", String(pageId));
-      router.push(`/docs?${params.toString()}`, { scroll: false });
+      router.push(buildDocsUrl(searchParams, spaceId, pageId), { scroll: false });
     },
-    [router],
+    [router, searchParams],
   );
 
   const handleSelectSpace = useCallback(
@@ -1236,6 +1238,7 @@ function DocsContent() {
         onTemplate={() => setTemplateOpen(true)}
         onImportExport={() => setImportExportOpen(true)}
         spacesLoading={spacesLoading}
+        workspaceStateParams={workspaceStateParams}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible((v) => !v)}
         topBarActions={topBarActions}

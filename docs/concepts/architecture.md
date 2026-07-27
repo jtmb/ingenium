@@ -402,11 +402,28 @@ If the primary LLM call fails during Phase 2 skill synthesis:
 
 Docs AI, RAG Ask, and Job Suggestions use `executeSynthesisBroker()` which routes through OpenCode's provider infrastructure:
 
-1. Reads primary (`synthesis_provider` + `synthesis_model`) and secondary (`synthesis_backup_provider` + `synthesis_backup_model`) from settings
+1. For callers without a validated explicit selection, reads primary (`synthesis_provider` + `synthesis_model`) and secondary (`synthesis_backup_provider` + `synthesis_backup_model`) from settings
 2. Deduplicates identical `(providerID, modelID)` pairs
-3. Tries primary first; falls back to secondary on failure
+3. For callers without an explicit selection, tries primary first and falls back to secondary on failure; an explicit selection is attempted exactly once
 4. **Hard 30-second timeout cap** on every call regardless of what `timeoutMs` is passed
-5. Creates ephemeral OpenCode sessions (no agent, empty tools) for each call
+5. Creates ephemeral OpenCode sessions using only `ingenium-llm-broker`, whose
+   wildcard-deny profile has no tool allowances; the request also carries an
+   empty `tools: {}` selection as defense in depth
+
+The broker profile's `hidden` frontmatter is persisted in the agent record and
+restored by agent disk sync and enable/disable lifecycle writes. This prevents
+the broker from becoming selectable after restart or agent lifecycle changes;
+the broker is permanently enabled and immutable, and the wildcard deny remains
+the authoritative capability boundary. Direct SQL writes cannot disable,
+rewrite, rename, claim, replace, or delete the reserved row while its project
+exists; broker repair is performed from trusted persisted state.
+
+Docs AI first resolves the unique active global project on the server. Chat
+persists a non-secret provider/model selection only through an authenticated
+server endpoint that validates the exact pair against that global catalog. Docs
+uses the persisted server-owned pair when it remains valid, otherwise its safe
+server-derived global Chat default. Provider/model fields from Docs browser
+requests are not used to select the broker.
 
 ### Same-Provider Different-Model Support
 
@@ -458,20 +475,27 @@ The `defaultSelection` field tells the Chat page which provider+model to pre-sel
 
 | Priority | Candidate | Condition |
 |----------|-----------|-----------|
-| 1st | Managed primary provider | Whichever managed block has `roles` containing `"primary"` |
-| 2nd | OpenCode Zen default | The runtime `default.opencode` model (e.g., `"big-pickle"`) if it is a free model |
-| 3rd | First selectable provider | `providers[0]` combined with its `defaultModel` |
+| 1st | Persisted Chat selection | The server-owned `chat_selection` pair, only when it exactly matches the active catalog |
+| 2nd | Managed primary provider | Whichever managed block has `roles` containing `"primary"` |
+| 3rd | Valid legacy primary | The legacy `synthesis_provider` + `synthesis_model` pair, only when it exactly matches the active catalog |
+| 4th | OpenCode Zen default | The runtime `default.opencode` model (e.g., `"big-pickle"`) if it is a free model |
 
-If no managed providers exist and the OpenCode Zen runtime is unreachable, `defaultSelection` is `null` and the Chat page shows the "No LLM" banner.
+No arbitrary managed provider is selected. If no valid selection/default exists,
+`defaultSelection` is `null` and the Chat page shows the "No LLM" banner. A
+non-network catalog failure returns the fixed `503 LLM_CATALOG_UNAVAILABLE`
+contract without upstream diagnostics. A recognized OpenCode network-startup
+failure retains the fixed `503 OPENCODE_UNAVAILABLE` startup message; neither
+case returns an empty catalog as though no providers were configured.
 
 ### Key Properties
 
 - **Atomic save**: `PUT /api/v1/settings/provider-configs` saves any number of provider blocks in one transaction. Omitting `apiKey` preserves the credential; an empty value clears it. Responses expose only `apiKeySet: boolean`.
 - **OpenCode projection**: Enabled blocks are written to the global `provider` object using OpenCode's `npm`, `options.baseURL`, and `models` schema. Removed managed IDs are removed without changing unrelated config entries. API keys are synchronized through OpenCode auth and never written to config files.
 - **Ingenium roles**: One block can be primary and one can be backup. Those selections are mirrored into the existing synthesis settings consumed by Chat and the synthesis engine; additional blocks remain available in OpenCode.
-- **Sanitized response**: `GET /api/v1/opencode/chat-config` strips `apiKey` from every provider — the Chat page never sees API keys. Only provider ID, model ID, and a display label are returned. The `providers[]` array includes both managed entries (`source: "managed"`) and the discovered builtin entry (`source: "builtin"`).
+- **Sanitized response**: `GET /api/v1/opencode/chat-config` uses an allowlisted DTO. Chat receives provider/model IDs, display labels, source, and default selection only; it never receives API keys, provider endpoints, base URLs, headers, packages, or internal topology. The `providers[]` array includes both managed entries (`source: "managed"`) and the discovered builtin entry (`source: "builtin"`).
 - **Runtime builtin discovery**: `GET /api/v1/opencode/builtin-providers` queries OpenCode's runtime provider list and filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. The response shape is `{ providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`.
 - **Builtin providers are read-only**: The OpenCode Zen entry in the `providers[]` array has `source: "builtin"` to distinguish it from managed providers. It is never persisted to the DB, never written to OpenCode config, and is recomputed on every `chat-config` request. The Chat page treats it as a non-editable runtime option.
+- **Catalog errors are sanitized**: Catalog failures are normalized to fixed `503` contracts (`OPENCODE_UNAVAILABLE` for recognized network startup failures, otherwise `LLM_CATALOG_UNAVAILABLE`). Upstream error codes, messages, endpoints, and credentials are not returned to Chat or Docs AI.
 - **"No LLM" state**: When no provider is configured and no builtin is available, the response returns `{ configured: false }` with `defaultSelection: null`. The Chat page shows a banner linking to Settings → Providers.
 - **Live reload**: Saving provider blocks triggers an OpenCode config reload in-process — no restart required. Provider changes take effect for new sessions immediately.
 
@@ -530,8 +554,9 @@ The **broker execution** system (`brokerExecute()` in `services/ingenium-api/lib
 ```
 RAG Ask / other features  ──▶  brokerExecute()
                                      │
-                            Creates ephemeral OpenCode session
-                            (no agent, empty tools list)
+                             Creates ephemeral OpenCode session
+                             (ingenium-llm-broker, wildcard deny,
+                              no tool allowances)
                                      │
                             Sends prompt via /prompt endpoint
                                      │
@@ -541,7 +566,7 @@ RAG Ask / other features  ──▶  brokerExecute()
 ### Architecture
 
 - **Multi-provider routing**: `brokerExecute()` uses the OpenCode session API to dispatch prompts against any configured provider/model combination — not just the synthesis LLM.
-- **Ephemeral sessions**: Each call creates a temporary OpenCode session without a named agent and with an empty `tools: {}` block (tool execution is denied). The session is not persisted or listed in the session catalog.
+- **Ephemeral sessions**: Each call creates a temporary OpenCode session with the named `ingenium-llm-broker` agent. That profile has a wildcard-deny permission rule and no allow exceptions, so no default, caller-selected, or future tool can execute. The API constructs the empty `tools: {}` selection itself; callers cannot supply a tool override. The session is not persisted or listed in the session catalog.
 - **Synchronous response**: The function waits for the prompt response and returns `{ ok: true, content }` on success, or `{ ok: false, error }` on failure.
 - **Timeout**: Configurable via `timeoutMs` parameter (default 30s).
 
@@ -549,7 +574,7 @@ RAG Ask / other features  ──▶  brokerExecute()
 
 | Feature | Consumer | Provider Resolution |
 |---------|----------|---------------------|
-| **Docs AI** | `POST /api/v1/docs/ai` | Synthesis primary/backup (broker resolves `synthesis_provider` + `synthesis_model`) |
+| **Docs AI** | `POST /api/v1/docs/ai` | Server-owned validated global Chat selection, or the server-derived global Chat default; no browser override or broker fallback |
 | **RAG Ask** | `POST /api/v1/rag/ask` | Synthesis primary/backup |
 | **Job Suggestions** | `POST /api/v1/jobs/suggest` | Synthesis primary/backup |
 

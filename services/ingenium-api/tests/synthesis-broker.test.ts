@@ -45,6 +45,24 @@ describe("executeSynthesisBroker", () => {
     expect(executor).toHaveBeenCalledWith(expect.objectContaining({ providerID: "custom", modelID: "model-a", system: "system", user: "user" }));
   });
 
+  it("uses a route-validated explicit selection without silently falling back", async () => {
+    const executor = vi.fn().mockResolvedValue({ ok: false, content: "", error: "selected model failed" });
+    const result = await executeSynthesisBroker({
+      projectId: configuredProject(["primary", "model-a"], ["backup", "model-b"]),
+      system: "system",
+      user: "user",
+      selection: { providerID: "chat-provider", modelID: "chat-model" },
+      executor,
+    });
+
+    expect(result).toEqual({ ok: false, content: "", error: "selected model failed" });
+    expect(executor).toHaveBeenCalledTimes(1);
+    expect(executor).toHaveBeenCalledWith(expect.objectContaining({
+      providerID: "chat-provider",
+      modelID: "chat-model",
+    }));
+  });
+
   it("falls back from primary to secondary", async () => {
     const executor = vi.fn()
       .mockResolvedValueOnce({ ok: false, content: "", error: "primary failed" })

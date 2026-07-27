@@ -139,6 +139,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   const [hasDraft, setHasDraft] = useState<boolean>(!!draftContent);
   const [showDraftPrompt, setShowDraftPrompt] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [selectedText, setSelectedText] = useState<string | undefined>();
 
   /**
    * contentRef tracks latest content for the autosave interval callback,
@@ -249,6 +250,11 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
         const newContent = update.state.doc.toString();
         setContent(newContent);
       }
+      if (update.selectionSet) {
+        const selection = update.state.selection.main;
+        const selected = update.state.sliceDoc(selection.from, selection.to);
+        setSelectedText(selected || undefined);
+      }
     });
     const view = new EditorView({
       doc: contentRef.current,
@@ -320,6 +326,15 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   const handleContentChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       setContent(e.target.value);
+    },
+    [],
+  );
+
+  const handleTextSelection = useCallback(
+    (event: React.SyntheticEvent<HTMLTextAreaElement>) => {
+      const textarea = event.currentTarget;
+      const selected = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd);
+      setSelectedText(selected || undefined);
     },
     [],
   );
@@ -465,7 +480,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
           <div className="flex-1" />
           <DictationButton onText={handleDictation} />
           <AIActions
-            selectedText={undefined}
+            selectedText={selectedText}
             fullContent={content}
             pageTitle={page.title}
             onApply={handleAIApply}
@@ -505,6 +520,8 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
             ref={textareaRef}
             value={content}
             onChange={handleContentChange}
+            onSelect={handleTextSelection}
+            onKeyUp={handleTextSelection}
             className="w-full h-full resize-none p-4 font-mono text-sm leading-relaxed bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none"
             placeholder="Write your documentation in Markdown..."
             spellCheck

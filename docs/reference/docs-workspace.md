@@ -79,13 +79,14 @@ This reference defines the canonical contract for the Docs Workspace API, models
 | HTTP Status | Code | Meaning |
 |-------------|------|---------|
 | 400 | `BAD_REQUEST` | Missing/ invalid required field |
-| 400 | `LLM_NOT_CONFIGURED` | No LLM configured in Settings (AI-only) |
+| 400 | `INVALID_AI_REQUEST` | Docs AI request failed validation; see [AI Error Contract](#-ai-error-contract) |
 | 404 | `NOT_FOUND` | Resource does not exist |
 | 409 | `CONFLICT` | Slug/name uniqueness violation OR optimistic concurrency failure |
 | 413 | `PAYLOAD_TOO_LARGE` | Import data or attachment exceeds size limit |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | Attachment MIME type not in allowlist |
-| 500 | `INTERNAL_ERROR` | Unexpected server error; AI transport/internal failures return generic message with no details leaked |
-| 502 | `LLM_ERROR` | AI upstream returned an error, no upstream body leaked in response (AI-only) |
+| 500 | `INTERNAL_ERROR` | Unexpected server error; Docs AI returns its stable generic message with no details leaked |
+| 502 | `LLM_BROKER_ERROR` | Docs AI broker failure; no upstream body or diagnostics are returned |
+| 503 | `GLOBAL_PROJECT_UNAVAILABLE` / `LLM_CATALOG_UNAVAILABLE` / `LLM_UNAVAILABLE` | Docs AI global-project or Chat-catalog/default unavailable; see [AI Error Contract](#-ai-error-contract) |
 
 ---
 
@@ -380,17 +381,38 @@ These live under `/api/v1/docs/ai` (separate router in `docs-ai.ts`):
 
 Supported actions: `outline`, `continue`, `rewrite`, `summarize`, `fix_grammar`, `tone_professional`, `tone_casual`, `tone_technical`.
 
+Docs AI is globally scoped: the API resolves the one active `is_global=1`
+project on the server. A request body `project` override is rejected rather
+than accepted or used for fallback. Provider/model fields are not part of the
+Docs AI DTO and are ignored if a legacy browser sends them. Docs resolves the
+server-owned global Chat selection, which the authenticated Chat selection
+route validated as an exact current catalog pair before storing it. If that
+selection is absent or stale, Docs uses only a safe server-derived global Chat
+default; it never chooses an arbitrary managed provider.
+
 #### 🔴 AI Error Contract
 
-The `POST /docs/ai` endpoint returns the following error codes on top of the general codes above:
+`POST /docs/ai` returns `{ "error": { "code": string, "message": string } }`
+for every failure. Codes and messages below are stable client contracts.
 
-| HTTP Status | Code | Condition | Upstream body leaked? |
-|-------------|------|-----------|-----------------------|
-| 400 | `LLM_NOT_CONFIGURED` | No primary LLM model configured in Settings → Providers | N/A |
-| 502 | `LLM_ERROR` | Upstream LLM provider returned a non-2xx response | ❌ No — only the HTTP status is logged server-side |
-| 500 | `INTERNAL_ERROR` | Transport failure (network error, JSON parse failure, etc.) | ❌ No — only generic message returned; thrown error details logged server-side only |
+| HTTP Status | Code | Stable message | Condition |
+|-------------|------|----------------|-----------|
+| 400 | `INVALID_AI_REQUEST` | `Provide a supported action and non-empty documentation content within the allowed size.` | The body is not an object, action/content are invalid, or content/title/selected-text exceeds its bound |
+| 422 | `DOCS_AI_PROJECT_CONFLICT` | `Documentation AI always uses the server-selected global project.` | A request attempted to supply a browser-controlled project authority |
+| 503 | `GLOBAL_PROJECT_UNAVAILABLE` | `Documentation AI requires exactly one active global project. Repair the global project configuration and try again.` | No active global project exists or global-project resolution is ambiguous |
+| 503 | `LLM_CATALOG_UNAVAILABLE` | `The Chat model catalog is temporarily unavailable. Try again later.` | The server cannot load the global Chat catalog |
+| 503 | `LLM_UNAVAILABLE` | `No Chat provider or model is currently available. Open Chat or Settings → Providers, then try again.` | No valid global Chat default/provider-model pair is available |
+| 502 | `LLM_BROKER_ERROR` | `The AI service is unavailable. Please try again later.` | The tool-denied OpenCode broker returns or throws an error |
+| 500 | `INTERNAL_ERROR` | `Unable to generate documentation assistance. Please try again later.` | An unexpected route failure occurs after validation |
 
-> 🔴 **Body safety**: The response NEVER includes upstream LLM provider response body text, thrown Error messages, or internal diagnostics. Upstream non-ok response bodies are released via `response.body?.cancel()` to prevent connection-pool exhaustion. All error details are logged server-side via `logger.warn`/`logger.error` with source `"docs-ai"`. Verified by `docs-ai-security.test.ts` (3 tests: upstream body non-leakage, connection hygiene body release on non-ok, and thrown error non-leakage).
+> 🔴 **Preflight and body safety**: Validation, global-project resolution, and
+> catalog validation complete before the broker is called. The response NEVER
+> includes an upstream provider response, endpoint, API key, thrown Error
+> message, or internal diagnostic. Server logs record only the sanitized failure
+> class. Coverage lives in `services/ingenium-api/tests/docs-ai-security.test.ts`.
+> The OpenCode request always names `ingenium-llm-broker`; its wildcard-deny
+> profile has no tool allowances, and API-owned empty tool selection cannot be
+> replaced by request content or browser input.
 
 ---
 
@@ -512,7 +534,7 @@ All request bodies and response payloads use **camelCase**. The DB stores `snake
 
 `projects.id` is defined as **TEXT PRIMARY KEY** in `001_init.sql`. Migration `037_docs_project_links.sql` originally declared `project_id INTEGER`, but **migration 040** now rebuilds `docs_page_projects` with `project_id TEXT`. This fix is verified at the core layer — `linkProject()` accepts `string projectId`, tests confirm TEXT FK (`docs-contract.test.ts:737-744`).
 
-✅ **API route**: `POST /pages/:id/projects` accepts `projectId` as any type and converts with `String(projectId)` (line 1375). `DELETE /pages/:id/projects/:projectId` treats path param as raw string (line 1415). **MCP handler `linkedProjectId` is still `number` type** (needs fix).
+✅ **API route**: `POST /pages/:id/projects` accepts `projectId` as any type and converts with `String(projectId)` (line 1375). `DELETE /pages/:id/projects/:projectId` treats path param as raw string (line 1415). The MCP handlers use `projectId: string`/`linkedProjectId: string`, preserving TEXT project IDs end to end.
 
 ### 🔴 Optimistic Concurrency
 
@@ -669,7 +691,7 @@ The Docs link in the navigation sidebar (`Navigation.tsx:230`) is active with no
 
 ## AI Actions and Dictation
 
-When an LLM is configured, the Docs Workspace supports AI-powered actions via `POST /docs/ai`:
+When a global Chat provider/model is available, the Docs Workspace supports AI-powered actions via `POST /docs/ai`:
 
 - **Summarize** — AI summary of current page
 - **Suggest edits** / **Continue** — LLM-powered improvement/continuation
@@ -677,6 +699,12 @@ When an LLM is configured, the Docs Workspace supports AI-powered actions via `P
 - **Rewrite** / **Fix grammar** — Targeted improvements
 - **Tone adjustments** — professional, casual, technical
 - **Dictation** — Voice-to-text via browser SpeechRecognition API
+
+The browser never sends a provider/model choice to Docs AI. Chat persists a
+user choice only through authenticated `PUT /api/v1/opencode/chat-selection`;
+the server validates the exact pair against the global catalog and stores it in
+the active global project. Docs resolves that server-owned choice, or a safe
+server-derived Chat default when it is absent or stale.
 
 ---
 

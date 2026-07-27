@@ -4,7 +4,7 @@ import helmet from "helmet";
 import type { Server } from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
+import { agents, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
@@ -57,6 +57,10 @@ import { shouldStartBackgroundSchedulers, shouldStartMailMaintenance } from "../
 function ensureGlobalProject(): string | null {
   try {
     const global = projectsDb.ensureGlobalProject();
+    // The broker is a system-owned profile. Its dedicated core bootstrap emits
+    // the only row accepted by migration 058; no public agent route can create
+    // or reactivate it.
+    agents.bootstrapReservedBroker(global.id);
     const migrations = protectedSettings.migrateLegacyOAuthClientSecrets(global.id);
     const deferred = migrations.filter((migration) => migration.status === "vault_unavailable").length;
     const conflicts = migrations.filter((migration) => migration.status === "legacy_conflict").length;

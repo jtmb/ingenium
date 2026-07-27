@@ -122,11 +122,11 @@ services/
 | **ingenium-qa-vision** | Subagent | Visual QA (Playwright screenshots at 1440x900, 390x844); no Bash, no writes | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling` |
 | **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
-| **ingenium-qa** | Subagent | Quality assurance — reviews changes, runs tests, verifies quality | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
+| **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
 | **ingenium-docs** | Subagent | **Writer** — documentation updates (AGENTS.md, SKILL-INDEX.md, docs workspace) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
-| **ingenium-security-auditor** | Subagent | Security audit — git history leak scanning, dependency review | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
+| **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
 | **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `mcp-tooling`, `engineering-workflow` |
-| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`) | — |
+| **ingenium-llm-broker** | Subagent | System-internal LLM broker (`enabled: true`, `hidden: true`), immutable, wildcard-denied with no tool allowances | — |
 
 > Full agent profiles at `.opencode/agents/`. Skill permissions defined per-agent in their YAML frontmatter. Archived profiles at `.opencode/archive/agents/`.
 >
@@ -264,35 +264,44 @@ The non-writer agents are `@ingenium-explore`, `@ingenium-scout`, `@ingenium-qa`
 
 ### Valid Phase Example
 
-The following single phase is within both limits: **6 active, 3 permission-derived writers**.
+The following implementation phase is within both limits: **5 active, 3 permission-derived writers**. QA and visual gates run later, after their applicable implementation work is final.
 
 ```text
-Phase: "Dashboard implementation, docs, and browser verification"
+Phase: "Dashboard implementation, direct docs, and browser work"
   @ingenium-software-engineer-fast → dashboard/components/ (writer)
   @ingenium-docs                   → docs/              (writer)
   @browser-agent                   → browser recipes/   (writer)
-  @ingenium-qa                     → review all         (non-writer)
   @ingenium-explore                → search patterns    (non-writer)
-  @ingenium-qa-vision              → visual review      (non-writer)
+  @ingenium-scout                  → retrieve context   (non-writer)
 ```
 
 No phase may dispatch more than six active subagents or three agents whose permission block grants `edit: allow` or `write: allow`; overlapping writer territories must be serialized.
 
 ### Phase Declaration Protocol
 
-Every orchestration phase MUST declare before dispatch:
+Every task and phase MUST declare before dispatch:
 
-1. **Active count** — total subagents to spawn (max 6)
-2. **Writer count** — total writers among them (max 3)
-3. **Exclusive territories** — file/directory ownership per writer; zero overlap
-4. **Dependencies** — serialization order for writers sharing territories across waves
-5. **Verification owners** — which QA/docs agent reviews which writer's output
+1. **IN_SCOPE** — permitted files, behavior, and remediation
+2. **OUT_OF_SCOPE** — excluded work; valid excluded findings are never auto-dispatched
+3. **Acceptance criteria** — observable pass conditions
+4. **STOP_CONDITION** — `PASS`, `ESCALATE_USER`, `STOP`, or `CANCELLED`
+5. **Verification budget** — maximum **3 verification phases per task**, each individual check at most **2 executions**, and maximum **1 writer remediation round**
+6. **Escalation rule** — evidence required after the second failed in-scope blocking check
+7. **Active count** — total subagents to spawn (max 6)
+8. **Writer count** — total writers (max 3)
+9. **Exclusive territories** — file/directory ownership per writer; zero overlap
+10. **Dependencies** — serialization order for writers sharing territories across waves
+11. **Verification owner and checks** — targeted owner, phase, and remaining budget
 
-Conflicting writers (touching the same file) MUST be serialized across waves — never dispatched simultaneously.
+Classify every finding as **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. Only an in-scope BLOCKING finding may reopen implementation. FOLLOW_UP findings are reported separately and never auto-dispatched. The second failed execution of an in-scope blocking check returns **ESCALATE_USER** with evidence; do not retry or reset the budget.
 
-### Mandatory Visual QA Gates
+**STOP** and **CANCELLED** are terminal: spawn no new agents and run no QA, Docs, security review, visual gate, or sweep. Preserve evidence and report skipped work. Conflicting writers (touching the same file) MUST be serialized across waves — never dispatched simultaneously.
 
-After UI implementation plus normal QA, test, deployment, and health verification, the orchestrator MUST run a changed-route visual gate through `@ingenium-qa-vision` at 1440x900 and 390x844. Before final completion or commit, it MUST run a passive full-site desktop/mobile sweep of every non-sensitive primary route at both viewports. PASS requires screenshot, accessibility, network/console, and browser-cleanup evidence. FAIL or BLOCKED status routes work back to a writer and requires a visual recheck.
+### Bounded QA, Documentation, and Visual Gates
+
+QA runs targeted checks **once** after an implementation wave and does not trigger QA, Docs, or remediation work. `@ingenium-qa` is the single owner of a declared full E2E/container suite; the orchestrator schedules it but does not duplicate it. Docs runs only for directly affected canonical documentation or an explicit user request, and Docs work never triggers QA/Docs work.
+
+UI work receives one changed-route visual gate after the final UI change for the route, and one passive full-site desktop/mobile sweep per user-requested UI batch, at 1440x900 and 390x844. A route has one writer visual-fix/recheck maximum; if its recheck FAILs or is BLOCKED, return **ESCALATE_USER** with evidence. Docs-only and non-UI changes never open or reopen visual gates. PASS evidence includes screenshot, accessibility, network/console, and browser-cleanup confirmation.
 
 All screenshots from visual QA gates must be saved under `tests/artifacts/visual-qa/<run-id>/` (e.g., `tests/artifacts/visual-qa/run-20260719/homepage-desktop.png`). See [mcp-tooling skill](../.opencode/skills/mcp-tooling/SKILL.md) for the complete screenshot storage convention.
 
@@ -546,6 +555,9 @@ For quick reference, here are the non-negotiable rules from above:
 | 20 | Declare phase (active count, writers, territories, dependencies, verification) before dispatch | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 | 21 | Restart OpenCode for newly-added agent profiles to become invocable | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 | 22 | Restart OpenCode when sync engine reports plugin/config changes | [Plugin Conventions](#plugin--skill-conventions) |
+| 23 | Declare finite task scope, acceptance, stop condition, verification budget, and escalation before dispatch | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 24 | Only in-scope BLOCKING findings may reopen work; second failure escalates | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
+| 25 | STOP/CANCELLED is terminal; preserve evidence and report skipped work | [Orchestration Policy](#-orchestration-policy--6-active--3-writer-phase-scheduler) |
 
 ---
 
@@ -555,15 +567,13 @@ For quick reference, here are the non-negotiable rules from above:
 
 ---
 
-## 🔴 QA-First Workflow
+## 🔴 Bounded QA and Documentation Workflow
 
-After the orchestrator completes every subagent task that modifies files:
+After an implementation wave, invoke `@ingenium-qa` once for the task contract's targeted checks. Invoke `@ingenium-docs` only when canonical documentation is directly affected or the user explicitly requested it. QA and Docs never recursively trigger QA/Docs work.
 
-1. **Spawn `@ingenium-qa`** — Review changes, run tests, verify quality
-2. **Spawn `@ingenium-docs`** — Update affected documentation (AGENTS.md, SKILL-INDEX.md, docs workspace)
-3. **Task not done until QA passes and docs are updated**
+The task contract limits verification to three phases, each check to two executions, and writer remediation to one round. If a targeted in-scope blocker fails for the second time, return **ESCALATE_USER** with evidence. STOP/CANCELLED skips all remaining QA, Docs, security, and visual work while preserving evidence.
 
-See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrator.md) for the full Definition of Done process.
+See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrator.md) for the complete finite task contract.
 
 ---
 
@@ -572,4 +582,4 @@ See [`ingenium-orchestrator.md`](./.opencode/agents/primary/ingenium-orchestrato
 Full agent profile definitions: `.opencode/agents/<category>/<name>.md`
 Archived profiles (historical reference): `.opencode/archive/agents/<category>/<name>.md`
 
-> 💡 Adding a new Markdown agent profile requires an OpenCode restart for the agent to become invocable via `@mention`. Agent metadata (model, enabled status) is managed via the Dashboard `/agents` page or `ingenium_agent_*` MCP tools, which persist runtime config to `opencode.json`. The model field is intentionally stripped from Markdown profiles on write — see `packages/ingenium-core/lib/tools/agents.ts`.
+> 💡 Adding a new Markdown agent profile requires an OpenCode restart for the agent to become invocable via `@mention`. Agent metadata (model, enabled status, and persisted frontmatter such as `hidden`) is managed via the Dashboard `/agents` page or `ingenium_agent_*` MCP tools. Runtime model/disable state is projected to `opencode.json`; persisted frontmatter metadata is restored during agent disk sync and enable/disable lifecycle writes. The model field is intentionally stripped from Markdown profiles on write — see `packages/ingenium-core/lib/tools/agents.ts`.

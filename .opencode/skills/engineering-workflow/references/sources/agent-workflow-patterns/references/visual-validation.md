@@ -1,13 +1,17 @@
 # Visual QA Validation Protocol
 
-## Mandatory Gates
+## Bounded UI Gates
 
-After UI implementation plus normal QA, test, and deployment verification, the orchestrator MUST dispatch `@ingenium-qa-vision` for every changed UI route. The agent must inspect each route at 1440x900 and 390x844, capture descriptive screenshots, inspect DOM/accessibility state, check keyboard/focus behavior, and report console errors and non-2xx network responses.
+Visual work requires a parent task contract with `IN_SCOPE`, `OUT_OF_SCOPE`, acceptance criteria, `STOP_CONDITION`, verification budget, and escalation rule.
 
-Before final completion or commit, the orchestrator MUST dispatch a safe, non-mutating full-site desktop/mobile sweep of every primary route at the same viewports. Do not submit forms, save, delete, authenticate, or invoke data-changing controls.
+1. Run one changed-route visual gate only **after the final UI change** for that route.
+2. Run one safe, passive full-site desktop/mobile sweep **per user-requested UI batch**.
+3. Both gates must fit within the task maximum of three verification phases; each route allows one visual writer-fix/recheck maximum.
+4. If the recheck FAILs or is BLOCKED, return **ESCALATE_USER** with screenshots, snapshots, console/network evidence, and cleanup confirmation. Do not request another fix or recheck.
+5. Docs-only and non-UI work never opens or reopens a visual gate.
 
-The agent returns PASS, FAIL, or BLOCKED with exact evidence. FAIL or BLOCKED blocks completion: route the problem to a writer, then re-run visual QA for the affected route. The agent closes its browser before returning.
+Inspect assigned non-sensitive routes at 1440x900 and 390x844. Capture descriptive screenshots and accessibility evidence, record console errors and non-2xx responses, avoid data-changing interactions, and close the browser before returning.
 
-## Luna Smoke Test After Restart
+Classify visual findings as **BLOCKING** only when in scope and acceptance-relevant; use **FOLLOW_UP** for valid out-of-scope/non-blocking issues and **INFORMATIONAL** for context. Never auto-dispatch a visual finding.
 
-After OpenCode restarts, invoke `@ingenium-qa-vision` against a known non-sensitive PNG or safe dashboard state. If it cannot inspect the image or browser output, it must return BLOCKED. The orchestrator must stop and reconfigure visual QA rather than recording a PASS.
+STOP and CANCELLED are terminal: do not open the browser or run a sweep; preserve evidence and report the skipped gate.

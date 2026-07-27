@@ -63,16 +63,23 @@ If the primary LLM fails during synthesis, the pipeline automatically falls back
 
 ### Broker Fallback and 30-Second Timeout Cap
 
-Interactive AI features (Docs AI, RAG Ask, Job Suggestions) that consume the synthesis LLM use the **synthesis broker** (`executeSynthesisBroker` in `opencode-client.ts`). The broker:
+Interactive AI features (Docs AI, RAG Ask, Job Suggestions) use the **synthesis broker** (`executeSynthesisBroker` in `opencode-client.ts`). The broker:
 
-1. Reads `synthesis_provider` + `synthesis_model` (primary) and `synthesis_backup_provider` + `synthesis_backup_model` (secondary) from the global project's settings
+1. For callers without a validated explicit selection, reads `synthesis_provider` + `synthesis_model` (primary) and `synthesis_backup_provider` + `synthesis_backup_model` (secondary) from the global project's settings
 2. Deduplicates identical `(providerID, modelID)` pairs — if primary and secondary are the same provider+model, only one call is made
-3. Tries the primary first; if it fails (non-ok response), immediately falls back to the secondary
+3. For callers without a validated explicit selection, tries the primary first and falls back to the secondary on failure; an explicit selection is attempted exactly once
 4. Caps **every** call at **30 seconds** (`Math.min(Math.max(timeoutMs, 0), 30_000)` — the passed timeout is clamped between 0 and 30s)
-5. Creates an ephemeral OpenCode session (no agent, empty tools list), sends the prompt via OpenCode's model routing, and polls for the response with exponential backoff (500ms → 30s max)
+5. Creates an ephemeral OpenCode session using the named `ingenium-llm-broker` agent. Its wildcard-deny profile has no tool allowances, and the API-owned request uses an empty `tools: {}` selection; callers cannot override either boundary. The broker then sends the prompt via OpenCode's model routing and polls for the response with exponential backoff (500ms → 30s max)
 6. If all configured providers fail, returns `{ ok: false, error: "all configured synthesis providers failed" }`
 
 This is separate from the core synthesis pipeline (`callSynthesisLLM` in `synthesis-llm.ts`), which makes direct HTTP calls to the LLM endpoint with a 60-second timeout. The broker exists for interactive features that need OpenCode's provider routing infrastructure.
+
+**Docs AI selection rule:** Chat persists a provider/model pair only through an
+authenticated server endpoint that validates it against the sole active global
+Chat catalog. Docs AI resolves that server-owned global selection; browser
+provider/model fields are not in the Docs AI DTO and cannot affect the broker.
+When a saved pair is absent or stale, Docs uses the safe server-derived global
+Chat default only; it does not choose an arbitrary managed provider.
 
 ### Local / Private Endpoint Opt-In
 
@@ -190,7 +197,10 @@ The same Synthesis LLM configuration powers several features beyond the pipeline
 | **Broker** (via `executeSynthesisBroker`) | Docs AI, RAG Ask, Job Suggestions | Creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure, polls for response | 30s cap (hard-clamped) |
 | **Direct** (via `synthesisLlm.resolveLLMConfig()` + `safeLlmFetch`) | Email suggestions, Email summaries, self-learning pipeline | Calls the LLM endpoint directly via HTTP | 60s (configurable) |
 
-The broker mode uses OpenCode's model routing (supports `(providerID, modelID)` pairs plus the fallback chain). The direct mode uses the resolved provider, model, endpoint, and API key from settings or env vars.
+The broker mode uses OpenCode's model routing. Docs AI supplies a validated
+exact `(providerID, modelID)` pair with no fallback; other broker consumers may
+use the configured fallback chain. The direct mode uses the resolved provider,
+model, endpoint, and API key from settings or env vars.
 
 ## Related Docs
 - [Self-Learning Pipeline](../concepts/self-learning.md) — Full pipeline reference (Phase 1, Phase 2, architecture, DB schema)

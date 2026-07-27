@@ -18,6 +18,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createOAuthCallbackRateLimiter, handleOAuthCallback, opencodeRouter } from "../lib/routes/opencode.js";
 import { opencodeClient, request, buildAuthHeader } from "../lib/opencode-client.js";
+import { logger } from "ingenium-core";
 
 /* ── Configuration ───────────────────────────────────────────────────────── */
 
@@ -79,7 +80,7 @@ function mockResponse(
   } as unknown as Response;
 }
 
-/** Build a provider info object with optional apiKey in options. */
+/** Build a raw upstream provider object, including fields the browser must never receive. */
 function makeProvider(
   id: string,
   name: string,
@@ -125,7 +126,7 @@ function mockProvidersResponse(overrides: Partial<{
       makeProvider("anthropic", "Anthropic", { apiKey: "sk-ant-test456" }),
       makeProvider("lmstudio", "LM Studio"),
     ],
-    default: overrides.default ?? { "openai": "gpt-4" },
+    default: overrides.default ?? { "openai": "model-1" },
     connected: overrides.connected ?? ["openai", "lmstudio"],
   };
 }
@@ -145,12 +146,12 @@ function containsSecretPattern(text: string): boolean {
    1. Provider List Sanitization
    ═══════════════════════════════════════════════════════════════════════════ */
 
-describe("Provider list sanitization", () => {
+describe("Browser provider catalog DTO", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
   });
 
-  it("returns provider list with expected shape through proxy", async () => {
+  it("returns only the strict browser provider DTO through the proxy", async () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
 
     const mockData = mockProvidersResponse();
@@ -163,56 +164,153 @@ describe("Provider list sanitization", () => {
 
     expect(res.status).toBe(200);
     expect(body.data).toBeDefined();
-    expect(body.data.all).toBeDefined();
-    expect(Array.isArray(body.data.all)).toBe(true);
-    expect(body.data.all.length).toBeGreaterThan(0);
-    expect(body.data.default).toBeDefined();
-    expect(body.data.connected).toBeDefined();
-    expect(Array.isArray(body.data.connected)).toBe(true);
-
-    // Verify provider shape
-    const provider = body.data.all[0];
-    expect(typeof provider.id).toBe("string");
-    expect(typeof provider.name).toBe("string");
-    expect(provider.models).toBeDefined();
+    expect(body).toEqual({
+      data: {
+        providers: [
+          {
+            id: "openai",
+            label: "OpenAI",
+            models: [{ id: "model-1", label: "OpenAI Model 1" }],
+            defaultModel: "model-1",
+            connected: true,
+          },
+          {
+            id: "anthropic",
+            label: "Anthropic",
+            models: [{ id: "model-1", label: "Anthropic Model 1" }],
+            defaultModel: null,
+            connected: false,
+          },
+          {
+            id: "lmstudio",
+            label: "LM Studio",
+            models: [{ id: "model-1", label: "LM Studio Model 1" }],
+            defaultModel: null,
+            connected: true,
+          },
+        ],
+      },
+    });
 
     spy.mockRestore();
   });
 
-  it("does not expose apiKey in provider options", async () => {
+  it("strips nested endpoint, header, and key-name canaries from successful catalog responses", async () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
-
-    // Mock providers — real OpenCode server already sanitizes apiKey from options,
-    // but we test the proxy layer to make sure no raw keys leak through.
-    const cleanData = mockProvidersResponse({
-      all: [
-        makeProvider("openai", "OpenAI", { apiKey: "" }),
-        makeProvider("anthropic", "Anthropic", { apiKey: "" }),
-      ],
+    const nestedEndpointCanary = "https://provider-endpoint-canary.invalid/v1";
+    const nestedHeaderCanary = "Bearer provider-header-canary";
+    const nestedKeyNameCanary = "provider-key-name-canary";
+    const provider = makeProvider("safe-provider", "Safe Provider", {
+      endpoint: nestedEndpointCanary,
+      nested: {
+        headers: { authorization: nestedHeaderCanary },
+        keyName: nestedKeyNameCanary,
+      },
     });
+    provider.env = ["PROVIDER_ENV_CANARY"];
+    provider.keyName = nestedKeyNameCanary;
+    provider.models["model-1"].api = {
+      id: "safe-provider",
+      url: nestedEndpointCanary,
+      npm: "provider-npm-canary",
+    };
+    provider.models["model-1"].headers = {
+      authorization: nestedHeaderCanary,
+      [nestedKeyNameCanary]: "nested-key-value-canary",
+    };
 
     const spy = vi
       .spyOn(opencodeClient, "listProviders")
-      .mockResolvedValue(cleanData);
+      .mockResolvedValue({
+        all: [provider],
+        default: { "safe-provider": "model-1" },
+        connected: ["safe-provider"],
+      });
 
     const res = await fetch(`${apiUrl}/providers?directory=/workspace`);
     const body = await res.json();
 
     expect(res.status).toBe(200);
-
-    // Check every provider's options does NOT contain raw apiKey
-    for (const provider of body.data.all) {
-      if (provider.options) {
-        const optsStr = JSON.stringify(provider.options);
-        expect(optsStr).not.toMatch(/sk-\w{10,}/);
-        expect(optsStr).not.toMatch(/api[_-]?key\s*[:=]\s*\S{10,}/i);
-      }
+    expect(body).toEqual({
+      data: {
+        providers: [{
+          id: "safe-provider",
+          label: "Safe Provider",
+          models: [{ id: "model-1", label: "Safe Provider Model 1" }],
+          defaultModel: "model-1",
+          connected: true,
+        }],
+      },
+    });
+    const response = JSON.stringify(body);
+    for (const forbidden of [
+      nestedEndpointCanary,
+      nestedHeaderCanary,
+      nestedKeyNameCanary,
+      "PROVIDER_ENV_CANARY",
+      "provider-npm-canary",
+      "endpoint",
+      "headers",
+      "keyName",
+      "options",
+      "env",
+      "api",
+    ]) {
+      expect(response).not.toContain(forbidden);
     }
 
-    // Check the entire response for secret patterns
-    const responseStr = JSON.stringify(body);
-    expect(responseStr).not.toMatch(/sk-\w{10,}/);
+    spy.mockRestore();
+  });
 
+  it("rejects secret-shaped provider and model IDs and redacts unsafe scalar labels", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    const providerIdCanary = "sk-provider-scalar-canary-ABCDEFGHI";
+    const modelIdCanary = "sk-model-scalar-canary-ABCDEFGHI";
+    const providerLabelCanary = "Bearer provider-label-scalar-canary";
+    const modelLabelCanary = "api_key=model-label-scalar-canary";
+    const scalarSafeProvider = makeProvider("safe-provider", providerLabelCanary);
+    scalarSafeProvider.models = {
+      "safe-model": {
+        id: "safe-model",
+        name: modelLabelCanary,
+      },
+      "secret-model": {
+        id: modelIdCanary,
+        name: "ordinary label",
+      },
+    };
+
+    const spy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      all: [
+        makeProvider(providerIdCanary, "Ordinary label"),
+        scalarSafeProvider,
+      ],
+      default: {
+        [providerIdCanary]: "model-1",
+        "safe-provider": modelIdCanary,
+      },
+      connected: [providerIdCanary, "safe-provider"],
+    });
+
+    const response = await fetch(`${apiUrl}/providers?directory=/workspace`);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      data: {
+        providers: [{
+          id: "safe-provider",
+          label: "safe-provider",
+          models: [{ id: "safe-model", label: "safe-model" }],
+          defaultModel: null,
+          connected: true,
+        }],
+      },
+    });
+    const serialized = JSON.stringify(body);
+    for (const forbidden of [providerIdCanary, modelIdCanary, providerLabelCanary, modelLabelCanary]) {
+      expect(serialized).not.toContain(forbidden);
+    }
     spy.mockRestore();
   });
 
@@ -228,10 +326,97 @@ describe("Provider list sanitization", () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.data.all).toEqual([]);
-    expect(body.data.connected).toEqual([]);
+    expect(body).toEqual({ data: { providers: [] } });
 
     spy.mockRestore();
+  });
+
+  it("returns a fixed catalog error without nested endpoint, header, or key-name canaries", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    const endpointCanary = "https://provider-error-endpoint-canary.invalid/v1";
+    const headerCanary = "Bearer provider-error-header-canary";
+    const keyNameCanary = "provider-error-key-name-canary";
+    const spy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      error: {
+        code: `PROVIDER_${keyNameCanary}`,
+        message: JSON.stringify({ endpoint: endpointCanary, headers: { authorization: headerCanary }, keyName: keyNameCanary }),
+      },
+    });
+
+    const response = await fetch(`${apiUrl}/providers?directory=/workspace`);
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body).toEqual({
+      error: {
+        code: "PROVIDER_CATALOG_UNAVAILABLE",
+        message: "OpenCode provider catalog is unavailable.",
+      },
+    });
+    const serialized = JSON.stringify(body);
+    for (const forbidden of [endpointCanary, headerCanary, keyNameCanary, "endpoint", "headers", "keyName"]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+
+    spy.mockRestore();
+  });
+
+  it("returns a fixed catalog error without scalar provider or model ID canaries", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    const providerIdCanary = "sk-provider-error-scalar-ABCDEFGHI";
+    const modelIdCanary = "sk-model-error-scalar-ABCDEFGHI";
+    const spy = vi.spyOn(opencodeClient, "listProviders").mockResolvedValue({
+      error: {
+        code: providerIdCanary,
+        message: `model=${modelIdCanary}`,
+      },
+    });
+
+    const response = await fetch(`${apiUrl}/providers?directory=/workspace`);
+    const body = await response.json();
+
+    expect(response.status).toBe(502);
+    expect(body).toEqual({
+      error: {
+        code: "PROVIDER_CATALOG_UNAVAILABLE",
+        message: "OpenCode provider catalog is unavailable.",
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain(providerIdCanary);
+    expect(JSON.stringify(body)).not.toContain(modelIdCanary);
+    spy.mockRestore();
+  });
+});
+
+describe("Provider catalog upstream error sanitization", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("does not return or log opaque provider error codes or text", async () => {
+    const opaqueCode = "provider-secret-code-A9B8C7";
+    const opaqueText = "credential=provider-secret-text";
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(mockResponse(502, {
+      code: opaqueCode,
+      message: opaqueText,
+    })));
+    const warn = vi.spyOn(logger, "warn");
+
+    const result = await opencodeClient.listProviders();
+
+    expect(result).toEqual({
+      error: {
+        code: "PROVIDER_CATALOG_FAILED",
+        message: "OpenCode provider catalog is unavailable",
+      },
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(opaqueCode);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(opaqueText);
+    expect(JSON.stringify(result)).not.toContain(opaqueCode);
+    expect(JSON.stringify(result)).not.toContain(opaqueText);
   });
 });
 
@@ -841,7 +1026,7 @@ describe("Secret leak check", () => {
         makeProvider("custom", "Custom Provider", {}),
       ],
       default: { "openai": "gpt-4" },
-      connected: ["openai", "lmstudio"],
+      connected: ["openai", "custom"],
     };
 
     const spy = vi
@@ -865,8 +1050,8 @@ describe("Secret leak check", () => {
 
     // Verify a non-secret response is still returned correctly
     expect(body.data).toBeDefined();
-    expect(body.data.all.length).toBe(3);
-    expect(body.data.connected.length).toBe(2);
+    expect(body.data.providers).toHaveLength(3);
+    expect(body.data.providers.filter((provider: { connected: boolean }) => provider.connected)).toHaveLength(2);
 
     spy.mockRestore();
   });

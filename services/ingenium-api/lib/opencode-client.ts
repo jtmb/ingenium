@@ -72,6 +72,13 @@ export interface SendPromptBody {
   variant?: string;
 }
 
+/**
+ * The only OpenCode agent that may execute API-owned broker requests. Its
+ * profile has a wildcard-deny permission boundary, so prompt-level tool
+ * selections can never grant it a default or future tool capability.
+ */
+export const LLM_BROKER_AGENT = "ingenium-llm-broker";
+
 /** Shape for summarization request body */
 export interface SummarizeBody {
   providerID: string;
@@ -316,7 +323,12 @@ export interface SkillInfo {
 
 export interface McpServerInfo {
   name: string;
+  /** OpenCode v1.18.3 connection state. */
+  status?: "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration";
+  /** Legacy compatibility for pre-v1.18.3 servers. */
   connected?: boolean;
+  toolCount?: number;
+  tools?: number | unknown[];
 }
 
 /* ── Permission request shape ── */
@@ -344,6 +356,10 @@ export interface SessionStatus {
 /* ── Constants ── */
 
 const SOURCE = "opencode-client";
+const PROVIDER_CATALOG_ERROR: OpenCodeErrorShape["error"] = {
+  code: "PROVIDER_CATALOG_FAILED",
+  message: "OpenCode provider catalog is unavailable",
+};
 
 /* ── Helpers ── */
 
@@ -387,6 +403,8 @@ export async function request<T>(
     method?: string;
     body?: unknown;
     query?: Record<string, string | number | undefined>;
+    /** Route-owned failures must not log or return opaque upstream codes. */
+    sanitizedUpstreamError?: OpenCodeErrorShape["error"];
   } = {},
 ): Promise<OpenCodeResult<T>> {
   const auth = buildAuthHeader();
@@ -399,7 +417,7 @@ export async function request<T>(
     };
   }
 
-  const { method = "GET", body, query } = opts;
+  const { method = "GET", body, query, sanitizedUpstreamError } = opts;
 
   // Build URL with query params
   let url = `${config.opencodeUrl}${path}`;
@@ -453,12 +471,17 @@ export async function request<T>(
         // Best-effort — use the fallback message
       }
 
-      logger.warn(SOURCE, `OpenCode ${response.status} for ${method} ${path}`, {
-        status: response.status,
-        code: errCode,
-      });
+      logger.warn(
+        SOURCE,
+        `OpenCode ${response.status} for ${method} ${path}`,
+        sanitizedUpstreamError ? { status: response.status } : { status: response.status, code: errCode },
+      );
 
-      return { error: { message: errMsg, code: errCode } };
+      return {
+        error: sanitizedUpstreamError
+          ? sanitizedUpstreamError
+          : { message: errMsg, code: errCode },
+      };
     }
 
     // Non-JSON responses (shouldn't happen except maybe for 204/205)
@@ -478,15 +501,19 @@ export async function request<T>(
       throw err;
     }
 
-    logger.error(SOURCE, `Fetch failed for ${method} ${path}: ${e.message}`, {
-      name: e.name,
-      code: e.name === "TypeError" ? (e as any).code : undefined,
-    });
+    if (sanitizedUpstreamError) {
+      logger.error(SOURCE, `Fetch failed for ${method} ${path}`, { name: e.name });
+    } else {
+      logger.error(SOURCE, `Fetch failed for ${method} ${path}: ${e.message}`, {
+        name: e.name,
+        code: e.name === "TypeError" ? (e as any).code : undefined,
+      });
+    }
 
     return {
       error: {
-        message: e.message ?? "Network error contacting OpenCode server",
-        code: "NETWORK_ERROR",
+        message: sanitizedUpstreamError?.message ?? e.message ?? "Network error contacting OpenCode server",
+        code: sanitizedUpstreamError?.code ?? "NETWORK_ERROR",
       },
     };
   }
@@ -784,7 +811,12 @@ export const opencodeClient = {
   /* ── Providers ── */
 
   listProviders: (directory?: string): Promise<OpenCodeResult<ProvidersResponse>> =>
-    request<ProvidersResponse>("/provider", { query: { directory } }),
+    request<ProvidersResponse>("/provider", {
+      query: { directory },
+      // Provider errors commonly contain opaque vendor diagnostics. This
+      // catalog is browser-facing, so no upstream code or message may escape.
+      sanitizedUpstreamError: PROVIDER_CATALOG_ERROR,
+    }),
 
   listIntegrations: (directory?: string): Promise<OpenCodeResult<V2Response<IntegrationInfo[]>>> =>
     request<V2Response<IntegrationInfo[]>>("/api/integration", {
@@ -870,16 +902,21 @@ export const opencodeClient = {
   /* ── MCP ── */
 
   getMCPStatus: (directory?: string): Promise<OpenCodeResult<Record<string, McpServerInfo>>> =>
-    request<Record<string, McpServerInfo>>("/mcp", { query: { directory } }),
+    request<Record<string, McpServerInfo>>("/mcp", {
+      query: { directory },
+      sanitizedUpstreamError: { code: "MCP_STATUS_FAILED", message: "OpenCode request failed" },
+    }),
 
   connectMCP: (name: string): Promise<OpenCodeResult<unknown>> =>
     request<unknown>(`/mcp/${encodeURIComponent(name)}/connect`, {
       method: "POST",
+      sanitizedUpstreamError: { code: "MCP_MUTATION_FAILED", message: "OpenCode request failed" },
     }),
 
   disconnectMCP: (name: string): Promise<OpenCodeResult<unknown>> =>
     request<unknown>(`/mcp/${encodeURIComponent(name)}/disconnect`, {
       method: "POST",
+      sanitizedUpstreamError: { code: "MCP_MUTATION_FAILED", message: "OpenCode request failed" },
     }),
 
   /* ── Permissions ── */
@@ -942,7 +979,11 @@ export const opencodeClient = {
 };
 
 /**
- * Execute an LLM request through an ephemeral, tool-denied OpenCode session.
+ * Execute an LLM request through an ephemeral, fail-closed OpenCode session.
+ *
+ * Do not add agent or tool parameters here. The API constructs both fields so
+ * callers, prompt content, and future broker consumers cannot override the
+ * wildcard-deny broker profile or enable a tool.
  */
 export async function brokerExecute(params: {
   providerID: string;
@@ -972,7 +1013,10 @@ export async function brokerExecute(params: {
     const sent = await opencodeClient.sendPrompt(sessionId, {
       parts: [{ type: "text", text: params.user }],
       model: { providerID: params.providerID, modelID: params.modelID },
+      agent: LLM_BROKER_AGENT,
       system: params.system,
+      // This is an explicit empty selection; the selected agent's wildcard
+      // deny is the authoritative capability boundary.
       tools: {},
     });
 
@@ -1045,9 +1089,19 @@ export async function executeSynthesisBroker(params: {
   system: string;
   user: string;
   timeoutMs?: number;
+  /** A route-validated selection. When present, do not silently switch models. */
+  selection?: { providerID: string; modelID: string };
   /** Test-only/integration seam; production uses the tool-denied broker session. */
   executor?: SynthesisBrokerExecutor;
 }): Promise<{ ok: boolean; content: string; error?: string }> {
+  if (params.selection) {
+    return (params.executor ?? brokerExecute)({
+      ...params.selection,
+      system: params.system,
+      user: params.user,
+      timeoutMs: params.timeoutMs,
+    });
+  }
   const primary = {
     providerID: settings.getSetting(params.projectId, "synthesis_provider") || "",
     modelID: settings.getSetting(params.projectId, "synthesis_model") || "",

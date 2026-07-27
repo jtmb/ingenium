@@ -837,6 +837,7 @@ export declare const AgentSchema: z.ZodObject<{
     model: z.ZodOptional<z.ZodString>;
     reasoning_effort: z.ZodOptional<z.ZodString>;
     permissions: z.ZodDefault<z.ZodString>;
+    metadata: z.ZodDefault<z.ZodString>;
     skills: z.ZodDefault<z.ZodString>;
     content: z.ZodString;
     enabled: z.ZodDefault<z.ZodBoolean>;
@@ -852,6 +853,7 @@ export declare const AgentSchema: z.ZodObject<{
     content: string;
     category: "research" | "chat" | "primary" | "execution" | "security";
     enabled: boolean;
+    metadata: string;
     mode: "primary" | "subagent";
     permissions: string;
     skills: string;
@@ -867,6 +869,7 @@ export declare const AgentSchema: z.ZodObject<{
     description?: string | undefined;
     category?: "research" | "chat" | "primary" | "execution" | "security" | undefined;
     enabled?: boolean | undefined;
+    metadata?: string | undefined;
     mode?: "primary" | "subagent" | undefined;
     model?: string | undefined;
     reasoning_effort?: string | undefined;
