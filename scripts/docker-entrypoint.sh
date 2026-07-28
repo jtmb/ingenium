@@ -128,9 +128,9 @@ if [ ! -f "$OC_CONFIG" ]; then
     }
   },
   "plugin": [
-    "/app/packages/ingenium-extension/observer.ts",
-    "/app/packages/ingenium-extension/auto-observer.ts",
-    "/app/packages/ingenium-extension/resource-sync.ts"
+    "/app/packages/ingenium-extension/observer-plugin.ts",
+    "/app/packages/ingenium-extension/auto-observer-plugin.ts",
+    "/app/packages/ingenium-extension/resource-sync-plugin.ts"
   ]
 }
 OCEOF

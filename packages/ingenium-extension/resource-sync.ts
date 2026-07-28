@@ -1521,7 +1521,7 @@ function mergePluginsIntoConfig(
     // provisioning and sync possible. Those bootstrap entries must survive an
     // API database reset even though the recreated project has no plugin rows yet.
     const isIngenium = (p: string) => p.includes("ingenium-extension");
-    const isBootstrapPlugin = (p: string) => /(?:^|\/)(?:auto-observer|observer|resource-sync)(?:\.ts|\.js)?$/.test(p);
+    const isBootstrapPlugin = (p: string) => /(?:^|\/)(?:auto-observer|observer|resource-sync)-plugin(?:\.ts|\.js)?$/.test(p);
     const userPlugins = existing.filter((p) => !isIngenium(p) || isBootstrapPlugin(p));
 
     // Build new plugin array: user plugins + API-managed plugins

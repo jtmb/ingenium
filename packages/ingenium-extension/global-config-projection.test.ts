@@ -37,6 +37,9 @@ describe("container OpenCode global-config projection", () => {
         }
       },
       "plugin": [
+        "/app/packages/ingenium-extension/auto-observer.ts",
+        "/app/packages/ingenium-extension/observer.ts",
+        "/app/packages/ingenium-extension/resource-sync.ts",
         "/app/packages/ingenium-extension/skill-sync.ts",
         "plugins/operator-plugin.ts",
       ],
@@ -68,9 +71,9 @@ describe("container OpenCode global-config projection", () => {
     expect(config.mcp.ingenium.environment.INGENIUM_API_TOKEN).toBeUndefined();
     expect(config.plugin).toEqual([
       "plugins/operator-plugin.ts",
-      "/app/packages/ingenium-extension/auto-observer.ts",
-      "/app/packages/ingenium-extension/observer.ts",
-      "/app/packages/ingenium-extension/resource-sync.ts",
+      "/app/packages/ingenium-extension/auto-observer-plugin.ts",
+      "/app/packages/ingenium-extension/observer-plugin.ts",
+      "/app/packages/ingenium-extension/resource-sync-plugin.ts",
     ]);
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });

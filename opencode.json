@@ -57,8 +57,8 @@
     }
   },
   "plugin": [
-    "packages/ingenium-extension/auto-observer.ts",
-    "packages/ingenium-extension/observer.ts",
-    "packages/ingenium-extension/resource-sync.ts"
+    "./packages/ingenium-extension/auto-observer-plugin.ts",
+    "./packages/ingenium-extension/observer-plugin.ts",
+    "./packages/ingenium-extension/resource-sync-plugin.ts"
   ]
 }

@@ -75,7 +75,7 @@ require_literal "$dockerfile" "RUN sh scripts/validate-deployment-config.sh"
 # OpenCode loads the configured TypeScript plugins from source paths. Keep the
 # small local dependency closure required by those entrypoints, but do not
 # restore a broad extension-workspace copy to the production image.
-for extension_source in auto-observer.ts observer.ts resource-sync.ts skill-sync.ts observer-core.ts project-resolver.ts api-auth.ts; do
+for extension_source in auto-observer.ts auto-observer-plugin.ts observer.ts observer-plugin.ts resource-sync.ts resource-sync-plugin.ts skill-sync.ts observer-core.ts project-resolver.ts api-auth.ts; do
   require_literal "$dockerfile" "COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/${extension_source} ./packages/ingenium-extension/${extension_source}"
 done
 reject_literal "$dockerfile" "COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ ./packages/ingenium-extension/"
@@ -151,7 +151,7 @@ require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scr
 require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/" "/usr/local/bin/ingenium-init-project --help"
 require_literal "$entrypoint" "project-opencode-global-config.mjs"
 require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/workspace"'
-require_literal "$entrypoint" '"/app/packages/ingenium-extension/resource-sync.ts"'
+require_literal "$entrypoint" '"/app/packages/ingenium-extension/resource-sync-plugin.ts"'
 require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_API_TOKEN_FILE="/workspace/.opencode/.ingenium-api-token"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKTREE="/workspace"'

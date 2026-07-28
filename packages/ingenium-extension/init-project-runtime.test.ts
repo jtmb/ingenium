@@ -18,9 +18,9 @@ const originalProject = process.env.INGENIUM_PROJECT;
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
 const configuredPluginPaths = [
-  "packages/ingenium-extension/auto-observer.ts",
-  "packages/ingenium-extension/observer.ts",
-  "packages/ingenium-extension/resource-sync.ts",
+  "packages/ingenium-extension/auto-observer-plugin.ts",
+  "packages/ingenium-extension/observer-plugin.ts",
+  "packages/ingenium-extension/resource-sync-plugin.ts",
 ];
 
 function temporaryDirectory(prefix: string): string {
@@ -120,7 +120,7 @@ describe("ingenium-init-project production runtime contract", () => {
     for (const pluginPath of configuredPluginPaths) {
       expect(dockerfile).toContain(`/app/${pluginPath} ./${pluginPath}`);
     }
-    expect(dockerfile).toContain(`"plugin":[${configuredPluginPaths.map((pluginPath) => JSON.stringify(pluginPath)).join(",")}]`);
+    expect(dockerfile).toContain(`"plugin":[${configuredPluginPaths.map((pluginPath) => JSON.stringify(`/app/${pluginPath}`)).join(",")}]`);
     expect(dockerfile).not.toContain("packages/ingenium-extension/dist/auto-observer.js");
   });
 

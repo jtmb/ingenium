@@ -203,7 +203,7 @@ require_text scripts/docker-entrypoint.sh 'mv -f "$runtime_token_tmp" "$RUNTIME_
 require_text scripts/docker-entrypoint.sh 'unset INGENIUM_API_TOKEN'
 require_text scripts/docker-entrypoint.sh 'export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"'
 require_text scripts/docker-entrypoint.sh 'project-opencode-global-config.mjs "$OC_CONFIG"'
-require_text scripts/docker-entrypoint.sh '"/app/packages/ingenium-extension/resource-sync.ts"'
+require_text scripts/docker-entrypoint.sh '"/app/packages/ingenium-extension/resource-sync-plugin.ts"'
 require_text scripts/docker-entrypoint.sh 'GLOBAL_AGENTS_DIR="/home/appuser/.config/opencode/agents"'
 require_text scripts/docker-entrypoint.sh '/app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents "$GLOBAL_AGENTS_DIR"'
 require_text scripts/docker-entrypoint.sh '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'

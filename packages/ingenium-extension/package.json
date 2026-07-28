@@ -14,13 +14,25 @@
       "types": "./dist/auto-observer.d.ts",
       "import": "./dist/auto-observer.js"
     },
+    "./plugins/auto-observer": {
+      "types": "./dist/auto-observer-plugin.d.ts",
+      "import": "./dist/auto-observer-plugin.js"
+    },
     "./observer": {
       "types": "./dist/observer.d.ts",
       "import": "./dist/observer.js"
     },
+    "./plugins/observer": {
+      "types": "./dist/observer-plugin.d.ts",
+      "import": "./dist/observer-plugin.js"
+    },
     "./resource-sync": {
       "types": "./dist/resource-sync.d.ts",
       "import": "./dist/resource-sync.js"
+    },
+    "./plugins/resource-sync": {
+      "types": "./dist/resource-sync-plugin.d.ts",
+      "import": "./dist/resource-sync-plugin.js"
     },
     "./onboarding-sync": {
       "types": "./dist/onboarding-sync.d.ts",
@@ -37,7 +49,7 @@
   },
   "files": ["dist/", "README.md"],
   "scripts": {
-    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp ../../services/ingenium-server/dist/scripts/mcp-server.js dist/scripts/mcp-transport.js && test -f dist/config/index.js && test -f dist/scripts/mcp-server.js && test -f dist/scripts/mcp-transport.js && test -f dist/scripts/init-project.js && chmod 0555 dist/scripts/mcp-server.js dist/scripts/init-project.js && node scripts/verify-mcp-transport-parity.mjs",
+    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp ../../services/ingenium-server/dist/scripts/mcp-server.js dist/scripts/mcp-transport.js && test -f dist/config/index.js && test -f dist/scripts/mcp-server.js && test -f dist/scripts/mcp-transport.js && test -f dist/scripts/init-project.js && test -f dist/auto-observer-plugin.js && test -f dist/observer-plugin.js && test -f dist/resource-sync-plugin.js && chmod 0555 dist/scripts/mcp-server.js dist/scripts/init-project.js && node scripts/verify-mcp-transport-parity.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

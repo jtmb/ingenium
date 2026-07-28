@@ -21,9 +21,9 @@ const originalFetch = globalThis.fetch;
 const originalProject = process.env.INGENIUM_PROJECT;
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const configuredPluginPaths = [
-  "packages/ingenium-extension/auto-observer.ts",
-  "packages/ingenium-extension/observer.ts",
-  "packages/ingenium-extension/resource-sync.ts",
+  "packages/ingenium-extension/auto-observer-plugin.ts",
+  "packages/ingenium-extension/observer-plugin.ts",
+  "packages/ingenium-extension/resource-sync-plugin.ts",
 ];
 
 function write(relativePath: string, content: string): void {

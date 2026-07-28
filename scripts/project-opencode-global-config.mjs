@@ -5,9 +5,9 @@ import { basename, dirname, resolve } from "node:path";
 
 const DEFAULT_CONFIG = "opencode.jsonc";
 const REQUIRED_PLUGINS = [
-  "/app/packages/ingenium-extension/auto-observer.ts",
-  "/app/packages/ingenium-extension/observer.ts",
-  "/app/packages/ingenium-extension/resource-sync.ts",
+  "/app/packages/ingenium-extension/auto-observer-plugin.ts",
+  "/app/packages/ingenium-extension/observer-plugin.ts",
+  "/app/packages/ingenium-extension/resource-sync-plugin.ts",
 ];
 
 function isRecord(value) {
@@ -111,7 +111,7 @@ function readConfig(configPath) {
 }
 
 function isManagedPlugin(value) {
-  return typeof value === "string" && /(?:^|\/)(?:auto-observer|observer|resource-sync|skill-sync)(?:\.ts|\.js)?$/.test(value);
+  return typeof value === "string" && /(?:^|\/)(?:auto-observer|observer|resource-sync)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value);
 }
 
 function writeAtomically(configPath, value) {
