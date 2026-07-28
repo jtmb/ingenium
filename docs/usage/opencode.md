@@ -53,9 +53,14 @@ silently treating an external worktree as the global namespace.
 The container also projects its persistent global config at startup so the
 `auto-observer`, `observer`, and `resource-sync` plugins all resolve the
 owner-only worktree token file. `ingenium-init-project` preflights that bearer
-path before it provisions a project or syncs repository resources. A failed
-preflight returns a generic authentication error; it never emits the token or
-browser-accessible credential data.
+path before it provisions a project or syncs repository resources. The shared
+extension project resolver uses the same authenticated preflight before its
+initial project provision, with a finite retry only for transient API
+unavailability. Authentication failures fail closed; diagnostics never emit the
+token, URL, HTTP detail, response body, or browser-accessible credential data.
+Container OpenCode startup also performs a finite authenticated API readiness
+check before loading plugins, so a cold API start does not silently consume the
+first resource-sync opportunity.
 
 If the Chat MCP drawer reports that Ingenium cannot connect, rebuild the
 extension artifact, verify the owner-only token file, and verify the intended

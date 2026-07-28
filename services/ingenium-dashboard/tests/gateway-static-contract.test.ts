@@ -56,6 +56,10 @@ describe("Phase 2E — static gateway contracts", () => {
     expect(dockerfile).not.toMatch(/^EXPOSE.*409[89]/m);
 
     expect(startOpenCode).toContain("opencode web --port 4098 --hostname 127.0.0.1");
+    expect(startOpenCode).toContain('INGENIUM_API_TOKEN_FILE="/workspace/.opencode/.ingenium-api-token"');
+    expect(startOpenCode).toContain("INGENIUM_OPENCODE_START_CLEAN_ENV=\"1\"");
+    expect(startOpenCode).toContain("attempts=10");
+    expect(startOpenCode).toContain("node /app/scripts/probe-api.mjs");
     expect(read("supervisord.conf")).toContain("command=/app/scripts/start-opencode-web.sh");
     expect(read("scripts/start-ttyd.sh")).toContain("--interface 127.0.0.1");
   });

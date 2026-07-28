@@ -111,10 +111,24 @@ describe("extension API authentication", () => {
     expect(apiRequestHeaders(worktree).has("Authorization")).toBe(false);
   });
 
-  it("returns only a generic preflight failure", async () => {
-    writeFallbackToken("f".repeat(32));
-    const result = await preflightApiAuthentication("http://127.0.0.1:4097/api/v1", worktree, async () => new Response("internal diagnostic", { status: 403 }));
+  it.each([401, 403])("classifies HTTP %i as a safe authentication failure without exposing request details", async (status) => {
+    const token = "f".repeat(32);
+    const apiBase = "http://127.0.0.1:4097/api/v1";
+    writeFallbackToken(token);
+    const result = await preflightApiAuthentication(
+      apiBase,
+      worktree,
+      async () => new Response(`internal diagnostic ${token}`, { status }),
+    );
 
-    expect(result).toEqual({ authenticated: false, error: "Unable to authenticate with Ingenium API" });
+    expect(result).toEqual({
+      authenticated: false,
+      error: "Unable to authenticate with Ingenium API",
+      failure: "authentication",
+    });
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain(token);
+    expect(serialized).not.toContain(apiBase);
+    expect(serialized).not.toContain("internal diagnostic");
   });
 });

@@ -13,11 +13,15 @@ try {
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) {
-    process.stderr.write(`[healthcheck] API readiness returned ${response.status}\n`);
+    const category = response.status === 401 || response.status === 403
+      ? "authentication failed"
+      : "unavailable";
+    process.stderr.write(`[healthcheck] API readiness ${category}\n`);
     process.exit(1);
   }
-} catch (error) {
-  const message = error instanceof Error ? error.message : "unknown error";
-  process.stderr.write(`[healthcheck] API readiness failed: ${message}\n`);
+} catch {
+  // Transport exceptions can include connection URLs. Keep container logs
+  // operationally useful without exposing request details or token sources.
+  process.stderr.write("[healthcheck] API readiness unavailable\n");
   process.exit(1);
 }

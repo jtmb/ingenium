@@ -356,6 +356,7 @@ describe("ingenium-init-project production runtime contract", () => {
       expect(result.stderr).not.toContain(token);
       expect(requests).toEqual([
         { method: "GET", url: "/api/v1/auth/preflight", authenticated: true },
+        { method: "GET", url: "/api/v1/auth/preflight", authenticated: true },
         { method: "POST", url: "/api/v1/projects", authenticated: true },
         { method: "POST", url: "/api/v1/docs/repository/sync?project=packaged-plugin-project", authenticated: true },
         { method: "POST", url: "/api/v1/repository/resources/sync?project=packaged-plugin-project", authenticated: true },

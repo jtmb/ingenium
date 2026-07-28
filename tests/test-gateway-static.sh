@@ -183,8 +183,11 @@ require_text scripts/docker-entrypoint.sh 'unset INGENIUM_API_TOKEN'
 require_text scripts/docker-entrypoint.sh 'export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"'
 require_text scripts/docker-entrypoint.sh 'project-opencode-global-config.mjs "$OC_CONFIG"'
 require_text scripts/docker-entrypoint.sh '"/app/packages/ingenium-extension/resource-sync.ts"'
-require_text scripts/start-opencode-web.sh 'INGENIUM_API_TOKEN_FILE=".opencode/.ingenium-api-token"'
+require_text scripts/start-opencode-web.sh 'INGENIUM_API_TOKEN_FILE="/workspace/.opencode/.ingenium-api-token"'
 require_text scripts/start-opencode-web.sh 'INGENIUM_WORKTREE="/workspace"'
+require_text scripts/start-opencode-web.sh 'INGENIUM_OPENCODE_START_CLEAN_ENV="1"'
+require_text scripts/start-opencode-web.sh 'attempts=10'
+require_text scripts/start-opencode-web.sh 'node /app/scripts/probe-api.mjs'
 require_text scripts/run-init-project.sh 'project="${INGENIUM_PROJECT:-global-default}"'
 
 # Express and token-bearing services remain container-only; the separate API

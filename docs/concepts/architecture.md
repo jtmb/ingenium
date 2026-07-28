@@ -251,7 +251,15 @@ The `ResourceSyncPlugin` hooks into OpenCode session events:
 | Event | Action | Throttle |
 |-------|--------|----------|
 | `session.created` | Full sync of all resources | None |
-| `session.idle` | Incremental sync (hash mismatch only) | 60s max 1 |
+| `session.idle` | Incremental sync (hash mismatch only) | 60s max 1 after a successful reconciliation; failed passes remain eligible for the next idle event |
+
+Before its first project-provisioning request, the extension performs a bounded
+authenticated API preflight. Transient API unavailability is retried a finite
+number of times; authentication failures fail closed without exposing the
+token, API URL, response body, or HTTP detail. A later successful lifecycle
+attempt emits a safe recovery diagnostic. The container additionally waits for
+an authenticated API readiness probe before OpenCode starts, reducing the
+cold-start race without introducing a background retry loop.
 
 #### Registration
 

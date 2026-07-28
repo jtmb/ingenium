@@ -91,14 +91,25 @@ files should contain the MCP command, API URL, and non-secret settings only.
 
 ### Extension project initialization preflight
 
-`ingenium-init-project` performs an authenticated `GET /api/v1/auth/preflight`
-before project provisioning or repository projection. A missing, unsafe, or
-incorrect protected token fails closed with the generic message `Unable to
-authenticate with Ingenium API`; it does not print a token source, API URL,
-status, response body, or bearer value. In the container, the stable command
-sets the explicit `/workspace` and `global-default` values only for the
-container-owned session. External sessions retain the normal precedence of
-explicit `--project`, `INGENIUM_PROJECT`, then a validated worktree basename.
+`ingenium-init-project` and extension project provisioning perform an
+authenticated `GET /api/v1/auth/preflight` before a project is created or a
+repository projection begins. Extension startup permits at most three probes,
+each capped at one second and separated by a 250 ms delay; only an unavailable
+API is retried. `401` and `403` are safely classified as authentication
+failures and fail closed immediately. Diagnostics contain only a stable safe
+category (`authentication`, `unavailable`, `invalid_target`, or `rejected`) and
+never print a token source, API URL, status, response body, or bearer value. If a later
+session lifecycle event succeeds after a transient startup failure, the
+resource-sync plugin emits the `extension_project_init_recovered` event.
+
+In the container, OpenCode also performs a fixed ten-attempt authenticated API
+readiness check before it starts loading extension plugins. Each attempt is
+bounded by the API probe timeout; a failed bounded startup is left to
+Supervisor's normal restart policy rather than an unbounded background loop.
+The stable container command sets the explicit `/workspace` and
+`global-default` values only for the container-owned session. External sessions
+retain the normal precedence of explicit `--project`, `INGENIUM_PROJECT`, then
+a validated worktree basename.
 
 ## Dashboard proxy and CSRF behavior
 

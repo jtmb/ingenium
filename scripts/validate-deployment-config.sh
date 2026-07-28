@@ -133,8 +133,11 @@ require_literal "$dockerfile" "scripts/run-init-project.sh"
 require_literal "$entrypoint" "project-opencode-global-config.mjs"
 require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/workspace"'
 require_literal "$entrypoint" '"/app/packages/ingenium-extension/resource-sync.ts"'
-require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_API_TOKEN_FILE=".opencode/.ingenium-api-token"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_API_TOKEN_FILE="/workspace/.opencode/.ingenium-api-token"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKTREE="/workspace"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_OPENCODE_START_CLEAN_ENV="1"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'attempts=10'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'node /app/scripts/probe-api.mjs'
 require_literal "${repo_root}/scripts/run-init-project.sh" 'project="${INGENIUM_PROJECT:-global-default}"'
 require_literal "${repo_root}/scripts/run-init-project.sh" 'INGENIUM_API_TOKEN_FILE="$token_file"'
 

@@ -14,6 +14,7 @@ let originalApiUrl: string | undefined;
 let originalProject: string | undefined;
 let originalToken: string | undefined;
 let originalTokenFile: string | undefined;
+let remainingPreflightFailures = 0;
 
 interface RequestRecord {
   path: string;
@@ -51,6 +52,12 @@ beforeEach(async () => {
       response.end(JSON.stringify({ error: { code: "UNAUTHORIZED" } }));
       return;
     }
+    if (request.url === "/api/v1/auth/preflight" && remainingPreflightFailures > 0) {
+      remainingPreflightFailures -= 1;
+      response.writeHead(503, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: { detail: `startup diagnostic ${token}` } }));
+      return;
+    }
     response.writeHead(200, { "Content-Type": "application/json" });
     if (request.url?.startsWith("/api/v1/synthesis/run")) {
       response.end(JSON.stringify({ data: { processed: 0 } }));
@@ -65,6 +72,7 @@ beforeEach(async () => {
   await new Promise<void>((resolveListen) => server!.listen(0, "127.0.0.1", resolveListen));
   apiUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/v1`;
   process.env.INGENIUM_API_URL = apiUrl;
+  remainingPreflightFailures = 0;
   vi.resetModules();
 });
 
@@ -82,6 +90,7 @@ afterEach(async () => {
   worktree = "";
   server = undefined;
   vi.resetModules();
+  vi.restoreAllMocks();
 });
 
 describe("packaged extension plugin protected API requests", () => {
@@ -106,5 +115,25 @@ describe("packaged extension plugin protected API requests", () => {
       expect.stringMatching(new RegExp(`^/api/v1/synthesis/run\\?project=${project}`)),
     ]));
     expect(JSON.stringify(log.mock.calls)).not.toContain(token);
+  });
+
+  it("recovers a cold-start project readiness race on the next session event without leaking diagnostics", async () => {
+    remainingPreflightFailures = 3;
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const log = vi.fn();
+    const { ResourceSyncPlugin } = await import("./resource-sync.js");
+
+    const plugin = await ResourceSyncPlugin({ worktree, client: { app: { log } } });
+    await plugin.event({ event: { type: "session.created" } });
+
+    const diagnostic = stderr.mock.calls.map(([message]) => String(message)).join("");
+    expect(diagnostic).toContain('{"event":"extension_project_init_failed","reason":"unavailable"}');
+    expect(diagnostic).toContain('{"event":"extension_project_init_recovered"}');
+    expect(diagnostic).not.toContain(token);
+    expect(diagnostic).not.toContain(apiUrl);
+    expect(diagnostic).not.toContain("startup diagnostic");
+    expect(requests.filter((request) => request.path === "/api/v1/auth/preflight")).toHaveLength(4);
+    expect(requests.every((request) => request.authenticated)).toBe(true);
+    expect(log).toHaveBeenCalledOnce();
   });
 });

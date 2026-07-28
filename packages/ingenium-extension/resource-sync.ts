@@ -14,7 +14,12 @@
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { resolve, basename, dirname, isAbsolute, parse as parsePath, sep, relative, extname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { ensureExtensionProject, resolveExtensionProject } from "./project-resolver.js";
+import {
+  classifyExtensionProjectFailure,
+  ensureExtensionProject,
+  resolveExtensionProject,
+  type ExtensionProjectFailureKind,
+} from "./project-resolver.js";
 import { apiRequestHeaders } from "./api-auth.js";
 
 const API_BASE =
@@ -2802,7 +2807,19 @@ export async function fullSync(worktree: string): Promise<FullSyncResult & { res
 // 60s throttle to avoid hammering the API on rapid session.idle bursts.
 // The API's scheduled maintenance cycle provides a safety net for anything missed.
 let lastIncrementalSync = 0;
+let incrementalSyncInFlight = false;
 const INCREMENTAL_THROTTLE_MS = 60000;
+
+/** Test support: reset the process-wide idle throttle and in-flight guard. */
+export function resetIncrementalSyncThrottle(): void {
+  lastIncrementalSync = 0;
+  incrementalSyncInFlight = false;
+}
+
+function hasSyncErrors(result: FullSyncResult): boolean {
+  return [result.docs, result.skills, result.agents, result.plugins, result.commands, result.config]
+    .some((resource) => resource !== undefined && resource.errors > 0);
+}
 
 /**
  * Incremental sync — triggered on session.idle.
@@ -2810,9 +2827,18 @@ const INCREMENTAL_THROTTLE_MS = 60000;
  */
 export async function incrementalSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean } | null> {
   const now = Date.now();
-  if (now - lastIncrementalSync < INCREMENTAL_THROTTLE_MS) return null;
-  lastIncrementalSync = now;
-  return fullSync(worktree);
+  if (incrementalSyncInFlight || now - lastIncrementalSync < INCREMENTAL_THROTTLE_MS) return null;
+  incrementalSyncInFlight = true;
+  try {
+    const result = await fullSync(worktree);
+    // A failed reconciliation is intentionally eligible for the next idle
+    // event. Advancing the throttle here used to turn a startup race into a
+    // guaranteed one-minute recovery delay.
+    if (!hasSyncErrors(result)) lastIncrementalSync = Date.now();
+    return result;
+  } finally {
+    incrementalSyncInFlight = false;
+  }
 }
 
 /** Build a human-readable summary of a sync result for dashboard logging. */
@@ -2836,19 +2862,42 @@ function resultSummary(label: string, r: SyncResult): string {
  */
 export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
+  let startupProvisioningFailure: ExtensionProjectFailureKind | null = null;
+
+  const reportStartupDiagnostic = (event: "extension_project_init_failed" | "extension_project_init_recovered", reason?: ExtensionProjectFailureKind) => {
+    // These fields are intentionally an allowlist. Do not add caught-error
+    // messages: request errors can include a bearer, URL, or response body.
+    process.stderr.write(`${JSON.stringify(reason ? { event, reason } : { event })}\n`);
+  };
+
+  const recoverStartupProvisioning = async (): Promise<boolean> => {
+    if (!startupProvisioningFailure) return true;
+    try {
+      await ensureExtensionProject(worktree, API_BASE);
+      startupProvisioningFailure = null;
+      reportStartupDiagnostic("extension_project_init_recovered");
+      return true;
+    } catch {
+      // The initial failure was already reported with a safe classification.
+      // Do not emit repeated or lower-level errors on every lifecycle event.
+      return false;
+    }
+  };
 
   // Provision at plugin load so a database/API restart cannot leave this
   // worktree missing until a later session lifecycle event happens to fire.
   try {
     await ensureExtensionProject(worktree, API_BASE);
-  } catch {
-    process.stderr.write(`${JSON.stringify({ event: "extension_project_init_failed", reason: "request_failed" })}\n`);
+  } catch (error) {
+    startupProvisioningFailure = classifyExtensionProjectFailure(error);
+    reportStartupDiagnostic("extension_project_init_failed", startupProvisioningFailure);
   }
 
   return {
     event: async ({ event }: { event: any }) => {
       if (event.type === "session.created") {
         try {
+          if (!(await recoverStartupProvisioning())) return;
           const result = await fullSync(worktree);
           const lines: string[] = [
             resultSummary("docs", result.docs ?? emptyResult()),
@@ -2873,6 +2922,7 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
 
       if (event.type === "session.idle") {
         try {
+          if (!(await recoverStartupProvisioning())) return;
           const result = await incrementalSync(worktree);
           if (result) {
             const lines: string[] = [

@@ -2,12 +2,27 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { hashContent, syncAgents, syncCommands, syncConfig, syncPlugins, writeAgentToDisk, type SyncManifest } from "./resource-sync.js";
+import {
+  hashContent,
+  incrementalSync,
+  resetIncrementalSyncThrottle,
+  resetProjectCache,
+  syncAgents,
+  syncCommands,
+  syncConfig,
+  syncPlugins,
+  writeAgentToDisk,
+  type SyncManifest,
+} from "./resource-sync.js";
+import { resetEnsuredProjects } from "./project-resolver.js";
 
 let worktree = "";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  resetIncrementalSyncThrottle();
+  resetProjectCache();
+  resetEnsuredProjects();
   if (worktree) rmSync(worktree, { recursive: true, force: true });
   worktree = "";
 });
@@ -319,5 +334,43 @@ describe("agent resource sync", () => {
 
     expect(result).toMatchObject({ pushed: 1, conflicts: 0, errors: 0 });
     expect(manifest.resources.config.hash).toBe(hashContent(source));
+  });
+});
+
+describe("incremental resource sync recovery", () => {
+  it("does not consume the idle throttle when an incremental reconciliation fails", async () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-idle-"));
+    const originalProject = process.env.INGENIUM_PROJECT;
+    process.env.INGENIUM_PROJECT = "idle-recovery-project";
+    let docsCalls = 0;
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/auth/preflight")) return { ok: true, status: 200, json: async () => ({}) } as Response;
+      if (path.endsWith("/projects")) return { ok: true, status: 201, json: async () => ({}) } as Response;
+      if (path.endsWith("/docs/repository/sync")) {
+        docsCalls += 1;
+        if (docsCalls === 1) return { ok: false, status: 503, json: async () => ({}) } as Response;
+        return { ok: true, status: 200, json: async () => ({ data: { summary: {} } }) } as Response;
+      }
+      if (path.endsWith("/repository/resources/sync")) {
+        return { ok: true, status: 200, json: async () => ({ data: { summary: {} } }) } as Response;
+      }
+      return { ok: false, status: 404, json: async () => ({}) } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      const failed = await incrementalSync(worktree);
+      const recovered = await incrementalSync(worktree);
+      const throttled = await incrementalSync(worktree);
+
+      expect(failed?.docs?.errors).toBe(1);
+      expect(recovered?.docs?.errors).toBe(0);
+      expect(throttled).toBeNull();
+      expect(docsCalls).toBe(2);
+    } finally {
+      if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
+      else process.env.INGENIUM_PROJECT = originalProject;
+    }
   });
 });

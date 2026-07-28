@@ -73,6 +73,9 @@ function fixture(): void {
 function successfulFetch(): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn(async (url: string | URL, init?: RequestInit) => {
     const path = new URL(String(url)).pathname;
+    if (path.endsWith("/auth/preflight") && init?.method === undefined) {
+      return { ok: true, status: 200, json: async () => ({ data: { authenticated: true } }) } as Response;
+    }
     if (path.endsWith("/projects") && init?.method === "POST") {
       return { ok: true, status: 201, json: async () => ({}) } as Response;
     }
@@ -239,6 +242,7 @@ describe("repository-authoritative manifest v2", () => {
     });
     const paths = fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname);
     expect(paths).toEqual([
+      "/api/v1/auth/preflight",
       "/api/v1/projects",
       "/api/v1/docs/repository/sync",
       "/api/v1/repository/resources/sync",
@@ -263,6 +267,7 @@ describe("repository-authoritative manifest v2", () => {
 
     await expect(pushDiskToApi(worktree)).rejects.toBeInstanceOf(RepositorySyncScanError);
     expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/api/v1/auth/preflight",
       "/api/v1/projects",
     ]);
   });
@@ -303,6 +308,7 @@ describe("repository-authoritative manifest v2", () => {
       await expect(plugin.event({ event: { type: "session.created" } })).rejects.toBeInstanceOf(RepositorySyncScanError);
       expect(readFileSync(outsideManifest, "utf8")).toBe(original);
       expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+        "/api/v1/auth/preflight",
         "/api/v1/projects",
         "/api/v1/docs/repository/sync",
         "/api/v1/repository/resources/sync",

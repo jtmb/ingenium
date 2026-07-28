@@ -183,39 +183,52 @@ describe("Project Resolution", () => {
     process.env.INGENIUM_PROJECT = "provisioned-project";
     vi.resetModules();
     const { ensureExtensionProject, resetEnsuredProjects } = await import("../packages/ingenium-extension/project-resolver.js");
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({ ok: true, status: 201 })
-      .mockResolvedValueOnce({ ok: false, status: 500 })
-      .mockResolvedValueOnce({ ok: true, status: 201 });
+    let projectAttempts = 0;
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/auth/preflight")) return { ok: true, status: 200 } as Response;
+      projectAttempts += 1;
+      return { ok: projectAttempts === 2 ? false : true, status: projectAttempts === 2 ? 500 : 201 } as Response;
+    });
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
 
     await expect(Promise.all([
       ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1/"),
       ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1"),
     ])).resolves.toEqual(["provisioned-project", "provisioned-project"]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/preflight"))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects"))).toHaveLength(1);
 
     resetEnsuredProjects();
-    await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).rejects.toThrow("HTTP 500");
+    await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).rejects.toMatchObject({ failure: "unavailable" });
     await expect(ensureExtensionProject("/worktrees/provisioned-project", "http://api.test/api/v1")).resolves.toBe("provisioned-project");
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/auth/preflight"))).toHaveLength(3);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/projects"))).toHaveLength(3);
     resetEnsuredProjects();
   });
 
   it("provisions the project when the resource-sync plugin loads", async () => {
     process.env.INGENIUM_PROJECT = "startup-project";
     vi.resetModules();
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 201 });
+    const fetchMock = vi.fn(async (url: string | URL) => ({
+      ok: new URL(String(url)).pathname.endsWith("/auth/preflight"),
+      status: new URL(String(url)).pathname.endsWith("/auth/preflight") ? 200 : 201,
+    } as Response));
     globalThis.fetch = fetchMock as typeof globalThis.fetch;
     const { ResourceSyncPlugin } = await import("../packages/ingenium-extension/resource-sync.js");
 
     await ResourceSyncPlugin({ worktree: "/worktrees/startup-project", client: {} });
 
     expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/auth/preflight"),
+      expect.objectContaining({ method: undefined }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/projects"),
       expect.objectContaining({ method: "POST" }),
     );
-    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const projectCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/projects"));
+    const request = projectCall?.[1] as RequestInit;
     expect(JSON.parse(String(request.body))).toMatchObject({ name: "startup-project", is_global: false });
   });
 });
