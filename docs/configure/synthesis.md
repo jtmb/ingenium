@@ -79,7 +79,9 @@ authenticated server endpoint that validates it against the sole active global
 Chat catalog. Docs AI resolves that server-owned global selection; browser
 provider/model fields are not in the Docs AI DTO and cannot affect the broker.
 When a saved pair is absent or stale, Docs uses the safe server-derived global
-Chat default only; it does not choose an arbitrary managed provider.
+Chat default only; it does not choose an arbitrary managed provider. The default
+precedence is a valid stored Chat selection, then a managed primary, then a
+valid legacy primary, then the runtime OpenCode Zen free-model default.
 
 ### Local / Private Endpoint Opt-In
 

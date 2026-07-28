@@ -137,6 +137,37 @@ describe("POST /docs/ai Chat selection and global-project contract", () => {
     }));
   });
 
+  it("invokes the server-derived Zen default when no managed synthesis selection exists", async () => {
+    const zenCatalog = {
+      providers: [{
+        providerId: "opencode",
+        label: "OpenCode Zen",
+        models: [{ id: "opencode/zen-free", label: "Zen Free" }],
+        defaultModel: "opencode/zen-free",
+        source: "builtin" as const,
+      }],
+      unavailable: null,
+    };
+    mocks.getChatProviderCatalog.mockResolvedValue(zenCatalog);
+    mocks.getStoredOrDefaultChatSelection.mockReturnValue({
+      providerId: "opencode",
+      modelId: "opencode/zen-free",
+    });
+
+    const response = await postAi({
+      providerId: "browser-provider",
+      modelId: "browser-model",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.getStoredOrDefaultChatSelection).toHaveBeenCalledWith("docs-global", zenCatalog.providers);
+    expect(mocks.executeSynthesisBroker).toHaveBeenCalledWith(expect.objectContaining({
+      selection: { providerID: "opencode", modelID: "opencode/zen-free" },
+      timeoutMs: 60_000,
+      timeoutPolicy: "docs-ai",
+    }));
+  });
+
   it.each([
     ["missing action", { action: undefined }],
     ["invalid action", { action: "run_tools" }],
@@ -248,6 +279,22 @@ describe("POST /docs/ai Chat selection and global-project contract", () => {
   });
 
   it("returns a distinct catalog failure without calling the broker", async () => {
+    mocks.getChatProviderCatalog.mockResolvedValue({ providers: [], unavailable: "catalog" });
+
+    const response = await postAi();
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload).toEqual({
+      error: {
+        code: "LLM_CATALOG_UNAVAILABLE",
+        message: "The Chat model catalog is temporarily unavailable. Try again later.",
+      },
+    });
+    expect(mocks.executeSynthesisBroker).not.toHaveBeenCalled();
+  });
+
+  it("sanitizes a thrown catalog lookup failure without calling the broker", async () => {
     mocks.getChatProviderCatalog.mockRejectedValue(new Error("private provider endpoint failed"));
 
     const response = await postAi();
