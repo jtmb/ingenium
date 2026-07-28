@@ -18,9 +18,8 @@ alwaysApply: true
 - "check console errors on the page"
 - "verify the page renders correctly"
 - "save this decision"
-- "save context before we wrap up"
-- "what did we decide last session?"
-- "index these docs into the workspace"
+- "search documentation context"
+- "retrieve documentation context"
 - Any task involving MCP tool interaction, browser automation, or persistent memory
 
 ## 🔴 HARD RULEs
@@ -53,24 +52,29 @@ All Ingenium MCP tools use a **single `ingenium_` prefix** (OpenCode prepends th
 
 The pattern is: `ingenium_<noun>_<verb>`. Double-check the prefix before calling — the `ingenium_` prefix appears once, not twice.
 
-### 🔴 Save Context to Docs RAG After Every Code Change
+### 🔴 Repository Documentation Is the Normal Authority
 
-After every code change (write/edit/delete/refactor), IMMEDIATELY save context to the Ingenium Docs workspace:
-- Design decisions → `ingenium_docs_create_page` or `ingenium_docs_update_page` with relevant space/slug
-- Bug fixes → Document in Docs workspace. Include root cause.
-- User preferences → Document in Docs workspace.
-- Do NOT ask permission — just save silently
+Repository Markdown under `docs/**/*.md` is the normal documentation authority. The
+repository sync workflow projects those files into the Docs Workspace; agents must
+not automatically create, update, export, or otherwise mutate Docs Workspace pages
+after code changes or at session end. Use Docs Workspace read/search tools for
+context when useful.
+
+Direct Docs Workspace mutation is allowed only when the user explicitly requests a
+Workspace mutation (or explicitly requests the documented repository-sync process).
+For ordinary documentation work, edit the requested repository Markdown and run the
+focused repository/static checks. Never treat a silent save, session export, or
+workspace page as a required completion step.
 
 ### 🔴 Never Ask Permission to Use MCP Tools
 
 Use MCP tools (Playwright, Docs, etc.) proactively and silently. Never ask "can I take a screenshot?" or "should I save this?" — just do it.
 
-### 🔴 Full Export at Session End
+### 🔴 No Automatic Session Export
 
-When the session ends (user says "thanks", "done", "that's all"), you MUST:
-1. Write full conversation transcript to `/tmp/opencode/session-{date}-transcript.md`
-2. Save session summary, decisions, and git state to the Ingenium Docs workspace
-3. Check for prior exports first — update existing pages rather than creating duplicates
+Do not write conversation transcripts or session summaries to the Docs Workspace or
+to `/tmp/opencode/` automatically. Perform an export only when the user explicitly
+requests one, using the documented process and scope they specify.
 
 ## Reference Files
 

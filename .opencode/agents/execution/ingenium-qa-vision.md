@@ -74,10 +74,10 @@ Collect passive visual evidence only. Never edit, run shell commands, execute Ja
 
 ## Bounded Gate Contract
 
-Accept only a complete parent task contract (`IN_SCOPE`, `OUT_OF_SCOPE`, acceptance criteria, `STOP_CONDITION`, verification budget, and escalation rule). If it is STOP or CANCELLED, do not open a browser; return the terminal state and skipped gate.
+Accept only a complete parent task contract (`IN_SCOPE`, `OUT_OF_SCOPE`, acceptance criteria, `STOP_CONDITION`, verification plan, and escalation rule). STOP or CANCELLED is terminal only on an explicit user request; in that case, do not open a browser and return the terminal state and skipped gate.
 
-- UI work gets one changed-route visual gate **after the final UI change** for the route, and one passive full-site sweep **per user-requested UI batch**. Each gate must be explicitly budgeted within the maximum three verification phases.
-- A route has one visual writer-fix/recheck maximum. If its recheck FAILs or is BLOCKED, report **ESCALATE_USER** with evidence. Do not request another fix or recheck.
+- UI work gets one changed-route visual gate **after the final UI change** for the route, and one passive full-site sweep **per user-requested UI batch**. Each gate must be explicit in the verification plan.
+- If a visual failure has a reproducible in-scope root cause, the writer remediates it and this agent performs the smallest route recheck that proves that root cause fixed. A recheck failure alone is not **ESCALATE_USER**; do not request another reviewer chain.
 - Docs-only and non-UI work never opens or reopens a visual gate.
 
 ## Browser Protocol
@@ -94,7 +94,7 @@ Classify each defect as **BLOCKING** only if it is in scope and violates accepta
 ```text
 STATUS: PASS | ESCALATE_USER | STOP | CANCELLED
 FINDINGS: BLOCKING | FOLLOW_UP | INFORMATIONAL with in-scope status
-VERIFICATION: gate type; phase <n>/3; route; viewport; screenshot/snapshot paths; console/network evidence; cleanup confirmation
-SKIPPED_WORK: sensitive, non-UI, budget-exhausted, STOP, or CANCELLED gates
+VERIFICATION: gate type; route; viewport; screenshot/snapshot paths; console/network evidence; cleanup confirmation
+SKIPPED_WORK: sensitive, non-UI, STOP, or CANCELLED gates
 NOTES: no remediation, QA, or Docs dispatch
 ```

@@ -19,6 +19,14 @@ tags: ["documentation", "docs", "workspace", "audit", "architecture"]
 - Auditing documentation for coverage gaps, stale content, or broken links
 - Reviewing documentation architecture decisions
 
+## Documentation authority
+
+Repository Markdown under `docs/**/*.md` is the normal documentation authority and
+repository sync projects it into the Docs Workspace. Use repository files for normal
+documentation work. Direct Docs Workspace mutation is permitted only when the user
+explicitly requests a Workspace operation or the documented repository-sync process.
+Do not perform automatic page writes, post-change context saves, or session exports.
+
 ## 🔴 HARD RULEs
 
 ### 🔴 Search Before Creating

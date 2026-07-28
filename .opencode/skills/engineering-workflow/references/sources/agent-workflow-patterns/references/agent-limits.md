@@ -2,6 +2,8 @@
 
 ## 🔴 Canonical Policy: 6 Active / 3 Writers
 
+**Open-roadmap turn rule:** While any roadmap task or `TodoWrite` item remains open, the orchestrator must not emit a normal final/progress response, end a turn as a status update, or require a user reprompt; it must immediately dispatch the next declared phase. Token/turn pressure, partial agent completion, and unverified source changes are never terminal reasons. Only `PASS`, `ESCALATE_USER`, an explicit user-requested `STOP`, or an explicit user-requested `CANCELLED` may end a turn.
+
 | Limit | Value | Scope |
 |-------|-------|-------|
 | **Max active subagents per phase** | 6 | Total subagents spawned simultaneously in a single orchestration phase |
@@ -11,9 +13,11 @@
 
 ## Task Contract Before Every Phase
 
-Every task must declare **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification budget, and escalation rule before execution. The verification budget is finite: maximum **3 verification phases per task**, each individual check may execute at most **2 times**, and maximum **1 writer remediation round**. The second failed execution of an in-scope BLOCKING check is **ESCALATE_USER** with evidence, not a new retry.
+Every task must declare **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification plan, and escalation rule before execution. The plan identifies targeted checks, deployment/acceptance steps, a bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for every remediation. A failed check or retry count alone is never **ESCALATE_USER**.
 
-Every finding is **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. Only an in-scope BLOCKING finding can reopen work. Out-of-scope findings are FOLLOW_UP, reported separately, and never auto-dispatched. STOP and CANCELLED are terminal: preserve evidence and run no new agents, QA, Docs, security review, visual gate, or sweep.
+Every finding is **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**. BLOCKING means an in-scope acceptance failure or immediately exploitable changed code. Only an in-scope BLOCKING finding can reopen work. Out-of-scope findings are FOLLOW_UP, reported separately, and never auto-dispatched. Every remediation names and addresses the current reproducible root cause, then runs the minimum targeted regression. STOP and CANCELLED are terminal only when explicitly requested: preserve resumable state and evidence, and run no new agents, QA, Docs, security review, visual gate, or sweep.
+
+Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and declared deployment autonomously. Compile, test, package, scanner, configuration, and runtime defects with a concrete reproducible root cause are fixed and reverified automatically. Never ask permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work already within scope. Only Plan mode may use interactive decision questions; orchestration never invokes the `question` tool. Return `ESCALATE_USER` in the normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
 
 ## Writer Classification
 
@@ -36,7 +40,9 @@ Every orchestration phase must declare:
 2. **Writer count** — total writers among them (max 3)
 3. **Ownership paths** — each writer's exclusive territory
 4. **Dependencies** — writers that must complete before others start
-5. **Verification owner and budget** — targeted checks, owner, phase number, and remaining executions
+5. **Verification owner and plan** — targeted checks, owner, phase number, and declared execution sequence
+
+Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven; never report completion from source tests alone. Runtime-impacting changes require a named, authorized writer deployment owner with Docker/Compose permission and a deployment wave to rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success, and roadmap markers plus `TodoWrite` are reconciled before the final response.
 
 ## Safe Parallelism Examples
 
@@ -68,20 +74,21 @@ Active: 5, Writers: 3. Docs and Browser count because their permission blocks al
 
 ## Bounded Gates
 
+- QA and security each report scope-classified BLOCKING/FOLLOW_UP findings once per implementation wave. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. After an in-scope reviewer blocker is fixed, run only its minimum targeted regression. Rerun the original reviewer check only when the fix changes that reviewer’s declared boundary; never create a recursive reviewer handoff.
 - QA runs targeted checks once after an implementation wave and never schedules QA/Docs work.
 - Docs runs only for directly affected canonical documentation or an explicit user request; Docs never schedules QA/Docs work.
 - `@ingenium-qa` solely owns a declared full E2E/container suite.
-- UI work gets one changed-route visual gate after its final UI change and one batch sweep per user-requested UI batch. Each route permits one writer fix/recheck; a failed/BLOCKED recheck is ESCALATE_USER.
+- UI work gets one changed-route visual gate after its final UI change and one batch sweep per user-requested UI batch. A reproducible visual defect receives causal remediation and the smallest proving recheck; that recheck alone is not ESCALATE_USER.
 - Docs and non-UI work never open visual gates.
 
 ## Territory Reservation Protocol
 
-Before spawning a writer, list territories, check conflicts, serialize overlaps, and record the ownership in the phase declaration. A new wave does not reset the task's verification or remediation budget.
+Before spawning a writer, list territories, check conflicts, serialize overlaps, and record the ownership in the phase declaration. A new wave does not erase failure evidence: every follow-on remediation must name the current causal defect and its proving regression.
 
 ## 🔴 HARD RULEs
 
 - **Never exceed 6 active subagents in any single phase**
 - **Never exceed 3 concurrent writers per wave**
 - **Never overlap write territories** — serialize writers targeting the same file or directory
-- **Always declare the finite task contract and phase before execution**
+- **Always declare the causal task contract and phase before execution**
 - **Never auto-dispatch FOLLOW_UP or INFORMATIONAL findings**

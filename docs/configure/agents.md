@@ -9,6 +9,17 @@ description: Agent profiles, model configuration, and invocation for the Ingeniu
 
 **12 agents total: 2 primary + 10 subagents (2 hidden).** The orchestrator (`@ingenium-orchestrator`) is the primary coordination agent — it declares finite task contracts, delegates bounded work, and returns terminal outcomes. It never writes code directly. A dedicated **chat agent** (`ingenium-chat`, hidden) handles conversational interactions with read-only access. Ten subagents handle exploration, QA, documentation, engineering, security, web automation, and the system-internal LLM broker. The hidden `ingenium-llm-broker` is reserved for system use (never invoked directly).
 
+Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope. A compile, test, package, scanner, configuration, or runtime defect with a concrete reproducible root cause is remediated and reverified automatically; a failed check alone never escalates. Only Plan mode may use interactive decision questions. Orchestration never invokes the `question` tool. It returns `ESCALATE_USER` in its normal response only for unavailable required external credential/access after the configured path was attempted, unauthorized destructive/irreversible work, a mutually exclusive product decision, a genuinely ambiguous user requirement, or no reproducible root cause after bounded diagnosis.
+
+### Documentation authority
+
+Repository Markdown under `docs/**/*.md` is the normal documentation authority, and
+repository sync projects it into the Docs Workspace. Agents update repository docs
+for normal documentation work. Direct Docs Workspace mutation is allowed only when
+the user explicitly requests a Workspace mutation or the documented repository-sync
+process. Automatic page writes, post-change context saves, and session exports are
+not agent requirements.
+
 ### Orchestrator Agent Model
 
 The primary agents (`ingenium-orchestrator`, `ingenium-chat`) and all subagents have model mappings defined centrally in `opencode.json` under the `"agent"` key:
@@ -73,7 +84,7 @@ flowchart TB
 | **ingenium-software-engineer-fast** | Subagent | Writer tier — routine isolated work, single-package scope | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-software-engineer-premium** | Subagent | Writer tier — critical and complex cross-cutting work (auth, migrations, Docker, multi-service, high-risk) | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `local-models`, `skill-maintenance`, `database-conventions` |
 | **ingenium-qa** | Subagent | Targeted, read-only QA — one declared verification pass with scope-classified findings | `development-conventions`, `devops-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `documentation`, `security-audit`, `database-conventions` |
-| **ingenium-docs** | Subagent | **Writer** — documentation updates (AGENTS.md, SKILL-INDEX.md, docs workspace) | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
+| **ingenium-docs** | Subagent | **Writer** — repository documentation and explicitly requested Docs Workspace updates | `development-conventions`, `engineering-workflow`, `local-models`, `mcp-tooling`, `skill-maintenance`, `documentation` |
 | **ingenium-security-auditor** | Subagent | Bounded current-diff/dependency review; one history scan only for a confirmed secret or critical explicit trigger | `development-conventions`, `devops-conventions`, `engineering-workflow`, `mcp-tooling`, `security-audit`, `local-models`, `database-conventions` |
 | **browser-agent** | Subagent | **Writer** — web automation and self-healing site interaction | `mcp-tooling`, `engineering-workflow` |
 | **ingenium-llm-broker** | Subagent | System-internal LLM broker (`hidden: true`), wildcard-denied with no tool allowances | — |
@@ -105,7 +116,7 @@ This classification is permission-derived rather than based on task type: Docs a
 | # | Phase | Agent | Action |
 |---|-------|-------|--------|
 | 1 | **Plan** | User / Plan mode | Define the task or generate plan |
-| 2 | **Route** | `@ingenium-orchestrator` | Declare IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, verification budget, escalation rule, counts, territories, dependencies, and targeted verification owner |
+| 2 | **Route** | `@ingenium-orchestrator` | Declare IN_SCOPE, OUT_OF_SCOPE, acceptance criteria, STOP_CONDITION, verification plan, escalation rule, counts, territories, dependencies, and targeted verification owner |
 | 3 | **Fast** | `ingenium-software-engineer-fast` | Routine isolated work — single-package scope |
 | 4 | **Premium** | `ingenium-software-engineer-premium` | 🔴 Critical and complex work — auth, migrations, Docker, multi-service, cross-package, high-risk |
 | 5 | **Verify** | `@ingenium-qa` | One targeted QA pass after an implementation wave; sole owner of a declared full E2E/container suite |
@@ -152,11 +163,17 @@ Example implementation phase: **5 active, 3 writers** — Fast owns `dashboard/`
 
 ### Finite Task and Phase Declaration
 
-Before dispatch, every task declares **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification budget, and escalation rule. The budget permits a maximum of **3 verification phases**, each individual check at most **2 executions**, and maximum **1 writer remediation round**. A second failed in-scope BLOCKING check returns **ESCALATE_USER** with evidence and no retry.
+Before dispatch, every task declares **IN_SCOPE**, **OUT_OF_SCOPE**, acceptance criteria, **STOP_CONDITION**, verification plan, and escalation rule. The verification plan names targeted checks, deployment/acceptance steps, the bounded diagnosis limit for an unreproduced failure, and the root-cause/proving-regression link for every remediation. A check failure or retry count alone never returns **ESCALATE_USER**: reproducible in-scope defects are fixed and reverified automatically.
 
-Every orchestration phase also declares active count (max 6), writer count (max 3), exclusive territories (zero overlap), dependencies (serialization order), and the targeted verification owner/checks. Findings are **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**; only in-scope BLOCKING findings reopen work. FOLLOW_UP findings are reported separately and never auto-dispatched.
+Every orchestration phase also declares active count (max 6), writer count (max 3), exclusive territories (zero overlap), dependencies (serialization order), and the targeted verification owner/checks. Findings are **BLOCKING**, **FOLLOW_UP**, or **INFORMATIONAL**; a finding is BLOCKING only when it fails acceptance criteria in user scope or is immediately exploitable changed code. Only in-scope BLOCKING findings reopen work. FOLLOW_UP findings are reported separately and never auto-dispatched. Each remediation must name and address the currently failing root cause.
 
-QA runs once after an implementation wave, Docs runs only for directly affected canonical docs or explicit user request, and neither role recursively triggers QA/Docs work. UI gets one changed-route gate after final UI change and one sweep per user-requested UI batch; a route receives one fix/recheck maximum before ESCALATE_USER. Docs/non-UI work never opens visual gates. Security defaults to current-diff/dependency review; history scans are once-only for a confirmed secret or critical explicit trigger. STOP/CANCELLED is terminal: preserve evidence and report skipped work without spawning new agents or gates.
+QA and security each run once after an implementation wave, Docs runs only for directly affected canonical docs or explicit user request, and no reviewer recursively triggers QA/Docs work. After a writer fixes a reviewer-reported in-scope blocker, run the minimum targeted regression; rerun the original reviewer check only when the source change affects that reviewer’s declared boundary. UI gets one changed-route gate after final UI change and one sweep per user-requested UI batch; reproducible visual failures receive causal remediation and their smallest proving recheck. Docs/non-UI work never opens visual gates. Security defaults to current-diff/dependency review; history scans are once-only for a confirmed secret or critical explicit trigger. Continue declared source fix → targeted test → deploy → acceptance steps automatically. STOP/CANCELLED is terminal only when explicitly requested: preserve resumable state, evidence, and skipped work without spawning new agents or gates; never reinterpret a remediation request as terminal.
+
+### 🔴 Autonomous Roadmap Completion Contract
+
+Roadmap execution continues autonomously until every scoped roadmap task has evidence-backed completion or one of the five narrow escalation conditions is proven. Never report completion from source tests alone. Runtime-impacting changes require a deployment owner and deployment wave; the owner must rebuild and restart the current merged source, then health-check actual routes. Visual/UI gates and full acceptance are mandatory before terminal success. Before the final response, reconcile roadmap markers and `TodoWrite` with evidence-backed state.
+
+QA and security may report scope-classified BLOCKING/FOLLOW_UP findings once per their declared bounded phase. They have no task-delegation authority, cannot spawn the other, and cannot reopen a closed task. The orchestrator remediates a reproducible in-scope blocker and runs its minimum targeted regression; it does not create another reviewer chain unless the changed review boundary requires the original declared check.
 
 ### Restart Required for New Agent Profiles
 

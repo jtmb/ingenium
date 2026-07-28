@@ -17,6 +17,19 @@ description: Canonical contract for the Documentation Workspace API — routes, 
 
 This reference defines the canonical contract for the Docs Workspace API, models, and behavior rules. It is the single source of truth for all callers (Dashboard, MCP tools, third-party clients).
 
+## Documentation authority and agent policy
+
+Repository Markdown under `docs/**/*.md` is the normal documentation authority.
+Repository sync projects those files into managed Docs Workspace pages and their RAG
+sources. Agents should make ordinary documentation changes in the repository and
+use the sync process when projection is requested.
+
+Direct Docs Workspace mutation is reserved for an explicit user request for a
+Workspace operation, including an explicit request to run repository sync. Agents
+must not silently create, update, export, or delete Workspace content after code
+changes or at session end. The Workspace API remains available to the Dashboard,
+MCP callers, and explicitly authorized workflows.
+
 **Related canonical references** (do not duplicate):
 - [Database Migrations](database-migrations.md) — migration file format and execution rules
 - [docs/* schema definitions](#database-schema) — only copied here for contract completeness
@@ -79,6 +92,7 @@ This reference defines the canonical contract for the Docs Workspace API, models
 | HTTP Status | Code | Meaning |
 |-------------|------|---------|
 | 400 | `BAD_REQUEST` | Missing/ invalid required field |
+| 400 | `MALFORMED_JSON` | The request body could not be parsed as JSON; no submitted content is returned |
 | 400 | `INVALID_AI_REQUEST` | Docs AI request failed validation; see [AI Error Contract](#-ai-error-contract) |
 | 404 | `NOT_FOUND` | Resource does not exist |
 | 409 | `CONFLICT` | Slug/name uniqueness violation OR optimistic concurrency failure |
@@ -86,7 +100,8 @@ This reference defines the canonical contract for the Docs Workspace API, models
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | Attachment MIME type not in allowlist |
 | 500 | `INTERNAL_ERROR` | Unexpected server error; Docs AI returns its stable generic message with no details leaked |
 | 502 | `LLM_BROKER_ERROR` | Docs AI broker failure; no upstream body or diagnostics are returned |
-| 503 | `GLOBAL_PROJECT_UNAVAILABLE` / `LLM_CATALOG_UNAVAILABLE` / `LLM_UNAVAILABLE` | Docs AI global-project or Chat-catalog/default unavailable; see [AI Error Contract](#-ai-error-contract) |
+| 503 | `GLOBAL_PROJECT_UNAVAILABLE` | Docs AI cannot resolve its required global project; see [AI Error Contract](#-ai-error-contract) |
+| 504 | `LLM_BROKER_TIMEOUT` | Docs AI exceeded its bounded broker timeout; no provider details are returned |
 
 ---
 
@@ -381,15 +396,6 @@ These live under `/api/v1/docs/ai` (separate router in `docs-ai.ts`):
 
 Supported actions: `outline`, `continue`, `rewrite`, `summarize`, `fix_grammar`, `tone_professional`, `tone_casual`, `tone_technical`.
 
-Docs AI is globally scoped: the API resolves the one active `is_global=1`
-project on the server. A request body `project` override is rejected rather
-than accepted or used for fallback. Provider/model fields are not part of the
-Docs AI DTO and are ignored if a legacy browser sends them. Docs resolves the
-server-owned global Chat selection, which the authenticated Chat selection
-route validated as an exact current catalog pair before storing it. If that
-selection is absent or stale, Docs uses only a safe server-derived global Chat
-default; it never chooses an arbitrary managed provider.
-
 #### 🔴 AI Error Contract
 
 `POST /docs/ai` returns `{ "error": { "code": string, "message": string } }`
@@ -397,22 +403,28 @@ for every failure. Codes and messages below are stable client contracts.
 
 | HTTP Status | Code | Stable message | Condition |
 |-------------|------|----------------|-----------|
-| 400 | `INVALID_AI_REQUEST` | `Provide a supported action and non-empty documentation content within the allowed size.` | The body is not an object, action/content are invalid, or content/title/selected-text exceeds its bound |
+| 400 | `MALFORMED_JSON` | `Malformed JSON request body` | The HTTP JSON body cannot be parsed; no submitted content is included in the response |
+| 400 | `INVALID_AI_REQUEST` | `Provide a supported action and non-empty content, a title for a blank outline, or selected text for rewrite.` | The body is not an object, the action or field types/limits are invalid, a non-outline action has blank content, a blank outline has neither content nor a title, or rewrite has no non-whitespace selected text |
+| 413 | `DOCS_AI_CONTENT_TOO_LARGE` | `The <action> action accepts documentation content up to 131,072 UTF-8 bytes.` | The supplied document content exceeds 128 KiB UTF-8; the response does not include the submitted document text |
 | 422 | `DOCS_AI_PROJECT_CONFLICT` | `Documentation AI always uses the server-selected global project.` | A request attempted to supply a browser-controlled project authority |
 | 503 | `GLOBAL_PROJECT_UNAVAILABLE` | `Documentation AI requires exactly one active global project. Repair the global project configuration and try again.` | No active global project exists or global-project resolution is ambiguous |
-| 503 | `LLM_CATALOG_UNAVAILABLE` | `The Chat model catalog is temporarily unavailable. Try again later.` | The server cannot load the global Chat catalog |
-| 503 | `LLM_UNAVAILABLE` | `No Chat provider or model is currently available. Open Chat or Settings → Providers, then try again.` | No valid global Chat default/provider-model pair is available |
+| 503 | `LLM_CATALOG_UNAVAILABLE` | `The Chat model catalog is temporarily unavailable. Try again later.` | The global Chat catalog or server-owned selection cannot be read safely |
+| 503 | `LLM_UNAVAILABLE` | `No Chat provider or model is currently available. Open Chat or Settings → Providers, then try again.` | No valid server-owned Chat selection or default is available |
 | 502 | `LLM_BROKER_ERROR` | `The AI service is unavailable. Please try again later.` | The tool-denied OpenCode broker returns or throws an error |
+| 504 | `LLM_BROKER_TIMEOUT` | `The AI service timed out. Please try again later.` | The tool-denied OpenCode broker exceeds Docs AI's server-owned, bounded 60-second timeout policy |
 | 500 | `INTERNAL_ERROR` | `Unable to generate documentation assistance. Please try again later.` | An unexpected route failure occurs after validation |
 
-> 🔴 **Preflight and body safety**: Validation, global-project resolution, and
-> catalog validation complete before the broker is called. The response NEVER
-> includes an upstream provider response, endpoint, API key, thrown Error
-> message, or internal diagnostic. Server logs record only the sanitized failure
-> class. Coverage lives in `services/ingenium-api/tests/docs-ai-security.test.ts`.
-> The OpenCode request always names `ingenium-llm-broker`; its wildcard-deny
-> profile has no tool allowances, and API-owned empty tool selection cannot be
-> replaced by request content or browser input.
+> 🔴 **Preflight and body safety**: Invalid input and oversized content are
+> rejected before AI processing. Error responses are sanitized and do not include
+> submitted document text, upstream responses, or internal diagnostics.
+
+#### Action-aware content validation
+
+- `outline` accepts blank or whitespace-only `content` when `title` is non-blank. A blank outline without a usable title is rejected.
+- `rewrite` may operate on blank page `content`, but requires non-whitespace `selectedText`.
+- `continue`, `summarize`, `fix_grammar`, and all tone actions require non-whitespace `content`.
+- Normal repository documents up to **128 KiB (131,072 UTF-8 bytes)** are accepted as `content`. `selectedText` remains limited to 16,000 characters and `title` to 512 characters. Optional fields must still be strings when supplied.
+- Prompts use bounded document context. Oversized `content` is rejected before AI processing with the sanitized `413 DOCS_AI_CONTENT_TOO_LARGE` response above.
 
 ---
 
@@ -606,7 +618,39 @@ Pages in the Docs Workspace are automatically indexed into the RAG (Retrieval-Au
 
 See `indexPublishedDoc()` in `packages/ingenium-core/lib/tools/rag.ts` and its call sites in `docs.ts`.
 
-For canonical repository docs (`docs/**/*.md`), use `POST /api/v1/rag/ingest` or `ingenium_docs_ingest` — these are indexed with `source_type='file'` and `source_path='docs/relative/path.md'`, NOT as editable Docs Workspace pages.
+### Repository-authoritative Markdown synchronization
+
+`POST /api/v1/docs/repository/sync?project=<project>` is the authenticated,
+page-backed foundation for synchronizing repository Markdown into the Docs
+Workspace. The API receives a complete manifest and does not read repository
+paths itself; the caller supplies regular `docs/**/*.md` file content, SHA-256
+hashes, and file metadata. This keeps filesystem authority outside the API and
+gives each managed document a stable Docs Workspace page plus a RAG source.
+
+Send `{ "manifest": { "files": [...] }, "dryRun": true }` to preview changes.
+Omit `dryRun` or set it to `false` to apply the transaction. Manifest entries
+must use normalized `docs/` paths ending in `.md`, be regular non-symlink files,
+contain matching lowercase SHA-256 hashes, and pass the file-count, per-file,
+total-size, and secret-content gates. The result reports created, updated,
+renamed, restored, unchanged, and archived page operations together with RAG
+source changes. Files omitted from a later complete manifest archive only
+documents already managed by that project; unrelated Docs Workspace pages are
+untouched.
+
+Invalid manifests return `422 INVALID_REPOSITORY_DOCS_MANIFEST`; unexpected
+apply failures return `500 REPOSITORY_DOCS_SYNC_FAILED`. The route is a
+foundation for repository documentation only. It does not establish agent,
+skill, or plugin synchronization.
+
+The `ingenium-init-project --docs-only` CLI scope is the repository-facing
+caller for this route. The default `ingenium-init-project --dry-run` /
+`--apply` workflow combines this Markdown projection with the separate
+repository-resource route for skills, agents, and plugins. The docs route alone
+does not provision a project or synchronize those other resource types.
+
+For the older direct file-source ingestion path, `POST /api/v1/rag/ingest` and
+`ingenium_docs_ingest` remain available; those sources are indexed as
+`source_type='file'` and are not editable Docs Workspace pages.
 
 ### RAG Tools
 
@@ -691,7 +735,7 @@ The Docs link in the navigation sidebar (`Navigation.tsx:230`) is active with no
 
 ## AI Actions and Dictation
 
-When a global Chat provider/model is available, the Docs Workspace supports AI-powered actions via `POST /docs/ai`:
+The Docs Workspace supports AI-powered actions via `POST /docs/ai`:
 
 - **Summarize** — AI summary of current page
 - **Suggest edits** / **Continue** — LLM-powered improvement/continuation
@@ -699,12 +743,6 @@ When a global Chat provider/model is available, the Docs Workspace supports AI-p
 - **Rewrite** / **Fix grammar** — Targeted improvements
 - **Tone adjustments** — professional, casual, technical
 - **Dictation** — Voice-to-text via browser SpeechRecognition API
-
-The browser never sends a provider/model choice to Docs AI. Chat persists a
-user choice only through authenticated `PUT /api/v1/opencode/chat-selection`;
-the server validates the exact pair against the global catalog and stores it in
-the active global project. Docs resolves that server-owned choice, or a safe
-server-derived Chat default when it is absent or stale.
 
 ---
 

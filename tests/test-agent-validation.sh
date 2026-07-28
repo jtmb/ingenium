@@ -7,6 +7,7 @@ CONFIG="$REPO_ROOT/opencode.json"
 EXPECTED_LOGICAL_AGENT_COUNT=12
 MAX_ACTIVE_SUBAGENTS=6
 MAX_CONCURRENT_WRITERS=3
+ROADMAP_FILE="$REPO_ROOT/docs/reference/ROADMAP.md"
 FAILED=0
 
 pass() { printf 'PASS: %s\n' "$1"; }
@@ -544,6 +545,108 @@ validate_orchestrator_bash_permissions() {
   return 1
 }
 
+# The root config intentionally remains permissive for normal agents. The
+# orchestrator must retain its stricter, explicit question-tool denial in both
+# the profile and any agent-specific config projection.
+validate_orchestrator_question_boundary() {
+  local errors=0
+  local -a question_rules=()
+
+  mapfile -t question_rules < <(awk '
+    NR == 1 && $0 != "---" { exit 1 }
+    NR == 1 { in_frontmatter = 1; next }
+    in_frontmatter && $0 == "---" { exit }
+    in_frontmatter && /^  question:[[:space:]]*/ {
+      value = $0
+      sub(/^  question:[[:space:]]*/, "", value)
+      gsub(/[[:space:]]/, "", value)
+      gsub(/["'"'"']/, "", value)
+      print value
+    }
+  ' "$ORCHESTRATOR")
+
+  if [[ "${#question_rules[@]}" -ne 1 || "${question_rules[0]:-}" != "deny" ]]; then
+    fail "orchestrator must define exactly one scalar question: deny permission"
+    errors=1
+  fi
+
+  if ! node - "$ORCHESTRATOR" "$CONFIG" <<'NODE'
+const fs = require("fs");
+const [profilePath, configPath] = process.argv.slice(2);
+const profile = fs.readFileSync(profilePath, "utf8");
+const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+const errors = [];
+const frontmatter = profile.match(/^---\n([\s\S]*?)\n---/);
+
+if (!frontmatter) {
+  errors.push("orchestrator profile has no readable frontmatter");
+} else {
+  const permissionGrants = frontmatter[1].match(/^\s*question:\s*(?:allow|ask)\s*$/gmi) ?? [];
+  if (permissionGrants.length > 0) {
+    errors.push(`orchestrator profile grants question permission: ${permissionGrants.join(", ")}`);
+  }
+}
+
+const projection = config.agent?.["ingenium-orchestrator"];
+if (!projection || typeof projection !== "object") {
+  errors.push("orchestrator is missing from the centralized agent config");
+} else {
+  const projectedQuestionPermissions = [
+    ["agent.question", projection.question],
+    ["agent.permission.question", projection.permission?.question],
+    ["root permission.question", config.permission?.question],
+  ];
+  for (const [label, value] of projectedQuestionPermissions) {
+    if (value !== undefined && value !== "deny") {
+      errors.push(`${label} must be absent or deny, found ${JSON.stringify(value)}`);
+    }
+  }
+}
+
+const body = profile.slice(profile.indexOf("---", 3) + 3);
+for (const line of body.split(/\r?\n/)) {
+  if (/question\s+tool/i.test(line) && !/\b(?:never|must not|does not|do not)\b/i.test(line)) {
+    errors.push(`orchestrator contains a non-denial question-tool instruction: ${line.trim()}`);
+  }
+  if (/ask(?:s)?\s+(?:the\s+)?user\s+(?:for\s+)?permission/i.test(line)
+    && /(?:test|verification|remediation)/i.test(line)
+    && !/\b(?:never|must not|does not|do not)\b/i.test(line)) {
+    errors.push(`orchestrator contains a permission-seeking verification instruction: ${line.trim()}`);
+  }
+}
+
+if (errors.length > 0) {
+  console.error(errors.join("\n"));
+  process.exit(1);
+}
+console.log("PASS: orchestrator and config projections deny the question tool; no permissive instruction remains");
+NODE
+  then
+    errors=1
+  fi
+
+  if [[ "$errors" -eq 0 ]]; then
+    pass "orchestrator has an explicit non-interactive question-tool boundary"
+    return 0
+  fi
+  return 1
+}
+
+validate_reporting_agent_task_denial() {
+  local profile="$1"
+  local label="$2"
+  if awk '
+    /^  task:[[:space:]]*$/ { in_task = 1; next }
+    in_task && /^  [^[:space:]]/ { exit }
+    in_task && /^    "\*"[[:space:]]*:[[:space:]]*"?deny"?[[:space:]]*$/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$profile"; then
+    pass "$label denies task delegation"
+  else
+    fail "$label must deny task delegation to prevent automatic reviewer handoffs"
+  fi
+}
+
 extract_declared_agent_list() {
   local source="$1"
   local heading="$2"
@@ -578,7 +681,12 @@ else
   if validate_orchestrator_bash_permissions; then
     bash_permissions_valid=1
   fi
-  if [[ "$task_delegation_valid" -eq 1 && "$bash_permissions_valid" -eq 1 ]]; then
+  question_boundary_valid=0
+  if validate_orchestrator_question_boundary; then
+    question_boundary_valid=1
+    pass "scenario: orchestrator has no question-tool permission"
+  fi
+  if [[ "$task_delegation_valid" -eq 1 && "$bash_permissions_valid" -eq 1 && "$question_boundary_valid" -eq 1 ]]; then
     pass "orchestrator has delegation permissions with task deny-all pattern"
   fi
 
@@ -729,6 +837,76 @@ check_normalized_policy_pattern() {
     policy_errors=1
   fi
 }
+
+# Orchestration is non-interactive: it remediates reproducible in-scope defects
+# autonomously and returns ESCALATE_USER only for the permitted hard boundaries.
+AUTONOMY_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+  "$REPO_ROOT/AGENTS.md"
+  "$REPO_ROOT/docs/configure/agents.md"
+)
+for policy_source in "${AUTONOMY_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  check_normalized_policy_pattern "$policy_source" "$policy_label" \
+    'Orchestration executes declared scoped tests, standard verification, in-scope source fixes, and any declared deployment autonomously. It never asks the user for permission to test, diagnose, fix, retry, package, scan, configure, run, or deploy work that is already within the declared user scope.' \
+    "autonomous scoped source-fix and deployment policy"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'Only Plan mode may use interactive decision questions\.' \
+    "Plan-mode-only interactive decision policy"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'Orchestration never invokes the `question` tool' \
+    "question-tool prohibition"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'external credential.*access.*(attempted configured path|configured path was attempted)' \
+    "configured credential/access escalation boundary"
+done
+
+# QA and security can report bounded findings, but their permissions and policy
+# prose must not allow them to hand work to one another or revive a closed task.
+QA_PROFILE="$AGENTS_DIR/execution/ingenium-qa.md"
+SECURITY_PROFILE="$AGENTS_DIR/security/ingenium-security-auditor.md"
+validate_reporting_agent_task_denial "$QA_PROFILE" "QA profile"
+validate_reporting_agent_task_denial "$SECURITY_PROFILE" "security profile"
+
+REVIEWER_HANDOFF_POLICY_SOURCES=(
+  "$ORCHESTRATOR"
+  "$REPO_ROOT/AGENTS.md"
+  "$REPO_ROOT/docs/configure/agents.md"
+  "$WORKFLOW_POLICY_SOURCE"
+  "$AGENT_LIMITS_SOURCE"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/finite-task-contract.md"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/source-index.md"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/references/orchestrator-flow.md"
+  "$QA_PROFILE"
+  "$SECURITY_PROFILE"
+)
+for policy_source in "${REVIEWER_HANDOFF_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  if [[ ! -r "$policy_source" ]]; then
+    fail "$policy_label is missing for reviewer-handoff validation"
+    policy_errors=1
+    continue
+  fi
+  stale_handoff="$(grep -Ein \
+    'QA[[:space:]]+and[[:space:]]+security[[:space:]]+(must|will|automatically)[[:space:]]+(spawn|dispatch|trigger|schedule)' \
+    "$policy_source" || true)"
+  if [[ -n "$stale_handoff" ]]; then
+    fail "$policy_label contains unbounded QA/security handoff wording: $stale_handoff"
+    policy_errors=1
+  else
+    pass "$policy_label contains no unbounded QA/security handoff wording"
+  fi
+done
+
+for policy_source in "${AUTONOMY_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'QA.*security.*once.*implementation wave' \
+    "one-pass QA/security reporting policy"
+  check_policy_pattern "$policy_source" "$policy_label" \
+    'minimum targeted regression' \
+    "reviewer-blocker targeted-regression policy"
+done
 
 # These patterns intentionally vary by document format.  That makes this a
 # real cross-source check instead of merely checking that the files exist.
@@ -966,10 +1144,10 @@ else
 fi
 
 # ============================================================
-# 6. Finite-execution policy contract.  These checks intentionally inspect
+# 6. Causal-remediation policy contract. These checks intentionally inspect
 #    canonical profiles and policy references, not archives or historical
-#    examples. They make recursive QA/Docs/security/visual execution a static
-#    regression rather than a runtime surprise.
+#    examples. They make premature escalation and recursive reviewer handoffs
+#    static regressions rather than runtime surprises.
 # ============================================================
 FINITE_TASK_CONTRACT_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/agent-workflow-patterns/references/finite-task-contract.md"
 ORCHESTRATOR_PRIMER_SOURCE="$REPO_ROOT/.opencode/skills/engineering-workflow/references/sources/orchestrator-primer/source-index.md"
@@ -979,7 +1157,7 @@ DOCS_PROFILE="$AGENTS_DIR/execution/ingenium-docs.md"
 VISION_PROFILE="$AGENTS_DIR/execution/ingenium-qa-vision.md"
 SECURITY_PROFILE="$AGENTS_DIR/security/ingenium-security-auditor.md"
 SECURITY_POLICY="$REPO_ROOT/.opencode/skills/security-audit/SKILL.md"
-FINITE_POLICY_SOURCES=(
+CAUSAL_POLICY_SOURCES=(
   "$ORCHESTRATOR"
   "$REPO_ROOT/AGENTS.md"
   "$REPO_ROOT/docs/configure/agents.md"
@@ -990,7 +1168,7 @@ FINITE_POLICY_SOURCES=(
   "$ORCHESTRATOR_FLOW_SOURCE"
 )
 RECURSION_POLICY_SOURCES=(
-  "${FINITE_POLICY_SOURCES[@]}"
+  "${CAUSAL_POLICY_SOURCES[@]}"
   "$QA_PROFILE"
   "$DOCS_PROFILE"
   "$VISION_PROFILE"
@@ -999,7 +1177,7 @@ RECURSION_POLICY_SOURCES=(
   "$SECURITY_POLICY"
 )
 
-finite_policy_errors=0
+causal_policy_errors=0
 
 require_contract_pattern() {
   local source="$1"
@@ -1010,14 +1188,79 @@ require_contract_pattern() {
     pass "$label $description"
   else
     fail "$label is missing $description"
-    finite_policy_errors=1
+    causal_policy_errors=1
   fi
 }
 
-for policy_source in "${FINITE_POLICY_SOURCES[@]}"; do
+# Roadmap terminal-state guard: an active append-only start marker means work is
+# still open. The roadmap may describe per-task PASS criteria, but it must not
+# claim final completion until every active marker is closed and reconciled.
+validate_roadmap_terminal_state() {
+  local active_ids
+  active_ids="$(awk '
+    /<!-- \(work-started\)/ { active[$3] = 1 }
+    /<!-- \(work-complete\)/ { delete active[$3] }
+    END { for (id in active) print id }
+  ' "$ROADMAP_FILE" | sort)"
+
+  if [[ -n "$active_ids" ]]; then
+    if grep -Eqi 'final[[:space:]-]+completion|terminal[[:space:]-]+PASS' "$ROADMAP_FILE" && \
+       ! grep -Eqi 'no final completion may be' "$ROADMAP_FILE"; then
+      fail "ROADMAP.md claims final completion while active work markers remain"
+      causal_policy_errors=1
+    else
+      pass "ROADMAP.md blocks final PASS/completion while active markers remain"
+    fi
+    require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'TodoWrite/roadmap reconciliation' 'active-marker reconciliation requirement'
+  else
+    pass "ROADMAP.md has no unreconciled active work markers"
+  fi
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'STOP.*CANCELLED.*only on an explicit user request' 'explicit-user-request STOP/CANCELLED task contracts'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'named authorized writer deployment owner.*Docker/Compose permission' 'runtime deployment owner requirement'
+  require_contract_pattern "$ROADMAP_FILE" "ROADMAP.md" 'active markers block terminal completion[[:space:]]+only;[[:space:]]+they do not block autonomous resumption' 'active-marker status semantics'
+}
+
+# Require a task-level deployment-owner field. Runtime tasks name an
+# authorized Docker/Compose writer; documentation-only tasks explicitly use
+# N/A rather than inheriting a document-wide statement.
+validate_roadmap_task_deployment_owners() {
+  local task=""
+  local block=""
+  local missing=0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" =~ ^####[[:space:]] ]]; then
+      if [[ -n "$task" && "$block" != *"- **Deployment owner:**"* ]]; then
+        fail "ROADMAP.md task $task is missing a task-level Deployment owner"
+        causal_policy_errors=1
+        missing=1
+      fi
+      task="$line"
+      block="$line"
+    else
+      block+=$'\n'$line
+    fi
+  done < "$ROADMAP_FILE"
+  if [[ -n "$task" && "$block" != *"- **Deployment owner:**"* ]]; then
+    fail "ROADMAP.md task $task is missing a task-level Deployment owner"
+    causal_policy_errors=1
+    missing=1
+  fi
+  if [[ "$missing" -eq 0 ]]; then
+    pass "ROADMAP.md declares a task-level Deployment owner for every task"
+  fi
+}
+
+if [[ ! -r "$ROADMAP_FILE" ]]; then
+  fail "ROADMAP.md is missing or unreadable"
+else
+  validate_roadmap_terminal_state
+  validate_roadmap_task_deployment_owners
+fi
+
+for policy_source in "${CAUSAL_POLICY_SOURCES[@]}"; do
   if [[ ! -r "$policy_source" ]]; then
-    fail "finite policy source is missing or unreadable: $policy_source"
-    finite_policy_errors=1
+    fail "causal policy source is missing or unreadable: $policy_source"
+    causal_policy_errors=1
     continue
   fi
   policy_label="${policy_source#"$REPO_ROOT"/}"
@@ -1025,16 +1268,76 @@ for policy_source in "${FINITE_POLICY_SOURCES[@]}"; do
   require_contract_pattern "$policy_source" "$policy_label" 'OUT_OF_SCOPE' 'OUT_OF_SCOPE declaration'
   require_contract_pattern "$policy_source" "$policy_label" 'acceptance criteria' 'acceptance criteria declaration'
   require_contract_pattern "$policy_source" "$policy_label" 'STOP_CONDITION' 'STOP_CONDITION declaration'
-  require_contract_pattern "$policy_source" "$policy_label" 'verification budget' 'verification budget declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'verification plan' 'verification plan declaration'
   require_contract_pattern "$policy_source" "$policy_label" 'escalation rule' 'escalation rule declaration'
-  require_contract_pattern "$policy_source" "$policy_label" 'maximum( of)? .*3.*verification phases' 'maximum three verification phases'
-  require_contract_pattern "$policy_source" "$policy_label" 'each individual check.*(at most|may execute).*2' 'two executions per individual check'
-  require_contract_pattern "$policy_source" "$policy_label" 'maximum( of)? .*1.*writer remediation' 'one writer remediation round'
-  require_contract_pattern "$policy_source" "$policy_label" 'second failed.*ESCALATE_USER' 'second-failure escalation'
+  require_contract_pattern "$policy_source" "$policy_label" 'bounded diagnosis' 'bounded diagnosis declaration'
+  require_contract_pattern "$policy_source" "$policy_label" 'external credential.*destructive.*mutually exclusive product.*genuinely ambiguous.*reproducible root cause' 'five-condition escalation taxonomy'
+  require_contract_pattern "$policy_source" "$policy_label" 'root.?cause.*(regression|remediation)' 'causal remediation/proving-regression link'
   require_contract_pattern "$policy_source" "$policy_label" 'BLOCKING' 'BLOCKING finding classification'
   require_contract_pattern "$policy_source" "$policy_label" 'FOLLOW_UP' 'FOLLOW_UP finding classification'
   require_contract_pattern "$policy_source" "$policy_label" 'INFORMATIONAL' 'INFORMATIONAL finding classification'
   require_contract_pattern "$policy_source" "$policy_label" 'STOP.*CANCELLED.*terminal' 'terminal STOP/CANCELLED handling'
+done
+
+# Autonomous-completion contract regressions: policy text must retain the
+# roadmap state machine and all release gates, not merely source-test guidance.
+for policy_source in "${CAUSAL_POLICY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'roadmap execution continues autonomously.*every scoped roadmap task.*evidence-backed completion' \
+    'autonomous evidence-backed roadmap completion'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'never report completion from source tests alone' \
+    'source-tests-alone completion prohibition'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'runtime-impacting changes require.*deployment owner.*deployment (owner|wave)' \
+    'deployment owner/wave requirement'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'rebuild.*restart.*current merged source.*health-check.*actual routes' \
+    'current-source deployment and route health-check loop'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'visual/ui gates and full acceptance are mandatory' \
+    'visual/UI and full-acceptance terminal gates'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'roadmap markers.*TodoWrite' \
+    'roadmap-marker/TodoWrite reconciliation'
+done
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'QA and security each run once per declared review boundary' \
+  'single QA/security boundary'
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'writer fix triggers only its targeted proving recheck' \
+  'targeted-only writer recheck'
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'STOP.*CANCELLED.*only when explicitly requested.*remediation request' \
+  'explicit-request STOP/CANCELLED boundary'
+require_contract_pattern "$ORCHESTRATOR" "orchestrator" \
+  'named.*authorized.*deployment owner.*writer.*Docker/Compose' \
+  'named authorized writer Docker/Compose deployment owner'
+
+# Open-roadmap turn boundary: open roadmap/TodoWrite work requires immediate
+# continuation, and context pressure or partial/unverified work is not terminal.
+OPEN_ROADMAP_TURN_SOURCES=(
+  "$ORCHESTRATOR"
+  "$REPO_ROOT/AGENTS.md"
+  "$REPO_ROOT/.opencode/skills/engineering-workflow/SKILL.md"
+  "$WORKFLOW_POLICY_SOURCE"
+  "$AGENT_LIMITS_SOURCE"
+  "$FINITE_TASK_CONTRACT_SOURCE"
+  "$ORCHESTRATOR_PRIMER_SOURCE"
+  "$ORCHESTRATOR_FLOW_SOURCE"
+)
+for policy_source in "${OPEN_ROADMAP_TURN_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'roadmap task or.*TodoWrite.*item remains open.*must not emit a normal final/progress response.*end a turn as a status update.*require a user reprompt.*immediately dispatch the next declared phase' \
+    'open-roadmap immediate-dispatch turn rule'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'token/turn pressure.*partial agent completion.*unverified source changes are never terminal reasons' \
+    'non-terminal pressure/partial/unverified conditions'
+  require_contract_pattern "$policy_source" "$policy_label" \
+    'Only .*PASS.*ESCALATE_USER.*explicit user-requested.*STOP.*explicit user-requested.*CANCELLED.*end a turn' \
+    'exclusive terminal response states'
 done
 
 require_contract_pattern "$ORCHESTRATOR" "orchestrator" 'Only an .*in-scope.*BLOCKING.*reopen' 'in-scope blocker-only reopening'
@@ -1046,7 +1349,7 @@ require_contract_pattern "$DOCS_PROFILE" "Docs profile" 'directly affected canon
 require_contract_pattern "$DOCS_PROFILE" "Docs profile" 'never dispatch or request QA, Docs' 'no recursive Docs dispatch'
 require_contract_pattern "$VISION_PROFILE" "Vision profile" 'one changed-route visual gate.*final UI change' 'post-final-change route gate'
 require_contract_pattern "$VISION_PROFILE" "Vision profile" 'one passive full-site sweep.*user-requested UI batch' 'one batch sweep'
-require_contract_pattern "$VISION_PROFILE" "Vision profile" 'one visual writer-fix/recheck maximum' 'single visual recheck'
+require_contract_pattern "$VISION_PROFILE" "Vision profile" 'smallest route recheck.*root cause fixed' 'causal visual recheck'
 require_contract_pattern "$VISION_PROFILE" "Vision profile" 'Docs-only and non-UI work never opens or reopens' 'non-UI visual-gate prohibition'
 require_contract_pattern "$SECURITY_PROFILE" "security profile" 'current diff.*relevant dependency' 'current-diff/dependency default'
 require_contract_pattern "$SECURITY_PROFILE" "security profile" 'history scan may run.*once' 'one-time history scan'
@@ -1054,10 +1357,79 @@ require_contract_pattern "$SECURITY_PROFILE" "security profile" 'confirmed secre
 require_contract_pattern "$SECURITY_PROFILE" "security profile" 'outside scope.*FOLLOW_UP.*immediately exploitable' 'out-of-scope security classification'
 require_contract_pattern "$SECURITY_POLICY" "security policy" 'history scan may run.*once' 'one-time history scan'
 
-# Reject phrasing that previously made downstream work automatic or unbounded.
-# Keep this narrowly scoped to policy language; historical/security terminology
-# outside these canonical sources is not an execution instruction.
-STALE_RECURSION_PATTERNS=(
+# Documentation authority is repository-first. Direct Docs Workspace mutation is
+# an explicit-user-request path, never an automatic post-change/session action.
+DOC_AUTHORITY_SOURCES=(
+  "$REPO_ROOT/AGENTS.md"
+  "$REPO_ROOT/.opencode/skills/mcp-tooling/SKILL.md"
+  "$REPO_ROOT/.opencode/skills/documentation/SKILL.md"
+  "$DOCS_PROFILE"
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-fast.md"
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"
+  "$REPO_ROOT/docs/configure/agents.md"
+  "$REPO_ROOT/docs/reference/docs-workspace.md"
+)
+for policy_source in "${DOC_AUTHORITY_SOURCES[@]}"; do
+  policy_label="${policy_source#"$REPO_ROOT"/}"
+  require_contract_pattern "$policy_source" "$policy_label" 'normal documentation authority' 'repository-first documentation authority'
+  require_contract_pattern "$policy_source" "$policy_label" 'explicit(ly)? (user )?request' 'explicit-request Workspace boundary'
+done
+
+if grep -Eqi 'save context to the Ingenium Docs workspace|Full Export at Session End|MUST:.*session summary|Do NOT ask permission.*save' "$REPO_ROOT/.opencode/skills/mcp-tooling/SKILL.md"; then
+  fail "mcp-tooling retains an automatic Docs Workspace write/session-export mandate"
+  causal_policy_errors=1
+else
+  pass "mcp-tooling has no automatic Docs Workspace write/session-export mandate"
+fi
+
+for engineer_profile in \
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-fast.md" \
+  "$REPO_ROOT/.opencode/agents/execution/ingenium-software-engineer-premium.md"; do
+  if grep -Eq '^  ingenium_docs_(create|update|delete|restore|move|save_draft|import_pages|add_tag|remove_tag|create_comment|resolve_comment|delete_comment|create_space):' "$engineer_profile"; then
+    fail "$(basename "$engineer_profile") grants unnecessary direct Docs Workspace mutation"
+    causal_policy_errors=1
+  else
+    pass "$(basename "$engineer_profile") denies direct Docs Workspace mutation by default"
+  fi
+done
+
+# Scenario regressions: ordinary in-scope failures must remain actionable, while
+# the five real decision/access boundaries remain the only normal escalation.
+require_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" \
+  'compile, test, package, scanner, configuration, or runtime defect.*concrete reproducible root cause' \
+  'recognizes scanner rejection as autonomous remediation work'
+require_contract_pattern "$ORCHESTRATOR" "scenario: scanner rejection auto-fix" \
+  'source fix.*targeted test.*deploy.*acceptance' \
+  'continues the planned feature pipeline after a source fix'
+require_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
+  'After a writer fixes an in-scope reviewer blocker.*minimum targeted regression' \
+  'runs only the proving regression'
+require_contract_pattern "$ORCHESTRATOR" "scenario: reviewer blocker fixed once" \
+  'Do not rerun QA or security unless.*review boundary' \
+  'prevents a second reviewer chain'
+require_contract_pattern "$ORCHESTRATOR" "scenario: unavailable external credential" \
+  'required external credential or access.*attempted configured path' \
+  'is a permitted ESCALATE_USER boundary'
+require_contract_pattern "$ORCHESTRATOR" "scenario: permitted escalation taxonomy" \
+  'destructive or irreversible.*authorization' \
+  'covers unauthorized destructive work'
+require_contract_pattern "$ORCHESTRATOR" "scenario: permitted escalation taxonomy" \
+  'mutually exclusive product decision' \
+  'covers product decisions'
+require_contract_pattern "$ORCHESTRATOR" "scenario: permitted escalation taxonomy" \
+  'genuinely ambiguous' \
+  'covers genuine ambiguity'
+require_contract_pattern "$ORCHESTRATOR" "scenario: permitted escalation taxonomy" \
+  'bounded diagnosis.*reproducible root cause' \
+  'covers unreproduced causes after diagnosis'
+require_contract_pattern "$SECURITY_PROFILE" "scenario: unrelated security finding" \
+  'outside scope.*FOLLOW_UP.*immediately exploitable' \
+  'is classified FOLLOW_UP rather than blocking release'
+
+# Reject both recursive reviewer instructions and the old retry-count terminal
+# rule. Keep this narrowly scoped to policy language; historical/security
+# terminology outside these canonical sources is not an execution instruction.
+STALE_POLICY_PATTERNS=(
   'after[[:space:]]+every[[:space:]]+(subagent[[:space:]]+)?(task|change)'
   'mandatory[[:space:]]+after[[:space:]]+every[[:space:]]+change'
   'all[[:space:]]+sub-agent[[:space:]]+outputs[[:space:]]+must[[:space:]]+be[[:space:]]+audited'
@@ -1066,20 +1438,27 @@ STALE_RECURSION_PATTERNS=(
   'before[[:space:]]+final[[:space:]]+completion[[:space:]]+or[[:space:]]+commit.*full-site'
   'automatically[[:space:]]+escalate.*git[[:space:]-]*history'
   'automatically[[:space:]]+scan[[:space:]]+git[[:space:]-]*history'
+  'maximum[[:space:]]+(of[[:space:]]+)?3[[:space:]]+verification[[:space:]]+phases'
+  'each[[:space:]]+individual[[:space:]]+check.*(at[[:space:]]+most|may[[:space:]]+execute).*2'
+  'one[[:space:]]+writer[[:space:]]+remediation[[:space:]]+round'
+  'second[[:space:]]+failed.*is[[:space:]]+terminal'
+  'second[[:space:]]+failed.*return.*ESCALATE_USER'
+  'if[[:space:]]+the[[:space:]]+recheck.*ESCALATE_USER'
+  'STOP[[:space:]]+and[[:space:]]+CANCELLED[[:space:]]+are[[:space:]]+terminal:'
 )
 for policy_source in "${RECURSION_POLICY_SOURCES[@]}"; do
   [[ -r "$policy_source" ]] || continue
-  for stale_pattern in "${STALE_RECURSION_PATTERNS[@]}"; do
+  for stale_pattern in "${STALE_POLICY_PATTERNS[@]}"; do
     stale_match="$(grep -Ein "$stale_pattern" "$policy_source" || true)"
     if [[ -n "$stale_match" ]]; then
-      fail "$(basename "$policy_source") contains unbounded recursive policy text: $stale_match"
-      finite_policy_errors=1
+      fail "$(basename "$policy_source") contains stale recursive or premature-escalation policy text: $stale_match"
+      causal_policy_errors=1
     fi
   done
 done
 
-if [[ "$finite_policy_errors" -eq 0 ]]; then
-  pass "finite task contracts, bounded gates, cancellation, and non-recursive policy invariants hold"
+if [[ "$causal_policy_errors" -eq 0 ]]; then
+  pass "causal task contracts, bounded diagnosis, cancellation, and non-recursive policy invariants hold"
 fi
 
 if [[ "$FAILED" -ne 0 ]]; then exit 1; fi

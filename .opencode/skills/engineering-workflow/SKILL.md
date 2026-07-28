@@ -21,6 +21,10 @@ tags: ["engineering", "workflow", "agents", "debugging", "orchestrator", "loggin
 
 ## 🔴 HARD RULEs
 
+### 🔴 Open-Roadmap Turn Rule
+
+While any roadmap task or `TodoWrite` item remains open, the orchestrator must not emit a normal final/progress response, end a turn as a status update, or require a user reprompt. It must immediately dispatch the next declared phase. Token/turn pressure, partial agent completion, and unverified source changes are never terminal reasons. Only `PASS`, `ESCALATE_USER`, an explicit user-requested `STOP`, or an explicit user-requested `CANCELLED` may end a turn.
+
 ### 🔴 Self-Verify Everything Before Delivery
 
 Every agent task must self-verify: run typechecks, tests, lints before returning results. Never ask the user to verify — do it yourself. No simulated testing.
