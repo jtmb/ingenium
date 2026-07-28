@@ -209,6 +209,7 @@ function SortableCard({
       >
         {bulkMode && (
           <input type="checkbox" checked={isSelected ?? false}
+            aria-label={`Select task ${task.title}`}
             onClick={(e) => e.stopPropagation()}
             onChange={() => onToggleSelect?.(task.id)}
             className="absolute top-1 left-1 rounded" />
@@ -245,6 +246,7 @@ function SortableCard({
     >
       {bulkMode && (
         <input type="checkbox" checked={isSelected ?? false}
+          aria-label={`Select task ${task.title}`}
           onClick={(e) => e.stopPropagation()}
           onChange={() => onToggleSelect?.(task.id)}
           className="absolute top-2 left-2 rounded z-10" />
@@ -699,7 +701,11 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
       {/* Toolbar */}
       <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
+          <label className="sr-only" htmlFor="tasks-swimlane">
+            Group tasks by
+          </label>
           <select
+            id="tasks-swimlane"
             value={swimlane}
             onChange={(e) => setSwimlane(e.target.value as SwimlaneMode)}
             className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-3 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer"
@@ -737,14 +743,17 @@ export default function BoardView({ project, tasks, onTasksChange }: BoardViewPr
       {bulkMode && selectedIds.size > 0 && (
         <div className="flex items-center gap-3 bg-[var(--color-surface)] border border-blue-200 rounded p-3 shadow-lg sticky bottom-0 z-10 flex-wrap">
           <span className="text-sm font-medium text-[var(--color-text-primary)]">{selectedIds.size} selected</span>
-          <select value={bulkColumn} onChange={(e) => setBulkColumn(e.target.value)}
+          <label className="sr-only" htmlFor="tasks-bulk-column">Move selected tasks to status</label>
+          <select id="tasks-bulk-column" value={bulkColumn} onChange={(e) => setBulkColumn(e.target.value)}
             className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="">Move to...</option>
             {columns.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
           </select>
-          <input value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}
+          <label className="sr-only" htmlFor="tasks-bulk-assignee">Assign selected tasks to</label>
+          <input id="tasks-bulk-assignee" value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}
             placeholder="Assign to..." className="border border-[var(--color-border)] rounded px-2 py-1 text-sm w-32" />
-          <select value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}
+          <label className="sr-only" htmlFor="tasks-bulk-priority">Set selected task priority</label>
+          <select id="tasks-bulk-priority" value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}
             className="border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="">Set Priority...</option>
             {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}

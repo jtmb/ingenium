@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useId } from "react";
 import { api, Task, BoardColumn } from "../../../lib/api";
 import Overlay from "../../components/Overlay";
 
@@ -38,6 +38,17 @@ export default function TaskCreateModal({
   onClose,
   onCreated,
 }: TaskCreateModalProps) {
+  const formId = useId();
+  const fieldIds = {
+    title: `${formId}-title`,
+    status: `${formId}-status`,
+    assignee: `${formId}-assignee`,
+    priority: `${formId}-priority`,
+    dueDate: `${formId}-due-date`,
+    issueType: `${formId}-issue-type`,
+    estimate: `${formId}-estimate`,
+    description: `${formId}-description`,
+  };
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [status, setStatus] = useState("todo");
@@ -160,10 +171,11 @@ export default function TaskCreateModal({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
           {/* Title (required) */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label htmlFor={fieldIds.title} className="block text-xs font-medium text-gray-500 mb-1">
               Title *
             </label>
             <input
+              id={fieldIds.title}
               value={title}
               onChange={(e) => {
                 setTitle(e.target.value);
@@ -180,10 +192,11 @@ export default function TaskCreateModal({
 
           {/* Status */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label htmlFor={fieldIds.status} className="block text-xs font-medium text-gray-500 mb-1">
               Status
             </label>
             <select
+              id={fieldIds.status}
               value={status}
               onChange={(e) => setStatus(e.target.value)}
               className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]"
@@ -198,10 +211,11 @@ export default function TaskCreateModal({
 
           {/* Assignee */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label htmlFor={fieldIds.assignee} className="block text-xs font-medium text-gray-500 mb-1">
               Assignee
             </label>
             <input
+              id={fieldIds.assignee}
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
               placeholder="Unassigned"
@@ -211,10 +225,11 @@ export default function TaskCreateModal({
 
           {/* Priority */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label htmlFor={fieldIds.priority} className="block text-xs font-medium text-gray-500 mb-1">
               Priority
             </label>
             <select
+              id={fieldIds.priority}
               value={priority}
               onChange={(e) => setPriority(e.target.value)}
               className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]"
@@ -229,10 +244,11 @@ export default function TaskCreateModal({
 
           {/* Due Date */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label htmlFor={fieldIds.dueDate} className="block text-xs font-medium text-gray-500 mb-1">
               Due Date
             </label>
             <input
+              id={fieldIds.dueDate}
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
@@ -242,10 +258,11 @@ export default function TaskCreateModal({
 
           {/* Issue Type */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label htmlFor={fieldIds.issueType} className="block text-xs font-medium text-gray-500 mb-1">
               Issue Type
             </label>
             <select
+              id={fieldIds.issueType}
               value={issueType}
               onChange={(e) => setIssueType(e.target.value)}
               className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]"
@@ -259,10 +276,11 @@ export default function TaskCreateModal({
 
           {/* Estimate */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label htmlFor={fieldIds.estimate} className="block text-xs font-medium text-gray-500 mb-1">
               Estimate (minutes)
             </label>
             <input
+              id={fieldIds.estimate}
               type="number"
               min="0"
               value={estimate}
@@ -275,10 +293,11 @@ export default function TaskCreateModal({
 
         {/* Description */}
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label htmlFor={fieldIds.description} className="block text-xs font-medium text-gray-500 mb-1">
             Description
           </label>
           <textarea
+            id={fieldIds.description}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Task description..."

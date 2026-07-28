@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useId } from "react";
 import { api, Task, TaskComment, TaskActivity, TaskLink, Agent, BoardConfig, CustomFieldDef } from "../../../lib/api";
 import Overlay from "../../components/Overlay";
 import MarkdownViewer from "../../components/MarkdownViewer";
@@ -130,6 +130,23 @@ function evaluateFormula(formula: string, values: Record<string, any>): string {
   return "—";
 }
 
+/** Convert arbitrary display values and React useId output into safe HTML-id segments. */
+function safeIdSegment(value: string, fallback = "field"): string {
+  const normalized = value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || fallback;
+}
+
+function safeReactIdSegment(value: string): string {
+  return Array.from(value)
+    .map((character) => character.codePointAt(0)!.toString(36))
+    .join("-");
+}
+
 // ── TaskDetail ─────────────────────────────────────────────────────────────
 
 /**
@@ -144,6 +161,21 @@ function evaluateFormula(formula: string, values: Record<string, any>): string {
  * at the cursor using computed pixel offsets from the textarea.
  */
 export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTaskClick }: TaskDetailProps) {
+  const formId = `task-detail-${safeReactIdSegment(useId())}`;
+  const fieldIds = {
+    title: `${formId}-title`,
+    status: `${formId}-status`,
+    assignee: `${formId}-assignee`,
+    priority: `${formId}-priority`,
+    dueDate: `${formId}-due-date`,
+    issueType: `${formId}-issue-type`,
+    estimate: `${formId}-estimate`,
+    spent: `${formId}-spent`,
+    remaining: `${formId}-remaining`,
+    description: `${formId}-description`,
+    dependencyType: `${formId}-dependency-type`,
+    dependencySearch: `${formId}-dependency-search`,
+  };
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [columnId, setColumnId] = useState(task.column_id);
@@ -505,38 +537,38 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
           {/* Editable fields grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Title</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)}
+              <label htmlFor={fieldIds.title} className="block text-xs font-medium text-gray-500 mb-1">Title</label>
+              <input id={fieldIds.title} value={title} onChange={(e) => setTitle(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
-              <select value={columnId} onChange={(e) => setColumnId(e.target.value)}
+              <label htmlFor={fieldIds.status} className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+              <select id={fieldIds.status} value={columnId} onChange={(e) => setColumnId(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 {COLUMN_OPTIONS.map((c) => (<option key={c.id} value={c.id}>{c.label}</option>))}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Assignee</label>
-              <input value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}
+              <label htmlFor={fieldIds.assignee} className="block text-xs font-medium text-gray-500 mb-1">Assignee</label>
+              <input id={fieldIds.assignee} value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" placeholder="Unassigned" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Priority</label>
-              <select value={priority} onChange={(e) => setPriority(e.target.value)}
+              <label htmlFor={fieldIds.priority} className="block text-xs font-medium text-gray-500 mb-1">Priority</label>
+              <select id={fieldIds.priority} value={priority} onChange={(e) => setPriority(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 <option value="">—</option>
                 {PRIORITY_OPTIONS.map((p) => (<option key={p.id} value={p.id}>{p.label}</option>))}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Due Date</label>
-              <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
+              <label htmlFor={fieldIds.dueDate} className="block text-xs font-medium text-gray-500 mb-1">Due Date</label>
+              <input id={fieldIds.dueDate} type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Issue Type</label>
-              <select value={issueType} onChange={(e) => setIssueType(e.target.value)}
+              <label htmlFor={fieldIds.issueType} className="block text-xs font-medium text-gray-500 mb-1">Issue Type</label>
+              <select id={fieldIds.issueType} value={issueType} onChange={(e) => setIssueType(e.target.value)}
                 className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 <option value="epic">Epic</option>
                 <option value="story">Story</option>
@@ -548,7 +580,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
 
           {/* Time tracking */}
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Time Tracking (minutes)</label>
+            <h3 className="block text-xs font-medium text-gray-500 mb-1">Time Tracking (minutes)</h3>
             <div className="flex gap-4 items-start">
               <TimePieChart
                 spent={spentMin ? Number(spentMin) : 0}
@@ -557,18 +589,18 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
               />
               <div className="flex-1 grid grid-cols-3 gap-2">
                 <div>
-                  <label className="block text-xs text-gray-400 mb-0.5">Estimate</label>
-                  <input type="number" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)}
+                  <label htmlFor={fieldIds.estimate} className="block text-xs text-gray-400 mb-0.5">Estimate</label>
+                  <input id={fieldIds.estimate} type="number" value={estimateMin} onChange={(e) => setEstimateMin(e.target.value)}
                     className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-sm" placeholder="min" min="0" />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-0.5">Spent</label>
-                  <input type="number" value={spentMin} onChange={(e) => setSpentMin(e.target.value)}
+                  <label htmlFor={fieldIds.spent} className="block text-xs text-gray-400 mb-0.5">Spent</label>
+                  <input id={fieldIds.spent} type="number" value={spentMin} onChange={(e) => setSpentMin(e.target.value)}
                     className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-sm" placeholder="min" min="0" />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-400 mb-0.5">Remaining</label>
-                  <input type="number" value={remainingMin} onChange={(e) => setRemainingMin(e.target.value)}
+                  <label htmlFor={fieldIds.remaining} className="block text-xs text-gray-400 mb-0.5">Remaining</label>
+                  <input id={fieldIds.remaining} type="number" value={remainingMin} onChange={(e) => setRemainingMin(e.target.value)}
                     className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-sm" placeholder="min" min="0" />
                 </div>
               </div>
@@ -578,102 +610,93 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
           {/* Custom fields */}
           {customFieldDefs.length > 0 && (
             <div>
-              <label className="block text-xs font-medium text-gray-500 mb-2">Custom Fields</label>
+              <h3 className="block text-xs font-medium text-gray-500 mb-2">Custom Fields</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {customFieldDefs.map((def) => {
+                {customFieldDefs.map((def, fieldIndex) => {
+                  const customFieldId = `${formId}-custom-field-${fieldIndex}-${safeIdSegment(def.name)}`;
+                  const customFieldLabelId = `${customFieldId}-label`;
                   if (def.formula) {
                     const computed = evaluateFormula(def.formula, customFields);
                     return (
-                      <div key={def.name}>
-                        <label className="block text-xs text-gray-400 mb-0.5">{def.name}</label>
-                        <div className="text-sm text-gray-600 border border-[var(--color-border-muted)] rounded px-2 py-1.5 bg-gray-50">{computed}</div>
+                      <div key={`${def.name}-${fieldIndex}`}>
+                        <span id={customFieldLabelId} className="block text-xs text-gray-400 mb-0.5">{def.name}</span>
+                        <output aria-labelledby={customFieldLabelId} className="block text-sm text-gray-600 border border-[var(--color-border-muted)] rounded px-2 py-1.5 bg-gray-50">{computed}</output>
                       </div>
                     );
                   }
 
                   const val = customFields[def.name] ?? "";
+                  if (def.type === "multi_select" || def.type === "checkboxes" || def.type === "radio") {
+                    const inputType = def.type === "radio" ? "radio" : "checkbox";
+                    return (
+                      <fieldset key={`${def.name}-${fieldIndex}`} className="min-w-0">
+                        <legend id={customFieldLabelId} className="block text-xs text-gray-400 mb-0.5">{def.name}</legend>
+                        <div className="space-y-1 max-h-28 overflow-y-auto border border-[var(--color-border)] rounded p-1.5">
+                          {(def.options ?? []).map((option, optionIndex) => {
+                            const selected = Array.isArray(val) ? (val as string[]).includes(option) : false;
+                            const optionId = `${customFieldId}-option-${optionIndex}-${safeIdSegment(option, "option")}`;
+                            return (
+                              <label key={`${option}-${optionIndex}`} htmlFor={optionId} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded">
+                                <input
+                                  id={optionId}
+                                  type={inputType}
+                                  name={def.type === "radio" ? `${customFieldId}-options` : undefined}
+                                  checked={def.type === "radio" ? val === option : selected}
+                                  onChange={(event) => {
+                                    if (def.type === "radio") {
+                                      handleCustomFieldChange(def.name, option);
+                                      return;
+                                    }
+                                    const current = Array.isArray(val) ? [...val as string[]] : [];
+                                    if (event.target.checked) {
+                                      handleCustomFieldChange(def.name, [...current, option]);
+                                    } else {
+                                      handleCustomFieldChange(def.name, current.filter((value) => value !== option));
+                                    }
+                                  }}
+                                  className="rounded"
+                                />
+                                {option}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </fieldset>
+                    );
+                  }
+
                   return (
-                    <div key={def.name}>
-                      <label className="block text-xs text-gray-400 mb-0.5">{def.name}</label>
+                    <div key={`${def.name}-${fieldIndex}`}>
+                      <label htmlFor={customFieldId} className="block text-xs text-gray-400 mb-0.5">{def.name}</label>
                       {def.type === "text" && (
-                        <input type="text" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
+                        <input id={customFieldId} type="text" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
                           className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "paragraph" && (
-                        <textarea value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
+                        <textarea id={customFieldId} value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
                           className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm min-h-[60px]" />
                       )}
                       {def.type === "number" && (
-                        <input type="number" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
+                        <input id={customFieldId} type="number" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
                           className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "date" && (
-                        <input type="date" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
+                        <input id={customFieldId} type="date" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
                           className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "datetime" && (
-                        <input type="datetime-local" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
+                        <input id={customFieldId} type="datetime-local" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
                           className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" />
                       )}
                       {def.type === "single_select" && (
-                        <select value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
+                        <select id={customFieldId} value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
                           className="w-full border border-[var(--color-border)] rounded text-sm bg-[var(--color-surface)] px-2 py-1.5 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                           <option value="">—</option>
                           {(def.options ?? []).map((o) => (<option key={o} value={o}>{o}</option>))}
                         </select>
                       )}
-                      {def.type === "multi_select" && (
-                        <div className="space-y-1 max-h-28 overflow-y-auto border border-[var(--color-border)] rounded p-1.5">
-                          {(def.options ?? []).map((o) => {
-                            const selected = Array.isArray(val) ? (val as string[]).includes(o) : false;
-                            return (
-                              <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded">
-                                <input type="checkbox" checked={selected} onChange={(e) => {
-                                  const current = Array.isArray(val) ? [...val as string[]] : [];
-                                  if (e.target.checked) {
-                                    handleCustomFieldChange(def.name, [...current, o]);
-                                  } else {
-                                    handleCustomFieldChange(def.name, current.filter((v) => v !== o));
-                                  }
-                                }} className="rounded" />
-                                {o}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {def.type === "checkboxes" && (
-                        <div className="space-y-1 max-h-28 overflow-y-auto border border-[var(--color-border)] rounded p-1.5">
-                          {(def.options ?? []).map((o) => {
-                            const selected = Array.isArray(val) ? (val as string[]).includes(o) : false;
-                            return (
-                              <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded">
-                                <input type="checkbox" checked={selected} onChange={(e) => {
-                                  const current = Array.isArray(val) ? [...val as string[]] : [];
-                                  if (e.target.checked) {
-                                    handleCustomFieldChange(def.name, [...current, o]);
-                                  } else {
-                                    handleCustomFieldChange(def.name, current.filter((v) => v !== o));
-                                  }
-                                }} className="rounded" />
-                                {o}
-                              </label>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {def.type === "radio" && (
-                        <div className="space-y-1 max-h-28 overflow-y-auto border border-[var(--color-border)] rounded p-1.5">
-                          {(def.options ?? []).map((o) => (
-                            <label key={o} className="flex items-center gap-1.5 text-sm cursor-pointer hover:bg-[var(--color-surface-hover)] px-1 py-0.5 rounded">
-                              <input type="radio" name={`cf-${def.name}`} checked={val === o} onChange={() => handleCustomFieldChange(def.name, o)} />
-                              {o}
-                            </label>
-                          ))}
-                        </div>
-                      )}
                       {def.type === "url" && (
-                        <input type="url" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
+                        <input id={customFieldId} type="url" value={val} onChange={(e) => handleCustomFieldChange(def.name, e.target.value)}
                           className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm" placeholder="https://..." />
                       )}
                     </div>
@@ -686,7 +709,11 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
           {/* Description with Edit/Preview + @mention */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-medium text-gray-500">Description</label>
+              {descMode === "edit" ? (
+                <label htmlFor={fieldIds.description} className="block text-xs font-medium text-gray-500">Description</label>
+              ) : (
+                <h3 className="block text-xs font-medium text-gray-500">Description</h3>
+              )}
               <div className="flex items-center gap-1">
                 <button onClick={() => setDescMode("edit")}
                   className={`px-2 py-0.5 text-xs rounded ${descMode === "edit" ? "bg-blue-600 text-white" : "text-gray-500 hover:bg-gray-100"}`}>
@@ -700,7 +727,7 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             </div>
             {descMode === "edit" ? (
               <div className="relative">
-                <textarea ref={textareaRef} value={description}
+                <textarea id={fieldIds.description} ref={textareaRef} value={description}
                   onChange={(e) => handleDescChange(e.target.value)}
                   onKeyDown={handleMentionKey}
                   className="w-full border border-[var(--color-border)] rounded px-2 py-1.5 text-sm min-h-[120px] font-mono"
@@ -791,13 +818,15 @@ export default function TaskDetail({ task, project, onClose, onTaskUpdated, onTa
             </div>
             {/* Add dependency */}
             <div className="mt-2 flex gap-2">
-              <select value={depType} onChange={(e) => setDepType(e.target.value as "blocks" | "blocked_by")}
+              <label className="sr-only" htmlFor={fieldIds.dependencyType}>Dependency type</label>
+              <select id={fieldIds.dependencyType} value={depType} onChange={(e) => setDepType(e.target.value as "blocks" | "blocked_by")}
                 className="border border-[var(--color-border)] rounded text-xs bg-[var(--color-surface)] px-2 py-1 hover:bg-[var(--color-surface-hover)] cursor-pointer text-[var(--color-text-primary)]">
                 <option value="blocks">Blocks</option>
                 <option value="blocked_by">Blocked by</option>
               </select>
               <div className="relative flex-1">
-                <input value={depSearch} onChange={(e) => { handleDepSearch(e.target.value); setDepSearchOpen(true); }}
+                <label className="sr-only" htmlFor={fieldIds.dependencySearch}>Search tasks to link</label>
+                <input id={fieldIds.dependencySearch} value={depSearch} onChange={(e) => { handleDepSearch(e.target.value); setDepSearchOpen(true); }}
                   onFocus={() => setDepSearchOpen(true)}
                   placeholder="Search tasks to link..."
                   className="w-full border border-[var(--color-border)] rounded px-2 py-1 text-xs" />
