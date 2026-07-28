@@ -141,6 +141,14 @@ const CONTEXT_CONVERSATION_ENDPOINTS = [
   "POST /api/v1/context/conversations/:conversationId/archive",
   "POST /api/v1/context/conversations/:conversationId/unarchive",
 ];
+const CONTEXT_SESSION_IMPORT_ENDPOINTS = [
+  "POST /api/v1/context/imports/opencode-session",
+];
+const CONTEXT_CURRENT_SESSION_IMPORT_ENDPOINTS = [
+  "POST /api/v1/context/conversations",
+  "GET /api/v1/context/conversations/:conversationId/messages",
+  "POST /api/v1/context/conversations/:conversationId/messages",
+];
 
 const PROJECTS_ENDPOINTS = [
   "GET /api/v1/projects",
@@ -1030,6 +1038,8 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   { name: "ingenium_context_conversation_archive", category: "Context", description: "Append a reversible archive event without deleting immutable history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
   { name: "ingenium_context_conversation_unarchive", category: "Context", description: "Append a reversible unarchive event without changing immutable history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
   { name: "ingenium_context_checkpoint_audit_list", category: "Context", description: "List bounded content-free archive and restore audit evidence.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_opencode_session_import", category: "Context", description: "Import one explicitly selected, project-owned OpenCode session's user and assistant text into API-owned Context RAG.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_SESSION_IMPORT_ENDPOINTS },
+  { name: "ingenium_context_import_current_session", category: "Context", description: "Import the current OpenCode session's completed user and assistant text into an immutable Ingenium Context conversation.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CURRENT_SESSION_IMPORT_ENDPOINTS },
 
   // ── Projects (10) ────────────────────────────────────
   {

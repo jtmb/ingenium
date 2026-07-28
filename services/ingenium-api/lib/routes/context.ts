@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { context, contextConversations, contextRag } from "ingenium-core";
+import { context, contextConversations, contextRag, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { executeSynthesisBroker, isOpenCodeError, opencodeClient } from "../opencode-client.js";
 
@@ -135,23 +135,157 @@ function contextRagUploadDto(result: contextRag.ContextRagUploadResult) {
   };
 }
 
-function isSafeOpenCodeSessionId(value: unknown): value is string {
-  return typeof value === "string"
-    && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value);
+const CONTEXT_SESSION_IMPORT_SOURCE = "context-session-import";
+const OPENCODE_SESSION_REFERENCE_PREFIX = "opencode-session:";
+const MAX_OPENCODE_SESSION_IMPORT_PARTS = 256;
+const MAX_OPENCODE_SESSION_IMPORT_PART_BYTES = 65_536;
+
+class OpenCodeSessionImportValidationError extends Error {
+  constructor() {
+    super("INVALID_SESSION_IMPORT");
+    this.name = "OpenCodeSessionImportValidationError";
+  }
 }
 
-function normalizedDirectory(value: unknown): string | null {
+function isSafeOpenCodeSessionId(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length <= 256 - OPENCODE_SESSION_REFERENCE_PREFIX.length
+    && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value);
+}
+
+function canonicalOpenCodeDirectory(value: unknown): string | null {
   if (typeof value !== "string" || value.length === 0 || value.length > 1024 || /[\u0000-\u001f\u007f]/.test(value)) {
     return null;
   }
-  const normalized = value.replace(/\\/g, "/");
-  if (!normalized.startsWith("/") && !/^[A-Za-z]:\//.test(normalized)) return null;
-  return normalized.replace(/\/+$/, "");
+  const slashNormalized = value.replace(/\\/g, "/");
+  const drive = /^([A-Za-z]):\/(.*)$/.exec(slashNormalized);
+  const absolute = slashNormalized.startsWith("/");
+  if (!drive && !absolute) return null;
+
+  const root = drive ? `${drive[1]!.toUpperCase()}:` : "";
+  const remainder = drive ? drive[2]! : slashNormalized.slice(1);
+  if (remainder.length === 0) return `${root}/`;
+  const components = remainder.split("/");
+  if (components.some((component) => component.length === 0 || component === "." || component === "..")) {
+    return null;
+  }
+  return `${root}/${components.join("/")}`;
 }
 
 function directoryBase(value: string): string | null {
+  if (value === "/" || /^[A-Za-z]:\/$/.test(value)) return null;
   const parts = value.split("/").filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1]! : null;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function isSafeOpenCodeReference(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 256
+    && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function hasRejectedImportMarker(value: Record<string, unknown>): boolean {
+  return ["synthetic", "ignored", "isSynthetic", "isIgnored"].some((key) =>
+    value[key] !== undefined && value[key] !== false,
+  );
+}
+
+function timestampForSessionImport(value: unknown): { epoch: number; iso: string } | null {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 8.64e15) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return { epoch: value, iso: date.toISOString() };
+}
+
+function sessionImportValidationError(): never {
+  throw new OpenCodeSessionImportValidationError();
+}
+
+function buildOpenCodeSessionImportContent(
+  messages: unknown,
+  sessionId: string,
+): { content: string; messageCount: number } {
+  if (!Array.isArray(messages) || messages.length > 100) sessionImportValidationError();
+
+  const sections = ["# OpenCode session import"];
+  let contentBytes = Buffer.byteLength(sections[0]!, "utf8");
+  let aggregateTextBytes = 0;
+  let partCount = 0;
+  let priorTimestamp = -1;
+  let messageCount = 0;
+
+  for (const envelope of messages) {
+    const message = record(envelope);
+    const info = record(message?.info);
+    if (!message || !info || hasRejectedImportMarker(message) || hasRejectedImportMarker(info)) {
+      sessionImportValidationError();
+    }
+    const role = info.role;
+    if ((role !== "user" && role !== "assistant") || !record(info.time)) sessionImportValidationError();
+    if (info.sessionID !== undefined && (!isSafeOpenCodeReference(info.sessionID) || info.sessionID !== sessionId)) {
+      sessionImportValidationError();
+    }
+    if (info.id !== undefined && !isSafeOpenCodeReference(info.id)) sessionImportValidationError();
+
+    const created = timestampForSessionImport(record(info.time)?.created);
+    const completedValue = record(info.time)?.completed;
+    const completed = completedValue === undefined ? null : timestampForSessionImport(completedValue);
+    if (!created || (completedValue !== undefined && (!completed || completed.epoch < created.epoch)) || created.epoch < priorTimestamp) {
+      sessionImportValidationError();
+    }
+    priorTimestamp = created.epoch;
+
+    if (!Array.isArray(message.parts)) sessionImportValidationError();
+    const textParts: string[] = [];
+    for (const candidate of message.parts) {
+      partCount += 1;
+      if (partCount > MAX_OPENCODE_SESSION_IMPORT_PARTS) sessionImportValidationError();
+      const part = record(candidate);
+      if (!part || hasRejectedImportMarker(part) || part.type !== "text" || typeof part.text !== "string") {
+        sessionImportValidationError();
+      }
+      if (part.sessionID !== undefined && (!isSafeOpenCodeReference(part.sessionID) || part.sessionID !== sessionId)) {
+        sessionImportValidationError();
+      }
+      if (part.messageID !== undefined && !isSafeOpenCodeReference(part.messageID)) sessionImportValidationError();
+      if (part.messageID !== undefined && info.id !== undefined && part.messageID !== info.id) {
+        sessionImportValidationError();
+      }
+
+      const partBytes = Buffer.byteLength(part.text, "utf8");
+      aggregateTextBytes += partBytes;
+      if (partBytes > MAX_OPENCODE_SESSION_IMPORT_PART_BYTES
+        || aggregateTextBytes > contextRag.CONTEXT_RAG_DIRECT_UPLOAD_MAX_BYTES) {
+        sessionImportValidationError();
+      }
+      const text = part.text.trim();
+      if (text) textParts.push(text);
+    }
+
+    if (textParts.length === 0) continue;
+    const section = `## ${role} — ${created.iso}\n\n${textParts.join("\n\n")}`;
+    const nextContentBytes = contentBytes + Buffer.byteLength("\n\n", "utf8") + Buffer.byteLength(section, "utf8");
+    if (nextContentBytes > contextRag.CONTEXT_RAG_DIRECT_UPLOAD_MAX_BYTES) sessionImportValidationError();
+    sections.push(section);
+    contentBytes = nextContentBytes;
+    messageCount += 1;
+  }
+  return { content: sections.join("\n\n"), messageCount };
+}
+
+function sendSessionImportError(
+  res: Response,
+  status: 409 | 422 | 503,
+  code: "INVALID_CONTEXT_RAG_INPUT" | "SESSION_IMPORT_UNAVAILABLE" | "SESSION_PROJECT_MISMATCH",
+  message: string,
+): void {
+  logger.warn(CONTEXT_SESSION_IMPORT_SOURCE, "OpenCode session import rejected", { code });
+  res.status(status).json({ error: { code, message } });
 }
 
 function checkpointForProject(
@@ -316,64 +450,76 @@ contextRouter.post("/learning/ingest", (req, res) => {
 
 /**
  * Session import is deliberately opt-in and fail-closed. The caller supplies
- * an absolute OpenCode directory whose basename must match its project name;
- * the upstream session must report the exact same directory before any message
- * body is read. No message body is logged or reflected in an error response.
+ * a canonical absolute OpenCode directory whose basename must match its project
+ * name; the upstream session must report the exact same canonical directory
+ * before any message body is read. Only validated user/assistant text reaches
+ * API-owned RAG. No message body is logged or reflected in an error response.
  */
 contextRouter.post("/imports/opencode-session", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
   const projectName = req.query.project as string;
   const sessionId = req.body?.sessionId;
-  const directory = normalizedDirectory(req.body?.directory);
+  const directory = canonicalOpenCodeDirectory(req.body?.directory);
   const limit = req.body?.limit === undefined ? 100 : req.body.limit;
   if (!isSafeOpenCodeSessionId(sessionId) || !directory || directoryBase(directory) !== projectName
     || !Number.isInteger(limit) || limit < 1 || limit > 100) {
-    res.status(422).json({ error: { code: "INVALID_CONTEXT_RAG_INPUT", message: "Invalid safe OpenCode session import request" } });
+    sendSessionImportError(res, 422, "INVALID_CONTEXT_RAG_INPUT", "Invalid safe OpenCode session import request");
     return;
   }
-  const session = await opencodeClient.getSession(sessionId, directory);
+
+  let session: Awaited<ReturnType<typeof opencodeClient.getSession>>;
+  try {
+    session = await opencodeClient.getSession(sessionId, directory);
+  } catch {
+    sendSessionImportError(res, 503, "SESSION_IMPORT_UNAVAILABLE", "OpenCode session import is unavailable");
+    return;
+  }
   if (isOpenCodeError(session)) {
-    res.status(503).json({ error: { code: "SESSION_IMPORT_UNAVAILABLE", message: "OpenCode session import is unavailable" } });
+    sendSessionImportError(res, 503, "SESSION_IMPORT_UNAVAILABLE", "OpenCode session import is unavailable");
     return;
   }
-  if (session.id !== sessionId || normalizedDirectory(session.directory) !== directory || directoryBase(session.directory) !== projectName) {
-    res.status(409).json({ error: { code: "SESSION_PROJECT_MISMATCH", message: "OpenCode session is not safely owned by this project" } });
+  const upstreamSession = record(session);
+  const upstreamDirectory = canonicalOpenCodeDirectory(upstreamSession?.directory);
+  if (!upstreamSession || upstreamSession.id !== sessionId || !upstreamDirectory
+    || upstreamDirectory !== directory || directoryBase(upstreamDirectory) !== projectName) {
+    sendSessionImportError(res, 409, "SESSION_PROJECT_MISMATCH", "OpenCode session is not safely owned by this project");
     return;
   }
-  const messages = await opencodeClient.getMessages(sessionId, limit, undefined, directory);
+
+  let messages: Awaited<ReturnType<typeof opencodeClient.getMessages>>;
+  try {
+    messages = await opencodeClient.getMessages(sessionId, limit, undefined, directory);
+  } catch {
+    sendSessionImportError(res, 503, "SESSION_IMPORT_UNAVAILABLE", "OpenCode session import is unavailable");
+    return;
+  }
   if (isOpenCodeError(messages)) {
-    res.status(503).json({ error: { code: "SESSION_IMPORT_UNAVAILABLE", message: "OpenCode session import is unavailable" } });
+    sendSessionImportError(res, 503, "SESSION_IMPORT_UNAVAILABLE", "OpenCode session import is unavailable");
     return;
   }
-  const sections: string[] = ["# OpenCode session import"];
-  let messageCount = 0;
-  for (const message of messages) {
-    if (message.info.role !== "user" && message.info.role !== "assistant") continue;
-    const text = message.parts
-      .filter((part) => part.type === "text" && typeof part.text === "string")
-      .map((part) => part.text!.trim())
-      .filter(Boolean)
-      .join("\n\n");
-    if (!text) continue;
-    sections.push(`## ${message.info.role} — ${new Date(message.info.time.created).toISOString()}\n\n${text}`);
-    messageCount += 1;
+
+  let imported: { content: string; messageCount: number };
+  try {
+    imported = buildOpenCodeSessionImportContent(messages, sessionId);
+  } catch {
+    sendSessionImportError(res, 422, "INVALID_CONTEXT_RAG_INPUT", "Invalid OpenCode session import content");
+    return;
   }
-  const content = sections.join("\n\n");
-  if (messageCount === 0) {
+  if (imported.messageCount === 0) {
     res.json({ data: { noOp: true, reason: "NO_TEXT_MESSAGES", sessionId } });
     return;
   }
   try {
     const result = contextRag.ingestContextRagDocument(projectId, {
       title: typeof req.body?.title === "string" ? req.body.title : `OpenCode session ${sessionId}`,
-      content,
+      content: imported.content,
       mimeType: "text/markdown",
-      metadata: { sessionId, messageCount, importedAt: new Date().toISOString() },
-      sourceReference: `opencode-session:${sessionId}`,
+      metadata: { sessionId, messageCount: imported.messageCount, importedAt: new Date().toISOString() },
+      sourceReference: `${OPENCODE_SESSION_REFERENCE_PREFIX}${sessionId}`,
     }, "opencode_session");
     res.status(result.deduplicated ? 200 : 201).json({
-      data: { ...contextRagUploadDto(result), importedMessages: messageCount },
+      data: { ...contextRagUploadDto(result), importedMessages: imported.messageCount },
     });
   } catch (error) {
     sendContextRagError(res, error);
