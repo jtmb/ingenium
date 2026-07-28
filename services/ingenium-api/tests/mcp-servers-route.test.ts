@@ -351,4 +351,39 @@ describe("canonical child MCP server API", () => {
       error: { code: "MCP_SERVER_NOT_FOUND", message: "Child MCP server is not registered." },
     });
   });
+
+  it("keeps built-in and category tool state isolated per project", async () => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-tool-state-isolation-"));
+    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
+    process.env.INGENIUM_HOME = join(directory, "home");
+    projects.createProject("mcp-tool-state-a");
+    projects.createProject("mcp-tool-state-b");
+    const baseUrl = await startRouter();
+    const tool = "ingenium_skill_list";
+
+    const disabled = await fetch(`${baseUrl}/mcp-tools/${tool}?project=mcp-tool-state-a`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(disabled.status).toBe(200);
+
+    const stateA = await (await fetch(`${baseUrl}/mcp-tools/${tool}/state?project=mcp-tool-state-a`)).json();
+    const stateB = await (await fetch(`${baseUrl}/mcp-tools/${tool}/state?project=mcp-tool-state-b`)).json();
+    expect(stateA.data).toMatchObject({ tool_name: tool, enabled: false });
+    expect(stateB.data).toMatchObject({ tool_name: tool, enabled: true });
+
+    const categoryDisabled = await fetch(`${baseUrl}/mcp-tools/category/Skills?project=mcp-tool-state-a`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(categoryDisabled.status).toBe(200);
+    const categoryA = await (await fetch(`${baseUrl}/mcp-tools?project=mcp-tool-state-a&include_categories=true`)).json();
+    const categoryB = await (await fetch(`${baseUrl}/mcp-tools?project=mcp-tool-state-b&include_categories=true`)).json();
+    expect(categoryA.data.find((group: { category: string }) => group.category === "Skills")).toMatchObject({ enabled_count: 0 });
+    const skillsB = categoryB.data.find((group: { category: string }) => group.category === "Skills");
+    expect(skillsB).toMatchObject({ enabled_count: expect.any(Number) });
+    expect(skillsB.enabled_count).toBeGreaterThan(0);
+  });
 });

@@ -9,7 +9,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { apiRequestHeaders, config } from "../config/index.js";
+import { api } from "../lib/client.js";
 import { logger } from "../lib/logger.js";
+import { McpToolVisibilityController, type ToolVisibilityApi } from "../lib/tool-visibility.js";
 import {
   ChildMcpGateway,
   resolveChildMcpProjectIdentity,
@@ -104,6 +106,27 @@ function wrapHandler(toolName: string, handler: (args: any) => Promise<any>) {
  */
 const C = (name: string) => `ingenium_${name}`;
 
+interface CategorizedToolState {
+  category?: string;
+  tools?: Array<{ tool_name?: unknown; enabled?: unknown }>;
+}
+
+const toolVisibilityApi: ToolVisibilityApi = {
+  async listToolStates(project) {
+    const response = await api.get("/mcp-tools", { project, include_categories: "true" });
+    if (!response.ok || !Array.isArray(response.data)) throw new Error("MCP_TOOL_STATE_UNAVAILABLE");
+    const states = new Map<string, boolean>();
+    for (const category of response.data as CategorizedToolState[]) {
+      for (const tool of category.tools ?? []) {
+        if (typeof tool.tool_name === "string" && typeof tool.enabled === "boolean") {
+          states.set(tool.tool_name, tool.enabled);
+        }
+      }
+    }
+    return states;
+  },
+};
+
 /**
  * Shared required project parameter for all project-scoped tools.
  * Projects are NOT auto-created on first use — they must be created explicitly
@@ -119,6 +142,18 @@ const server = new McpServer(
   { name: config.mcpName, version: config.mcpVersion },
   { capabilities: { tools: { listChanged: true }, resources: {} } },
 );
+
+const toolVisibility = new McpToolVisibilityController(
+  server,
+  resolveChildMcpProjectIdentity(process.env.INGENIUM_PROJECT),
+  toolVisibilityApi,
+);
+const originalRegisterTool = server.registerTool.bind(server);
+server.registerTool = ((name: string, toolConfig: Parameters<typeof server.registerTool>[1], handler: Parameters<typeof server.registerTool>[2]) => {
+  const registration = originalRegisterTool(name, toolConfig, handler);
+  toolVisibility.track(C(name), registration);
+  return registration;
+}) as typeof server.registerTool;
 
 const childToolHost = server as unknown as ChildMcpToolHost;
 const childGateway = new ChildMcpGateway(
@@ -2540,6 +2575,10 @@ server.registerTool(
     backupTools.backupScheduleSet(project, config)),
 );
 
+// Child tools have their own registration/reconciliation path. Do not route
+// those dynamic registrations through the built-in visibility controller.
+server.registerTool = originalRegisterTool;
+
 // ── Start ───────────────────────────────────────────────
 
 /**
@@ -2551,6 +2590,7 @@ server.registerTool(
  */
 async function main() {
   const transport = new StdioServerTransport();
+  await toolVisibility.start();
   await server.connect(transport);
   await childGateway.start();
   logger.info("ingenium-server MCP transport started on stdio");
@@ -2562,6 +2602,7 @@ async function shutdown(exitCode: number, reason: "SIGTERM" | "SIGINT" | "fatal"
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info({ reason }, "MCP server shutting down");
+  await toolVisibility.stop();
   await childGateway.shutdown();
   process.exit(exitCode);
 }

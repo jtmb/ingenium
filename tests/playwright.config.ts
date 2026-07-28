@@ -50,6 +50,7 @@ export default defineConfig({
   // manual visual suites are selected only by their dedicated configs.
   testMatch: [
     "**/mcp-tools.spec.ts",
+    "**/ingenium-dashboard/mcp-tool-controls.spec.ts",
     "**/ingenium-dashboard/homepage.spec.ts",
     "**/ingenium-dashboard/dashboard.spec.ts",
     "**/ingenium-dashboard/docs-ai.spec.ts",
@@ -62,6 +63,7 @@ export default defineConfig({
     "**/ingenium-dashboard/vault-first-run.spec.ts",
     "**/ingenium-dashboard/lan-api-assertions.spec.ts",
     "**/ingenium-dashboard/theme-flash.spec.ts",
+    "**/ingenium-dashboard/usage.spec.ts",
   ],
   timeout: 30_000,
   expect: { timeout: 10_000 },

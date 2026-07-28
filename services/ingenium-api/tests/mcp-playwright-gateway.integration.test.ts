@@ -205,6 +205,34 @@ function serializedToolResult(result: unknown): string {
   return JSON.stringify(result);
 }
 
+async function waitForToolPresence(
+  tools: Map<string, RegisteredTool>,
+  toolName: string,
+  present: boolean,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const started = Date.now();
+  while (tools.has(toolName) !== present) {
+    if (Date.now() - started >= timeoutMs) {
+      throw new Error(`Timed out waiting for ${toolName} to become ${present ? "visible" : "hidden"}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now();
+  while (true) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    if (Date.now() - started >= timeoutMs) throw new Error(`Timed out waiting for child process ${pid} to exit`);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 afterEach(async () => {
   await Promise.all(gateways.splice(0).map((gateway) => gateway.shutdown()));
   await Promise.all(managers.splice(0).map((manager) => manager.stopAll()));
@@ -319,6 +347,8 @@ describe("MCP-005 real Playwright child gateway", () => {
       arguments: { url: fixtureUrl },
     });
     expect(serializedToolResult(blockedNavigation)).toContain("TOOL_DISABLED");
+    await gateway.refresh();
+    await waitForToolPresence(tools, navigate, false);
 
     const enabledTool = await jsonRequest(
       baseUrl,
@@ -326,6 +356,8 @@ describe("MCP-005 real Playwright child gateway", () => {
       { method: "PUT", body: JSON.stringify({ enabled: true }) },
     );
     expect(enabledTool.status).toBe(200);
+    await gateway.refresh();
+    await waitForToolPresence(tools, navigate, true);
     await expect(tools.get(navigate)!.handler({
       project: projectName,
       arguments: { url: fixtureUrl },
@@ -343,6 +375,9 @@ describe("MCP-005 real Playwright child gateway", () => {
       arguments: {},
     });
     expect(serializedToolResult(blockedSnapshot)).toContain("TOOL_DISABLED");
+    await gateway.refresh();
+    await waitForToolPresence(tools, navigate, false);
+    await waitForToolPresence(tools, snapshot, false);
 
     const enabledCategory = await jsonRequest(
       baseUrl,
@@ -350,6 +385,9 @@ describe("MCP-005 real Playwright child gateway", () => {
       { method: "PUT", body: JSON.stringify({ enabled: true }) },
     );
     expect(enabledCategory.status).toBe(200);
+    await gateway.refresh();
+    await waitForToolPresence(tools, navigate, true);
+    await waitForToolPresence(tools, snapshot, true);
     await expect(tools.get(snapshot)!.handler({
       project: projectName,
       arguments: {},
@@ -357,6 +395,7 @@ describe("MCP-005 real Playwright child gateway", () => {
 
     const firstPid = manager.getStatus(childName).pid;
     expect(firstPid).toEqual(expect.any(Number));
+    const staleNavigateHandler = tools.get(navigate)!.handler;
     const disconnected = await jsonRequest(
       baseUrl,
       `/api/v1/mcp-servers/${childName}/disconnect${query(projectName)}`,
@@ -364,9 +403,15 @@ describe("MCP-005 real Playwright child gateway", () => {
     );
     expect(disconnected.status).toBe(200);
     await gateway.refresh();
-    expect(tools.has(navigate)).toBe(false);
-    expect(tools.has(snapshot)).toBe(false);
-    expect(() => process.kill(firstPid!, 0)).toThrow();
+    await waitForToolPresence(tools, navigate, false);
+    await waitForToolPresence(tools, snapshot, false);
+    await expect(staleNavigateHandler({
+      project: projectName,
+      arguments: { url: fixtureUrl },
+    })).resolves.toMatchObject({
+      content: [{ type: "text", text: expect.stringContaining("CHILD_MCP_UNAVAILABLE") }],
+    });
+    await waitForProcessExit(firstPid!);
 
     const connected = await jsonRequest(
       baseUrl,
@@ -375,26 +420,46 @@ describe("MCP-005 real Playwright child gateway", () => {
     );
     expect(connected.status).toBe(200);
     await gateway.refresh();
+    await waitForToolPresence(tools, navigate, true);
+    await waitForToolPresence(tools, snapshot, true);
     const reconnected = manager.getStatus(childName);
     expect(reconnected).toMatchObject({ state: "ready", toolCount: expect.any(Number) });
     expect(reconnected.pid).toEqual(expect.any(Number));
     expect(reconnected.pid).not.toBe(firstPid);
     expect(() => process.kill(firstPid!, 0)).toThrow();
-    expect(tools.has(navigate)).toBe(true);
-    expect(tools.has(snapshot)).toBe(true);
+    await expect(staleNavigateHandler({
+      project: projectName,
+      arguments: { url: fixtureUrl },
+    })).resolves.toMatchObject({
+      content: [{ type: "text", text: expect.stringContaining("CHILD_MCP_UNAVAILABLE") }],
+    });
 
     const closed = await tools.get(close)!.handler({ project: projectName, arguments: {} });
     expect(serializedToolResult(closed)).not.toContain("error");
-    const reconnectedPid = reconnected.pid!;
-    await gateway.shutdown();
-    expect(manager.getStatus(childName)).toMatchObject({ state: "stopped", pid: null });
-    expect(() => process.kill(reconnectedPid, 0)).toThrow();
 
+    const removedHandler = tools.get(navigate)!.handler;
     const removed = await jsonRequest(
       baseUrl,
       `/api/v1/mcp-servers/${childName}${query(projectName)}`,
       { method: "DELETE" },
     );
     expect(removed.status).toBe(204);
+    await gateway.refresh();
+    await waitForToolPresence(tools, navigate, false);
+    await waitForToolPresence(tools, snapshot, false);
+    await expect(removedHandler({
+      project: projectName,
+      arguments: { url: fixtureUrl },
+    })).resolves.toMatchObject({
+      content: [{ type: "text", text: expect.stringContaining("TOOL_STATE_UNAVAILABLE") }],
+    });
+
+    const reconnectedPid = reconnected.pid!;
+    await gateway.shutdown();
+    expect(tools.has(navigate)).toBe(false);
+    expect(tools.has(snapshot)).toBe(false);
+    expect(tools.has(close)).toBe(false);
+    expect(() => manager.getStatus(childName)).toThrow();
+    expect(() => process.kill(reconnectedPid, 0)).toThrow();
   }, 60_000);
 });

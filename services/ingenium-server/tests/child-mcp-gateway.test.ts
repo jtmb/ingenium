@@ -104,6 +104,7 @@ describe("ChildMcpGateway", () => {
     });
     expect(forwarded).toMatchObject({ content: [{ type: "text", text: "forwarded" }] });
 
+    const disabledGenerationHandler = tools.get(transportName)!.handler;
     api.setToolState("disabled");
     const disabled = await tools.get(transportName)!.handler({
       project: "child-gateway-project",
@@ -111,6 +112,23 @@ describe("ChildMcpGateway", () => {
     });
     expect(disabled).toEqual({
       content: [{ type: "text", text: JSON.stringify({ error: { code: "TOOL_DISABLED", message: "This child MCP tool is disabled for the project." } }) }],
+    });
+
+    await gateway.refresh();
+    expect(tools.has(transportName)).toBe(false);
+
+    api.setToolState("enabled");
+    await gateway.refresh();
+    expect(tools.has(transportName)).toBe(true);
+    await expect(tools.get(transportName)!.handler({
+      project: "child-gateway-project",
+      arguments: { value: "restored" },
+    })).resolves.toMatchObject({ content: [{ type: "text", text: "restored" }] });
+    await expect(disabledGenerationHandler({
+      project: "child-gateway-project",
+      arguments: { value: "must-not-forward-from-old-generation" },
+    })).resolves.toEqual({
+      content: [{ type: "text", text: JSON.stringify({ error: { code: "CHILD_MCP_UNAVAILABLE", message: "The child MCP server is unavailable." } }) }],
     });
 
     const wrongProject = await tools.get(transportName)!.handler({
@@ -121,21 +139,30 @@ describe("ChildMcpGateway", () => {
       content: [{ type: "text", text: JSON.stringify({ error: { code: "PROJECT_IDENTITY_REQUIRED", message: "A valid explicit project identity is required for this child MCP tool." } }) }],
     });
 
+    const staleHandler = tools.get(transportName)!.handler;
     definitions.splice(0);
     await gateway.refresh();
     expect(tools.has(transportName)).toBe(false);
-    expect(host.sendToolListChanged).toHaveBeenCalledTimes(2);
+    await expect(staleHandler({
+      project: "child-gateway-project",
+      arguments: { value: "must-not-forward-after-remove" },
+    })).resolves.toEqual({
+      content: [{ type: "text", text: JSON.stringify({ error: { code: "CHILD_MCP_UNAVAILABLE", message: "The child MCP server is unavailable." } }) }],
+    });
+    expect(host.sendToolListChanged).toHaveBeenCalledTimes(4);
   });
 
   it("fails closed for an unavailable toggle state and rejects invalid session identity", async () => {
     const { host, tools } = createHost();
     const api = createApi([runtimeDefinition()]);
-    api.setToolState("unavailable");
     const manager = new ChildMcpRuntimeManager({ startupMs: 750, requestMs: 250, shutdownMs: 750 });
     const gateway = new ChildMcpGateway(host, "child-gateway-project", api.api, manager);
     gateways.push(gateway);
 
+    api.setToolState("enabled");
     await gateway.refresh();
+    expect(tools.has("fixture_echo")).toBe(true);
+    api.setToolState("unavailable");
     const unavailable = await tools.get("fixture_echo")!.handler({
       project: "child-gateway-project",
       arguments: { value: "must-not-forward" },
@@ -143,6 +170,8 @@ describe("ChildMcpGateway", () => {
     expect(unavailable).toEqual({
       content: [{ type: "text", text: JSON.stringify({ error: { code: "TOOL_STATE_UNAVAILABLE", message: "The child MCP tool state could not be verified." } }) }],
     });
+    await gateway.refresh();
+    expect(tools.has("fixture_echo")).toBe(false);
 
     expect(resolveChildMcpProjectIdentity(undefined)).toBeNull();
     expect(resolveChildMcpProjectIdentity("../unsafe")).toBeNull();

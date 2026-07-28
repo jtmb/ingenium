@@ -72,6 +72,7 @@ interface RegisteredChildTool {
   serverName: string;
   sourceToolName: string;
   signature: string;
+  generation: symbol;
   registration: ChildMcpToolRegistration;
 }
 
@@ -258,20 +259,27 @@ export class ChildMcpGateway {
    * Serialize reconciliation so an interval tick can never race a manual
    * refresh or shutdown. Callers share the same bounded lifecycle operation.
    */
-  refresh(): Promise<void> {
-    if (this.stopping) return Promise.resolve();
-    if (this.refreshPromise) return this.refreshPromise;
-    const refreshPromise = this.refreshInternal();
+  async refresh(): Promise<void> {
+    if (this.stopping) return;
+    if (this.refreshPromise) {
+      await this.refreshPromise;
+      if (this.stopping) return;
+      // A mutation can land while the in-flight reconciliation is reading the
+      // API. Do not let a caller that explicitly requested refresh observe
+      // that stale snapshot; run one fresh pass after the active pass settles.
+      // If another waiter already started that pass, wait for it instead of
+      // starting a duplicate reconciliation.
+      if (this.refreshPromise) {
+        await this.refreshPromise;
+        return;
+      }
+    }
+    if (this.stopping) return;
+    const refreshPromise = this.refreshInternal().finally(() => {
+      if (this.refreshPromise === refreshPromise) this.refreshPromise = null;
+    });
     this.refreshPromise = refreshPromise;
-    void refreshPromise.then(
-      () => {
-        if (this.refreshPromise === refreshPromise) this.refreshPromise = null;
-      },
-      () => {
-        if (this.refreshPromise === refreshPromise) this.refreshPromise = null;
-      },
-    );
-    return refreshPromise;
+    await refreshPromise;
   }
 
   private async refreshInternal(): Promise<void> {
@@ -284,6 +292,12 @@ export class ChildMcpGateway {
     try {
       result = await this.apiClient.listRuntimeDefinitions(this.project);
     } catch {
+      // The API owns the authoritative definition and tool state. Keep the
+      // transport projection fail-closed when that authority is unavailable;
+      // a stale dynamic registration must not remain callable or visible in
+      // tools/list during an outage.
+      const changed = this.removeAllTools();
+      if (changed) await this.notifyToolsChanged();
       logger.warn({ boundary: "child-mcp-discovery" }, "Child MCP discovery refresh is unavailable");
       return;
     }
@@ -330,7 +344,7 @@ export class ChildMcpGateway {
           throw new ChildMcpRuntimeError("CHILD_MCP_INVALID_RESPONSE");
         }
         this.discovery.set(definition.name, currentDiscovery);
-        changed = this.syncTools(definition, tools) || changed;
+        changed = await this.syncTools(definition, tools) || changed;
       } catch (error) {
         changed = this.removeTools(definition.name) || changed;
         this.discovery.delete(definition.name);
@@ -355,6 +369,8 @@ export class ChildMcpGateway {
       this.reconcileTimer = null;
     }
     await this.refreshPromise?.catch(() => undefined);
+    const changed = this.removeAllTools();
+    if (changed) await this.notifyToolsChanged();
     await this.manager.stopAll();
   }
 
@@ -373,9 +389,14 @@ export class ChildMcpGateway {
     return true;
   }
 
-  private syncTools(definition: ChildMcpRuntimeDefinitionResponse, discovered: ChildMcpTool[]): boolean {
+  private async syncTools(definition: ChildMcpRuntimeDefinitionResponse, discovered: ChildMcpTool[]): Promise<boolean> {
     let changed = false;
-    const desired = new Map(discovered.map((tool) => [canonicalToolName(definition.name, tool.name), tool]));
+    const visible: ChildMcpTool[] = [];
+    for (const tool of discovered) {
+      const state = await this.apiClient.toolEnabled(this.project!, canonicalToolName(definition.name, tool.name));
+      if (state === "enabled") visible.push(tool);
+    }
+    const desired = new Map(visible.map((tool) => [canonicalToolName(definition.name, tool.name), tool]));
     for (const [name, tool] of this.tools) {
       const next = desired.get(name);
       if (tool.serverName === definition.name && (!next || tool.signature !== toolSignature(next))) {
@@ -385,9 +406,10 @@ export class ChildMcpGateway {
       }
     }
 
-    for (const tool of discovered) {
+    for (const tool of visible) {
       const name = canonicalToolName(definition.name, tool.name);
       if (this.tools.has(name)) continue;
+      const generation = Symbol(name);
       const registration = this.host.registerTool(
         transportToolName(definition.name, tool.name),
         {
@@ -397,12 +419,13 @@ export class ChildMcpGateway {
             arguments: z.record(z.unknown()).default({}),
           },
         },
-        async (args) => this.forward(definition.name, tool.name, name, args),
+        async (args) => this.forward(definition.name, tool.name, name, generation, args),
       );
       this.tools.set(name, {
         serverName: definition.name,
         sourceToolName: tool.name,
         signature: toolSignature(tool),
+        generation,
         registration,
       });
       changed = true;
@@ -421,10 +444,21 @@ export class ChildMcpGateway {
     return changed;
   }
 
+  private removeAllTools(): boolean {
+    let changed = false;
+    for (const tool of this.tools.values()) {
+      tool.registration.remove();
+      changed = true;
+    }
+    this.tools.clear();
+    return changed;
+  }
+
   private async forward(
     serverName: string,
     sourceToolName: string,
     canonicalName: string,
+    generation: symbol,
     args: Record<string, unknown>,
   ): Promise<ChildMcpToolCallResult | ReturnType<typeof safeError>> {
     if (!this.project || args.project !== this.project) {
@@ -436,6 +470,18 @@ export class ChildMcpGateway {
     }
     if (state !== "enabled") {
       return safeError("TOOL_STATE_UNAVAILABLE", "The child MCP tool state could not be verified.");
+    }
+    // A caller may retain an old tools/call payload while reconciliation is
+    // removing a disabled, disconnected, or deleted registration. The MCP
+    // host will reject the removed name, but this guard also protects direct
+    // handler references used by transports and tests from forwarding through
+    // a stale closure.
+    const registration = this.tools.get(canonicalName);
+    if (!registration
+      || registration.serverName !== serverName
+      || registration.sourceToolName !== sourceToolName
+      || registration.generation !== generation) {
+      return safeError("CHILD_MCP_UNAVAILABLE", "The child MCP server is unavailable.");
     }
     try {
       return await this.manager.callTool(serverName, sourceToolName, args.arguments ?? {});
