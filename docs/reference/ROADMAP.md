@@ -505,3 +505,43 @@ provider-specific credential, account, or live billing access.
 <!-- (work-started) USAGE-003 2026-07-28T03:29:20Z ingenium-docs -->
 <!-- (work-started) USAGE-004 2026-07-28T03:29:21Z ingenium-docs -->
 <!-- (work-started) USAGE-005 2026-07-28T03:29:22Z ingenium-docs -->
+<!-- (work-complete) BUG-003 2026-07-28T12:10:00Z ingenium-docs -->
+Evidence BUG-003: Backup core/API tests (`packages/ingenium-core/tests/backups.test.ts`, `services/ingenium-api/tests/backups-api.test.ts`), backup directory hardening in commit `6743616`, preserved Docker volumes, and deployed image HEAD `730b9669`.
+<!-- (work-complete) BUG-004 2026-07-28T12:10:01Z ingenium-docs -->
+Evidence BUG-004: Settings/provider persistence and deep-link coverage in `tests/ingenium-dashboard/settings-providers.spec.ts` and commit `685ca9d`, with desktop/mobile visual artifacts in `tests/artifacts/visual-qa/run-20260728-roadmap-usage-final/`.
+<!-- (work-complete) BUG-005 2026-07-28T12:10:02Z ingenium-docs -->
+Evidence BUG-005: Vault CRUD/crypto/rate-limit coverage in `packages/ingenium-core/tests/vault*.test.ts`, `services/ingenium-api/tests/vault-api.test.ts`, and the repository security-boundary checks recorded in the session.
+<!-- (work-complete) BUG-006 2026-07-28T12:10:03Z ingenium-docs -->
+Evidence BUG-006: Chat theme/paint regression coverage in `tests/ingenium-dashboard/theme-flash.spec.ts` and `tests/ingenium-dashboard/chat-states.spec.ts`, commit `685ca9d`, and final desktop/mobile artifacts under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
+<!-- (work-complete) MCP-001 2026-07-28T12:10:04Z ingenium-docs -->
+Evidence MCP-001: Catalog parity and child-tool naming/state coverage in `services/ingenium-server/tests/tool-visibility.test.ts`, `services/ingenium-core/tests/mcp-tools/catalog-parity.test.ts`, and the catalog implementation committed in `cdc5678`.
+<!-- (work-complete) MCP-002 2026-07-28T12:10:05Z ingenium-docs -->
+Evidence MCP-002: Child gateway lifecycle/runtime coverage in `services/ingenium-server/tests/child-mcp-runtime.test.ts`, `services/ingenium-server/tests/child-mcp-gateway.test.ts`, and gateway implementation commit `36deb4a`, with deployed health evidence at `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/status-six-processes.png`.
+<!-- (work-complete) MCP-003 2026-07-28T12:10:06Z ingenium-docs -->
+Evidence MCP-003: Project resolver/identity implementation and isolation coverage in `packages/ingenium-extension/project-resolver.ts`, `docs/concepts/architecture.md`, and the global-agent/security-boundary acceptance recorded for commit `7a5eb2c`.
+<!-- (work-complete) MCP-004 2026-07-28T12:10:07Z ingenium-docs -->
+Evidence MCP-004: Safe MCP/API error and launcher coverage in `services/ingenium-api/tests/mcp-status-contract.test.ts`, `services/ingenium-api/tests/mcp-launcher.test.ts`, and `packages/ingenium-extension/mcp-launcher.test.ts`; QA/security PASS is recorded for commit `7a5eb2c`.
+<!-- (work-complete) MCP-005 2026-07-28T12:10:08Z ingenium-docs -->
+Evidence MCP-005: Dynamic child gateway implementation and tests in commit `36deb4a`, catalog/operator documentation in the repository, and deployed Windows/gateway visual evidence including `mcp-tool-catalog.png` under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
+<!-- (work-complete) MCP-006 2026-07-28T12:10:09Z ingenium-docs -->
+Evidence MCP-006: Fail-closed tool visibility implementation and focused API/server/dashboard tests in commit `cdc5678`, deployed image HEAD `730b9669`, and final Windows desktop/mobile evidence with zero console errors and listed API responses 200 under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
+<!-- (work-complete) CTX-001 2026-07-28T12:10:10Z ingenium-docs -->
+Evidence CTX-001: Canonical context CRUD/API/server coverage in `packages/ingenium-core/tests/context-conversations.test.ts`, `services/ingenium-api/tests/context-conversations-api.test.ts`, and the context route implementation; final context desktop/mobile artifacts are under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
+<!-- (work-complete) CTX-002 2026-07-28T12:10:11Z ingenium-docs -->
+Evidence CTX-002: Checkpoint/version governance implementation and focused tests in commit `d725d49`, including migration 066 and core/API/server coverage; preserved volumes and deployed acceptance were recorded in the session.
+<!-- (work-complete) CTX-003 2026-07-28T12:10:12Z ingenium-docs -->
+Evidence CTX-003: RAG ingestion/search/ask coverage in `packages/ingenium-core/tests/context-rag*.test.ts` and `services/ingenium-api/tests/context-rag-api.test.ts`, commit `cedb7c7`, plus live Docs AI/RAG Ask and extraction-synthesis acceptance.
+<!-- (work-complete) CTX-005 2026-07-28T12:10:13Z ingenium-docs -->
+Evidence CTX-005: End-to-end capture/retrieval integration in `services/ingenium-api/tests/context-e2e.test.ts` and commit `7c4640e`, with current session evidence of 88 observations and 37 traits and final context/observations visual artifacts.
+<!-- (work-complete) DOC-001 2026-07-28T12:10:14Z ingenium-docs -->
+Evidence DOC-001: This canonical `docs/reference/ROADMAP.md`, repository-authoritative documentation model, marker protocol, and `docs/reference/index.md` link were inspected; `tests/test-append-only-files.sh` is the declared validation.
+<!-- (work-complete) USAGE-001 2026-07-28T12:10:15Z ingenium-docs -->
+Evidence USAGE-001: Provider-neutral schema/collector implementation and focused tests in commits `cedb7c7` and `85dbc85`, with `services/ingenium-api/tests/usage-sync.test.ts` and session evidence of fresh normalized telemetry without provider-specific credentials.
+<!-- (work-complete) USAGE-002 2026-07-28T12:10:16Z ingenium-docs -->
+Evidence USAGE-002: Usage aggregation/export API implementation and tests in commit `85dbc85`, `services/ingenium-api/tests/usage-api.test.ts`, and usage route/network evidence under `tests/artifacts/visual-qa/run-20260728-roadmap-usage-final/`.
+<!-- (work-complete) USAGE-003 2026-07-28T12:10:17Z ingenium-docs -->
+Evidence USAGE-003: `/usage` dashboard implementation and focused browser/component tests in commit `e942e91`, with desktop/mobile screenshots and route evidence under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
+<!-- (work-complete) USAGE-004 2026-07-28T12:10:18Z ingenium-docs -->
+Evidence USAGE-004: Provider-neutral normalization and cache-state tests in `packages/ingenium-core/tests/usage.test.ts` and `services/ingenium-api/tests/usage-sync.test.ts`, with final usage acceptance and API-200 network evidence in both recorded visual runs.
+<!-- (work-complete) USAGE-005 2026-07-28T12:10:19Z ingenium-docs -->
+Evidence USAGE-005: End-to-end usage implementation commits `cedb7c7`, `85dbc85`, and `e942e91`; deployed image HEAD `730b9669`; prior usage visual evidence under `tests/artifacts/visual-qa/run-20260728-roadmap-usage-final/`; final Windows desktop/mobile evidence under `tests/artifacts/visual-qa/run-20260728-o1-685ca9d/`.
