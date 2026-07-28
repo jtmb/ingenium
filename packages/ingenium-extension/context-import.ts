@@ -476,7 +476,7 @@ async function sourcePage(
 ): Promise<unknown> {
   const query = cursor === undefined
     ? { directory: context.directory, limit: CONTEXT_IMPORT_SOURCE_PAGE_SIZE }
-    : { directory: context.directory, limit: CONTEXT_IMPORT_SOURCE_PAGE_SIZE, cursor };
+    : { directory: context.directory, limit: CONTEXT_IMPORT_SOURCE_PAGE_SIZE, before: cursor };
 
   for (let attempt = 0; attempt <= CONTEXT_IMPORT_MAX_RATE_LIMIT_RETRIES; attempt += 1) {
     try {

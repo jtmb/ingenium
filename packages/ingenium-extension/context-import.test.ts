@@ -164,8 +164,8 @@ function excludedMessage(id: string, created: number) {
 function paginatedSourceClient(source: unknown[]) {
   return {
     session: {
-      messages: vi.fn(async ({ query }: { query: { cursor?: string; limit: number } }) => {
-        const offset = query.cursor === undefined ? 0 : Number(query.cursor);
+      messages: vi.fn(async ({ query }: { query: { before?: string; limit: number } }) => {
+        const offset = query.before === undefined ? 0 : Number(query.before);
         const page = source.slice(offset, offset + query.limit);
         const nextOffset = offset + page.length;
         return sourcePage(page, nextOffset < source.length ? String(nextOffset) : null);
@@ -317,6 +317,10 @@ describe.sequential("current-session Context import", () => {
     expect(client.session.messages).toHaveBeenNthCalledWith(1, {
       path: { id: "current-session" },
       query: { directory: "/safe/context-directory", limit: 100 },
+    });
+    expect(client.session.messages).toHaveBeenNthCalledWith(2, {
+      path: { id: "current-session" },
+      query: { directory: "/safe/context-directory", limit: 100, before: "100" },
     });
     expect(messages).toHaveLength(907);
     expect(messages[0]!.body.content).toBe("message 0");
