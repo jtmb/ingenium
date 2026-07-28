@@ -194,6 +194,54 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
 }
 
 // ============================================================================
+// Usage sync scheduler — metadata-only OpenCode collection
+// ============================================================================
+
+// OpenCode usage is collected from metadata-only step-finish parts. Unlike
+// mail, collection has no global-project ownership: explicit source mappings
+// determine each destination project and unmapped sessions are quarantined.
+const USAGE_SYNC_DEFAULT_MS = parseInt(process.env.USAGE_SYNC_INTERVAL_MS ?? "300000", 10);
+
+function getUsageSyncInterval(): number {
+  return Number.isFinite(USAGE_SYNC_DEFAULT_MS) && USAGE_SYNC_DEFAULT_MS >= 0
+    ? USAGE_SYNC_DEFAULT_MS
+    : 300_000;
+}
+
+async function triggerUsageSync(generation: number): Promise<void> {
+  if (!isSchedulerActive(generation)) return;
+  const { syncUsageFromOpenCode } = await import("./usage-sync.js");
+  const result = await syncUsageFromOpenCode();
+  if (result.alreadyRunning) {
+    logger.debug("usage-sync", "Scheduled usage sync skipped because another sync is already running");
+    return;
+  }
+  if (result.unavailable) {
+    logger.warn("usage-sync", "Scheduled usage sync is unavailable", { code: result.errorCode });
+    return;
+  }
+  logger.info("usage-sync", "Scheduled usage sync completed", {
+    projects: result.projects.length,
+    events: result.projects.reduce((total, project) => total + project.eventsUpserted, 0),
+    quarantinedSessions: result.sessionsQuarantined,
+  });
+}
+
+function scheduleUsageSync(generation: number): void {
+  if (!isSchedulerActive(generation)) return;
+  const interval = getUsageSyncInterval();
+  if (interval <= 0) {
+    logger.info("usage-sync", "Usage sync disabled (USAGE_SYNC_INTERVAL_MS = 0)");
+    return;
+  }
+  scheduleTimeout(generation, interval, () => {
+    void trackTask(triggerUsageSync(generation)).finally(() => {
+      if (isSchedulerActive(generation)) scheduleUsageSync(generation);
+    }).catch(() => undefined);
+  });
+}
+
+// ============================================================================
 // Mail sync scheduler — independent timer, reads "mail_sync_interval_ms"
 // ============================================================================
 
@@ -440,6 +488,14 @@ export function startScheduler(port: number): void {
     scheduleTimeout(generation, 15_000, () => scheduleMailSync(generation));
   } else {
     logger.info("mail-sync", "Mail sync disabled (mail_sync_interval_ms = 0)");
+  }
+
+  const usageInterval = getUsageSyncInterval();
+  if (usageInterval > 0) {
+    logger.info("usage-sync", `Usage sync scheduler started (${usageInterval / 1000}s cycle)`);
+    scheduleTimeout(generation, 20_000, () => scheduleUsageSync(generation));
+  } else {
+    logger.info("usage-sync", "Usage sync disabled (USAGE_SYNC_INTERVAL_MS = 0)");
   }
 }
 

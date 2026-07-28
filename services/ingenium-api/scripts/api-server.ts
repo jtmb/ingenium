@@ -43,6 +43,7 @@ import { repositoryRouter } from "../lib/routes/repository.js";
 import { router as docsAiRouter } from "../lib/routes/docs-ai.js";
 import { backupsRouter } from "../lib/routes/backups.js";
 import { ragRouter } from "../lib/routes/rag.js";
+import { usageRouter } from "../lib/routes/usage.js";
 import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
 import {
   defaultMcpServerProjection,
@@ -174,6 +175,7 @@ app.use("/api/v1/repository", repositoryRouter);
 app.use("/api/v1/docs", docsAiRouter);
 app.use("/api/v1/backups", backupsRouter);
 app.use("/api/v1/rag", ragRouter);
+app.use("/api/v1/usage", usageRouter);
 
 // Error handler must be registered AFTER all routes — Express 4 does not catch errors
 // from middleware registered below the error handler.
