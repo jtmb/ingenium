@@ -31,6 +31,12 @@ reject_text() {
   fi
 }
 
+line_number() {
+  local path="$1"
+  local expected="$2"
+  grep -n -F -- "$expected" "$REPO_ROOT/$path" | cut -d: -f1
+}
+
 for path in \
   docker-compose.yml \
   Dockerfile \
@@ -83,8 +89,15 @@ reject_text docker-compose.yml 'seccomp=unconfined'
 reject_text docker-compose.yml 'sudo'
 
 require_text Dockerfile 'COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf'
-require_text Dockerfile 'COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh scripts/normalize-agent-profiles.sh ./scripts/'
-require_text Dockerfile 'COPY --chown=appuser:appuser scripts/run-init-project.sh ./scripts/run-init-project.sh'
+require_text Dockerfile 'COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/'
+require_text Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh'
+require_text Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh'
+normalizer_copy_line="$(line_number Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh')"
+init_wrapper_copy_line="$(line_number Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh')"
+init_smoke_line="$(line_number Dockerfile '/usr/local/bin/ingenium-init-project --help')"
+if [[ -z "$normalizer_copy_line" || -z "$init_wrapper_copy_line" || -z "$init_smoke_line" || "$normalizer_copy_line" -ge "$init_wrapper_copy_line" || "$normalizer_copy_line" -ge "$init_smoke_line" ]]; then
+  fail 'normalize-agent-profiles must be safely copied before init-project wrapper smoke'
+fi
 require_text Dockerfile 'ARG NEXT_PUBLIC_OPENCODE_WEB_URL="http://opencode.localhost:3000/"'
 require_text Dockerfile 'ARG NEXT_PUBLIC_OPENCODE_CLI_URL="http://cli.localhost:3000/"'
 require_text Dockerfile 'FROM node:22-slim AS builder'

@@ -30,6 +30,18 @@ require_literal() {
   fi
 }
 
+require_line_before() {
+  path="$1"
+  earlier="$2"
+  later="$3"
+  earlier_line="$(grep -n -F -- "$earlier" "$path" | cut -d: -f1)"
+  later_line="$(grep -n -F -- "$later" "$path" | cut -d: -f1)"
+  if [ -z "$earlier_line" ] || [ -z "$later_line" ] || [ "$earlier_line" -ge "$later_line" ]; then
+    echo "ERROR: required deployment copy order is missing from $path: $earlier must precede $later"
+    exit 1
+  fi
+}
+
 reject_literal() {
   path="$1"
   literal="$2"
@@ -132,6 +144,10 @@ reject_literal "$supervisor_config" "environment="
 require_literal "$dockerfile" "scripts/project-opencode-global-config.mjs"
 require_literal "$dockerfile" "scripts/run-init-project.sh"
 require_literal "$dockerfile" "scripts/normalize-agent-profiles.sh"
+require_literal "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh"
+require_literal "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh"
+require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh" "COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh"
+require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh" "/usr/local/bin/ingenium-init-project --help"
 require_literal "$entrypoint" "project-opencode-global-config.mjs"
 require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/workspace"'
 require_literal "$entrypoint" '"/app/packages/ingenium-extension/resource-sync.ts"'
