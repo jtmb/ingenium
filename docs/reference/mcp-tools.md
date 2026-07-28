@@ -21,6 +21,19 @@ Ingenium MCP tools use a three-layer naming system:
 
 OpenCode applies the server key (`ingenium`) as a prefix. Transport names are unprefixed to avoid double-prefixing (`ingenium_ingenium_*`).
 
+### Connection preflight
+
+The built-in Ingenium transport is the packaged
+`@ingenium/extension` launcher. Before exposing its stdio tool catalog, it
+requires a protected API token and one safe project identity. Local worktrees
+derive the project unless `INGENIUM_PROJECT` is set; the Docker `/workspace`
+session explicitly uses `global-default`. Run
+`npm run build --workspace=packages/ingenium-extension` after changing the
+launcher or transport. A safe read smoke test is `ingenium_health_check`; it
+does not require a project argument. Authentication, unavailable transport, and
+unrecognized status failures are reported with fixed diagnostics that do not
+include bearer tokens or upstream error text.
+
 ## PROJECTS — Managing workspaces
 
 | Tool | What it does |
@@ -98,7 +111,7 @@ OpenCode applies the server key (`ingenium`) as a prefix. Transport names are un
 
 `ingenium_plan_save`, `ingenium_plan_search`, `ingenium_plan_list`.
 
-## CONTEXT — Canonical agent memory (4 tools, Phase 3)
+## CONTEXT — Canonical agent memory and immutable conversations
 
 | Tool | What it does |
 |------|-------------|
@@ -108,6 +121,19 @@ OpenCode applies the server key (`ingenium`) as a prefix. Transport names are un
 | `ingenium_context_batch_get` | Batch retrieve multiple context entries by ID (max 100) |
 
 Context entries are project-isolated, taggable, priority-ranked (0–10), and FTS5-searchable. They persist working context across sessions — the task management and plan surface reads from the same `context_entries` table. The `plan_*` tools remain supported for backward compatibility; `context_*` tools provide the canonical CRUD surface. See `services/ingenium-api/lib/routes/context.ts` and `packages/ingenium-core/lib/tools/context.ts`.
+
+Immutable conversation tools are project-scoped and use optimistic `expectedRevision` values for message appends, checkpoint creation, and restore. Optional idempotency keys make creation retries safe; reusing a key with a different request returns a conflict. List and search tools return only metadata and content hashes. Content is returned only by the explicit retrieve tools.
+
+| Tool | What it does |
+|------|-------------|
+| `ingenium_context_conversation_create` | Create immutable conversation metadata |
+| `ingenium_context_conversation_get` / `ingenium_context_conversation_list` | Retrieve or keyset-paginate conversations |
+| `ingenium_context_message_append` | Append a message when `expectedRevision` matches |
+| `ingenium_context_message_list` / `ingenium_context_message_search` | Browse or relevance-search bounded message summaries without content |
+| `ingenium_context_message_retrieve` / `ingenium_context_message_batch_retrieve` | Explicitly retrieve content; batch retrieval preserves requested-ID order and reports missing IDs |
+| `ingenium_context_checkpoint_create` | Create a hash-addressed checkpoint with optional source provenance IDs |
+| `ingenium_context_checkpoint_get` / `ingenium_context_checkpoint_list` | Retrieve or keyset-paginate checkpoint history |
+| `ingenium_context_checkpoint_restore` | Restore a checkpoint by branching to a new immutable conversation; the source is unchanged |
 
 ## PLUGINS — Add-ons
 
@@ -139,7 +165,7 @@ Context entries are project-isolated, taggable, priority-ranked (0–10), and FT
 | Tool | What it does |
 |------|-------------|
 | `ingenium_vault_status` | Get vault status (sealed/unsealed) |
-| `ingenium_vault_unseal` | Unseal the vault with a passphrase |
+| `ingenium_vault_unseal` | Unseal the vault with a passphrase; on first use it initializes the shared vault only when the passphrase meets the new-vault policy. It may return `429` with a retry delay after repeated attempts. |
 | `ingenium_vault_seal` | Seal (lock) the vault |
 | `ingenium_vault_item_list` | List vault items, optionally by folder |
 | `ingenium_vault_item_create` | Create a new vault item (password, note, API key, etc.) |
@@ -154,7 +180,7 @@ Context entries are project-isolated, taggable, priority-ranked (0–10), and FT
 | Tool | What it does |
 |------|-------------|
 | `ingenium_backup_create` | Create a new backup snapshot (Ingenium + OpenCode DB) |
-| `ingenium_backup_list` | List all backups for a project |
+| `ingenium_backup_list` | List all server-owned backups (the server resolves the active global project) |
 | `ingenium_backup_get` | Get a single backup record by ID |
 | `ingenium_backup_download` | Download a backup archive to a validated path |
 | `ingenium_backup_delete` | Delete a backup by ID |

@@ -84,7 +84,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–058)
+### Feature Migrations (045–065)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -102,6 +102,10 @@ another Compose project volume.
 | 056 | `056_reserved_broker_rename_protection.sql` | Adds a `BEFORE UPDATE OF name` trigger that rejects direct renames of `ingenium-llm-broker`, preventing a low-level SQL write from bypassing the canonical broker invariant and escaping under a permissive new name. |
 | 057 | `057_reserved_broker_immutable.sql` | Historical broker immutability migration. It remains in the upgrade sequence for prior installations; migration 058 supersedes its recursive-trigger-dependent protections. |
 | 058 | `058_reserved_broker_connection_independent.sql` | Backfills every broker to the exact canonical bootstrap template and installs non-recursive `BEFORE INSERT`/`BEFORE UPDATE` collision and immutable guards. `INSERT OR REPLACE` and `UPDATE OR REPLACE` are rejected even when a raw SQLite connection has `recursive_triggers=0`. Only the dedicated internal core bootstrap emits the admitted template; public API and resource sync cannot provision a broker. |
+| 059 | `059_repository_docs_onboarding.sql` | Creates repository-authoritative Docs page identity metadata that survives archive and later reappearance. |
+| 060 | `060_repository_resource_sync.sql` | Creates repository-authoritative synchronization state for skills, agents, and plugins, including semantic payload and source hashes. |
+| 061 | `061_global_backup_ownership.sql` | Creates an idempotent migration marker and backfills legacy backup records and restore jobs to the sole active global project. Startup retries the backfill after global-project initialization. |
+| 065 | `065_context_rag_ingestion.sql` | Creates project-scoped direct/chunked context-upload state and durable provenance rows, freezes checkpoint-linked RAG sources/chunks, and stores immutable checkpoint citation snapshots. |
 
 *See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
 

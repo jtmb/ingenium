@@ -47,7 +47,7 @@ This dialog collects a new vault passphrase. It includes:
 | Lock icon | Centered above the title |
 | Title | "Create Your Vault Passphrase" |
 | Warning | Amber banner: "**No recovery key exists.** There is no way to reset or recover a lost passphrase." |
-| Passphrase field | Password input with show/hide toggle. Minimum 12 characters. |
+| Passphrase field | Password input with show/hide toggle. Minimum 12 non-blank Unicode characters. |
 | Passphrase hint | Shows `(n/12)` in red when too short; turns green when valid |
 | Confirmation field | Re-enter the passphrase |
 | Match/mismatch hint | Red "Passphrases do not match" or green checkmark "Passphrases match" |
@@ -66,7 +66,7 @@ This dialog collects a new vault passphrase. It includes:
 | **All valid + checked** | Submit button enabled ("Create & Unseal Vault") |
 
 The submit button is gated on all three conditions:
-1. Passphrase ≥ 12 characters AND matches confirmation
+1. Passphrase ≥ 12 non-blank Unicode characters AND matches confirmation
 2. Acknowledgement checkbox checked
 3. Not currently saving
 
@@ -83,6 +83,14 @@ On subsequent visits, the vault is sealed but initialized. The page shows an "Un
 | Actions | Cancel + "Unseal Vault" (disabled when empty) |
 
 The submit button is enabled only when the passphrase field is non-empty. Pressing Enter also submits.
+
+### Attempt throttling
+
+Vault creation and unseal attempts are limited to five per client IP per
+minute. When the API responds with `429`, the dialog disables its submit action
+and displays the exact `Retry-After` countdown. It does not retry automatically;
+after the countdown ends, submit again deliberately. Status, folder, and item
+metadata reads are not affected by this passphrase-attempt limiter.
 
 ### Error Handling
 
@@ -155,6 +163,12 @@ The "New item" button opens a CreateItemModal with fields for name, credential v
 | `/api/v1/vault/items/:id` | PATCH | Update an item |
 | `/api/v1/vault/items/:id` | DELETE | Delete an item |
 
+`GET /status` includes `nextAction: "initialize"` on first run and
+`nextAction: "unseal"` when an existing vault is sealed. For Dashboard calls,
+an uninitialized vault must use `/initialize` with a matching confirmation.
+MCP's `ingenium_vault_unseal` retains its first-use auto-initialization behavior,
+but its passphrase is subject to the same policy and rate limit.
+
 ## Fail-Closed Behavior
 
 The vault is a hard security boundary. When it is sealed, uninitialized,
@@ -189,10 +203,15 @@ conflicting protected value.
 
 ## Security Notes
 
-- The passphrase is **never stored** on the server. It is used client-side for scrypt key derivation to produce the AES-256-GCM encryption key.
+- The passphrase is **never stored**. It is sent only to the authenticated API
+  to derive the in-memory scrypt key and is never written to the database,
+  returned by an API response, or included in an audit event.
 - There is **no passphrase recovery**. If the passphrase is lost, all secrets are permanently inaccessible.
 - On "Lock Vault", the client clears all decrypted data from memory.
 - On page load, the vault status is checked and the appropriate modal is shown automatically.
+- The master-key configuration is service-wide, while vault items, folders, and
+  audit records remain project-scoped. Protected OAuth client secrets use the
+  unique active global project regardless of the selected dashboard project.
 - Losing `INGENIUM_EMAIL_ENCRYPTION_KEY` continuity makes encrypted mail
   credentials unreadable; the system reports reconnect/decryption failure and
   does not guess, re-encrypt, or overwrite the source data.

@@ -23,6 +23,12 @@ arrive without a local bearer credential:
 |--------|----------|---------|
 | GET | `/auth/callback` | OAuth callback receiver for native OpenCode provider integrations. Validates state/code from `pendingOAuthAttempts` Map (10-min TTL). Supports both **auto mode** (forwards to OpenCode's internal `localhost:1455/auth/callback` listener) and **code mode** (completes via OpenCodeClient). State is consumed on first use to prevent redirect replay. Malformed states (>1024 chars or containing control chars) rejected with 400. |
 
+### Authenticated Extension Preflight
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/auth/preflight` | Authenticated capability probe for extension-managed onboarding. Returns `{ data: { authenticated: true } }`; it does not disclose token configuration, credentials, upstream diagnostics, or HTTP details on failure. |
+
 ## Startup Behavior
 
 The API performs the following at startup (in order):
@@ -92,12 +98,18 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 | GET | `/api/v1/skills/search?q=...` | FTS5 search across skills |
 
 ### Observations
+Observation and personality endpoints require a valid `?project=<name>` query
+parameter. Detail and mutation routes return `404 Not Found` when the requested
+observation or trait is not owned by that project.
+
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
 | GET | `/api/v1/observations` | List observations |
 | POST | `/api/v1/observations` | Store observation |
 | GET | `/api/v1/observations/search?q=...` | FTS5 search |
 | GET | `/api/v1/observations/stats` | Pipeline statistics |
+| GET | `/api/v1/observations/:id` | Get a project-owned observation |
+| PATCH | `/api/v1/observations/:id` | Update a project-owned observation |
 | POST | `/api/v1/extraction/run` | Trigger server-side extraction |
 
 ### Personality
@@ -198,11 +210,11 @@ All routes prefixed with `/api/v1/vault`.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/initialize` | Initialize a new vault with passphrase + confirmation. Body: `{ password, confirmation }`. Passphrase must be at least 12 characters. Passphrases must match. Returns `201` on success, `409` if already initialized, `422` on validation error. |
-| POST | `/unseal` | Unseal vault with passphrase. When called from the dashboard (`x-ingenium-ui: dashboard` header present) on an uninitialized vault, returns `503 VAULT_NOT_INITIALIZED` — the Dashboard must redirect to `/initialize`. For MCP/programmatic clients, auto-initializes on first use. Returns `403` on invalid passphrase. |
+| POST | `/initialize` | Initialize a new vault with passphrase + confirmation. Body: `{ password, confirmation }`. A new passphrase must be non-blank and at least 12 Unicode characters; confirmation must match. Returns `201` on success, `409` if already initialized, `422` on validation error, or `429` with `Retry-After` after five passphrase attempts per IP per minute. |
+| POST | `/unseal` | Unseal vault with passphrase. When called from the dashboard (`x-ingenium-ui: dashboard` header present) on an uninitialized vault, returns `409 VAULT_NOT_INITIALIZED` — the Dashboard must use `/initialize`. For MCP/programmatic clients, auto-initializes on first use using the same new-vault passphrase policy. Returns `403` on invalid passphrase and `429` with `Retry-After` after five shared initialize/unseal attempts per IP per minute. |
 | POST | `/seal` | Seal (lock) vault |
-| GET | `/status` | Vault sealed/unsealed status |
-| GET | `/items` | List vault items (optionally `?folder_id=`) |
+| GET | `/status` | Vault sealed/unsealed status plus `nextAction` (`initialize`, `unseal`, or `null`). Not subject to the vault brute-force limiter. |
+| GET | `/items` | List vault item metadata (optionally `?folder_id=`); never returns secret values and is not subject to the vault brute-force limiter. |
 | POST | `/items` | Create a vault item |
 | GET | `/items/:id` | Get vault item metadata (no secret value) |
 | POST | `/items/:id/reveal` | Reveal a vault item's secret value (audit-logged) |
@@ -215,7 +227,7 @@ All routes prefixed with `/api/v1/vault`.
 | DELETE | `/folders/:id` | Delete a folder |
 | POST | `/generate-password` | Generate a secure random password |
 | POST | `/password/generate` | Dashboard-compatible password generation alias |
-| GET | `/audit` | List vault audit log entries |
+| GET | `/audit` | List redacted audit event metadata; no audit details or secret material are returned |
 
 ### Backups
 All routes prefixed with `/api/v1/backups`.
@@ -248,6 +260,29 @@ All routes prefixed with `/api/v1/context`. Project-scoped entries persist worki
 
 Input validation: `content` required, `priority` must be integer 0–10 (default 5), `tags` must be non-empty strings ≤64 characters. See `packages/ingenium-core/lib/tools/context.ts` and `services/ingenium-api/lib/routes/context.ts`.
 
+#### Context RAG uploads and retrieval
+
+These routes are also project-scoped under `/api/v1/context`. They are API-only
+in CTX-003; no MCP or Dashboard UI surface is implied.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/uploads` | Ingest one bounded direct document. Accepts `{ title, content, mimeType?, priority?, tags?, metadata? }`; allowed MIME types are `text/plain`, `text/markdown`, `application/json`, and `application/x-ndjson`; maximum UTF-8 size is 1 MiB. Returns `200` for a project-local SHA-256 duplicate and `201` for a new source. |
+| POST | `/uploads/chunked` | Start a bounded upload with `{ title, expectedHash, expectedBytes, chunkCount, mimeType?, priority?, tags?, metadata? }`. The total limit is 2 MiB, with at most 32 chunks. Supports `Idempotency-Key`. |
+| POST | `/uploads/:uploadId/chunks` | Add one immutable `{ ordinal, content }` chunk (≤64 KiB). An identical retry is `200`; a conflicting ordinal is `409`. |
+| POST | `/uploads/:uploadId/complete` | Verify contiguous chunk order, byte count, and SHA-256, then atomically index and publish the source. Incomplete uploads remain unsearchable. |
+| GET | `/uploads` | List context-upload source metadata and provenance without returning document bodies. |
+| GET | `/rag/search?q=` | Search only the current project's context-upload corpus and return provenance citations/snippets; no global fallback. |
+| POST | `/rag/ask` | Ask against only the current project's context-upload corpus. Returns an answer plus source-hash/provenance citations. |
+| POST | `/imports/opencode-session` | Opt-in OpenCode text-message import. Requires a safely project-bound `sessionId` and absolute `directory`; unavailable or mismatched sessions fail closed. |
+| GET | `/learning/current` | Retrieve bounded project-local observations/traits with latest input and trait timestamps. |
+| POST | `/learning/ingest` | Explicitly snapshot current learning into a RAG source, or return `{ noOp: true, reason: "NO_CURRENT_LEARNING" }`. |
+| GET | `/conversations/:conversationId/checkpoints/:checkpointId/rag/search?q=` | Search only the immutable RAG source set cited by that checkpoint and return historical citations. |
+
+Context checkpoint links freeze their referenced RAG source/chunks and persist a
+citation snapshot. Attempts to re-ingest or delete such a source are rejected;
+normal checkpoint and source ownership checks remain project-scoped.
+
 ### RAG (Retrieval-Augmented Generation)
 All routes prefixed with `/api/v1/rag`.
 
@@ -263,6 +298,64 @@ All routes prefixed with `/api/v1/rag`.
 | POST | `/ask` | Natural-language Q&A with LLM-grounded answers and citations. Returns `{ answer, citations: [{ id, title, path, heading, snippet, kind, score }] }`. Broker-executed via `executeSynthesisBroker()`. |
 | GET | `/stats` | RAG index statistics (sources, chunks, embeddings, `vector_capability`) |
 | POST | `/export` | Export all RAG sources as JSON |
+
+### Repository Documentation Sync
+
+All routes prefixed with `/api/v1/docs`.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/repository/sync?project=<project>` | Preview or atomically apply a complete repository Markdown manifest to managed Docs Workspace pages and their RAG sources. Use `{ manifest, dryRun? }`; invalid manifests return `422 INVALID_REPOSITORY_DOCS_MANIFEST`. |
+
+The manifest is caller-supplied data: the API does not walk or open repository
+paths. Entries are limited to normalized regular `docs/**/*.md` files with
+matching SHA-256 hashes and size/secret-content validation. A dry run returns
+the planned operations without mutation; apply archives only previously
+managed documents missing from the complete manifest.
+
+### Repository Resource Sync
+
+All routes prefixed with `/api/v1/repository`.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/resources/sync?project=<project>` | Preview or atomically apply the repository-authoritative v2 manifest for skills, agents, and plugins. Use `{ manifest, dryRun? }`; invalid manifests return `422 INVALID_REPOSITORY_RESOURCES_MANIFEST`. |
+
+The v2 resource manifest accepts exactly `skills`, `agents`, and `plugins`.
+Each item carries stable identity, normalized path, and SHA-256 of its full
+semantic projection. It preserves skill frontmatter/metadata/file trees, agent
+permissions/hidden/skills plus compatibility-mirror paths, and plugin source,
+order, enabled state, and options. The immutable `ingenium-llm-broker` cannot
+be imported. Missing entries archive/remove only resources previously recorded
+as repository-managed; manual, unmanaged, and system resources are untouched.
+Commands and project/global configuration are deliberately excluded.
+
+### `ingenium-init-project` CLI contract
+
+The extension CLI is the repository-facing caller for these two sync endpoints.
+It accepts exactly one mode, an optional documentation scope, and an optional
+validated project override:
+
+```text
+ingenium-init-project --dry-run [--docs-only] [--project <name>]
+ingenium-init-project --apply [--docs-only] [--project <name>]
+```
+
+`--dry-run` resolves the validated project identity and submits preview requests;
+it does not provision a project, mutate remote state, or write the local sync
+manifest. `--apply` provisions the validated project when necessary, applies the
+projection, and advances the local repository baseline only after API
+confirmation. The `all` scope covers repository Markdown plus `.opencode/skills`,
+`.opencode/agents` (including compatibility mirrors), and configured/local
+`.opencode/plugins` sources. `--docs-only` submits only the Markdown manifest.
+`--project` is validated and takes precedence over `INGENIUM_PROJECT`, which
+takes precedence over the validated worktree basename; the CLI never defaults
+to `global-default`. In the production image, the command is on `PATH` at the
+stable `/usr/local/bin/ingenium-init-project` path, independent of
+`/app/node_modules/.bin`.
+
+This contract documents the available workflow; it does not assert that a live
+onboarding or apply run has occurred.
 
 **Indexing pipeline**: Two auto-indexing paths: (1) Canonical repo Markdown files via `POST /rag/ingest` walks `INGENIUM_DOCS_ROOT/docs/**/*.md` with symlink escape protection and SHA-256 hash idempotency. (2) Docs Workspace pages are indexed at lifecycle boundaries — publish, update (if published), archive, restore — as `docs-page:{id}` sources. Manual ingestion via `POST /rag/sources` and `POST /rag/sources/:id/ingest` is also available.
 

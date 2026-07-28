@@ -232,6 +232,30 @@ The plugin is self-registering — the `@ingenium/extension` package exports `Re
 
 When the sync engine detects changes to **plugins** or **config** (opencode.json), the response includes `restartRequired: true`. A human-readable message is logged: `"⚡ OpenCode restart required (plugin/config changes)"`. This is because OpenCode loads plugins and config at startup — runtime changes to the plugin array or config content do not take effect until the next session restart.
 
+#### Repository-authoritative initialization
+
+`ingenium-init-project` provides a deterministic repository-to-API projection
+for onboarding and reconciliation. It resolves validated `--project` first,
+then `INGENIUM_PROJECT`, then the validated worktree basename; it never invents
+a `global-default` fallback. The production image exposes the command on
+`PATH` at `/usr/local/bin/ingenium-init-project`, independent of the prunable
+workspace `.bin` directory.
+
+- `--dry-run` previews the docs/resource operations without provisioning a
+  project, mutating remote state, or writing the local repository baseline.
+- `--apply` provisions the validated project when needed and advances the
+  `.opencode/.ingenium-sync-state.json` repository baseline only after the API
+  confirms the corresponding apply.
+- The default scope covers `docs/**/*.md`, `.opencode/skills/**`,
+  `.opencode/agents/**` (including linked compatibility mirrors), and configured
+  local plugin sources under `.opencode/plugins/**`.
+- `--docs-only` limits the projection to repository Markdown.
+
+Commands, MCP server definitions, project/global configuration, and manual or
+unmanaged remote resources are excluded from this initialization contract.
+The presence of this procedure is not a claim that live onboarding has been
+performed.
+
 The dashboard sync log captures this condition and prompts the user to restart OpenCode. Skills, agents, and commands do not require a restart — they are read from disk at session startup from the `.opencode/` directory.
 
 ### Skill Seeds
@@ -405,7 +429,10 @@ Docs AI, RAG Ask, and Job Suggestions use `executeSynthesisBroker()` which route
 1. For callers without a validated explicit selection, reads primary (`synthesis_provider` + `synthesis_model`) and secondary (`synthesis_backup_provider` + `synthesis_backup_model`) from settings
 2. Deduplicates identical `(providerID, modelID)` pairs
 3. For callers without an explicit selection, tries primary first and falls back to secondary on failure; an explicit selection is attempted exactly once
-4. **Hard 30-second timeout cap** on every call regardless of what `timeoutMs` is passed
+4. **Bounded timeout policy**: the default and all non-Docs broker consumers
+   remain hard-capped at 30 seconds. Docs AI alone uses the server-owned
+   `docs-ai` policy, which permits its requested 60 seconds but cannot exceed
+   the broker-wide 60-second maximum.
 5. Creates ephemeral OpenCode sessions using only `ingenium-llm-broker`, whose
    wildcard-deny profile has no tool allowances; the request also carries an
    empty `tools: {}` selection as defense in depth
@@ -646,6 +673,32 @@ The `plan_*` tools remain supported for backward compatibility. The `context_*` 
 
 All context operations follow the HARD RULE `checkpointAfterWrite()` must be called OUTSIDE `execTransaction()`. Calling checkpoint inside a transaction causes `SQLITE_LOCKED`.
 
+### Context RAG Ingestion (CTX-003)
+
+Context documents are a separate, project-scoped RAG corpus. They never inherit
+the generic RAG route's optional global-project fallback.
+
+| Input | Route | Bound and lifecycle |
+|-------|-------|---------------------|
+| Direct text / Markdown / JSON / JSONL | `POST /api/v1/context/uploads` | ≤1 MiB UTF-8; SHA-256 deduplicated per project; source, chunks, embeddings, and provenance commit together. |
+| Chunked document | `POST /api/v1/context/uploads/chunked`, then `.../:id/chunks` and `.../:id/complete` | ≤2 MiB total, ≤32 chunks, ≤64 KiB each; staged chunks are not searchable until ordered byte-size and SHA-256 verification succeeds in the final transaction. |
+| OpenCode session | `POST /api/v1/context/imports/opencode-session` | Opt-in only. The caller must provide an absolute directory whose basename equals the requested project, and OpenCode must report that exact directory before text parts are read. Reasoning and tool parts are excluded. |
+| Current learning | `POST /api/v1/context/learning/ingest` | Explicit snapshot of current project observations and active traits; returns an explainable no-op when neither exists. |
+
+The durable `context_rag_uploads` rows retain a source hash, provenance
+(`direct_upload`, `chunked_upload`, `opencode_session`, or
+`learning_snapshot`), and optional opaque source reference. Upload list routes
+return metadata only, never document bodies. The dedicated search and ask routes
+return project-local citations with provenance; `POST /context/rag/ask` passes
+only its local result set to the broker.
+
+When a source is attached to an immutable checkpoint, migration 065 freezes its
+source and chunks at the database layer. A companion
+`context_checkpoint_rag_source_snapshots` row preserves the title, hash, path,
+MIME type, provenance, and source reference seen at checkpoint creation.
+`GET /context/conversations/:conversationId/checkpoints/:checkpointId/rag/search`
+therefore searches only that frozen source set and returns historical citations.
+
 ## RAG Indexing Architecture (Phase 3)
 
 The RAG (Retrieval-Augmented Generation) system provides two indexing paths feeding a unified search index.
@@ -688,6 +741,15 @@ restorePage() ──▶ indexPublishedDoc(page)    ──▶ source creation
 
 **Path 3 — Manual:**
 - `POST /rag/sources` + `POST /rag/sources/:id/ingest` for arbitrary text
+
+**Path 4 — Context documents (project-local):**
+- `POST /context/uploads` and the chunked-upload lifecycle create durable RAG
+  sources only after all validation and indexing work commits.
+- `POST /context/imports/opencode-session` imports only safely project-bound
+  text messages; it does not read arbitrary sessions or store reasoning/tool
+  parts.
+- `POST /context/learning/ingest` is an explicit snapshot of durable learning
+  records rather than an automatic raw-observation export.
 
 ### Atomic Canonical Ingestion
 
@@ -734,6 +796,8 @@ Two functions in `rag.ts`:
 | Function | Algorithm | Use Case |
 |----------|-----------|----------|
 | `searchChunks()` | BM25 FTS5 only, snippet-generation, cross-project (include global) | `/search` route, `/ask` route, MCP search |
+| `searchContextUploadChunks()` | BM25 FTS5 only, constrained by `context_rag_uploads` | Context current retrieval; never includes global sources |
+| `searchChunksBySourceIds()` | BM25 FTS5 only, constrained to checkpoint-linked source IDs | Context historical checkpoint retrieval |
 | `hybridSearch()` | 70% BM25 + 30% n-gram cosine similarity, filters at vector_score ≥ 0.08 | Available but not currently wired to API routes |
 
 Both cap at 20 results by default. `searchChunks()` accepts `limit` (max configurable via API query param up to 100).

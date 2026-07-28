@@ -27,7 +27,7 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 
 ## Database Migrations
 
-Ingenium currently has 58 numbered migrations (`001`–`058`):
+Ingenium currently has 61 numbered migrations (`001`–`061`):
 
 - `001`–`028`: platform, self-learning, tasks/jobs, skill project isolation, and email persistence
 - `029`–`040`: documentation workspace schema and integrity repair
@@ -42,5 +42,7 @@ Ingenium currently has 58 numbered migrations (`001`–`058`):
 - `056`: reserved LLM broker direct-rename protection
 - `057`: reserved LLM broker enabled-state backfill and immutable direct-SQL/REPLACE protection
 - `058`: connection-independent reserved broker canonical-template and REPLACE collision protection
+- `059`–`060`: repository-authoritative Docs and resource synchronization state
+- `061`: canonical global ownership backfill for legacy backup records and restore jobs
 
 The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.

@@ -53,7 +53,7 @@ The extension package ships three OpenCode plugins — `observer.ts` (session ev
 
 ### Routes
 
-The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
+The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 
 | Page | Purpose |
 |------|---------|
@@ -76,6 +76,7 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 | `/config` | OpenCode config editor |
 | `/observations` | Self-learning observations |
 | `/personality` | Personality traits |
+| `/context` | Immutable context conversation memory |
 | `/pipeline` | Pipeline event timeline |
 | Settings (overlay) | Full-screen settings overlay
 
@@ -142,6 +143,21 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 - Use the FTS5 search box for full-text search (supports prefix*, phrase "search", -negation)
 - Filter by status and type
 
+## Context
+
+**What it does**: Browse immutable, project-scoped context conversations. The
+conversation index deliberately exposes metadata only; message content is loaded
+only after selecting a conversation or running a bounded in-conversation search.
+
+**How to use**:
+- Navigate to `/context`. The page uses the active project from the project dropdown; project selection is preserved in the route query when present.
+- Choose a conversation from the responsive index to inspect its ordered message timeline and checkpoint history.
+- Use **Search** to find messages within the selected conversation. Search results are explicit content retrievals, not content returned by the index.
+- Select **Restore as new conversation** on a checkpoint to branch a new immutable conversation at that checkpoint. The source conversation and checkpoint remain unchanged.
+- Loading, unavailable, and empty states describe whether a project has no conversations or the dashboard could not reach the API.
+
+**API**: Uses the project-scoped immutable conversation endpoints under `/api/v1/context/conversations`. See [API Reference](../develop/api.md#context--canonical-agent-memory) for the endpoint contract.
+
 ## Pipeline
 
 **What it does**: A real-time Git-workflow-style timeline of all self-learning pipeline events. Every observation, synthesis run, trait creation, and plugin event is displayed in a connected vertical timeline with color-coded nodes.
@@ -165,6 +181,7 @@ The Ingenium Dashboard provides **20 primary routes** plus the Settings overlay:
 - Fork, share (copy link to clipboard), and compact conversations via header action buttons.
 - Provider-emitted reasoning appears live in a separate escaped plain-text disclosure above the assistant answer. OpenCode v1.18.3 identifies the reasoning part in `message.part.updated` before sending its `field: "text"` deltas, and Chat uses that authoritative part mapping to keep reasoning out of the rendered Markdown answer and copy. The disclosure remains open while streaming, then becomes user-toggleable after the terminal event.
 - Tool calls appear as compact trace rows with a friendly tool label and short argument summary. **Web Search is the sole exception**: its row provides an accessible inline disclosure of the actual query (keyboard support and `aria-expanded` state). When the provider returns concrete sites, only validated `http`/`https` URLs are disclosed, grouped as **Visited**, **Results**, or **Sites**; query text cannot fabricate a site, and result titles/arbitrary payload fields are omitted. External links open with `target="_blank"` and `rel="noopener noreferrer"`. All other tools remain non-interactive compact traces; detailed payload, status, timing, output, and error metadata are not shown in the trace.
+- Open the **Activity** drawer from a selected assistant tool activity to inspect a chronological timeline of reasoning, response text, and tool events. The modal traps focus, restores focus on close, supports `Escape` and backdrop dismissal, and is full-width on small screens.
 - Assistant prose, reasoning, stream activity/errors, generated attachments, Chat-only Markdown callouts, and agent permission/question prompts use borderless, background-free plain flow. User-message bubbles retain their selected-surface styling; Docs Markdown callouts are unaffected.
 - Footer reads "OpenCode Chat".
 

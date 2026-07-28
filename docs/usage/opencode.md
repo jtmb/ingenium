@@ -33,6 +33,28 @@ boundary is `127.0.0.1:4097`. OAuth on `127.0.0.1:1455` reaches Nginx and then
 private Express `4096`; the auth middleware allowlists only the exact
 unauthenticated `GET /auth/callback` path.
 
+## Ingenium MCP launcher preflight
+
+The tracked local `opencode.json` launches the packaged
+`packages/ingenium-extension/dist/scripts/mcp-server.js` artifact, not a
+service build path. Build it before starting a local OpenCode session:
+
+```bash
+npm run build --workspace=packages/ingenium-extension
+```
+
+The launcher checks the protected token source and project identity before it
+loads the stdio transport. Local sessions derive a validated project name from
+their worktree unless `INGENIUM_PROJECT` explicitly overrides it. Docker is the
+only `/workspace` session, so its generated OpenCode config explicitly uses
+`global-default`. This avoids a clone-specific local project value while never
+silently treating an external worktree as the global namespace.
+
+If the Chat MCP drawer reports that Ingenium cannot connect, rebuild the
+extension artifact, verify the owner-only token file, and verify the intended
+project identity. The drawer deliberately does not reveal upstream paths,
+tokens, or transport diagnostics.
+
 Web and CLI sessions share the same backend process state.
 
 ## Gateway boundaries

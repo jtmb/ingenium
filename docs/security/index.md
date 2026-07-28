@@ -90,11 +90,30 @@ This means:
 - The key is never written to disk in any form
 - A new `vault_config` row with fresh salt and HMAC tag is the only initialization artifact
 
+### Initialization Policy and Scope
+
+- New vaults require a non-blank passphrase of at least 12 Unicode characters.
+  The same core policy is enforced for Dashboard initialization and MCP's
+  first-use auto-initialization path. Existing vaults are not revalidated while
+  unsealing, so a policy upgrade cannot lock out an already-created vault.
+- `vault_config` and the in-memory master key are service-wide singletons. Vault
+  items, folders, and audit records are still scoped to the requested project.
+  Protected OAuth settings are separately resolved only against the unique
+  active global project.
+- Initialization and unseal attempts are limited to five per client IP per
+  minute. The API returns `429` with `Retry-After`; status and metadata reads
+  are not subject to this brute-force limiter.
+
 ### Audit Trail
 
 All vault operations are logged to `vault_audit_log`:
-- `vault_initialize` / `vault_unsealed` / `vault_sealed` / `vault_unseal_failed`
+- `vault_unsealed` / `vault_sealed` / `vault_unseal_failed`
 - `secret_created` / `secret_read` / `secret_updated` / `secret_deleted` / `secret_rotated`
+
+Audit details are empty for vault operations, and the audit API returns only
+event metadata (`id`, event type, item ID, actor, and timestamp). It never
+returns passphrases, decrypted values, ciphertext, wrapped keys, or free-form
+audit details.
 
 ### Important Security Properties
 

@@ -18,3 +18,4 @@ How to configure every component of the Ingenium system.
 | [MCP Servers](mcp-servers.md) | MCP server configuration and tool manager |
 | [Email Setup](email-setup.md) | Email account setup with OAuth2 |
 | [Synthesis](synthesis.md) | Synthesis pipeline configuration |
+| [Dashboard Settings](settings.md) | Settings overlay deep links, project scope, and panel loading behavior |

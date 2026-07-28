@@ -48,6 +48,16 @@ Each backup creates two files in `INGENIUM_BACKUPS_DIR`:
 
 A `backup_records` DB table stores metadata: SHA-256 hashes, backup type, component manifest, and status. The manifest JSON includes `schema_version`, `ingenium` component (filename, sha256, size_bytes), and `opencode` component.
 
+### Ownership and project context
+
+Backups are server-owned resources. Their `project_id` is the sole active
+global project (`is_global = 1`), not the project selected by an external
+worktree or dashboard URL. Migration `061_global_backup_ownership.sql`
+backfills legacy backup records and restore jobs; startup repeats the
+idempotent backfill after ensuring the global project exists. Backup API
+requests ignore the `project` query parameter for ownership, so an external
+URL context cannot read or mutate a different backup namespace.
+
 ### Schedule Management via MCP
 
 ```typescript
@@ -96,7 +106,7 @@ const result = await ingenium_backup_create({
   type: "manual",
 });
 
-// List all backups
+// List all backups (the server resolves canonical global ownership)
 const backups = await ingenium_backup_list({ project: "global-default" });
 
 // Get a specific backup
@@ -120,7 +130,13 @@ const job = await ingenium_backup_restore_start({
 const status = await ingenium_backup_restore_status({ job_id: "<job-uuid>" });
 ```
 
-The API currently records a confirmed restore job and returns `restartRequired: true`; applying a confirmed snapshot remains an operator-controlled maintenance action. The restore preflight validates:
+The API currently records a confirmed restore job and returns
+`restartRequired: true`; it does **not** replace either active database. Applying
+a confirmed snapshot remains an operator-controlled maintenance action outside
+the API contract. The supported restore workflow is therefore limited to
+preflight, explicit confirmation, job-status tracking, and an operator-led
+isolated maintenance restore. It does not claim or apply unsupported
+destructive restoration of arbitrary project data. The restore preflight validates:
 1. Backup record exists in DB
 2. Component files exist on disk with matching SHA-256
 3. Ingenium snapshot passes `PRAGMA integrity_check`

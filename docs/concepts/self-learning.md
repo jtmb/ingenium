@@ -129,10 +129,8 @@ User interacts with OpenCode (:4098)
   │   → cheap regex pre-filter selects candidate messages (NOT final extraction)
   │   → batches of 15 sent to synthesis LLM for durable behavior rule extraction
   │   → only LLM output becomes observations — raw snippets NEVER enter DB
-  │   → max_tokens: 4096 (increased for reasoning models like Qwen — reasoning
-  │     consumes half the token budget)
-  │   → reasoning_content fallback: reads from msg.reasoning_content when
-  │     msg.content is empty (common with reasoning model responses)
+   │   → max_tokens: 8192
+   │   → empty response content produces no rules; reasoning traces are never used
   │   → 🔴 Failure-aware watermark: watermark does NOT advance if ANY batch
   │     fails LLM extraction, preventing gaps from transient errors
   │   → pipeline event: extraction_completed
@@ -196,6 +194,28 @@ User interacts with OpenCode (:4098)
 | **Database** | SQLite with three core tables (`observations` with FTS5, `personality_traits` with confidence tracking, `pipeline_events` with parent-child nesting) plus `personality_profile` aggregated view |
 | **LLM Provider** | (Optional) OpenCode-compatible provider blocks for extraction (Phase 0), trait consolidation (Phase 1), and skill synthesis (Phase 2), configured via Settings → Providers. One block can be primary and one backup; additional blocks remain available in OpenCode. **API keys are never exposed** in responses or OpenCode config files — the API returns only `apiKeySet: boolean`. API keys are stored in the encrypted vault (`vault_items`, AES-256-GCM), never in plaintext settings. Legacy `synthesis_api_key` / `synthesis_backup_api_key` / `llm_provider_api_keys` settings are auto-migrated into the vault on first read. |
 
+### Project Ownership
+
+Observations, personality traits, extraction watermarks, and synthesis batches are
+owned by the project named in the request. Extension plugins resolve and provision
+their external worktree project before calling the extraction or synthesis routes;
+they never fall back to `global-default`. Detail and mutation operations verify that
+the target observation or trait belongs to that same project and report it as not
+found otherwise. The only intentional promotion into `global-default` is the
+separate cross-project synthesis flow after a pattern appears in multiple projects.
+
+### Explicit current-learning RAG snapshots
+
+CTX-003 does not automatically export raw observations into RAG. A caller can
+explicitly request `POST /api/v1/context/learning/ingest` for its project to
+snapshot the bounded current observations and active traits into a provenance-tagged
+RAG source. The response includes current input/trait timestamps and returns an
+explainable `NO_CURRENT_LEARNING` no-op when there is nothing to snapshot. The
+resulting source is project-local; context RAG retrieval does not include
+`global-default` sources. This preserves the extraction rule that raw OpenCode
+messages are not persisted as observations while still allowing explicit,
+source-attributed retrieval of durable learning output.
+
 ---
 
 ## 2.5 Extraction Engine (Server-Side)
@@ -226,10 +246,8 @@ Extraction Engine (extraction.ts)
   │   → Each batch sent to synthesis LLM with structured prompt
   │   → LLM extracts DURABLE USER BEHAVIOR RULES as JSON
   │   → Only LLM output becomes observations — raw snippets NEVER enter DB
-  │   → max_tokens: 4096 (increased for reasoning models like Qwen)
-  │   → reasoning_content fallback: if the LLM returns empty content but
-  │     populated reasoning_content (common with reasoning models), it is
-  │     used as the extraction source instead
+   │   → max_tokens: 8192
+   │   → empty content produces no extracted rules; reasoning traces are not used
   │
   └─ No-LLM = No Observations
       → If no synthesis LLM configured, extraction creates 0 observations
@@ -243,9 +261,9 @@ The system uses two LLM dispatch modes depending on the feature:
 | Mode | Mechanism | Timeout | Used By | Configuration Source |
 |------|-----------|---------|---------|---------------------|
 | **Direct** | `callSynthesisLLM()` / `safeLlmFetch()` — calls LLM endpoint directly via HTTP | 60s | Self-learning pipeline (Phase 0 extraction, Phase 1 consolidation, Phase 2 skill synthesis), Email suggestions/summaries | `resolveLLMConfig()` — global→project→env vars chain |
-| **Broker** | `executeSynthesisBroker()` — creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s hard cap** (`Math.min(Math.max(timeoutMs, 0), 30_000)`) | Docs AI, RAG Ask, Job Suggestions | Docs AI uses the server-owned validated global Chat selection or server-derived default; RAG Ask and Job Suggestions use the synthesis primary/backup chain with dedup |
+| **Broker** | `executeSynthesisBroker()` — creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s default hard cap**; only the server-owned Docs AI policy permits its requested 60s, with a broker-wide 60s maximum | Docs AI, RAG Ask, Job Suggestions | Docs AI uses the server-owned validated global Chat selection or server-derived default; RAG Ask and Job Suggestions use the synthesis primary/backup chain with dedup |
 
-The core pipeline uses direct calls (60s timeout) for batch processing. Interactive features use the broker (30s cap) for responsiveness and OpenCode model routing.
+The core pipeline uses direct calls (60s timeout) for batch processing. Interactive broker consumers retain a 30-second cap for responsiveness and OpenCode model routing, except Docs AI's server-owned 60-second policy for longer document transformations.
 
 | Trigger | Mechanism |
 |---------|-----------|

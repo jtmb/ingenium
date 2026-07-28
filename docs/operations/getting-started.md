@@ -134,5 +134,21 @@ Once everything is running:
 
 - **Explore the dashboard** — click through all 20 primary routes plus the Settings overlay
 - **Read feature guides** — see `usage/` for per-feature instructions
-- **Initialize a project** — use `/init-project` command or `ingenium_project_init` MCP tool
+- **Initialize repository resources (optional)** — from the active worktree, run
+  `ingenium-init-project --dry-run` to preview the repository-authoritative
+  projection. Use `--apply` only when the preview is accepted; append
+  `--docs-only` to limit the operation to `docs/**/*.md`, or
+  `--project <name>` to target a validated explicit project. In the production
+  image, the command is on `PATH` at
+  `/usr/local/bin/ingenium-init-project`. This is a documented procedure, not
+  evidence that onboarding has been run in the current session.
+- The default projection includes `docs/**/*.md`, eligible skills and agents,
+  and configured local plugin sources. It excludes commands, MCP server
+  definitions, project/global config, incomplete agent notes, migrated skill
+  directories, the reserved `ingenium-llm-broker`, symlinks, and secret-like
+  plugin paths or option keys. The production image preserves configured plugin
+  source files at their repository paths so runtime onboarding can submit the
+  same source identities.
+- **Provision an empty project** — use the `ingenium_project_init` MCP tool when
+  you need project creation without the repository projection.
 - **Learn the self-learning pipeline** — read `concepts/self-learning.md`
