@@ -25,10 +25,19 @@ require_mode() {
   [[ "$actual" == "$expected" ]] || fail "expected $path mode $expected, got $actual"
 }
 
+require_link_count() {
+  local path="$1"
+  local expected="$2"
+  local actual
+  actual="$(stat -c '%h' "$path")"
+  [[ "$actual" == "$expected" ]] || fail "expected $path hard-link count $expected, got $actual"
+}
+
 SOURCE_AGENTS_DIR="$TEMP_ROOT/source-agents"
 GLOBAL_AGENTS_DIR="$TEMP_ROOT/global-config/opencode/agents"
 WORKSPACE_AGENTS_DIR="$TEMP_ROOT/workspace/.opencode/agents"
 OUTSIDE_PROFILE="$TEMP_ROOT/outside-profile.md"
+OUTSIDE_HARDLINK_PROFILE="$TEMP_ROOT/outside-hardlink-profile.md"
 mkdir -p "$SOURCE_AGENTS_DIR/chat" "$SOURCE_AGENTS_DIR/execution" "$SOURCE_AGENTS_DIR/research" \
   "$GLOBAL_AGENTS_DIR" "$WORKSPACE_AGENTS_DIR"
 
@@ -57,6 +66,8 @@ cmp -s "$SOURCE_AGENTS_DIR/execution/ingenium-llm-broker.md" "$GLOBAL_AGENTS_DIR
 require_mode "$GLOBAL_AGENTS_DIR/operator-profile.md" 600
 require_mode "$GLOBAL_AGENTS_DIR/ingenium-chat.md" 644
 require_mode "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" 644
+require_link_count "$GLOBAL_AGENTS_DIR/ingenium-chat.md" 1
+require_link_count "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md" 1
 
 grep -q '^  edit: deny$' "$GLOBAL_AGENTS_DIR/ingenium-chat.md" \
   || fail 'global chat profile lost its edit denial'
@@ -75,6 +86,36 @@ sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR
   || fail 'idempotent projection rewrote the unchanged chat profile'
 [[ "$broker_metadata_before" == "$(stat -c '%i:%Y:%a' "$GLOBAL_AGENTS_DIR/ingenium-llm-broker.md")" ]] \
   || fail 'idempotent projection rewrote the unchanged broker profile'
+
+# Hard links can let a privileged descriptor chmod an inode outside the owned
+# agent tree. Every source and destination identity must therefore be unique.
+cp "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md" "$OUTSIDE_HARDLINK_PROFILE"
+chmod 0600 "$OUTSIDE_HARDLINK_PROFILE"
+rm "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md"
+ln "$OUTSIDE_HARDLINK_PROFILE" "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md"
+if sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR"; then
+  fail 'projection accepted a hard-linked source profile'
+fi
+require_mode "$OUTSIDE_HARDLINK_PROFILE" 600
+cmp -s "$OUTSIDE_HARDLINK_PROFILE" "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md" \
+  || fail 'hard-linked source content changed during rejected projection'
+rm "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md"
+cp "$REPO_ROOT/.opencode/agents/chat/ingenium-chat.md" "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md"
+
+rm "$OUTSIDE_HARDLINK_PROFILE"
+cp "$SOURCE_AGENTS_DIR/chat/ingenium-chat.md" "$OUTSIDE_HARDLINK_PROFILE"
+chmod 0600 "$OUTSIDE_HARDLINK_PROFILE"
+rm "$GLOBAL_AGENTS_DIR/ingenium-chat.md"
+ln "$OUTSIDE_HARDLINK_PROFILE" "$GLOBAL_AGENTS_DIR/ingenium-chat.md"
+if sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR"; then
+  fail 'projection accepted a hard-linked destination profile'
+fi
+require_mode "$OUTSIDE_HARDLINK_PROFILE" 600
+cmp -s "$OUTSIDE_HARDLINK_PROFILE" "$GLOBAL_AGENTS_DIR/ingenium-chat.md" \
+  || fail 'hard-linked destination content changed during rejected projection'
+rm "$GLOBAL_AGENTS_DIR/ingenium-chat.md"
+sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR"
+require_link_count "$GLOBAL_AGENTS_DIR/ingenium-chat.md" 1
 
 # A target symlink must fail closed instead of following it to an unrelated
 # file. Restore the allowlisted target through the projector afterwards.
@@ -153,6 +194,22 @@ sh "$NORMALIZER" --project-server-owned "$SOURCE_AGENTS_DIR" "$GLOBAL_AGENTS_DIR
 sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"
 [[ "$(<"$WORKSPACE_AGENTS_DIR/workspace-profile.md")" == 'workspace compatibility profile' ]] \
   || fail 'workspace profile content changed during normalization'
+require_mode "$WORKSPACE_AGENTS_DIR/workspace-profile.md" 644
+rm "$OUTSIDE_HARDLINK_PROFILE"
+cp "$WORKSPACE_AGENTS_DIR/workspace-profile.md" "$OUTSIDE_HARDLINK_PROFILE"
+chmod 0600 "$OUTSIDE_HARDLINK_PROFILE"
+rm "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
+ln "$OUTSIDE_HARDLINK_PROFILE" "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
+if sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"; then
+  fail 'normalization accepted a hard-linked profile destination'
+fi
+require_mode "$OUTSIDE_HARDLINK_PROFILE" 600
+[[ "$(<"$OUTSIDE_HARDLINK_PROFILE")" == 'workspace compatibility profile' ]] \
+  || fail 'normalization changed the external hard-link content'
+rm "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
+printf '%s\n' 'workspace compatibility profile' > "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
+chmod 0600 "$WORKSPACE_AGENTS_DIR/workspace-profile.md"
+sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"
 require_mode "$WORKSPACE_AGENTS_DIR/workspace-profile.md" 644
 ln -s "$OUTSIDE_PROFILE" "$WORKSPACE_AGENTS_DIR/symlinked-profile.md"
 sh "$NORMALIZER" "$WORKSPACE_AGENTS_DIR"

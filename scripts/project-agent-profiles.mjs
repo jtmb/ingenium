@@ -107,12 +107,17 @@ function openRegularFileAt(parentFd, name, description, { optional = false } = {
   }
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.isSymbolicLink()) fail(`${description} must be a regular non-symlink file`);
+    assertExclusiveRegularFile(stat, description);
     return { fd, stat };
   } catch (error) {
     closeSync(fd);
     throw error;
   }
+}
+
+function assertExclusiveRegularFile(stat, description) {
+  if (!stat.isFile() || stat.isSymbolicLink()) fail(`${description} must be a regular non-symlink file`);
+  if (stat.nlink !== 1) fail(`${description} must have exactly one hard link`);
 }
 
 function closeQuietly(fd) {
@@ -132,8 +137,10 @@ function assertSameOwner(actual, expected, description) {
 
 function readStableFile(file) {
   const before = fstatSync(file.fd);
+  assertExclusiveRegularFile(before, "source profile");
   const contents = readFileSync(file.fd);
   const after = fstatSync(file.fd);
+  assertExclusiveRegularFile(after, "source profile");
   if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
     fail("source profile changed while it was being read");
   }
@@ -156,9 +163,15 @@ function applySourceOwnership(fd, sourceStat) {
   }
 }
 
+function applyProfileSourceOwnership(fd, sourceStat, description) {
+  assertExclusiveRegularFile(fstatSync(fd), description);
+  applySourceOwnership(fd, sourceStat);
+  assertExclusiveRegularFile(fstatSync(fd), description);
+}
+
 function assertProfile(fd, sourceStat, expectedContents, description) {
   const stat = fstatSync(fd);
-  if (!stat.isFile() || stat.isSymbolicLink()) fail(`${description} is not a regular file`);
+  assertExclusiveRegularFile(stat, description);
   assertSameOwner(stat, sourceStat, description);
   if ((stat.mode & 0o777) !== PROFILE_MODE) fail(`${description} does not have mode 0644`);
   const contents = readFileSync(fd);
@@ -185,13 +198,13 @@ function replaceProfileAtomically(targetDirectoryFd, profileName, sourceStat, co
 
   try {
     const temporaryStat = fstatSync(temporaryFd);
-    if (!temporaryStat.isFile() || temporaryStat.isSymbolicLink() || temporaryStat.nlink !== 1) {
-      fail("profile temporary file is not an exclusive regular file");
-    }
+    assertExclusiveRegularFile(temporaryStat, "profile temporary file");
     writeAll(temporaryFd, contents);
-    applySourceOwnership(temporaryFd, sourceStat);
+    assertExclusiveRegularFile(fstatSync(temporaryFd), "profile temporary file");
+    applyProfileSourceOwnership(temporaryFd, sourceStat, "profile temporary file");
     fchmodSync(temporaryFd, PROFILE_MODE);
     fsyncSync(temporaryFd);
+    assertExclusiveRegularFile(fstatSync(temporaryFd), "profile temporary file");
     closeSync(temporaryFd);
     temporaryFd = undefined;
 
@@ -228,6 +241,7 @@ function projectProfile(sourceDirectoryFd, targetDirectoryFd, sourceDirectorySta
       assertSameOwner(target.stat, sourceDirectoryStat, `global agent profile ${profileName}`);
       const current = readFileSync(target.fd);
       if (current.equals(contents)) {
+        assertExclusiveRegularFile(fstatSync(target.fd), `global agent profile ${profileName}`);
         fchmodSync(target.fd, PROFILE_MODE);
         fsyncSync(target.fd);
       } else {
@@ -289,6 +303,7 @@ function normalizeDirectory(directoryFd) {
     if (!entry.name.endsWith(".md")) continue;
     const profile = openRegularFileAt(directoryFd, entry.name, `agent profile ${entry.name}`);
     try {
+      assertExclusiveRegularFile(fstatSync(profile.fd), `agent profile ${entry.name}`);
       fchmodSync(profile.fd, PROFILE_MODE);
       fsyncSync(profile.fd);
     } finally {
