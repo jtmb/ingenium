@@ -99,6 +99,19 @@ describe("OpenCode MCP status proxy contract", () => {
     expect(JSON.stringify(body)).not.toContain("secret diagnostic");
   });
 
+  it("returns an actionable but non-secret diagnostic for a failed Ingenium launcher", async () => {
+    mocks.getMCPStatus.mockResolvedValue({ ingenium: { status: "failed", error: "token=do-not-leak" } });
+
+    const body = await (await fetch(`${baseUrl}/mcp`)).json();
+
+    expect(body.data.ingenium).toEqual({
+      status: "failed",
+      connected: false,
+      error: "Ingenium MCP could not connect. Build the extension launcher, then verify the protected API token and project identity.",
+    });
+    expect(JSON.stringify(body)).not.toContain("token=do-not-leak");
+  });
+
   it("projects unknown and malformed server states into a safe distinct state", async () => {
     mocks.getMCPStatus.mockResolvedValue({
       unknown: { status: "restarting", error: "token=do-not-leak" },

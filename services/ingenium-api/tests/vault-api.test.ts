@@ -9,6 +9,7 @@ import { initVault } from "../../../packages/ingenium-core/lib/tools/vault.js";
 import * as core from "ingenium-core";
 import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
 import { vaultRouter } from "../lib/routes/vault.js";
+import { vaultBruteForceLimiter } from "../lib/middleware/rate-limit.js";
 
 const passphrase = "correct horse battery staple";
 const plaintext = "my-secret-value";
@@ -24,6 +25,7 @@ function vaultPath(path: string): string {
 }
 
 beforeAll(async () => {
+  vaultBruteForceLimiter.clear();
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-vault-api-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "vault.db");
   projectId = createProject(projectName).id;
@@ -42,6 +44,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  vaultBruteForceLimiter.clear();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
   rmSync(tempDir, { recursive: true, force: true });
 });
@@ -178,6 +181,7 @@ describe("POST /initialize", () => {
     `${initializationBaseUrl}/api/v1/vault${path}?project=${initializationProject}`;
 
   beforeEach(async () => {
+    vaultBruteForceLimiter.clear();
     core.resetDbForTest();
     initializationTempDir = mkdtempSync(join(tmpdir(), "ingenium-vault-initialize-api-"));
     vi.stubEnv("INGENIUM_CORE_DB_PATH", join(initializationTempDir, "vault.db"));
@@ -196,6 +200,7 @@ describe("POST /initialize", () => {
   });
 
   afterEach(async () => {
+    vaultBruteForceLimiter.clear();
     await new Promise<void>((resolve) => initializationServer.close(() => resolve()));
     core.vault.sealVault();
     core.resetDbForTest();
@@ -260,7 +265,89 @@ describe("POST /initialize", () => {
       body: JSON.stringify({ password: passphrase }),
     });
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(409);
     expect((await response.json()).error.code).toBe("VAULT_NOT_INITIALIZED");
+  });
+
+  it("enforces the shared passphrase policy before MCP auto-initialization", async () => {
+    const response = await fetch(initializePath("/unseal"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase: "too-short" }),
+    });
+
+    expect(response.status).toBe(422);
+    expect((await response.json()).error).toMatchObject({
+      code: "VALIDATION_ERROR",
+      message: "Passphrase must be at least 12 characters",
+    });
+    const status = await fetch(initializePath("/status"));
+    expect((await status.json()).data).toMatchObject({ sealed: true, initialized: false, nextAction: "initialize" });
+  });
+
+  it("auto-initializes a valid MCP unseal request without returning the passphrase", async () => {
+    const response = await fetch(initializePath("/unseal"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+
+    const body = await response.text();
+    expect(response.status).toBe(200);
+    expect(body).toContain('"unsealed":true');
+    expect(body).not.toContain(passphrase);
+  });
+
+  it("rate-limits only passphrase attempts and honors Retry-After", async () => {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const status = await fetch(initializePath("/status"));
+      expect(status.status).toBe(200);
+      const itemList = await fetch(initializePath("/items"));
+      expect(itemList.status).toBe(409);
+    }
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const response = await fetch(initializePath("/initialize"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: passphrase, confirmation: "different passphrase" }),
+      });
+      expect(response.status).toBe(422);
+    }
+
+    const limited = await fetch(initializePath("/unseal"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase }),
+    });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
+    expect((await limited.json()).error.code).toBe("RATE_LIMITED");
+
+    // Normal status remains available instead of causing a retry loop while the
+    // client is waiting for its passphrase-attempt cooldown to expire.
+    expect((await fetch(initializePath("/status"))).status).toBe(200);
+  });
+
+  it("redacts audit details from the API response", async () => {
+    await fetch(initializePath("/initialize"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: passphrase, confirmation: passphrase }),
+    });
+    const secret = "audit-api-secret-value";
+    const created = await fetch(initializePath("/items"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "audit-item", type: "note", value: secret }),
+    });
+    expect(created.status).toBe(201);
+
+    const audit = await fetch(initializePath("/audit"));
+    const body = await audit.text();
+    expect(audit.status).toBe(200);
+    expect(body).not.toContain(secret);
+    expect(body).not.toContain(passphrase);
+    expect(JSON.parse(body).data[0]).not.toHaveProperty("details");
   });
 });

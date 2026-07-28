@@ -42,7 +42,11 @@ personalityRouter.post("/:id/dismiss", (req, res) => {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Invalid trait ID" } });
     return;
   }
-  personality.setActive(projectId, id, false);
+  const dismissed = personality.setActive(projectId, id, false);
+  if (!dismissed) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Trait not found" } });
+    return;
+  }
   res.json({ data: { id } });
 });
 
@@ -55,7 +59,11 @@ personalityRouter.post("/:id/disable", (req, res) => {
     res.status(400).json({ error: { code: "INVALID_ID", message: "Trait ID must be a number" } });
     return;
   }
-  personality.disableTrait(id);
+  const disabled = personality.disableTrait(projectId, id);
+  if (!disabled) {
+    res.status(404).json({ error: { code: "NOT_FOUND", message: "Trait not found" } });
+    return;
+  }
   res.status(204).send();
 });
 

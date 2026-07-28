@@ -79,6 +79,49 @@ export interface SendPromptBody {
  */
 export const LLM_BROKER_AGENT = "ingenium-llm-broker";
 
+/**
+ * Interactive broker consumers normally receive at most 30 seconds. Docs AI
+ * is explicitly allowed a longer bounded window for document transformations.
+ * No policy may exceed this broker-wide maximum.
+ */
+export const DEFAULT_BROKER_TIMEOUT_MS = 30_000;
+export const DOCS_AI_BROKER_TIMEOUT_MS = 60_000;
+export const MAX_BROKER_TIMEOUT_MS = DOCS_AI_BROKER_TIMEOUT_MS;
+
+export type BrokerTimeoutPolicy = "default" | "docs-ai";
+
+export interface BrokerTimeoutResolution {
+  policy: BrokerTimeoutPolicy;
+  requestedTimeoutMs: number;
+  effectiveTimeoutMs: number;
+}
+
+/** @internal — exported for bounded-timeout contract tests. */
+export function resolveBrokerTimeout(
+  timeoutMs: number | undefined,
+  policy: BrokerTimeoutPolicy = "default",
+): BrokerTimeoutResolution {
+  const policyDefaultTimeoutMs = policy === "docs-ai"
+    ? DOCS_AI_BROKER_TIMEOUT_MS
+    : DEFAULT_BROKER_TIMEOUT_MS;
+  const policyMaximumTimeoutMs = policy === "docs-ai"
+    ? DOCS_AI_BROKER_TIMEOUT_MS
+    : DEFAULT_BROKER_TIMEOUT_MS;
+  const requestedTimeoutMs = typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
+    ? timeoutMs
+    : policyDefaultTimeoutMs;
+
+  return {
+    policy,
+    requestedTimeoutMs,
+    effectiveTimeoutMs: Math.min(
+      Math.max(requestedTimeoutMs, 0),
+      policyMaximumTimeoutMs,
+      MAX_BROKER_TIMEOUT_MS,
+    ),
+  };
+}
+
 /** Shape for summarization request body */
 export interface SummarizeBody {
   providerID: string;
@@ -991,9 +1034,12 @@ export async function brokerExecute(params: {
   system: string;
   user: string;
   timeoutMs?: number;
+  /** Server-owned policy; browser input can never select this. */
+  timeoutPolicy?: BrokerTimeoutPolicy;
 }): Promise<{ ok: boolean; content: string; error?: string }> {
   const source = "opencode-broker";
-  const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 30_000, 0), 30_000);
+  const timeout = resolveBrokerTimeout(params.timeoutMs, params.timeoutPolicy);
+  const timeoutMs = timeout.effectiveTimeoutMs;
   const created = await opencodeClient.createSession({ title: "ingenium-llm-broker" });
 
   if (isOpenCodeError(created)) {
@@ -1055,7 +1101,7 @@ export async function brokerExecute(params: {
       delayMs = Math.min(delayMs * 2, 30_000);
     }
 
-    logger.warn(source, `Broker session ${sessionId} timed out`, { timeoutMs });
+    logger.warn(source, `Broker session ${sessionId} timed out`, timeout);
     return { ok: false, content: "", error: "timeout" };
   } catch (err: unknown) {
     const error = err instanceof Error ? err.name : "BrokerError";
@@ -1082,6 +1128,7 @@ export type SynthesisBrokerExecutor = (params: {
   system: string;
   user: string;
   timeoutMs?: number;
+  timeoutPolicy?: BrokerTimeoutPolicy;
 }) => Promise<{ ok: boolean; content: string; error?: string }>;
 
 export async function executeSynthesisBroker(params: {
@@ -1089,6 +1136,8 @@ export async function executeSynthesisBroker(params: {
   system: string;
   user: string;
   timeoutMs?: number;
+  /** Route-owned policy. Defaults preserve the 30-second broker contract. */
+  timeoutPolicy?: BrokerTimeoutPolicy;
   /** A route-validated selection. When present, do not silently switch models. */
   selection?: { providerID: string; modelID: string };
   /** Test-only/integration seam; production uses the tool-denied broker session. */
@@ -1100,6 +1149,7 @@ export async function executeSynthesisBroker(params: {
       system: params.system,
       user: params.user,
       timeoutMs: params.timeoutMs,
+      timeoutPolicy: params.timeoutPolicy,
     });
   }
   const primary = {
@@ -1117,7 +1167,13 @@ export async function executeSynthesisBroker(params: {
   if (choices.length === 0) return { ok: false, content: "", error: "no synthesis provider configured" };
 
   for (const choice of choices) {
-    const result = await (params.executor ?? brokerExecute)({ ...choice, system: params.system, user: params.user, timeoutMs: params.timeoutMs });
+    const result = await (params.executor ?? brokerExecute)({
+      ...choice,
+      system: params.system,
+      user: params.user,
+      timeoutMs: params.timeoutMs,
+      timeoutPolicy: params.timeoutPolicy,
+    });
     if (result.ok) return result;
   }
   return { ok: false, content: "", error: "all configured synthesis providers failed" };

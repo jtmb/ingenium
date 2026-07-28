@@ -16,7 +16,11 @@ import {
   redactHeaders,
   brokerExecute,
   LLM_BROKER_AGENT,
+  DOCS_AI_BROKER_TIMEOUT_MS,
+  DEFAULT_BROKER_TIMEOUT_MS,
+  MAX_BROKER_TIMEOUT_MS,
   opencodeClient,
+  resolveBrokerTimeout,
 } from "../lib/opencode-client.js";
 import { logger } from "ingenium-core";
 
@@ -146,6 +150,29 @@ describe("redactHeaders", () => {
   it("does not modify non-authorization headers", () => {
     const headers = { "X-Custom": "value", Host: "localhost" };
     expect(redactHeaders(headers)).toEqual(headers);
+  });
+});
+
+describe("broker timeout policy", () => {
+  it("preserves the default consumer cap while Docs AI receives its explicit 60-second policy", () => {
+    expect(resolveBrokerTimeout(DOCS_AI_BROKER_TIMEOUT_MS)).toEqual({
+      policy: "default",
+      requestedTimeoutMs: DOCS_AI_BROKER_TIMEOUT_MS,
+      effectiveTimeoutMs: DEFAULT_BROKER_TIMEOUT_MS,
+    });
+    expect(resolveBrokerTimeout(DOCS_AI_BROKER_TIMEOUT_MS, "docs-ai")).toEqual({
+      policy: "docs-ai",
+      requestedTimeoutMs: DOCS_AI_BROKER_TIMEOUT_MS,
+      effectiveTimeoutMs: DOCS_AI_BROKER_TIMEOUT_MS,
+    });
+  });
+
+  it("never permits the Docs AI policy to exceed the broker-wide hard maximum", () => {
+    expect(resolveBrokerTimeout(MAX_BROKER_TIMEOUT_MS + 1, "docs-ai")).toEqual({
+      policy: "docs-ai",
+      requestedTimeoutMs: MAX_BROKER_TIMEOUT_MS + 1,
+      effectiveTimeoutMs: MAX_BROKER_TIMEOUT_MS,
+    });
   });
 });
 
@@ -438,7 +465,7 @@ describe("brokerExecute — mocked lifecycle", () => {
     vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
 
     // Provide a response that has no assistant finish — broker should eventually time out.
-    // Use a very short timeout (the function clamps to 0..30000).
+    // Use a very short timeout so the test does not wait for the policy cap.
     const fetchSpy = vi
       .fn()
       // 1. createSession → succeeds

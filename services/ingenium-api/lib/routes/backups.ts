@@ -2,7 +2,7 @@ import { Router } from "express";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { backups, logger, settings } from "ingenium-core";
-import { requireProject } from "../helpers.js";
+import { requireGlobalProject } from "../helpers.js";
 
 type BackupSchedule = {
   hourly: { enabled: boolean; retention: number };
@@ -63,7 +63,7 @@ function publicBackup(record: any) {
 export const backupsRouter = Router();
 
 backupsRouter.post("/", async (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   try {
     const snapshot = await backups.createSnapshot(projectId, "manual", coreDbPath(), opencodeDbPath());
@@ -78,20 +78,20 @@ backupsRouter.post("/", async (req, res) => {
 });
 
 backupsRouter.get("/", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const records = backups.listBackups(projectId).map(publicBackup);
   res.json({ data: records, total: records.length });
 });
 
 backupsRouter.get("/schedule", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   res.json({ data: getSchedule(projectId) });
 });
 
 backupsRouter.put("/schedule", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const current = getSchedule(projectId);
   const { hourly, daily, manual_retention } = req.body ?? {};
@@ -114,7 +114,7 @@ backupsRouter.put("/schedule", (req, res) => {
 });
 
 backupsRouter.post("/restore/preview", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const backupId = req.body?.backupId;
   if (typeof backupId !== "string" || !backupId) {
@@ -133,7 +133,7 @@ backupsRouter.post("/restore/preview", (req, res) => {
       valid: validation.valid,
       errors: validation.errors,
       warnings: [
-        "Restore replaces the active Ingenium and OpenCode databases.",
+        "The API does not replace active databases; any restore application is an operator-controlled maintenance action.",
         "Create a current backup before proceeding.",
       ],
       estimatedSize: record.size_bytes,
@@ -142,7 +142,7 @@ backupsRouter.post("/restore/preview", (req, res) => {
 });
 
 backupsRouter.post("/restore", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const { backupId, confirm } = req.body ?? {};
   if (typeof backupId !== "string" || !backupId || confirm !== true) {
@@ -164,7 +164,7 @@ backupsRouter.post("/restore", (req, res) => {
 });
 
 backupsRouter.get("/restore/:jobId", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const job = backups.getRestoreStatus(req.params.jobId!);
   if (!job || job.project_id !== projectId) {
@@ -175,7 +175,7 @@ backupsRouter.get("/restore/:jobId", (req, res) => {
 });
 
 backupsRouter.get("/:id", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const record = backups.getBackup(projectId, req.params.id!);
   if (!record) {
@@ -186,7 +186,7 @@ backupsRouter.get("/:id", (req, res) => {
 });
 
 backupsRouter.get("/:id/download", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const filePath = backups.getBackupComponentPath(projectId, req.params.id!);
   if (!filePath || !existsSync(filePath)) {
@@ -204,7 +204,7 @@ backupsRouter.get("/:id/download", (req, res) => {
 });
 
 backupsRouter.delete("/:id", (req, res) => {
-  const projectId = requireProject(req, res);
+  const projectId = requireGlobalProject(req, res);
   if (!projectId) return;
   const record = backups.getBackup(projectId, req.params.id!);
   if (!record) {

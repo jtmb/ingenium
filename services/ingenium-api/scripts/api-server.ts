@@ -2,21 +2,25 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import type { Server } from "node:http";
-import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { agents, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
+import { pathToFileURL } from "node:url";
+import { agents, backups, logger, getDb, MAX_ATTACHMENT_SIZE, resolveCoreDbPath } from "ingenium-core";
 import { config } from "../config/index.js";
 import { errorHandler } from "../lib/middleware/errors.js";
 import { authMiddleware } from "../lib/middleware/auth.js";
 import { assertApiTokenConfigured } from "../lib/middleware/api-token.js";
 import { csrfMiddleware } from "../lib/middleware/csrf.js";
-import { rateLimit, vaultRateLimiter } from "../lib/middleware/rate-limit.js";
+import { rateLimit } from "../lib/middleware/rate-limit.js";
 import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
 import { contextRouter } from "../lib/routes/context.js";
 import { pluginsRouter } from "../lib/routes/plugins.js";
 import { serversRouter } from "../lib/routes/servers.js";
+import {
+  CHILD_MCP_RUNTIME_HANDOFF_PATH,
+  childMcpRuntimeRouter,
+  mcpServersRouter,
+} from "../lib/routes/mcp-servers.js";
 import { settingsRouter } from "../lib/routes/settings.js";
 import { agentsRouter } from "../lib/routes/agents.js";
 import { observationsRouter } from "../lib/routes/observations.js";
@@ -35,9 +39,16 @@ import { servicesRouter } from "../lib/routes/services.js";
 import { dashboardRouter } from "../lib/routes/dashboard.js";
 import { vaultRouter } from "../lib/routes/vault.js";
 import { router as docsRouter } from "../lib/routes/docs.js";
+import { repositoryRouter } from "../lib/routes/repository.js";
 import { router as docsAiRouter } from "../lib/routes/docs-ai.js";
 import { backupsRouter } from "../lib/routes/backups.js";
 import { ragRouter } from "../lib/routes/rag.js";
+import { authPreflightRouter } from "../lib/routes/auth-preflight.js";
+import {
+  defaultMcpServerProjection,
+  isPackagedMcpLauncher,
+  resolvePackagedMcpLauncher,
+} from "../lib/mcp-launcher.js";
 import { projects as projectsDb, protectedSettings, servers } from "ingenium-core";
 import { startScheduler } from "../lib/scheduler.js";
 import { startBackupScheduler } from "../lib/backup-scheduler.js";
@@ -122,18 +133,24 @@ app.get("/auth/callback", createOAuthCallbackRateLimiter(), handleOAuthCallback)
 app.get("/api/v1/health", (_req, res) => {
   res.json({ status: "ok", uptime: process.uptime() });
 });
+app.use("/api/v1/auth", authPreflightRouter);
 
 // Routes
+// This is deliberately outside `/api/v1`, which is the dashboard's entire
+// rewrite namespace. It is a bearer-authenticated server-to-server handoff for
+// resolved child-MCP environment values, not a browser API route.
+app.use(CHILD_MCP_RUNTIME_HANDOFF_PATH, childMcpRuntimeRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/skills", skillsRouter);
 app.use("/api/v1/tasks", tasksRouter);
 app.use("/api/v1/context", contextRouter);
 app.use("/api/v1/plugins", pluginsRouter);
 app.use("/api/v1/servers", serversRouter);
+app.use("/api/v1/mcp-servers", mcpServersRouter);
 app.use("/api/v1/settings", settingsRouter);
-// Keep every vault endpoint (including reveal, folders, and audit) behind one
-// prefix-level limiter. Route-specific lists are easy to bypass as routes grow.
-app.use("/api/v1/vault", vaultRateLimiter);
+// Vault brute-force protection is mounted inside vaultRouter only on passphrase
+// initialization and unseal routes. Status and metadata reads remain available
+// while a client is cooling down after HTTP 429.
 app.use("/api/v1/vault", vaultRouter);
 app.use("/api/v1/agents", agentsRouter);
 app.use("/api/v1/observations", observationsRouter);
@@ -153,6 +170,7 @@ app.use("/api/v1/jobs", jobsRouter);
 app.use("/api/v1/services", servicesRouter);
 app.use("/api/v1/dashboard", dashboardRouter);
 app.use("/api/v1/docs", docsRouter);
+app.use("/api/v1/repository", repositoryRouter);
 app.use("/api/v1/docs", docsAiRouter);
 app.use("/api/v1/backups", backupsRouter);
 app.use("/api/v1/rag", ragRouter);
@@ -166,6 +184,13 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
 
   // Ensure global-default exists before schedulers or mail maintenance use it.
   const globalProjectId = ensureGlobalProject();
+
+  // Migration 061 can run before a first-start global project is created. Run
+  // the idempotent backfill again after startup resolution so those legacy
+  // records are not stranded in an external namespace.
+  if (globalProjectId) {
+    backups.migrateLegacyBackupOwnership(globalProjectId);
+  }
 
   if (shouldStartBackgroundSchedulers()) {
     startScheduler(config.port);
@@ -199,13 +224,18 @@ function runStartupMaintenance(lifecycle: ApiLifecycle): void {
   try {
     const globalProjectRec = projectsDb.getGlobalProject();
     if (globalProjectRec) {
-      const localServerPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../ingenium-server/dist/scripts/mcp-server.js");
-      servers.registerServer(
+      const launcherPath = resolvePackagedMcpLauncher(import.meta.url);
+      if (!isPackagedMcpLauncher(launcherPath)) {
+        logger.warn("api", "Default Ingenium MCP launcher is unavailable; build @ingenium/extension before starting OpenCode");
+        return;
+      }
+      const projection = defaultMcpServerProjection(launcherPath);
+      servers.upsertServer(
         globalProjectRec.id,
         "ingenium",
-        `node ${localServerPath}`,
-        "[]",
-        JSON.stringify({ INGENIUM_API_URL: "http://localhost:4097/api/v1" }),
+        projection.command,
+        projection.args,
+        projection.environment,
         "opencode",
       );
       servers.updateServer(globalProjectRec.id, "ingenium", { running: 1 });

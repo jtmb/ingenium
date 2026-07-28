@@ -27,6 +27,7 @@ let server: Server;
 let baseUrl: string;
 const projectName = "backup-api-test";
 let projectId: string;
+let globalProjectId: string;
 
 function url(path: string): string {
   return `${baseUrl}/api/v1/backups${path}?project=${projectName}`;
@@ -42,6 +43,7 @@ beforeAll(async () => {
   opencodeDb.exec("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY)");
   opencodeDb.close();
 
+  globalProjectId = createProject("global-default", true).id;
   projectId = createProject(projectName).id;
 
   const app = express();
@@ -96,9 +98,27 @@ describe("GET /api/v1/backups — list backups", () => {
     expect(body.total).toBeGreaterThanOrEqual(1);
   });
 
-  it("returns 404 for nonexistent project", async () => {
+  it("ignores an external or unknown URL project context and resolves the global owner", async () => {
     const res = await fetch(`${baseUrl}/api/v1/backups?project=nonexistent`);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data.every((backup: { id: string }) => backup.id)).toBe(true);
+  });
+});
+
+describe("global backup ownership", () => {
+  it("stores a backup created from an external URL context under the active global project", async () => {
+    const res = await fetch(url(""), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    const record = getDb(coreDbPath)
+      .prepare("SELECT project_id FROM backup_records WHERE id = ?")
+      .get(body.data.id) as { project_id: string };
+    expect(record.project_id).toBe(globalProjectId);
+    expect(record.project_id).not.toBe(projectId);
   });
 });
 
@@ -181,6 +201,7 @@ describe("POST /api/v1/backups/restore/preview — validate", () => {
     expect(body.data.backup).toBeDefined();
     expect(body.data.backup.id).toBe(backupId);
     expect(body.data.warnings.length).toBeGreaterThan(0);
+    expect(body.data.warnings.some((warning: string) => warning.includes("does not replace active databases"))).toBe(true);
     expect(body.data.valid).toBe(true);
   });
 
@@ -200,6 +221,43 @@ describe("POST /api/v1/backups/restore/preview — validate", () => {
       body: JSON.stringify({ backupId: "00000000-0000-0000-0000-000000000000" }),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("POST /api/v1/backups/restore — confirmation safety", () => {
+  let backupId: string;
+
+  beforeAll(async () => {
+    const res = await fetch(url(""), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    const body = await res.json();
+    backupId = body.data.id;
+  });
+
+  it("rejects missing confirmation and only creates a non-applying confirmed job", async () => {
+    const rejected = await fetch(url("/restore"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupId, confirm: false }),
+    });
+    expect(rejected.status).toBe(422);
+
+    const started = await fetch(url("/restore"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ backupId, confirm: true }),
+    });
+    expect(started.status).toBe(202);
+    const startedBody = await started.json();
+    expect(startedBody.data.status).toBe("confirmed");
+    expect(startedBody.data.restartRequired).toBe(true);
+
+    const status = await fetch(url(`/restore/${startedBody.data.jobId}`));
+    expect(status.status).toBe(200);
+    const statusBody = await status.json();
+    expect(statusBody.data.status).toBe("confirmed");
   });
 });
 

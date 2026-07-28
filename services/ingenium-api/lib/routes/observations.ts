@@ -62,7 +62,7 @@ observationsRouter.get("/:id", (req, res) => {
     res.status(400).json({ error: { code: "INVALID_ID", message: "Observation ID must be a number" } });
     return;
   }
-  const entry = observations.getObservation(id);
+  const entry = observations.getObservation(projectId, id);
   if (!entry) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Observation not found" } });
     return;
@@ -83,7 +83,7 @@ observationsRouter.patch("/:id", (req, res) => {
   const update: any = {};
   if (status !== undefined) update.status = status;
   if (importance !== undefined) update.importance = importance;
-  const result = observations.updateObservation(id, update);
+  const result = observations.updateObservation(projectId, id, update);
   if (!result) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: "Observation not found" } });
     return;

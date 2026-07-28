@@ -2,10 +2,12 @@ import { Router } from "express";
 import type { NextFunction, Request, Response } from "express";
 import * as core from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import { vaultBruteForceLimiter } from "../middleware/rate-limit.js";
 
 /** Signature that matches the actual vault module in ingenium-core. */
 type VaultService = {
   initVault(projectId: string, passphrase: string): void;
+  validateVaultPassphrase(passphrase: string): { ok: true } | { ok: false; error: string };
   initializeVault(projectId: string, passphrase: string, confirmation: string): { ok: boolean; error?: string };
   unsealVault(projectId: string, passphrase: string): { ok: boolean; error?: string };
   sealVault(): void;
@@ -104,8 +106,18 @@ function vaultGuard(req: Request, res: Response, next: NextFunction): void {
     return;
   }
 
-  if (!vault || !vaultConfigExists()) {
-    res.status(503).json({ error: { code: "VAULT_SEALED", message: "Vault not initialized" } });
+  if (!vault) {
+    res.status(503).json({ error: { code: "VAULT_UNAVAILABLE", message: "Vault module not available" } });
+    return;
+  }
+
+  if (!vaultConfigExists()) {
+    res.status(409).json({
+      error: {
+        code: "VAULT_NOT_INITIALIZED",
+        message: "Vault has not been initialized. Create it with POST /vault/initialize.",
+      },
+    });
     return;
   }
 
@@ -131,7 +143,7 @@ vaultRouter.get("/status", (req, res) => {
   if (!projectId) return;
 
   if (!vaultConfigExists()) {
-    res.json({ data: { sealed: true, initialized: false } });
+    res.json({ data: { sealed: true, initialized: false, nextAction: "initialize" } });
     return;
   }
 
@@ -154,13 +166,18 @@ vaultRouter.get("/status", (req, res) => {
   }
 
   res.json({
-    data: { sealed: vault!.isSealed(), initialized: true, stats: { itemCount, folderCount } },
+    data: {
+      sealed: vault!.isSealed(),
+      initialized: true,
+      nextAction: vault!.isSealed() ? "unseal" : null,
+      stats: { itemCount, folderCount },
+    },
   });
 });
 
 /* ----  Initialize / Unseal / Seal  -------------------------------------- */
 
-vaultRouter.post("/initialize", (req, res) => {
+vaultRouter.post("/initialize", vaultBruteForceLimiter, (req, res) => {
   if (unavailable(res)) return;
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -176,6 +193,15 @@ vaultRouter.post("/initialize", (req, res) => {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "password is required" } });
     return;
   }
+  if (typeof confirmation !== "string") {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "confirmation is required" } });
+    return;
+  }
+  const validation = vault!.validateVaultPassphrase(passphrase);
+  if (!validation.ok) {
+    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: validation.error } });
+    return;
+  }
 
   const result = vault!.initializeVault(projectId, passphrase, confirmation);
   if (!result.ok) {
@@ -188,25 +214,32 @@ vaultRouter.post("/initialize", (req, res) => {
   res.status(201).json({ data: { ok: true, unsealed: true } });
 });
 
-vaultRouter.post("/unseal", (req, res) => {
+vaultRouter.post("/unseal", vaultBruteForceLimiter, (req, res) => {
   if (unavailable(res)) return;
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
   const passphrase = req.body?.password ?? req.body?.passphrase;
-  if (typeof passphrase !== "string" || passphrase.length === 0) {
+  if (typeof passphrase !== "string" || passphrase.trim().length === 0) {
     res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "password is required" } });
     return;
   }
 
   // Dashboard must use POST /initialize for first-run creation — do not auto-init from UI
   if (req.headers["x-ingenium-ui"] === "dashboard" && !vaultConfigExists()) {
-    res.status(503).json({ error: { code: "VAULT_NOT_INITIALIZED", message: "Vault has not been created yet. Use /vault/initialize first." } });
+    res.status(409).json({ error: { code: "VAULT_NOT_INITIALIZED", message: "Vault has not been created yet. Use /vault/initialize first." } });
     return;
   }
 
   // Auto-initialize when vault_config does not exist yet for MCP compatibility.
+  // This must use the same creation policy as the dashboard, because it
+  // establishes the service-wide master-key configuration.
   if (!vaultConfigExists()) {
+    const validation = vault!.validateVaultPassphrase(passphrase);
+    if (!validation.ok) {
+      res.status(422).json({ error: { code: "VALIDATION_ERROR", message: validation.error } });
+      return;
+    }
     vault!.initVault(projectId, passphrase);
   }
 
@@ -424,8 +457,12 @@ vaultRouter.get("/audit", (req, res) => {
   if (!projectId) return;
 
   const db = core.getDb(dbPath());
+  // Do not return free-form audit details. This prevents historical or future
+  // caller mistakes from reflecting secret material through an audit read.
   const logs = db
-    .prepare("SELECT * FROM vault_audit_log WHERE project_id = ? ORDER BY created_at DESC")
+    .prepare(
+      "SELECT id, event_type, item_id, actor, created_at FROM vault_audit_log WHERE project_id = ? ORDER BY created_at DESC",
+    )
     .all(projectId);
-  res.json({ data: logs });
+  res.json({ data: logs, total: logs.length });
 });

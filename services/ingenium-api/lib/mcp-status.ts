@@ -32,10 +32,12 @@ export interface SanitizedMcpServerStatus {
 
 const STATUS_ERRORS: Partial<Record<McpConnectionStatus, string>> = {
   failed: "MCP server failed to connect.",
-  needs_auth: "MCP server requires authentication.",
-  needs_client_registration: "MCP server requires client registration.",
+  needs_auth: "MCP server requires authentication. Configure its credentials and reconnect.",
+  needs_client_registration: "MCP server requires client registration. Update its configuration and reopen OpenCode.",
   unknown: "MCP server returned an unrecognized status.",
 };
+
+const INGENIUM_LAUNCHER_FAILURE = "Ingenium MCP could not connect. Build the extension launcher, then verify the protected API token and project identity.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -56,7 +58,7 @@ function readToolCount(info: Record<string, unknown>): number | undefined {
 }
 
 /** Normalize one OpenCode MCP server result into the public API contract. */
-export function normalizeMcpServerStatus(info: unknown): SanitizedMcpServerStatus {
+export function normalizeMcpServerStatus(info: unknown, name?: string): SanitizedMcpServerStatus {
   if (!isRecord(info)) {
     return {
       status: "unknown",
@@ -72,7 +74,9 @@ export function normalizeMcpServerStatus(info: unknown): SanitizedMcpServerStatu
       ? info.connected ? "connected" : "disabled"
       : "unknown";
   const toolCount = readToolCount(info);
-  const error = STATUS_ERRORS[status];
+  const error = name === "ingenium" && status === "failed"
+    ? INGENIUM_LAUNCHER_FAILURE
+    : STATUS_ERRORS[status];
 
   return {
     status,
@@ -93,7 +97,7 @@ export function normalizeMcpStatusResponse(
   const sanitized: Record<string, SanitizedMcpServerStatus> = {};
   for (const [name, info] of Object.entries(response)) {
     if (!isSafeMcpServerName(name)) continue;
-    sanitized[name] = normalizeMcpServerStatus(info);
+    sanitized[name] = normalizeMcpServerStatus(info, name);
   }
   return sanitized;
 }

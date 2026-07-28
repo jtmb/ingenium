@@ -37,3 +37,35 @@ export function requireProject(req: Request, res: Response): string | null {
   }
   return id;
 }
+
+/**
+ * Resolve the sole active global project for server-owned resources.
+ *
+ * The caller's project query parameter is intentionally ignored. This keeps
+ * shared resources such as backups in the canonical server namespace even
+ * when a dashboard tab or MCP client still carries an external project
+ * context in its URL/request.
+ */
+export function requireGlobalProject(_req: Request, res: Response): string | null {
+  try {
+    const global = projects.getGlobalProject();
+    if (!global) {
+      res.status(503).json({
+        error: {
+          code: "GLOBAL_PROJECT_UNAVAILABLE",
+          message: "The canonical active global project is not configured.",
+        },
+      });
+      return null;
+    }
+    return global.id;
+  } catch {
+    res.status(503).json({
+      error: {
+        code: "GLOBAL_PROJECT_UNAVAILABLE",
+        message: "The canonical active global project is unavailable.",
+      },
+    });
+    return null;
+  }
+}

@@ -75,4 +75,13 @@ export function clearRateLimitEntries(): void {
 }
 
 export const rateLimit = defaultRateLimiter;
-export const vaultRateLimiter = createRateLimiter(5);
+
+/**
+ * Brute-force protection for vault passphrase attempts only. It is mounted on
+ * POST /initialize and POST /unseal, never on normal vault status or metadata
+ * reads, so a locked vault remains observable after a throttle.
+ */
+export const vaultBruteForceLimiter = createRateLimiter(5);
+
+/** @deprecated Use vaultBruteForceLimiter. Retained for existing consumers. */
+export const vaultRateLimiter = vaultBruteForceLimiter;

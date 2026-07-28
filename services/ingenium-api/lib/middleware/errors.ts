@@ -28,12 +28,31 @@ export class AppError extends Error {
 }
 
 /**
+ * `express.json()` delegates malformed request bodies to the terminal error
+ * handler. Treat its known parse error as a client error instead of letting it
+ * fall through to the generic 500 response. The raw `body` property that
+ * body-parser attaches is deliberately never read or logged here.
+ */
+function isMalformedJsonError(err: Error): boolean {
+  const parseError = err as Error & {
+    type?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+  };
+  const status = parseError.status ?? parseError.statusCode;
+  return err instanceof SyntaxError
+    && parseError.type === "entity.parse.failed"
+    && status === 400;
+}
+
+/**
  * Express error-handling middleware (4-arg signature required by Express 4).
  *
- * Handles three tiers of errors:
- * 1. AppError        → structured response with caller-chosen status/code
- * 2. ZodError        → 422 with field-level validation details
- * 3. Everything else → 500 with logged stack trace (never leaks internals to client)
+ * Handles four tiers of errors:
+ * 1. Malformed JSON  → 400 without reflecting the submitted body
+ * 2. AppError        → structured response with caller-chosen status/code
+ * 3. ZodError        → 422 with field-level validation details
+ * 4. Everything else → 500 with logged stack trace (never leaks internals to client)
  *
  * Every response includes a requestId prefix to correlate client reports with
  * server logs. 8 hex chars from a UUID gives ~4B collision space — sufficient
@@ -46,6 +65,18 @@ export function errorHandler(
   _next: NextFunction,
 ): void {
   const requestId = `req_${randomUUID().slice(0, 8)}`;
+
+  if (isMalformedJsonError(err)) {
+    res.status(400).json({
+      error: {
+        code: "MALFORMED_JSON",
+        message: "Malformed JSON request body",
+        details: null,
+        requestId,
+      },
+    });
+    return;
+  }
 
   if (err instanceof AppError) {
     res.status(err.statusCode).json({

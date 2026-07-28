@@ -9,24 +9,26 @@ export const mcpToolsRouter = Router();
  * Returns true if the tool name exists in the catalog.
  * Uses the catalog map from mcp-tool-states for O(1) lookup.
  */
-function isKnownToolName(name: string): boolean {
-  const catalog = mcpToolStates.getAllTools();
+function isKnownToolName(name: string, projectId?: string): boolean {
+  const catalog = mcpToolStates.getAllTools(projectId);
   return catalog.has(name);
 }
 
 /**
  * Returns the set of known category names from the catalog.
  */
-function getKnownCategories(): Set<string> {
-  const categoryMap = mcpToolStates.getCategoryMap();
+function getKnownCategories(projectId?: string): Set<string> {
+  const categoryMap = mcpToolStates.getCategoryMap(projectId);
   return new Set(categoryMap.keys());
 }
 
 // NOTE: Catalog sub-routes (/catalog, /catalog/:name) MUST be registered before
 // the /:name wildcard to avoid Express route capture.
 
-mcpToolsRouter.get("/catalog", (_req, res) => {
-  const catalog = mcpToolStates.getAllTools();
+mcpToolsRouter.get("/catalog", (req, res) => {
+  const projectId = req.query.project === undefined ? undefined : requireProject(req, res) ?? undefined;
+  if (req.query.project !== undefined && !projectId) return;
+  const catalog = mcpToolStates.getAllTools(projectId);
   const entries = Array.from(catalog.values());
   res.json({
     data: entries,
@@ -35,7 +37,9 @@ mcpToolsRouter.get("/catalog", (_req, res) => {
 });
 
 mcpToolsRouter.get("/catalog/:name", (req, res) => {
-  const catalog = mcpToolStates.getAllTools();
+  const projectId = req.query.project === undefined ? undefined : requireProject(req, res) ?? undefined;
+  if (req.query.project !== undefined && !projectId) return;
+  const catalog = mcpToolStates.getAllTools(projectId);
   const entry = catalog.get(req.params.name!);
   if (!entry) {
     res.status(404).json({
@@ -68,7 +72,7 @@ mcpToolsRouter.get("/:name/state", (req, res) => {
 
   const toolName = req.params.name!;
 
-  if (!isKnownToolName(toolName)) {
+  if (!isKnownToolName(toolName, projectId)) {
     res.status(404).json({
       error: { code: "TOOL_NOT_REGISTERED", message: `Tool '${toolName}' is not registered in the catalog` },
     });
@@ -92,7 +96,7 @@ mcpToolsRouter.put("/category/:category", (req, res) => {
     return;
   }
 
-  const knownCategories = getKnownCategories();
+  const knownCategories = getKnownCategories(projectId);
   if (!knownCategories.has(category)) {
     res.status(404).json({
       error: { code: "CATEGORY_NOT_FOUND", message: `Category '${category}' does not exist in the tool catalog` },
@@ -115,7 +119,7 @@ mcpToolsRouter.put("/:name", (req, res) => {
     return;
   }
 
-  if (!isKnownToolName(toolName)) {
+  if (!isKnownToolName(toolName, projectId)) {
     res.status(404).json({
       error: { code: "TOOL_NOT_REGISTERED", message: `Tool '${toolName}' is not registered in the catalog` },
     });
