@@ -10,6 +10,9 @@ api_url="${INGENIUM_API_URL:-http://localhost:4097/api/v1}"
 token_file="${INGENIUM_API_TOKEN_FILE:-.opencode/.ingenium-api-token}"
 
 if [ "$(id -u)" -eq 0 ]; then
+  # Repair only public, regular agent profiles while still privileged. This
+  # handles mode-0600 mounted files before the command drops to appuser.
+  /app/scripts/normalize-agent-profiles.sh "$worktree/.opencode/agents"
   exec runuser -u appuser -- env -i \
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     HOME="/home/appuser" \

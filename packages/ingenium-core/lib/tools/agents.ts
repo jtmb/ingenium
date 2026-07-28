@@ -1,7 +1,7 @@
 import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { Agent } from "../schema.js";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync, unlinkSync, existsSync, lstatSync, mkdirSync } from "node:fs";
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { logger } from "../logger.js";
 import { getConfigPath } from "./paths.js";
@@ -248,6 +248,70 @@ function getAgentsDir(): string {
   return resolve(process.env.INGENIUM_CORE_DB_PATH ?? "./data", "..", "..", ".opencode", "agents");
 }
 
+function lstatIfPresent(path: string) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+/** Resolve a category only through real directories beneath the repository root. */
+function safeAgentCategoryDirectory(category: AgentCategory, create = false): string | undefined {
+  const agentsDir = resolve(getAgentsDir());
+  const opencodeDir = resolve(agentsDir, "..");
+  const projectRoot = resolve(opencodeDir, "..");
+  const categoryDir = resolve(agentsDir, category);
+  if (!categoryDir.startsWith(agentsDir + sep)) return undefined;
+
+  for (const directory of [projectRoot, opencodeDir, agentsDir, categoryDir]) {
+    let stat = lstatIfPresent(directory);
+    if (!stat) {
+      if (!create || directory === projectRoot) return undefined;
+      mkdirSync(directory, { mode: 0o755 });
+      stat = lstatIfPresent(directory);
+    }
+    if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) return undefined;
+  }
+  return categoryDir;
+}
+
+/** Return a regular, contained profile path without following a symlink. */
+function safeAgentFilePath(category: AgentCategory, name: string, create = false): string | undefined {
+  const categoryDir = safeAgentCategoryDirectory(category, create);
+  if (!categoryDir) return undefined;
+  const filePath = resolve(categoryDir, `${name}.md`);
+  if (!filePath.startsWith(categoryDir + sep)) return undefined;
+  const stat = lstatIfPresent(filePath);
+  if (stat && (stat.isSymbolicLink() || !stat.isFile())) return undefined;
+  return filePath;
+}
+
+/** Write a public profile with an exact readable mode and no symlink following. */
+function writePublicAgentProfile(filePath: string, content: string): void {
+  let descriptor: number | undefined;
+  try {
+    const existing = lstatIfPresent(filePath);
+    if (existing && (existing.isSymbolicLink() || !existing.isFile())) {
+      throw new Error("Unsafe agent profile path");
+    }
+    descriptor = openSync(
+      filePath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+      0o644,
+    );
+    if (!fstatSync(descriptor).isFile()) throw new Error("Unsafe agent profile path");
+    writeFileSync(descriptor, content, "utf-8");
+    // Existing files retain their mode and a restrictive umask affects new files.
+    fchmodSync(descriptor, 0o644);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 type OpenCodeAgentConfig = Record<string, { model?: string; disable?: boolean }>;
 
 function parseConfig(content: string): Record<string, unknown> {
@@ -347,17 +411,15 @@ function writeAgentToDisk(agent: Agent, force = false): void {
   assertSafeAgentName(agent.name);
   assertAgentCategory(agent.category);
   if (!agent.enabled && !force) return;
-  const categoryDir = resolve(getAgentsDir(), agent.category);
-  if (!existsSync(categoryDir)) mkdirSync(categoryDir, { recursive: true });
-
-  const filePath = resolve(categoryDir, `${agent.name}.md`);
+  const filePath = safeAgentFilePath(agent.category, agent.name, true);
+  if (!filePath) throw new Error("Unsafe agent profile path");
   const escapedDesc = agent.description.replace(/"/g, '\\"');
 
   // The reserved profile is a complete static template, not a serialization
   // of a database row. This keeps first bootstrap and later repair writes
   // byte-identical and prevents malformed persisted fields from reaching disk.
   if (isReservedAgentName(agent.name)) {
-    writeFileSync(filePath, reservedBrokerFileContent());
+    writePublicAgentProfile(filePath, reservedBrokerFileContent());
     return;
   }
 
@@ -398,7 +460,7 @@ function writeAgentToDisk(agent: Agent, force = false): void {
          updated = updated.replace(/^hidden:\s*.+(?:\r?\n|$)/gm, "");
        }
 
-        writeFileSync(filePath, `---\n${updated}\n---\n\n${agent.content}`);
+      writePublicAgentProfile(filePath, `---\n${updated}\n---\n\n${agent.content}`);
       return;
     }
   }
@@ -432,7 +494,7 @@ function writeAgentToDisk(agent: Agent, force = false): void {
   frontmatter.push("");
   frontmatter.push(agent.content);
 
-  writeFileSync(filePath, frontmatter.join("\n"));
+  writePublicAgentProfile(filePath, frontmatter.join("\n"));
 }
 
 /**
@@ -442,8 +504,14 @@ function writeAgentToDisk(agent: Agent, force = false): void {
 function removeAgentFromDisk(agent: Agent): void {
   assertSafeAgentName(agent.name);
   assertAgentCategory(agent.category);
-  const filePath = resolve(getAgentsDir(), agent.category, `${agent.name}.md`);
-  try { if (existsSync(filePath)) unlinkSync(filePath); } catch {}
+  const categoryDir = safeAgentCategoryDirectory(agent.category);
+  if (!categoryDir) return;
+  const filePath = resolve(categoryDir, `${agent.name}.md`);
+  if (!filePath.startsWith(categoryDir + sep)) return;
+  try {
+    const stat = lstatIfPresent(filePath);
+    if (stat?.isFile() || stat?.isSymbolicLink()) unlinkSync(filePath);
+  } catch {}
 }
 
 /**
@@ -466,16 +534,12 @@ function restoreReservedBrokerFromTrustedState(agent: Agent): Agent | undefined 
  * never follow a category-directory symlink while quarantining it.
  */
 function quarantineUntrustedBrokerFiles(): void {
-  const agentsRoot = resolve(getAgentsDir());
   for (const category of AGENT_CATEGORIES) {
-    const categoryDir = resolve(agentsRoot, category);
-    if (!categoryDir.startsWith(agentsRoot + sep)) continue;
+    const categoryDir = safeAgentCategoryDirectory(category);
+    if (!categoryDir) continue;
     try {
-      if (!existsSync(categoryDir) || lstatSync(categoryDir).isSymbolicLink() || !lstatSync(categoryDir).isDirectory()) {
-        continue;
-      }
       const filePath = resolve(categoryDir, `${LLM_BROKER_AGENT}.md`);
-      if (!filePath.startsWith(categoryDir + sep) || !existsSync(filePath)) continue;
+      if (!filePath.startsWith(categoryDir + sep) || !lstatIfPresent(filePath)) continue;
       unlinkSync(filePath);
       logger.warn("agents", "Removed untrusted reserved broker profile with no persisted record", { category });
     } catch {
@@ -780,18 +844,12 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
 
   if (dbAgent) {
     if (!isAgentCategory(dbAgent.category)) return undefined;
-    filePath = resolve(
-      process.env.INGENIUM_CORE_DB_PATH ?? "./data",
-      "..", "..", ".opencode", "agents", dbAgent.category, `${name}.md`
-    );
+    filePath = safeAgentFilePath(dbAgent.category, name) ?? "";
     category = dbAgent.category;
   } else {
     for (const cat of categories) {
-      const candidate = resolve(
-        process.env.INGENIUM_CORE_DB_PATH ?? "./data",
-        "..", "..", ".opencode", "agents", cat, `${name}.md`
-      );
-      if (existsSync(candidate)) {
+      const candidate = safeAgentFilePath(cat, name);
+      if (candidate && lstatIfPresent(candidate)?.isFile()) {
         filePath = candidate;
         category = cat;
         break;
@@ -804,7 +862,13 @@ export function syncAgentFromDisk(projectId: string, name: string): Agent | unde
     return undefined;
   }
 
-  const content = readFileSync(filePath, "utf-8");
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf-8");
+  } catch {
+    logger.warn("agents", "Agent profile is not readable from disk", { name });
+    return undefined;
+  }
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!fmMatch) {
     logger.warn("agents", "Agent file has no frontmatter", { name });

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -166,6 +166,18 @@ describe("repository-authoritative manifest v2", () => {
     }
   });
 
+  it("ignores a mode-0600 regular agent profile without blocking repository initialization", () => {
+    fixture();
+    const profilePath = join(worktree, ".opencode", "agents", "execution", "unreadable-agent.md");
+    writeFileSync(profilePath, "---\nname: unreadable-agent\ndescription: \"Unreadable\"\nmode: subagent\npermission:\n  read: allow\n---\n\nAgent body\n", "utf8");
+    chmodSync(profilePath, 0o600);
+
+    const projection = buildRepositoryManifestV2(worktree, manifest());
+
+    expect(lstatSync(profilePath).isFile()).toBe(true);
+    expect(projection.agents.map((entry) => entry.name)).not.toContain("unreadable-agent");
+  });
+
   it("changes semantic hashes for metadata/frontmatter-only edits and retains unique nested moves", async () => {
     fixture();
     successfulFetch();
@@ -325,6 +337,22 @@ describe("repository-authoritative manifest v2", () => {
       writeFileSync(join(outside, "escape.md"), "# escape\n");
       symlinkSync(outside, join(worktree, "docs", "linked"));
       expect(() => buildRepositoryManifestV2(worktree, manifest())).toThrow(RepositorySyncScanError);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a symlinked agent profile without reading its target", () => {
+    fixture();
+    const outside = mkdtempSync(join(tmpdir(), "ingenium-agent-profile-outside-"));
+    try {
+      const outsideProfile = join(outside, "outside-agent.md");
+      const original = "---\nname: escaped-agent\ndescription: \"Outside\"\nmode: subagent\npermission:\n  read: allow\n---\n\nOutside\n";
+      writeFileSync(outsideProfile, original, "utf8");
+      symlinkSync(outsideProfile, join(worktree, ".opencode", "agents", "execution", "escaped-agent.md"));
+
+      expect(() => buildRepositoryManifestV2(worktree, manifest())).toThrow(RepositorySyncScanError);
+      expect(readFileSync(outsideProfile, "utf8")).toBe(original);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }

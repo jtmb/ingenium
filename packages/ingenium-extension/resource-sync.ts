@@ -11,7 +11,7 @@
  *
  * Sync manifest: .opencode/.ingenium-sync-state.json
  */
-import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { resolve, basename, dirname, isAbsolute, parse as parsePath, sep, relative, extname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -321,7 +321,12 @@ interface RepositoryDiskFile {
 }
 
 /** Walk only regular, contained files; a symlink anywhere invalidates the scan. */
-function walkRepositoryFiles(worktree: string, directory: string, maxFileBytes: number): RepositoryDiskFile[] {
+function walkRepositoryFiles(
+  worktree: string,
+  directory: string,
+  maxFileBytes: number,
+  shouldIncludeRegularFile?: (filePath: string, mode: number) => boolean,
+): RepositoryDiskFile[] {
   const base = assertContainedDirectory(worktree, directory);
   if (!base) return [];
   const files: RepositoryDiskFile[] = [];
@@ -340,6 +345,7 @@ function walkRepositoryFiles(worktree: string, directory: string, maxFileBytes: 
         continue;
       }
       if (!stat.isFile()) throw new RepositorySyncScanError();
+      if (shouldIncludeRegularFile && !shouldIncludeRegularFile(fullPath, stat.mode)) continue;
       if (files.length >= REPOSITORY_MAX_ITEMS) throw new RepositorySyncScanError();
       const relativePath = repositoryRelativePath(worktree, fullPath);
       const content = normalizeRepositoryText(readRepositoryRegularText(worktree, fullPath));
@@ -554,7 +560,16 @@ function parseRepositoryAgentCandidate(agentsRoot: string, file: RepositoryDiskF
 function scanRepositoryAgents(worktree: string, baseline: RepositoryBaseline): RepositoryAgentManifestEntry[] {
   const agentsRoot = assertContainedDirectory(worktree, resolve(worktree, ".opencode", "agents"));
   if (!agentsRoot) return [];
-  const candidates = walkRepositoryFiles(worktree, agentsRoot, REPOSITORY_MAX_RESOURCE_BYTES)
+  // Profiles are public OpenCode metadata, not secrets. A mode-restricted
+  // regular file can be readable to a build user yet unreadable to the runtime
+  // appuser, so ignore it rather than failing repository initialization. Core,
+  // extension, and Docker startup writers normalize legitimate profiles to 0644.
+  const candidates = walkRepositoryFiles(
+    worktree,
+    agentsRoot,
+    REPOSITORY_MAX_RESOURCE_BYTES,
+    (filePath, mode) => !filePath.endsWith(".md") || (mode & 0o777) === 0o644,
+  )
     .filter((file) => file.path.endsWith(".md"));
   const byName = new Map<string, AgentCandidate[]>();
   for (const file of candidates) {
@@ -1071,6 +1086,34 @@ function safeAgentFilePath(worktree: string, name: string, category: string, cre
   }
 }
 
+/** Write a public agent profile without following a final-path symlink. */
+function writePublicAgentProfile(filePath: string, content: string): boolean {
+  let descriptor: number | undefined;
+  try {
+    try {
+      const existing = lstatSync(filePath);
+      if (existing.isSymbolicLink() || !existing.isFile()) return false;
+    } catch (error) {
+      if (!isMissingPathError(error)) return false;
+    }
+    descriptor = openSync(
+      filePath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+      0o644,
+    );
+    if (!fstatSync(descriptor).isFile()) return false;
+    writeFileSync(descriptor, content, "utf-8");
+    // Existing files retain their mode on write and new files are subject to
+    // umask, so explicitly keep non-secret profiles readable by OpenCode.
+    fchmodSync(descriptor, 0o644);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 function findAgentCategory(worktree: string, name: string): string | null {
   if (!isSafeAgentName(name)) return null;
   for (const category of AGENT_CATEGORIES) {
@@ -1343,8 +1386,7 @@ export function writeAgentToDisk(
   const frontmatter = `---\n${parts.join("\n")}\n---\n`;
 
   const content = isReservedBroker(agent.name) ? LLM_BROKER_CONTENT : agent.content || "";
-  writeFileSync(filePath, frontmatter + "\n" + content);
-  return true;
+  return writePublicAgentProfile(filePath, frontmatter + "\n" + content);
 }
 
 function configuredAgentModel(worktree: string, name: string): string | undefined {

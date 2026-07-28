@@ -48,6 +48,7 @@ for path in \
   scripts/run-dashboard.sh \
   scripts/run-dashboard.mjs \
   scripts/validate-gateway-config.sh \
+  scripts/normalize-agent-profiles.sh \
   scripts/healthcheck.sh \
   scripts/start-opencode-web.sh \
   scripts/start-ttyd.sh \
@@ -82,7 +83,7 @@ reject_text docker-compose.yml 'seccomp=unconfined'
 reject_text docker-compose.yml 'sudo'
 
 require_text Dockerfile 'COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf'
-require_text Dockerfile 'COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/'
+require_text Dockerfile 'COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh scripts/normalize-agent-profiles.sh ./scripts/'
 require_text Dockerfile 'COPY --chown=appuser:appuser scripts/run-init-project.sh ./scripts/run-init-project.sh'
 require_text Dockerfile 'ARG NEXT_PUBLIC_OPENCODE_WEB_URL="http://opencode.localhost:3000/"'
 require_text Dockerfile 'ARG NEXT_PUBLIC_OPENCODE_CLI_URL="http://cli.localhost:3000/"'
@@ -183,6 +184,11 @@ require_text scripts/docker-entrypoint.sh 'unset INGENIUM_API_TOKEN'
 require_text scripts/docker-entrypoint.sh 'export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"'
 require_text scripts/docker-entrypoint.sh 'project-opencode-global-config.mjs "$OC_CONFIG"'
 require_text scripts/docker-entrypoint.sh '"/app/packages/ingenium-extension/resource-sync.ts"'
+require_text scripts/docker-entrypoint.sh '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
+require_text scripts/run-init-project.sh '/app/scripts/normalize-agent-profiles.sh "$worktree/.opencode/agents"'
+require_text scripts/normalize-agent-profiles.sh 'find -P "$agents_dir" -type f -name "*.md" -exec chmod 0644 {} +'
+reject_text scripts/normalize-agent-profiles.sh 'chmod -R'
+reject_text scripts/normalize-agent-profiles.sh 'chown'
 require_text scripts/start-opencode-web.sh 'INGENIUM_API_TOKEN_FILE="/workspace/.opencode/.ingenium-api-token"'
 require_text scripts/start-opencode-web.sh 'INGENIUM_WORKTREE="/workspace"'
 require_text scripts/start-opencode-web.sh 'INGENIUM_OPENCODE_START_CLEAN_ENV="1"'

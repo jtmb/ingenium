@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -41,6 +41,25 @@ describe("agent resource sync", () => {
 
     const content = readFileSync(join(worktree, ".opencode", "agents", "execution", "sync-agent.md"), "utf8");
     expect(content).not.toMatch(/^model:/m);
+  });
+
+  it("writes public agent profiles as 0644 and never follows a profile symlink", () => {
+    worktree = mkdtempSync(join(tmpdir(), "ingenium-resource-sync-"));
+    const profilePath = join(worktree, ".opencode", "agents", "execution", "public-agent.md");
+
+    expect(writeAgentToDisk(worktree, { name: "public-agent", category: "execution", content: "# Public" })).toBe(true);
+    expect(statSync(profilePath).mode & 0o777).toBe(0o644);
+    chmodSync(profilePath, 0o600);
+    expect(writeAgentToDisk(worktree, { name: "public-agent", category: "execution", content: "# Repaired" })).toBe(true);
+    expect(statSync(profilePath).mode & 0o777).toBe(0o644);
+
+    const outsidePath = join(worktree, "outside-agent.md");
+    writeFileSync(outsidePath, "# Outside", "utf8");
+    unlinkSync(profilePath);
+    symlinkSync(outsidePath, profilePath);
+
+    expect(writeAgentToDisk(worktree, { name: "public-agent", category: "execution", content: "# Escape" })).toBe(false);
+    expect(readFileSync(outsidePath, "utf8")).toBe("# Outside");
   });
 
   it("serializes broker wildcard deny and hidden metadata without implicit capabilities", () => {

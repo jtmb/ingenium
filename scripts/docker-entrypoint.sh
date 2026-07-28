@@ -194,11 +194,32 @@ fi
 # worktree's .opencode/agents/ directory, while the source agents live in /app.
 # The orchestrator-based topology includes primary, execution, research, security,
 # and chat agent profiles — all copied flat into the workspace for discovery.
-mkdir -p /workspace/.opencode/agents
-cp /app/.opencode/agents/chat/ingenium-chat.md /workspace/.opencode/agents/ingenium-chat.md 2>/dev/null || true
+WORKSPACE_AGENTS_DIR="${WORKSPACE_OPENCODE_DIR}/agents"
+if [ -L "$WORKSPACE_AGENTS_DIR" ] || { [ -e "$WORKSPACE_AGENTS_DIR" ] && [ ! -d "$WORKSPACE_AGENTS_DIR" ]; }; then
+  echo "ERROR: OpenCode workspace agents directory must be a real directory"
+  exit 1
+fi
+mkdir -p "$WORKSPACE_AGENTS_DIR"
+copy_agent_profile() {
+  source_profile="$1"
+  target_profile="${WORKSPACE_AGENTS_DIR}/$(basename "$source_profile")"
+  if [ -L "$target_profile" ] || { [ -e "$target_profile" ] && [ ! -f "$target_profile" ]; }; then
+    echo "ERROR: OpenCode workspace agent profile must be a regular non-symlink file"
+    exit 1
+  fi
+  cp "$source_profile" "$target_profile"
+}
+copy_agent_profile /app/.opencode/agents/chat/ingenium-chat.md
 for dir in primary execution research security; do
-  cp /app/.opencode/agents/$dir/*.md /workspace/.opencode/agents/ 2>/dev/null || true
+  for source_profile in /app/.opencode/agents/$dir/*.md; do
+    [ -f "$source_profile" ] || continue
+    copy_agent_profile "$source_profile"
+  done
 done
+# Mounted repositories can retain historical root-owned mode-0600 profiles.
+# Repair only regular non-symlink Markdown profiles before appuser runs
+# repository initialization; secrets and configuration stay untouched.
+/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"
 
 # Refuse to start if a templating or package change made the gateway unsafe.
 # Validate as the supervised Nginx user so validation cannot leave root-owned

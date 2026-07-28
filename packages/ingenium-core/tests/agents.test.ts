@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { resetDbForTest } from "../lib/db.js";
@@ -72,6 +72,32 @@ describe("centralized agent runtime configuration", () => {
 });
 
 describe("agent path and category integrity", () => {
+  it("writes public profiles as 0644 and repairs a legacy restrictive mode", () => {
+    const agent = createAgent(projectId, "public-profile", "# Original");
+    const agentPath = join(root, ".opencode", "agents", "execution", "public-profile.md");
+
+    expect(statSync(agentPath).mode & 0o777).toBe(0o644);
+    chmodSync(agentPath, 0o600);
+    updateAgent(projectId, agent.name, { content: "# Updated" });
+
+    expect(statSync(agentPath).mode & 0o777).toBe(0o644);
+    expect(readFileSync(agentPath, "utf-8")).toContain("# Updated");
+  });
+
+  it("refuses a symlinked profile target without modifying its target", () => {
+    const agent = createAgent(projectId, "symlinked-profile", "# Original");
+    const agentPath = join(root, ".opencode", "agents", "execution", "symlinked-profile.md");
+    const outsidePath = join(root, "outside-agent.md");
+    writeFileSync(outsidePath, "# Outside", "utf-8");
+    unlinkSync(agentPath);
+    symlinkSync(outsidePath, agentPath);
+
+    expect(() => updateAgent(projectId, agent.name, { content: "# Replacement" }))
+      .toThrow("Unsafe agent profile path");
+    expect(lstatSync(agentPath).isSymbolicLink()).toBe(true);
+    expect(readFileSync(outsidePath, "utf-8")).toBe("# Outside");
+  });
+
   it("rejects traversal names and invalid categories before disk operations", () => {
     expect(isSafeAgentName("../escape")).toBe(false);
     expect(isSafeAgentName("agent/name")).toBe(false);
