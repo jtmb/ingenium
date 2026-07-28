@@ -396,3 +396,112 @@ are complete.
 <!-- (work-started) DOC-001 2026-07-27T22:41:43Z ingenium-docs -->
 <!-- (work-complete) CTX-004 2026-07-28T01:59:11Z ingenium-software-engineer-premium -->
 Evidence CTX-004: Core/API/MCP checkpoint governance with migration 066, focused core/API/server tests, typechecks, and DB-isolation enforcement.
+
+## Appended roadmap contracts
+
+The contracts below are appended additions. Existing contracts and marker
+records are immutable. Usage work is provider-agnostic: no task requires a
+provider-specific credential, account, or live billing access.
+
+### MCP improvements (continued)
+
+#### MCP-006 — Tool control visibility and fail-closed execution
+
+- **IN_SCOPE:** Make disabling a built-in or dynamically registered tool in `/mcp-servers` remove it from the agent/OpenCode visible-tools list and make direct execution fail closed; re-enabling restores visibility and execution. Cover the real UI, API, MCP, deployment, visual, and Windows browser paths.
+- **OUT_OF_SCOPE:** Renaming tools, changing catalog semantics, adding new tool providers, weakening authorization, or unrelated dashboard redesign.
+- **Owner:** MCP/API/dashboard writer; verification owner: `@ingenium-qa` and `@ingenium-qa-vision` for the visual gate.
+- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
+- **Acceptance:** A real built-in and a real dynamic tool can each be disabled from `/mcp-servers`; neither appears in the agent/OpenCode visible-tools list and direct MCP/API execution fails closed with a safe, deterministic error. Re-enabling restores both visibility and successful execution. The same behavior is proven after deployment and from a Windows browser against the supported localhost/WSL gateway, with no provider-specific credential requirement.
+- **STOP_CONDITION:** `PASS` only after deployed API/MCP/UI and Windows browser evidence, exact desktop/mobile visual evidence, and reconciliation of the active marker; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
+- **Escalation:** Escalate only for an authorization decision, unavailable required Windows/browser or deployment access after the configured path, genuine product ambiguity, or a bounded diagnosis that cannot reproduce a root cause; do not escalate for missing provider credentials because none are required.
+- **Verification owner:** `@ingenium-qa`; real dashboard toggle → API state → MCP/OpenCode discovery → direct invocation, deployed health/route checks, and Windows browser acceptance. `@ingenium-qa-vision` owns 1440x900 and 390x844 screenshots, accessibility, console/network, and cleanup evidence.
+- **Rollback/safety:** Fail closed on stale or unknown tool state; preserve built-in exceptions and project isolation; use disposable child-server/tool fixtures; revert only task-owned state/filtering changes and never delete registered production tools.
+- **Tests:** Focused API state/authorization tests; real MCP discovery and direct-execution tests for built-in and dynamic tools; dashboard interaction tests; deployed Docker/Compose rebuild/restart plus health and route checks; Playwright desktop/mobile visual gate; Windows browser localhost/WSL acceptance with console/network review. No provider-specific credentials or live provider billing account.
+- **Docs:** `docs/reference/mcp-tools.md`, `docs/configure/mcp-servers.md`, `docs/usage/dashboard.md`, and affected `docs/reference/index.md` links only if the supported user path changes; verify commands and links.
+- **Changed files:** MCP tool-state/API/server/dashboard implementation and focused test files identified by the source trace; the canonical docs listed above only when directly affected.
+
+### Usage and provider-agnostic telemetry
+
+#### USAGE-001 — Provider-agnostic usage event model and collection
+
+- **IN_SCOPE:** Define and collect a provider-neutral usage event model for requests, model/provider identity, tokens, cost, cache read/write, timestamps, status, and unknown values; capture usage from all supported provider response shapes without requiring provider-specific credentials.
+- **OUT_OF_SCOPE:** Provider billing integrations, credential management, changing provider routing, invoice reconciliation, or retroactive invention of unavailable token/cost/cache values.
+- **Owner:** Core/API writer; verification owner: `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
+- **Acceptance:** Real configured request paths persist normalized events without leaking prompts, API tokens, credentials, or secrets. Numeric usage-token counters are required for reported request, input, output, and reasoning-token usage; absent counters remain explicitly unknown. Total cost, cache use/read/write state, provider, model, status, and UTC freshness are represented when reported. Cache state distinguishes reported use, read, write, known-zero, and unknown; it does not infer provider hit-rate or miss. No provider-specific credential or account is required.
+- **STOP_CONDITION:** `PASS` after focused model/collection tests, real provider-neutral fixture ingestion, deployed health checks, and active-marker reconciliation; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
+- **Escalation:** Escalate only for an unresolved data-contract choice, unavailable required deployment access, or an unreproducible root cause after bounded diagnosis; missing provider credentials are not an escalation condition.
+- **Verification owner:** `@ingenium-qa`; inspect current persisted samples, UTC timestamps, redaction, deduplication, and unknown-value semantics across success, error, streaming, and cache-omitted responses.
+- **Rollback/safety:** Append-only or safely upsert usage records with project isolation; never infer billable cost; preserve raw-provider boundaries without storing secrets; roll back only task-owned schema/collector changes using isolated fixtures.
+- **Tests:** Unit and integration tests for each normalized field, provider-neutral response fixtures, malformed/partial/streaming responses, reported cache use/read/write, known-zero, and unknown cases, redaction, UTC freshness, and project isolation; deployed Docker/Compose health check. No provider-specific credentials.
+- **Docs:** `docs/concepts/architecture.md`, `docs/develop/api.md`, and `docs/reference/index.md` only for directly affected usage-data behavior; verify links and commands.
+- **Changed files:** Usage schema/collector and focused core/API tests, plus the canonical docs listed above only when directly affected.
+
+#### USAGE-002 — Usage API aggregation and export
+
+- **IN_SCOPE:** Provide project-scoped API aggregation for totals, daily UTC series, provider/model breakdowns, filters, freshness, and export of the normalized usage data, preserving unknown cost/cache values.
+- **OUT_OF_SCOPE:** Billing calculations, provider-specific dashboards, invoice export formats, credential flows, or unrelated analytics and reporting.
+- **Owner:** API/core writer; verification owner: `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
+- **Acceptance:** Real API calls return total cost, request count, required numeric token totals, input/output tokens, cache use/read/write state when reported, daily charts data, provider/model breakdown, UTC filter boundaries, freshness metadata, and export output. Cache state distinguishes reported use, read, write, known-zero, and unknown; it does not infer provider hit-rate or miss. Unknown cost/cache remains distinguishable from zero; invalid filters and unauthorized projects fail safely. No provider-specific credential is required, and no credential or API token leaks.
+- **STOP_CONDITION:** `PASS` after real API aggregation/export tests, deployed route/health checks, and source-verified examples; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
+- **Escalation:** Escalate only for a genuine aggregation/export contract decision, unavailable deployment access, or an unreproduced root cause after bounded diagnosis; provider credentials are explicitly out of the required path.
+- **Verification owner:** `@ingenium-qa`; verify real project isolation, inclusive/exclusive UTC ranges, empty periods, unknown fields, pagination/size bounds, deterministic export, and safe error envelopes.
+- **Rollback/safety:** Bound query/export size, authorize project scope, redact secrets, and avoid destructive migration; roll back only task-owned routes/query code if deployed checks fail.
+- **Tests:** API integration and contract tests for totals, daily series, filters, provider/model grouping, freshness, unknown cost/cache, export, authorization, range limits, empty results, and deployed Docker/Compose route checks. No provider-specific credentials.
+- **Docs:** `docs/develop/api.md`, `docs/reference/mcp-tools.md` only if an MCP export tool is exposed, and `docs/reference/index.md` only if a new canonical link is required.
+- **Changed files:** Usage API/aggregation/export implementation and focused API tests, plus directly affected canonical docs listed above.
+
+#### USAGE-003 — `/usage` dashboard
+
+- **IN_SCOPE:** Add a dashboard `/usage` view consuming the usage API with total cost, requests, tokens, input/output/cache read/write when reported, daily charts, provider/model breakdown, filters, UTC/freshness display, export, loading/empty/error states, and graceful unknown cost/cache presentation.
+- **OUT_OF_SCOPE:** Provider-specific branding or billing controls, credential setup, invoice management, unrelated dashboard navigation redesign, or fake values for omitted telemetry.
+- **Owner:** Dashboard writer; verification owner: `@ingenium-qa` and `@ingenium-qa-vision` for visual acceptance.
+- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
+- **Acceptance:** A real `/usage` route renders current API data and clearly labels total cost, requests, required numeric tokens, input/output, cache use/read/write state when available, daily charts, provider/model breakdown, filters, UTC range, freshness, and export. Cache state distinguishes reported use, read, write, known-zero, and unknown rather than inferring provider hit-rate or miss. Missing cost/cache is shown as unknown/not reported rather than zero; loading, empty, API failure, and export states are actionable. No provider-specific credential is required, and no credential or API token leaks.
+- **STOP_CONDITION:** `PASS` after deployed route acceptance, exact desktop/mobile visual gate, accessibility/console/network review, and run-scoped screenshots; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
+- **Escalation:** Escalate only for an unresolved product choice about unknown-data wording, unavailable deployment/browser access, or an unreproduced root cause after bounded diagnosis; do not require provider credentials.
+- **Verification owner:** `@ingenium-qa` owns API-to-UI behavior and export; `@ingenium-qa-vision` owns 1440x900 and 390x844 layout, chart readability, accessibility, console/network, and browser cleanup.
+- **Rollback/safety:** Do not fabricate telemetry or expose secrets; preserve existing navigation and project scope; revert only task-owned route/components/API client changes.
+- **Tests:** Dashboard unit/component and real API integration tests; Playwright `/usage` filters/export/empty/error/unknown-data paths; Docker/Compose rebuild/restart and actual route health check; visual screenshots under `tests/artifacts/visual-qa/<run-id>/`. No provider-specific credentials.
+- **Docs:** `docs/usage/index.md`, `docs/usage/dashboard.md`, and `docs/reference/index.md` only when the new route is directly documented; verify links and commands.
+- **Changed files:** Dashboard `/usage` route/components/API client and focused tests, plus directly affected usage docs and index links.
+
+#### USAGE-004 — Cross-provider and cache-state accuracy
+
+- **IN_SCOPE:** Validate normalization and aggregation across provider-neutral fixtures representing different provider response shapes, model names, token counters, cache read/write reports, omitted fields, retries, errors, and streaming completion.
+- **OUT_OF_SCOPE:** Acquiring provider credentials, testing live provider billing, redefining provider contracts, or estimating cost/cache data that the provider did not report.
+- **Owner:** Core/API writer; verification owner: `@ingenium-qa`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
+- **Acceptance:** Cross-provider fixture runs produce identical canonical semantics for equivalent usage, count requests exactly once across retries/stream completion, preserve required numeric token counters, and distinguish reported cache use/read/write, known-zero, and unknown without inferring provider hit-rate or miss. Provider/model breakdown and UTC daily totals remain correct without double counting. No provider-specific credential is required, and no credential or API token leaks.
+- **STOP_CONDITION:** `PASS` after focused cross-provider accuracy tests, deployed smoke/health checks, and evidence review; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
+- **Escalation:** Escalate only for a mutually exclusive canonical interpretation, unavailable deployment access, or an unreproduced defect after bounded diagnosis; never escalate solely because a provider omits a field.
+- **Verification owner:** `@ingenium-qa`; compare fixture inputs with persisted events, aggregate totals, export rows, and `/usage` API responses, including unknown and retry cases.
+- **Rollback/safety:** Keep unknown values unknown, avoid billing inference, isolate fixtures, and roll back only task-owned normalization/deduplication changes.
+- **Tests:** Table-driven provider-neutral unit/integration tests, streaming/retry/error/cache-state accuracy tests, UTC boundary tests, export/API regression, deployed Docker/Compose checks, and dashboard contract smoke. No provider-specific credentials or live billing access.
+- **Docs:** `docs/concepts/architecture.md`, `docs/develop/api.md`, and `docs/usage/dashboard.md` only for directly affected semantics; verify links and commands.
+- **Changed files:** Usage normalization, deduplication, aggregation, and focused cross-provider tests, plus directly affected canonical docs.
+
+#### USAGE-005 — Usage end-to-end, documentation, and visual acceptance
+
+- **IN_SCOPE:** Close the provider-agnostic usage path from request collection through API aggregation/export and `/usage` dashboard acceptance, including docs, deployment, visual QA, and browser acceptance.
+- **OUT_OF_SCOPE:** New provider integrations, credentials, billing reconciliation, unrelated dashboard pages, and changes to previously accepted roadmap contracts.
+- **Owner:** Usage integration writer; verification owner: `@ingenium-qa` and `@ingenium-qa-vision`.
+- **Deployment owner:** `@ingenium-software-engineer-premium` (authorized Docker/Compose writer).
+- **Acceptance:** A fresh provider-neutral fixture produces a UTC-fresh usage record visible through totals, requests, required numeric tokens, input/output, reported cache use/read/write, known-zero, and unknown states, daily charts, provider/model breakdown, filters, export, and graceful unknown cost/cache states. Documentation matches the supported path. Rebuilt/restarted deployment passes actual route/health checks; desktop/mobile visual evidence and Windows browser acceptance cover the route without provider-specific credentials.
+- **STOP_CONDITION:** `PASS` only after E2E, docs/link, deployment, visual, accessibility, console/network, cleanup, and Windows browser evidence are complete; `STOP`/`CANCELLED` only on an explicit user request; otherwise continue in scope.
+- **Escalation:** Escalate only for unavailable required deployment/Windows browser access, an unresolved product decision, or a bounded diagnosis without a reproducible root cause; provider-specific credentials are not required and cannot be used as a prerequisite.
+- **Verification owner:** `@ingenium-qa` owns the real fixture→API→dashboard/export path and deployed acceptance; `@ingenium-qa-vision` owns 1440x900/390x844 screenshots, accessibility, console/network, and cleanup.
+- **Rollback/safety:** Use disposable usage fixtures, preserve project isolation and redaction, never claim unsupported cost/cache precision, and revert only task-owned usage integration changes.
+- **Tests:** Full targeted E2E with provider-neutral fixtures, API/export assertions, `/usage` browser tests, docs/link and command checks, Docker/Compose rebuild/restart and health checks, visual QA artifacts under `tests/artifacts/visual-qa/<run-id>/`, and Windows localhost/WSL browser acceptance. No provider-specific credentials.
+- **Docs:** `docs/usage/index.md`, `docs/usage/dashboard.md`, `docs/develop/api.md`, `docs/concepts/architecture.md`, and `docs/reference/index.md` only where directly affected; no Docs Workspace mutation.
+- **Changed files:** Usage integration, E2E/visual test files, and directly affected canonical docs listed above; do not regenerate unrelated indexes.
+
+### Work marker log (continued)
+
+<!-- (work-started) MCP-006 2026-07-28T02:57:10Z ingenium-docs -->
+<!-- (work-started) USAGE-001 2026-07-28T02:57:11Z ingenium-docs -->
+<!-- (work-started) USAGE-002 2026-07-28T03:29:19Z ingenium-docs -->
+<!-- (work-started) USAGE-003 2026-07-28T03:29:20Z ingenium-docs -->
+<!-- (work-started) USAGE-004 2026-07-28T03:29:21Z ingenium-docs -->
+<!-- (work-started) USAGE-005 2026-07-28T03:29:22Z ingenium-docs -->

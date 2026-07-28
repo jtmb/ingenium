@@ -27,7 +27,7 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 
 ## Database Migrations
 
-Ingenium currently has 66 numbered migrations (`001`–`066`):
+Ingenium currently has 68 numbered migrations (`001`–`068`):
 
 - `001`–`028`: platform, self-learning, tasks/jobs, skill project isolation, and email persistence
 - `029`–`040`: documentation workspace schema and integrity repair
@@ -47,5 +47,7 @@ Ingenium currently has 66 numbered migrations (`001`–`066`):
 - `062`–`064`: child MCP definition/category persistence and immutable conversation/checkpoint foundations
 - `065`: context RAG ingestion, checkpoint source freezing, and immutable citation snapshots
 - `066`: context checkpoint maintenance authorization and append-only audit governance
+- `067`: transactional forward-only repair for recoverable legacy/partial 063 context schemas before 065/066 probes
+- `068`: provider-neutral, metadata-only usage events (including nullable agent attribution and numeric reasoning-token metadata), explicit OpenCode project mappings/quarantine, and per-project sync cursors
 
 The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.

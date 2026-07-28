@@ -78,6 +78,7 @@ The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 | `/personality` | Personality traits |
 | `/context` | Immutable context conversation memory |
 | `/pipeline` | Pipeline event timeline |
+| `/usage` | Provider-neutral project usage totals, daily UTC series, breakdowns, freshness, filters, and CSV export |
 | Settings (overlay) | Full-screen settings overlay
 
 ## Skills
@@ -166,6 +167,21 @@ only after selecting a conversation or running a bounded in-conversation search.
 - Navigate to `/pipeline` in the dashboard
 - Events auto-poll every 3 seconds (pause/resume button available)
 - Filter events using pill buttons: All, Agent, Plugin, Synthesis, Trait
+
+## Usage
+
+Navigate to `/usage` to view the active project's provider-neutral telemetry.
+The page shows requests, required numeric token totals and input/output,
+reported cache use/read/write state, cost availability, daily UTC charts,
+provider/model breakdowns, filters, freshness, and CSV export. Cache state is
+never turned into an inferred provider hit-rate or miss. Cost and cache values
+that the source did not report are shown as unknown/not reported rather than
+zero. Credentials and API tokens are never exposed.
+
+Usage collection reads assistant `step-finish` metadata only. An OpenCode
+project must have an explicit mapping to the active Ingenium project; unmapped
+sessions are quarantined and never fall back to `global-default`. See
+[Usage Telemetry](usage.md) for mapping, partial-cost, UTC, and export details.
 
 ## Chat
 

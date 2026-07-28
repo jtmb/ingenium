@@ -31,6 +31,8 @@ description: Canonical reference for all environment variables used across the I
 | `INGENIUM_HOME` | `~/.ingenium` | core, supervisord | Ingenium data home directory |
 | `INGENIUM_OPENCODE_DB_PATH` | `/var/opencode/opencode.db` | ingenium-api | OpenCode SQLite DB path for extraction engine |
 | `INGENIUM_PROJECT` | _(none — required override)_ | @ingenium/extension plugins | **Extension session override.** When set, takes priority over worktree-derived project name. Required when worktree is `/workspace` (container mount). Unlike other vars, this has no code-level default — the resolver throws if it cannot determine a valid project name. Set explicitly in Docker entrypoint for the container's own session. |
+| `IMAGE_REVISION` | _(required; `git rev-parse HEAD`)_ | Docker Compose build arg, Docker OCI label | Lowercase 40-character SHA for the checkout being built. Export before every Compose command; it is public image provenance, not a credential. |
+| `IMAGE_SOURCE` | `https://github.com/jtmb/ingenium` | Docker Compose build arg, Docker OCI label | Public credential-free HTTPS repository URL recorded as OCI source metadata. |
 | `LOG_LEVEL` | `info` | ingenium-server | Pino log level |
 | `MS_OAUTH_CLIENT_ID` | _(required for OAuth)_ | ingenium-email | Microsoft OAuth2 app client ID |
 | `MS_OAUTH_CLIENT_SECRET` | _(required for OAuth)_ | ingenium-email | Microsoft OAuth2 app client secret |
@@ -42,6 +44,7 @@ description: Canonical reference for all environment variables used across the I
 | `NEXT_PUBLIC_OPENCODE_WEB_URL` | `http://opencode.localhost:3000/` at build time | Docker Compose build args, dashboard bundle | Public root origin embedded by Next.js during image build. Remote/LAN profiles must use an authenticated root HTTPS origin. |
 | `NEXT_PUBLIC_OPENCODE_CLI_URL` | `http://cli.localhost:3000/` at build time | Docker Compose build args, dashboard bundle | Public root origin embedded by Next.js during image build. Remote/LAN profiles must use an authenticated root HTTPS origin. |
 | `SYNTHESIS_INTERVAL_MS` | `900000` | ingenium-api | Scheduled synthesis interval (15 min), 0 = disabled |
+| `USAGE_SYNC_INTERVAL_MS` | `300000` | ingenium-api | Scheduled metadata-only OpenCode usage sync interval (5 min), 0 = disabled. Project ownership always requires an explicit OpenCode mapping; no `global-default` fallback is used. |
 
 ---
 

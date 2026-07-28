@@ -39,6 +39,10 @@ both the total and the category list for that project.
 - Each tool has a toggle switch to enable or disable it
 - Disabled tools return a `TOOL_DISABLED` error when called
 - This allows fine-grained access control per project
+- Disabled tools are also removed from the agent/OpenCode MCP `tools/list`
+  projection. Unknown or unavailable project state fails closed. Re-enabling
+  restores visibility and execution; the MCP server publishes a list-changed
+  notification when the visible set changes.
 
 ### Search and Filter
 - Use the **Search** field to find tools by name

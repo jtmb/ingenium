@@ -25,6 +25,21 @@ Ingenium MCP tools use a three-layer naming system:
 
 OpenCode applies the server key (`ingenium`) as a prefix. Transport names are unprefixed to avoid double-prefixing (`ingenium_ingenium_*`).
 
+## Tool control and visibility
+
+The `/mcp-servers` Tools tab controls the project-scoped enabled state for
+built-in and discovered tools. Disabling a tool removes it from the MCP
+`tools/list` projection and direct invocation fails closed with a deterministic
+disabled error. Re-enabling restores both visibility and execution. If the
+project identity or authoritative API state is unavailable, the MCP server
+fails closed and treats the tool as disabled. The server refreshes this
+projection periodically and emits a tool-list-changed notification when the
+visible set changes.
+
+The guarantee is tested with an in-memory fixture in
+`services/ingenium-server/tests/tool-visibility.test.ts` and the dashboard
+toggle path in `tests/ingenium-dashboard/mcp-tool-controls.spec.ts`.
+
 ### Connection preflight
 
 The built-in Ingenium transport is the packaged

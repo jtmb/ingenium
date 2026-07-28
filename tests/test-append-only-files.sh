@@ -111,7 +111,7 @@ validate_roadmap_markers() {
         return 1
     fi
 
-    local marker_pattern='^<!-- \(work-(started|complete)\) (BUG-[0-9]{3}|MCP-[0-9]{3}|CTX-[0-9]{3}|DOC-[0-9]{3}) ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) ([^[:space:]]+) -->$'
+    local marker_pattern='^<!-- \(work-(started|complete)\) (BUG-[0-9]{3}|MCP-[0-9]{3}|CTX-[0-9]{3}|DOC-[0-9]{3}|USAGE-[0-9]{3}) ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) ([^[:space:]]+) -->$'
     declare -A active_ids=()
     declare -A completed_ids=()
     declare -A evidence_ids=()
@@ -126,7 +126,7 @@ validate_roadmap_markers() {
         timestamp="${BASH_REMATCH[3]}"
         actor="${BASH_REMATCH[4]}"
         case "$task" in
-            BUG-000|BUG-001|BUG-002|BUG-003|BUG-004|BUG-005|BUG-006|MCP-001|MCP-002|MCP-003|MCP-004|MCP-005|CTX-001|CTX-002|CTX-003|CTX-004|CTX-005|DOC-001) ;;
+            BUG-000|BUG-001|BUG-002|BUG-003|BUG-004|BUG-005|BUG-006|MCP-001|MCP-002|MCP-003|MCP-004|MCP-005|MCP-006|CTX-001|CTX-002|CTX-003|CTX-004|CTX-005|DOC-001|USAGE-001|USAGE-002|USAGE-003|USAGE-004|USAGE-005) ;;
             *) fail "ROADMAP.md — unknown work marker ID: $task"; return 1 ;;
         esac
         if [[ "$kind" != "(work-started)" && "$kind" != "(work-complete)" ]]; then
@@ -163,13 +163,13 @@ validate_roadmap_markers() {
     ' "$file" || true)
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
-        if [[ ! "$line" =~ ^Evidence\ ((BUG|MCP|CTX|DOC)-[0-9]{3}):[[:space:]]+.+$ ]]; then
+        if [[ ! "$line" =~ ^Evidence\ ((BUG|MCP|CTX|DOC|USAGE)-[0-9]{3}):[[:space:]]+.+$ ]]; then
             fail "ROADMAP.md — malformed implementation evidence: $line"
             return 1
         fi
         task="${BASH_REMATCH[1]}"
         case "$task" in
-            BUG-000|BUG-001|BUG-002|BUG-003|BUG-004|BUG-005|BUG-006|MCP-001|MCP-002|MCP-003|MCP-004|MCP-005|CTX-001|CTX-002|CTX-003|CTX-004|CTX-005|DOC-001) ;;
+            BUG-000|BUG-001|BUG-002|BUG-003|BUG-004|BUG-005|BUG-006|MCP-001|MCP-002|MCP-003|MCP-004|MCP-005|MCP-006|CTX-001|CTX-002|CTX-003|CTX-004|CTX-005|DOC-001|USAGE-001|USAGE-002|USAGE-003|USAGE-004|USAGE-005) ;;
             *) fail "ROADMAP.md — unknown evidence ID: $task"; return 1 ;;
         esac
         evidence_ids[$task]=1

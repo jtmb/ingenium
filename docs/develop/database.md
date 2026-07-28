@@ -84,7 +84,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–066)
+### Feature Migrations (045–068)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -105,8 +105,12 @@ another Compose project volume.
 | 059 | `059_repository_docs_onboarding.sql` | Creates repository-authoritative Docs page identity metadata that survives archive and later reappearance. |
 | 060 | `060_repository_resource_sync.sql` | Creates repository-authoritative synchronization state for skills, agents, and plugins, including semantic payload and source hashes. |
 | 061 | `061_global_backup_ownership.sql` | Creates an idempotent migration marker and backfills legacy backup records and restore jobs to the sole active global project. Startup retries the backfill after global-project initialization. |
+| 063 | `063_immutable_context_conversations.sql` | Creates immutable project-scoped conversations, messages, checkpoints, checkpoint RAG links, the message FTS5 index, scoped foreign keys, indexes, and immutability triggers. |
+| 064 | `064_child_mcp_tool_categories.sql` | Rebuilds child MCP discovery metadata so category values are server-specific. |
 | 065 | `065_context_rag_ingestion.sql` | Creates project-scoped direct/chunked context-upload state and durable provenance rows, freezes checkpoint-linked RAG sources/chunks, and stores immutable checkpoint citation snapshots. |
 | 066 | `066_context_checkpoint_governance.sql` | Creates short-lived, one-time project-scoped maintenance authorizations plus append-only archive/unarchive/restore-as-new audit records. Archive state is derived from events; checkpoints are never deleted. |
+| 067 | `067_context_migration_repair.sql` | Repairs recoverable legacy or partial 063 shapes before 065/066 are evaluated. The runner projects rows into canonical staging tables in one transaction, restores indexes/FTS/triggers/foreign keys, validates integrity, and records only a content-free schema hash plus row counts in `context_migration_repairs`. |
+| 068 | `068_usage_telemetry.sql` | Creates metadata-only provider-neutral usage events, explicit OpenCode-to-Ingenium project mappings (including unmapped quarantine), and per-project composite usage sync state. Events preserve raw provider/model IDs, nullable assistant-agent attribution, and numeric reasoning-token metadata. They have a replay-safe `(source_instance, source_part_id)` key and contain no message text, reasoning content, tool payload, credential, or raw payload columns. |
 
 *See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
 
@@ -163,6 +167,80 @@ if (!parent) return; // parent removed — skip silently
 ```
 
 ## Manual DB Repair
+
+### G3 context migration repair (067)
+
+Migration 067 is a **forward-only** startup repair for incomplete migration-063
+schemas. It is not a data reset and does not delete conversation, message,
+checkpoint, or checkpoint-RAG-link rows: rows are copied to canonical staging
+tables, source tables are replaced only after every copied row satisfies the
+target constraints, then the transaction verifies `PRAGMA integrity_check` and
+`PRAGMA foreign_key_check` before it commits. It runs before the normal 065 and
+066 probes so their dependent context tables can be applied afterward.
+
+The repair can fill only data that was absent because of the partial schema:
+missing hashes are deterministically generated, missing JSON metadata/tags use
+the schema defaults, missing sequences/ordinals receive stable values, and a
+missing link project is derived from its checkpoint. It refuses rather than
+guessing when project ownership, message/checkpoint linkage, required content,
+or a target uniqueness/constraint cannot be preserved. It also refuses a
+pre-existing integrity or foreign-key failure that is unrelated to the temporary
+partial-063 parent-key mismatch.
+
+#### Operator preflight
+
+Do not run the application against a production database until a maintenance
+window has prevented competing writers. These commands are examples for an
+operator with the `sqlite3` CLI; they are not executed by the migration itself.
+
+```bash
+# Point this at the single canonical database file, never at a new sibling .db.
+DB_PATH="/app/.ingenium/data"
+
+# Capture the current health and the context schema signature before startup.
+sqlite3 "$DB_PATH" "PRAGMA integrity_check; PRAGMA foreign_key_check;"
+sqlite3 "$DB_PATH" \
+  "SELECT type, name FROM sqlite_master WHERE name LIKE 'context_%' ORDER BY type, name;"
+```
+
+`integrity_check` must return only `ok`; investigate any foreign-key rows before
+continuing. A partial 063 schema may report a temporary `foreign key mismatch`
+because a child table references a missing parent key; 067 validates the copied
+context relationships and repeats the foreign-key check after rebuilding.
+
+#### Backup and startup
+
+Create a consistent SQLite backup with the SQLite backup API rather than copying
+a live WAL database file. Keep the original backup immutable and verify it
+before starting the release containing migration 067.
+
+```bash
+DB_PATH="/app/.ingenium/data"
+BACKUP_PATH="/secure/backups/ingenium-pre-g3-$(date -u +%Y%m%dT%H%M%SZ).sqlite"
+
+sqlite3 "$DB_PATH" ".backup '$BACKUP_PATH'"
+sqlite3 "$BACKUP_PATH" "PRAGMA integrity_check; PRAGMA foreign_key_check;"
+```
+
+On startup, inspect the structured database log for
+`Applied migration 067_context_migration_repair.sql`. A successful actual repair
+adds one content-free `context_migration_repairs` row with the source schema
+hash and copied row counts. Re-run `PRAGMA integrity_check` and
+`PRAGMA foreign_key_check` after startup; both must be clean.
+
+#### Failure and rollback
+
+If preflight or the in-transaction post-check fails, SQLite rolls back the
+entire 067 rebuild: source context tables and rows remain untouched. Preserve the
+failed database and logs for diagnosis; do not hand-drop context tables or
+re-run the migration against a changed copy.
+
+After a committed repair there is no supported destructive down-migration.
+To return to the prior database, stop all writers, preserve the committed file
+for forensics, restore the verified pre-G3 backup through the operator's normal
+database recovery procedure, and validate it with both pragmas before allowing
+the prior application version to write. This repository change does not perform
+that live restore, deploy services, or modify Docker configuration.
 
 ### Repair a failed 015 migration
 

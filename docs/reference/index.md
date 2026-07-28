@@ -30,3 +30,4 @@ Technical reference documents for the Ingenium system.
 - [API Reference](../develop/api.md) — REST API endpoints
 - [Database Migrations](../develop/database.md) — Migration file list and WAL safety
 - [Environment Variables (Quick)](../develop/variables.md) — Per-service quick reference
+- [Usage Telemetry](../usage/usage.md) — Project-scoped collection, mapping, freshness, and export

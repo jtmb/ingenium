@@ -127,7 +127,7 @@ Created by migration `049_workspace_project_migration.sql`. Stores:
 | `destination_project_id` | The `global-default` project UUID |
 | `source_skill_count` | Number of skills in source (expects 10) |
 | `source_hashes` | JSON array of `{name, sha256}` for every source skill |
-| `child_counts` | JSON map of table name → row count for all child tables |
+| `child_counts` | JSON object of logical repaired-component names → copied row counts |
 | `status` | One of `prepared`, `completed`, `failed` |
 
 The manifest is created **before** data movement and updated **after** successful completion, providing a durable audit trail.
@@ -163,7 +163,36 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
 - `ingenium-server` runs as an MCP stdio transport with **265 built-in registered tools** across **28 baseline categories**. Two extension-registered tools bring the built-in catalog to **267**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
-- `ingenium-dashboard` is a Next.js 16 App Router frontend with **20 primary routes plus the Settings overlay**. It talks to the API over HTTP.
+- `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
+
+## Usage Telemetry
+
+Usage telemetry is provider-neutral and project-scoped. The API reads OpenCode
+assistant `step-finish` parts and joins only their usage metadata with assistant
+message and session metadata. Persisted records contain request identifiers,
+raw provider/model IDs, nullable assistant-agent attribution, timestamps, status,
+token counters (including nullable numeric reasoning tokens), nullable cache
+counters, and reported cost state. They never contain prompts, message text,
+reasoning content, tool payloads, or credentials.
+
+OpenCode project IDs require an explicit mapping to an Ingenium project. An
+unmapped source project is quarantined and is never assigned to
+`global-default` by fallback. Replay safety is provided by a unique
+`source_instance + source_part_id` upsert key. Per-project sync state uses a
+composite cursor plus a five-minute session-update lookback so revised or
+late-arriving step data is replayed safely.
+
+The collector runs on the API scheduler (default five minutes; configurable with
+`USAGE_SYNC_INTERVAL_MS`) and can be triggered with the project-scoped usage
+sync API. Cost is reported as `known`, `partial`, or `unavailable`; cache
+read/write and reasoning-token counts remain nullable when OpenCode does not
+report them. The system does not calculate a cache-hit rate or infer provider
+billing.
+
+The dashboard `/usage` view consumes the same project-scoped summary,
+breakdown, freshness, and export contracts. It treats omitted cost/cache data
+as unknown rather than zero and preserves provider/model IDs for all supported
+providers.
 
 ## Provider Adapter Layer
 

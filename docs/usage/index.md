@@ -12,6 +12,7 @@ Step-by-step guides for using the Ingenium dashboard features.
 | Guide | Description |
 |-------|-------------|
 | [Dashboard](dashboard.md) | Full dashboard user guide with all features |
+| [Usage Telemetry](usage.md) | Project-scoped usage totals, freshness, mappings, and export |
 | [OpenCode](opencode.md) | OpenCode Web/CLI dual-mode interface |
 | [Mail](mail.md) | Email client usage — reading, composing, searching |
 | [Tasks](tasks.md) | Kanban task board workflow |

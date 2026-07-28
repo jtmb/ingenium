@@ -98,6 +98,25 @@ schema-valid, empty, fixture-owned runs whose manifest proves they are safe to
 remove. Missing, malformed, active, or process-bearing runs are retained and
 reported rather than deleted.
 
+## Usage and MCP control checks
+
+Usage telemetry is covered by provider-neutral focused tests; no provider
+credential is required. Run the core normalization/aggregation tests, API
+route tests, and OpenCode step-finish collector tests together:
+
+```bash
+npm run test --workspace=packages/ingenium-core -- usage.test.ts
+npm run test --workspace=services/ingenium-api -- usage-api.test.ts usage-sync.test.ts
+npm run test --workspace=services/ingenium-server -- tool-visibility.test.ts
+```
+
+The usage checks cover UTC inclusive/exclusive ranges, project mapping and
+quarantine, replay-safe upserts, partial/unknown cost and cache values,
+freshness, bounded pagination, and deterministic export. MCP visibility checks
+cover a built-in tool being removed from `tools/list`, direct execution failing
+closed, and visibility/execution returning after re-enable. The dashboard MCP
+control spec covers the real `/mcp-servers` toggle path.
+
 ## Explicit opt-in suites
 
 Each external suite fails during preflight unless its opt-in variable is set

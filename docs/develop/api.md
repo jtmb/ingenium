@@ -75,6 +75,40 @@ See the [startup regression tests](../../services/ingenium-api/tests/startup.tes
 |--------|----------|---------|
 | GET | `/api/v1/dashboard/summary` | Aggregated home dashboard endpoint |
 
+### Usage telemetry
+
+All routes below require `?project=<name>`. Usage collection is metadata-only:
+it never returns or persists prompt/message text, reasoning content, tool
+payloads, or credentials. It can persist numeric reasoning-token metadata and
+nullable assistant-agent attribution. `from` is inclusive and `to` is exclusive
+UTC ISO timestamps; ranges are limited to 366 days. Provider/model/agent/status
+filters may be repeated. Event pagination is cursor-based (maximum 200 rows), and CSV
+exports are capped at 10,000 rows with a continuation cursor header when
+truncated.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/usage/summary` | Totals, complete UTC daily series, and freshness metadata. Cost and metric availability distinguish `known`, `partial`, and `unavailable`; cache and reasoning-token counts are nullable and no hit rate is invented. |
+| GET | `/api/v1/usage/breakdown` | Provider/model/assistant-agent breakdown for the filtered UTC range. Raw provider and model IDs are preserved; assistant-agent attribution is nullable. |
+| GET | `/api/v1/usage/events` | Bounded metadata-only event page with `pagination.nextCursor`, `hasMore`, and `total`. |
+| GET | `/api/v1/usage/export` | Bounded deterministic CSV export. Returns `X-Export-Truncated` and, when applicable, `X-Export-Next-Cursor`. |
+| GET | `/api/v1/usage/mappings` | List this Ingenium project's explicit OpenCode project mappings. |
+| PUT | `/api/v1/usage/mappings` | Create or confirm an explicit mapping with `{ "opencodeProjectId": "…" }`. A source mapping owned by another project returns `409`; there is no global fallback. |
+| POST | `/api/v1/usage/sync` | Run a bounded manual metadata-only usage sync for this project's explicit mappings. |
+
+The scheduler runs the same bounded collector every five minutes by default.
+Unmapped OpenCode projects are quarantined without usage-event insertion until a
+project owner creates an explicit mapping.
+
+Collection is provider-agnostic: every supported OpenCode provider contributes
+through the same assistant `step-finish` metadata path, while raw provider and
+model IDs remain available for breakdowns. Agent attribution comes only from the
+assistant message that owns the step-finish and remains `null` when unavailable.
+If a message contains one step-finish, message-level token metadata (including
+numeric reasoning tokens) may fill omitted part-level counters; values are not
+redistributed across multiple step-finish parts. Cost, cache, and reasoning-token
+data that is absent remains explicitly unknown.
+
 ### Projects
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
