@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Comprehensive E2E tests for ALL 13 Ingenium Dashboard pages.
+ * Comprehensive E2E tests for the current dashboard management pages.
  *
  * Tests run against a live Next.js dev server (port 3000) and real API
  * server (port 4097). Each test navigates to a page and verifies that
@@ -65,25 +65,7 @@ test.describe("Projects Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  2. Archive                                                         */
-/* ------------------------------------------------------------------ */
-
-test.describe("Archive Page", () => {
-  test("loads with heading and shows empty state or archived projects", async ({ page }) => {
-    await goto(page, "/archive");
-
-    await expect(page.getByRole("heading", { name: "Archive" })).toBeVisible();
-
-    // Either shows "No archived projects" or a list with Restore buttons
-    const emptyState = page.getByText("No archived projects");
-    const restoreBtn = page.getByRole("button", { name: /Restore/i });
-    const hasContent = await emptyState.isVisible() || await restoreBtn.isVisible();
-    expect(hasContent).toBeTruthy();
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  3. Skills                                                          */
+/*  2. Skills                                                          */
 /* ------------------------------------------------------------------ */
 
 test.describe("Skills Page", () => {
@@ -131,7 +113,7 @@ test.describe("Skills Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  4. Tasks                                                           */
+/*  3. Tasks                                                           */
 /* ------------------------------------------------------------------ */
 
 test.describe("Tasks Page", () => {
@@ -172,7 +154,7 @@ test.describe("Tasks Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  5. Plugins                                                         */
+/*  4. Plugins                                                         */
 /* ------------------------------------------------------------------ */
 
 test.describe("Plugins Page", () => {
@@ -217,7 +199,7 @@ test.describe("Plugins Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  6. Mail                                                            */
+/*  5. Mail                                                            */
 /* ------------------------------------------------------------------ */
 
 test.describe("Mail Page", () => {
@@ -235,7 +217,7 @@ test.describe("Mail Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  7. Agents                                                          */
+/*  6. Agents                                                          */
 /* ------------------------------------------------------------------ */
 
 test.describe("Agents Page", () => {
@@ -279,35 +261,7 @@ test.describe("Agents Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  8. Servers                                                         */
-/* ------------------------------------------------------------------ */
-
-test.describe("Servers Page", () => {
-  test("loads with heading and server form", async ({ page }) => {
-    await goto(page, "/servers");
-
-    await expect(page.getByRole("heading", { name: "MCP Servers" })).toBeVisible();
-
-    // Creation form
-    await expect(page.getByPlaceholder("Server name")).toBeVisible();
-    await expect(page.getByPlaceholder(/Command/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Add Server/i })).toBeVisible();
-  });
-
-  test("can add and see a server", async ({ page }) => {
-    await goto(page, "/servers");
-
-    const serverName = `E2E Server ${Date.now()}`;
-    await page.getByPlaceholder("Server name").fill(serverName);
-    await page.getByPlaceholder(/Command/i).fill("echo test");
-    await page.getByRole("button", { name: /Add Server/i }).click();
-
-    await expect(page.getByText(serverName).first()).toBeVisible({ timeout: 5000 });
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/*  9. Config                                                          */
+/*  7. Config                                                          */
 /* ------------------------------------------------------------------ */
 
 test.describe("Config Page", () => {
@@ -348,7 +302,7 @@ test.describe("Config Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  10. Observations                                                   */
+/*  8. Observations                                                    */
 /* ------------------------------------------------------------------ */
 
 test.describe("Observations Page", () => {
@@ -378,7 +332,7 @@ test.describe("Observations Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  11. Personality                                                    */
+/*  9. Personality                                                     */
 /* ------------------------------------------------------------------ */
 
 test.describe("Personality Page", () => {
@@ -430,7 +384,7 @@ test.describe("Personality Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  12. Pipeline                                                       */
+/*  10. Pipeline                                                       */
 /* ------------------------------------------------------------------ */
 
 test.describe("Pipeline Page", () => {
@@ -488,7 +442,7 @@ test.describe("Pipeline Page", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/*  13. Settings                                                       */
+/*  11. Settings                                                       */
 /* ------------------------------------------------------------------ */
 
 test.describe("Settings Page", () => {

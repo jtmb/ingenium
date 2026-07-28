@@ -1,242 +1,94 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * E2E tests for the Ingenium Dashboard.
- *
- * These tests run against the manifest-owned dashboard and API fixture. Each
- * test navigates to a management page and verifies that interactions
- * (creating, moving, listing) work end-to-end.
- *
- * Selectors use roles, labels, and text content since the pages currently
- * don't have data-testid attributes. If refactoring later, prefer
- * data-testid selectors for stability (see useful-tests skill).
+ * E2E contracts for current dashboard routes that are not covered by a
+ * dedicated workflow spec. Retired learning, archive, and server page
+ * contracts intentionally do not appear here.
  */
 test.describe("Ingenium Dashboard", () => {
-  /* ------------------------------------------------------------------ */
-  /*  1. Home page                                                       */
-  /* ------------------------------------------------------------------ */
-
-  test("home page loads with title and navigation links", async ({ page }) => {
+  test("home page exposes current navigation links", async ({ page }) => {
     await page.goto("/");
 
-    // The page title is displayed as an <h1>
-    await expect(
-      page.getByRole("heading", { name: "Ingenium Dashboard" }),
-    ).toBeVisible();
-
-    // The subtitle should be present
-    await expect(
-      page.getByText("Manage your AI agent skill system, learnings, tasks, and MCP servers."),
-    ).toBeVisible();
-
-    // All navigation links should be present in the top nav bar
-    const nav = page.locator("nav");
-    const links = ["Projects", "Archive", "Skills", "Learnings", "Tasks", "Plugins", "Servers", "Settings"];
-    for (const name of links) {
-      await expect(nav.getByRole("link", { name })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Ingenium", exact: true })).toBeVisible();
+    const nav = page.getByRole("navigation", { name: "Main navigation" });
+    for (const name of [
+      "Chat",
+      "OpenCode",
+      "Mail",
+      "Tasks",
+      "Docs",
+      "Skills",
+      "Agents",
+      "Observations",
+      "Personality",
+      "Context",
+      "Pipeline",
+      "Jobs",
+      "Backups",
+      "Logs",
+      "Usage",
+      "Status",
+      "Projects",
+      "Plugins",
+      "MCP Servers",
+      "Config",
+      "Secrets",
+    ]) {
+      await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
     }
-
-    // The home page should also contain card-style link tiles
-    const cardLinks = page.locator("a[href]").filter({ has: page.locator("h2") });
-    await expect(cardLinks).toHaveCount(7);
+    await expect(nav.getByRole("link", { name: "Learnings", exact: true })).toHaveCount(0);
   });
-
-  /* ------------------------------------------------------------------ */
-  /*  2. Projects page                                                   */
-  /* ------------------------------------------------------------------ */
 
   test("projects page creates a project", async ({ page }) => {
     await page.goto("/projects");
 
-    // Page heading
-    await expect(
-      page.getByRole("heading", { name: "Projects" }),
-    ).toBeVisible();
-
-    // Create a new project via the inline form
+    await expect(page.getByRole("heading", { name: "Projects", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "+ New Project", exact: true }).click();
     const projectName = `E2E Project ${Date.now()}`;
     await page.getByPlaceholder("Project name").fill(projectName);
-    await page.getByRole("button", { name: "Create" }).click();
+    await page.getByRole("button", { name: "Create", exact: true }).click();
 
-    // The newly created project should appear in the list below the form
-    await expect(page.getByText(projectName).first()).toBeVisible();
+    await expect(page.getByText(projectName, { exact: true }).first()).toBeVisible();
   });
 
-  /* ------------------------------------------------------------------ */
-  /*  3. Skills page                                                     */
-  /* ------------------------------------------------------------------ */
-
-  test("skills page loads with search", async ({ page }) => {
+  test("skills page loads with its current search contract", async ({ page }) => {
     await page.goto("/skills");
 
-    // The heading shows "Skills" and a count of loaded skills
-    await expect(
-      page.getByRole("heading", { name: /^Skills / }),
-    ).toBeVisible();
-
-    // The search input should be rendered
-    await expect(
-      page.getByPlaceholder("Search skills..."),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Skills \(/ })).toBeVisible();
+    await expect(page.getByPlaceholder("Search skills...", { exact: true })).toBeVisible();
   });
 
-  /* ------------------------------------------------------------------ */
-  /*  4. Learnings page                                                  */
-  /* ------------------------------------------------------------------ */
-
-  test("learnings page logs an entry", async ({ page }) => {
-    await page.goto("/learnings");
-
-    // Page heading
-    await expect(
-      page.getByRole("heading", { name: "Learnings" }),
-    ).toBeVisible();
-
-    // Select a learning type from the dropdown
-    await page.locator("select").selectOption("pattern");
-
-    // Fill in the content textarea
-    const entryText = `E2E learning entry ${Date.now()}`;
-    await page.getByPlaceholder("What did you learn?").fill(entryText);
-
-    // Click the "Log Learning" button
-    await page.getByRole("button", { name: "Log Learning" }).click();
-
-    // The new entry should appear in the list
-    await expect(page.getByText(entryText)).toBeVisible();
-
-    // The type badge ("pattern") should also be visible for the new entry
-    // Use a more specific selector to avoid matching the <option> in the dropdown
-    await expect(page.locator("span", { hasText: "pattern" }).first()).toBeVisible();
-  });
-
-  /* ------------------------------------------------------------------ */
-  /*  5. Tasks page                                                      */
-  /* ------------------------------------------------------------------ */
-
-  test("tasks page creates and moves a task", async ({ page }) => {
+  test("tasks page creates a task through the current modal", async ({ page }) => {
     await page.goto("/tasks");
 
-    // Page heading
-    await expect(
-      page.getByRole("heading", { name: "Tasks" }),
-    ).toBeVisible();
-
-    // Create a new task (starts in "todo" column)
+    await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
     const taskTitle = `E2E Task ${Date.now()}`;
-    await page.getByPlaceholder("Task title").fill(taskTitle);
-    await page.getByRole("button", { name: "Add" }).click();
-
-    // The task should appear on the board after creation
-    await expect(page.getByText(taskTitle)).toBeVisible();
-
-    // Click the Advance → button inside the task card to move it to "in progress"
-    const taskCard = page.getByText(taskTitle).first();
-    await taskCard.locator("..").getByRole("button", { name: /Advance/i }).click();
-
-    // Wait for the PATCH request that moves the task to complete
-    await page.waitForResponse(
-      (resp) =>
-        resp.url().includes("/api/v1/tasks/") &&
-        resp.request().method() === "PATCH" &&
-        resp.status() === 200,
-    );
-
-    // The task should still be visible after moving to the next column
-    await expect(page.getByText(taskTitle)).toBeVisible();
+    await page.getByRole("button", { name: "+ Add Task", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "New Task", exact: true })).toBeVisible();
+    await page.getByPlaceholder("Task title", { exact: true }).fill(taskTitle);
+    await page.getByRole("button", { name: "Create Task", exact: true }).click();
+    await expect(page.getByText(taskTitle, { exact: true })).toBeVisible();
   });
 
-  /* ------------------------------------------------------------------ */
-  /*  6. Plugins page                                                    */
-  /* ------------------------------------------------------------------ */
-
-  test("plugins page renders with heading and Add Plugin button", async ({ page }) => {
+  test("plugins page exposes the current management entry point", async ({ page }) => {
     await page.goto("/plugins");
 
-    // Page heading
-    await expect(
-      page.getByRole("heading", { name: "Plugins" }),
-    ).toBeVisible();
-
-    // Add Plugin button should be present
+    await expect(page.getByRole("heading", { name: "Plugins", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: /Add Plugin/i })).toBeVisible();
   });
 
-  test("plugins page creates and shows a plugin", async ({ page }) => {
-    const ts = Date.now().toString();
-    await page.goto("/plugins");
-    await page.getByRole("button", { name: /Add Plugin/i }).click();
-    await page.getByPlaceholder("my-plugin", { exact: true }).fill(`e2e-plugin-${ts}`);
-    await page.getByPlaceholder("my-plugin.ts").fill(`e2e-plugin-${ts}.ts`);
-    await page.getByRole("button", { name: /Upload & Create/i }).click();
-    await expect(page.getByText(`e2e-plugin-${ts}`).first()).toBeVisible({ timeout: 5000 });
-  });
+  test("context page uses the current immutable conversation workspace", async ({ page }) => {
+    await page.route("**/api/v1/context/conversations**", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ data: { data: [], nextCursor: null } }),
+    }));
 
-  /* ------------------------------------------------------------------ */
-  /*  7. Servers page                                                    */
-  /* ------------------------------------------------------------------ */
+    await page.goto("/context");
 
-    test("tasks page completes a task through all columns", async ({ page }) => {
-    await page.goto("/tasks");
-
-    // Create a new task
-    const taskTitle = `E2E Complete ${Date.now()}`;
-    await page.getByPlaceholder("Task title").fill(taskTitle);
-    await page.getByRole("button", { name: "Add" }).click();
-    await expect(page.getByText(taskTitle)).toBeVisible();
-
-    // Click the Advance → button through all 4 columns (todo → in_progress → review → done)
-    for (let i = 0; i < 4; i++) {
-      const moveResponse = page.waitForResponse(
-        (response) => response.url().includes("/api/v1/tasks/") &&
-          response.request().method() === "PATCH" &&
-          response.status() === 200,
-      );
-      await page.getByRole("button", { name: /Advance/ }).first().click();
-      await moveResponse;
-    }
-
-    // The task should still be visible after cycling through all columns
-    await expect(page.getByText(taskTitle)).toBeVisible();
-  });
-
-  test("archive page renders", async ({ page }) => {
-    await page.goto("/archive");
-    await expect(page.getByRole("heading", { name: "Archive" })).toBeVisible();
-    // Either shows "No archived projects" or lists archived projects
-    await expect(page.getByText(/No archived|Restore/)).toBeVisible({ timeout: 5000 });
-  });
-
-  test("settings page loads with archive retention setting", async ({ page }) => {
-    await page.goto("/settings");
-    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
-    await expect(page.getByText("Archive retention")).toBeVisible();
-    await expect(page.locator('input[type="number"]')).toBeVisible();
-  });
-
-test("servers page adds a server", async ({ page }) => {
-    await page.goto("/servers");
-
-    // Page heading is "MCP Servers" (not just "Servers")
-    await expect(
-      page.getByRole("heading", { name: "MCP Servers" }),
-    ).toBeVisible();
-
-    // Fill in the server creation form
-    const serverName = `E2E Server ${Date.now()}`;
-    const serverCommand = "echo test-connection";
-
-    await page.getByPlaceholder("Server name").fill(serverName);
-    await page
-      .getByPlaceholder("Command (e.g. kaban mcp)")
-      .fill(serverCommand);
-    await page.getByRole("button", { name: "Add Server" }).click();
-
-    // The server should appear in the list
-    await expect(page.getByText(serverName).first()).toBeVisible();
-    await expect(page.getByText(serverCommand).first()).toBeVisible();
-
-    // A "Stopped" status badge should be visible for the new server
-    await expect(page.getByText("Stopped").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Context", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Conversation index", exact: true })).toBeVisible();
+    await expect(page.getByTestId("context-empty")).toBeVisible();
+    await expect(page.getByText(/immutable conversation memory/)).toBeVisible();
   });
 });
