@@ -466,10 +466,12 @@ Docs AI, RAG Ask, and Job Suggestions use `executeSynthesisBroker()` which route
 1. For callers without a validated explicit selection, reads primary (`synthesis_provider` + `synthesis_model`) and secondary (`synthesis_backup_provider` + `synthesis_backup_model`) from settings
 2. Deduplicates identical `(providerID, modelID)` pairs
 3. For callers without an explicit selection, tries primary first and falls back to secondary on failure; an explicit selection is attempted exactly once
-4. **Bounded timeout policy**: the default and all non-Docs broker consumers
-   remain hard-capped at 30 seconds. Docs AI alone uses the server-owned
-   `docs-ai` policy, which permits its requested 60 seconds but cannot exceed
-   the broker-wide 60-second maximum.
+4. **Bounded timeout policy**: interactive broker consumers remain hard-capped
+    at 30 seconds by default; the server-owned `docs-ai` policy alone permits
+    60 seconds. Background extraction and synthesis use a separate policy that
+    preserves the pipeline's 60-second request budget and may explicitly extend
+    only to a finite 180-second maximum. Every broker policy deletes its
+    ephemeral OpenCode session in `finally`, including timeout and retry paths.
 5. Creates ephemeral OpenCode sessions using only `ingenium-llm-broker`, whose
    wildcard-deny profile has no tool allowances; the request also carries an
    empty `tools: {}` selection as defense in depth

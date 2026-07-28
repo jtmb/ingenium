@@ -170,6 +170,13 @@ token in curl arguments, URLs, logs, or browser responses. If token
 configuration is unavailable, the API returns `503 API_AUTH_NOT_CONFIGURED`
 rather than becoming unauthenticated.
 
+The extraction engine reaches `GET /api/v1/opencode/messages` through an
+API-owned internal client. That client loads the same protected runtime token
+only while creating the loopback request, sends it only as the bearer header,
+and returns stable failure categories rather than headers, endpoint details, or
+response bodies. The route remains protected; loopback callers do not receive
+an authentication bypass.
+
 ## OAuth callback on port 1455
 
 The host `127.0.0.1:1455` reaches the Nginx callback listener, which forwards

@@ -18,6 +18,8 @@ import {
   LLM_BROKER_AGENT,
   DOCS_AI_BROKER_TIMEOUT_MS,
   DEFAULT_BROKER_TIMEOUT_MS,
+  BACKGROUND_BROKER_TIMEOUT_MS,
+  MAX_BACKGROUND_BROKER_TIMEOUT_MS,
   MAX_BROKER_TIMEOUT_MS,
   opencodeClient,
   resolveBrokerTimeout,
@@ -172,6 +174,28 @@ describe("broker timeout policy", () => {
       policy: "docs-ai",
       requestedTimeoutMs: MAX_BROKER_TIMEOUT_MS + 1,
       effectiveTimeoutMs: MAX_BROKER_TIMEOUT_MS,
+    });
+  });
+
+  it("permits bounded background synthesis time without raising interactive limits", () => {
+    expect(resolveBrokerTimeout(BACKGROUND_BROKER_TIMEOUT_MS, "background")).toEqual({
+      policy: "background",
+      requestedTimeoutMs: BACKGROUND_BROKER_TIMEOUT_MS,
+      effectiveTimeoutMs: BACKGROUND_BROKER_TIMEOUT_MS,
+    });
+    expect(resolveBrokerTimeout(MAX_BACKGROUND_BROKER_TIMEOUT_MS, "background")).toEqual({
+      policy: "background",
+      requestedTimeoutMs: MAX_BACKGROUND_BROKER_TIMEOUT_MS,
+      effectiveTimeoutMs: MAX_BACKGROUND_BROKER_TIMEOUT_MS,
+    });
+    expect(resolveBrokerTimeout(MAX_BACKGROUND_BROKER_TIMEOUT_MS + 1, "background")).toEqual({
+      policy: "background",
+      requestedTimeoutMs: MAX_BACKGROUND_BROKER_TIMEOUT_MS + 1,
+      effectiveTimeoutMs: MAX_BACKGROUND_BROKER_TIMEOUT_MS,
+    });
+    expect(resolveBrokerTimeout(MAX_BACKGROUND_BROKER_TIMEOUT_MS)).toMatchObject({
+      policy: "default",
+      effectiveTimeoutMs: DEFAULT_BROKER_TIMEOUT_MS,
     });
   });
 });
@@ -519,6 +543,36 @@ describe("brokerExecute — mocked lifecycle", () => {
     const lastCall = calls[calls.length - 1];
     expect(lastCall[0]).toContain("/session/ses_tmo");
     expect(lastCall[1]).toHaveProperty("method", "DELETE");
+  });
+
+  it("deletes a background broker session after its bounded timeout", async () => {
+    vi.stubEnv("OPENCODE_SERVER_PASSWORD", "test-pass");
+    const fetchSpy = vi
+      .fn()
+      .mockResolvedValueOnce(mockResponse(200, { id: "ses_background_timeout", title: "Broker Session" }))
+      .mockResolvedValueOnce(mockResponse(200, { info: { id: "msg_u", sessionID: "ses_background_timeout", role: "user" }, parts: [] }));
+    for (let index = 0; index < 10; index += 1) {
+      fetchSpy.mockResolvedValueOnce(mockResponse(200, [{
+        info: { id: "msg_u", sessionID: "ses_background_timeout", role: "user" },
+        parts: [],
+      }]));
+    }
+    fetchSpy.mockResolvedValueOnce(mockResponse(200, true));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await brokerExecute({
+      providerID: "opencode",
+      modelID: "opencode/zen-free",
+      system: "You are helpful",
+      user: "say hello",
+      timeoutMs: 1,
+      timeoutPolicy: "background",
+    });
+
+    expect(result).toEqual({ ok: false, content: "", error: "timeout" });
+    const deleteCall = fetchSpy.mock.calls[fetchSpy.mock.calls.length - 1]!;
+    expect(deleteCall[0]).toContain("/session/ses_background_timeout");
+    expect(deleteCall[1]).toHaveProperty("method", "DELETE");
   });
 });
 

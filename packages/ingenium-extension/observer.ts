@@ -1,5 +1,5 @@
 import { tool } from "@opencode-ai/plugin"
-import { importObservationsFromFile, triggerSynthesis, logPipelineEvent } from "./observer-core.js"
+import { importObservationsFromFile, triggerSynthesis, logPipelineEvent, type ObserverRequestFailure } from "./observer-core.js"
 
 /**
  * How many session.idle events to skip between synthesis checks.
@@ -16,8 +16,8 @@ function getInterval(): number {
 let turnCount = 0
 let lastCheckTime = 0
 
-function reportObserverError(operation: string): void {
-  process.stderr.write(`${JSON.stringify({ event: "observer_operation_failed", operation, reason: "request_failed" })}\n`);
+function reportObserverError(operation: string, reason: ObserverRequestFailure = "request_failed"): void {
+  process.stderr.write(`${JSON.stringify({ event: "observer_operation_failed", operation, reason })}\n`);
 }
 
 /**
@@ -69,7 +69,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
 
         // Process any observations that accumulated while the session was closed
         const synthResult = await triggerSynthesis(worktree, sessionId)
-        if (!synthResult.triggered) reportObserverError("trigger_synthesis")
+        if (!synthResult.triggered) reportObserverError("trigger_synthesis", synthResult.failure)
         if (synthResult.triggered) {
           await ctx.client.app.log({
             body: {
@@ -97,7 +97,7 @@ export const ObserverPlugin = async (ctx: { worktree: string; client: any }) => 
         lastCheckTime = now
 
         const synthResult = await triggerSynthesis(worktree, sessionId)
-        if (!synthResult.triggered) reportObserverError("trigger_synthesis")
+        if (!synthResult.triggered) reportObserverError("trigger_synthesis", synthResult.failure)
         if (synthResult.triggered) {
           await ctx.client.app.log({
             body: {

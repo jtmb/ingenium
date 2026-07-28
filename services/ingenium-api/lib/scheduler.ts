@@ -10,6 +10,7 @@ import {
 } from "ingenium-email";
 import { loadApiToken } from "./middleware/api-token.js";
 import { createBackgroundSynthesisBrokerExecutor } from "./opencode-client.js";
+import { createOpenCodeMessagesClient } from "./opencode-messages-client.js";
 
 /**
  * Default synthesis interval: 15 minutes (900,000ms).
@@ -87,6 +88,7 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
   if (!isSchedulerActive(generation)) return;
   const allProjects = projects.listProjects();
   const activeProjects = allProjects.filter(p => !p.archived_at);
+  const messagesClient = createOpenCodeMessagesClient();
 
   for (const p of activeProjects) {
     if (!isSchedulerActive(generation)) break;
@@ -118,6 +120,7 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
       try {
         const extractResult = await extraction.runExtraction(p.id, p.name, {
           llmExecutor: createBackgroundSynthesisBrokerExecutor(p.id),
+          messagesClient,
         });
         logger.info("scheduler", `Extraction for "${p.name}": scanned=${extractResult.scanned}, created=${extractResult.created}`);
       } catch (err: any) {

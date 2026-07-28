@@ -82,12 +82,16 @@ export const LLM_BROKER_AGENT = "ingenium-llm-broker";
 /**
  * Interactive broker consumers normally receive at most 30 seconds. Docs AI
  * is explicitly allowed a longer bounded window for document transformations.
- * No policy may exceed this broker-wide maximum.
+ * Background self-learning work has its own finite upper bound so it cannot
+ * inherit an interactive timeout or run without a deadline.
  */
 export const DEFAULT_BROKER_TIMEOUT_MS = 30_000;
 export const DOCS_AI_BROKER_TIMEOUT_MS = 60_000;
-/** Background learning historically uses a 60-second direct-LLM timeout. */
+/** Background callers preserve the core pipeline's established 60-second request. */
 export const BACKGROUND_BROKER_TIMEOUT_MS = 60_000;
+/** A background caller may explicitly request more time, but never indefinitely. */
+export const MAX_BACKGROUND_BROKER_TIMEOUT_MS = 180_000;
+/** Maximum for interactive broker policies (default and Docs AI). */
 export const MAX_BROKER_TIMEOUT_MS = DOCS_AI_BROKER_TIMEOUT_MS;
 
 export type BrokerTimeoutPolicy = "default" | "docs-ai" | "background";
@@ -110,7 +114,9 @@ export function resolveBrokerTimeout(
       : BACKGROUND_BROKER_TIMEOUT_MS;
   const policyMaximumTimeoutMs = policy === "default"
     ? DEFAULT_BROKER_TIMEOUT_MS
-    : MAX_BROKER_TIMEOUT_MS;
+    : policy === "docs-ai"
+      ? DOCS_AI_BROKER_TIMEOUT_MS
+      : MAX_BACKGROUND_BROKER_TIMEOUT_MS;
   const requestedTimeoutMs = typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
     ? timeoutMs
     : policyDefaultTimeoutMs;
@@ -121,7 +127,6 @@ export function resolveBrokerTimeout(
     effectiveTimeoutMs: Math.min(
       Math.max(requestedTimeoutMs, 0),
       policyMaximumTimeoutMs,
-      MAX_BROKER_TIMEOUT_MS,
     ),
   };
 }

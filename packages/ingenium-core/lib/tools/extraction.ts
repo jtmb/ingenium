@@ -17,13 +17,42 @@ import { safeLlmFetch } from "./endpoint-policy.js";
 
 // ── Types ──────────────────────────────────────────────────
 
-interface CandidateMessage {
+/**
+ * Sanitized message data supplied by the API-owned OpenCode messages client.
+ * Core never reads the API bearer credential or constructs its HTTP request.
+ */
+export interface OpenCodeMessage {
   text: string;
   time_created: number;
-  hash: string;
   messageId?: string;
   sessionId?: string;
 }
+
+interface CandidateMessage extends OpenCodeMessage {
+  hash: string;
+}
+
+/**
+ * Narrow authenticated transport boundary owned by the API service. Returning a
+ * stable failure category lets extraction retry safely without carrying an
+ * upstream body, URL, or credential into core logging.
+ */
+export type OpenCodeMessagesFailure =
+  | "authentication"
+  | "not_found"
+  | "locked"
+  | "timeout"
+  | "unavailable"
+  | "invalid_response";
+
+export type OpenCodeMessagesClient = (request: {
+  since: number;
+  limit: number;
+  projectName: string;
+}) => Promise<{
+  messages: OpenCodeMessage[];
+  failure?: OpenCodeMessagesFailure;
+}>;
 
 interface ExtractionRule {
   content: string;
@@ -136,31 +165,27 @@ function setWatermark(projectId: string, ts: number): void {
 // ── Fetch messages from the OpenCode endpoint ────────────
 
 /**
- * Fetch messages from the OpenCode message history via the local API.
- * Only fetches messages *after* the watermark (incremental).
- * Returns empty array on any HTTP error — the caller treats empty as "nothing to do".
+ * Fetch messages through the API-owned, authenticated messages client. Core
+ * receives only normalized messages and a safe failure category, keeping the
+ * bearer token out of this package and its logs.
  */
 async function fetchMessages(
   watermark: number,
   limit: number,
   projectName: string,
+  client: OpenCodeMessagesClient | undefined,
 ): Promise<CandidateMessage[]> {
-  const port = process.env.INGENIUM_API_PORT || "4097";
-  const url = new URL(`http://localhost:${port}/api/v1/opencode/messages`);
-  url.searchParams.set("since", String(watermark));
-  url.searchParams.set("limit", String(limit));
-  url.searchParams.set("project", projectName);
-
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    logger.warn("extraction", `OpenCode messages endpoint returned ${res.status}`);
+  if (!client) {
+    logger.warn("extraction", "OpenCode messages client is unavailable");
     return [];
   }
 
-  const json = await res.json();
-  const messages = json?.data?.messages;
-  if (!Array.isArray(messages)) return [];
-  return messages as CandidateMessage[];
+  const result = await client({ since: watermark, limit, projectName });
+  if (result.failure) {
+    logger.warn("extraction", "OpenCode messages client request failed", { reason: result.failure });
+    return [];
+  }
+  return result.messages.map((message) => ({ ...message, hash: hashText(message.text.trim()) }));
 }
 
 // ── LLM extraction batch call ────────────────────────────
@@ -364,7 +389,7 @@ export function parseExtractionResponse(raw: string): ExtractionRule[] {
 export async function runExtraction(
   projectId: string,
   projectName: string,
-  opts?: { limit?: number; llmExecutor?: LLMTextExecutor },
+  opts?: { limit?: number; llmExecutor?: LLMTextExecutor; messagesClient?: OpenCodeMessagesClient },
 ): Promise<ExtractionResult> {
   const limit = opts?.limit ?? 500;
   let scanned = 0;
@@ -395,7 +420,7 @@ export async function runExtraction(
     const watermark = getWatermark(projectId);
 
     // 3. Fetch messages
-    const messages = await fetchMessages(watermark, limit, projectName);
+    const messages = await fetchMessages(watermark, limit, projectName, opts?.messagesClient);
     scanned = messages.length;
 
     if (scanned === 0) {

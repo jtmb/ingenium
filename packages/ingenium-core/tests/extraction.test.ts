@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createProject } from "../lib/tools/projects.js";
-import { parseExtractionResponse, callLLMForExtraction, runExtraction } from "../lib/tools/extraction.js";
+import {
+  parseExtractionResponse,
+  callLLMForExtraction,
+  runExtraction,
+  type OpenCodeMessagesClient,
+} from "../lib/tools/extraction.js";
 import { getObservations } from "../lib/tools/observations.js";
 import { setSetting } from "../lib/tools/settings.js";
 
@@ -18,7 +23,6 @@ let mockResponseStatus: number;
 let mockRequests: number;
 let mockMessages: Array<{ text: string; time_created: number; hash: string; messageId?: string; sessionId?: string }>;
 let requestedMessageProjects: string[];
-const originalApiPort = process.env.INGENIUM_API_PORT;
 
 function setMockResponse(payload: any, status = 200) {
   mockResponsePayload = payload;
@@ -36,6 +40,16 @@ function mockContent(content: string): any {
 function makeCandidate(text = "User prefers 2-space indentation"): { text: string; time_created: number; hash: string } {
   return { text, time_created: Date.now(), hash: "abc123" };
 }
+
+const mockMessagesClient: OpenCodeMessagesClient = async ({ since, limit, projectName }) => {
+  const url = new URL("/api/v1/opencode/messages", `http://localhost:${mockPort}`);
+  url.searchParams.set("since", String(since));
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("project", projectName);
+  const response = await fetch(url);
+  const payload = await response.json() as { data?: { messages?: unknown } };
+  return { messages: Array.isArray(payload.data?.messages) ? payload.data.messages as any[] : [] };
+};
 
 beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-test-extraction-"));
@@ -69,8 +83,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => mockServer.close(() => resolve()));
   rmSync(tempDir, { recursive: true, force: true });
-  if (originalApiPort === undefined) delete process.env.INGENIUM_API_PORT;
-  else process.env.INGENIUM_API_PORT = originalApiPort;
 });
 
 beforeEach(() => {
@@ -270,7 +282,6 @@ describe("external project extraction", () => {
     setSetting(globalProject.id, "synthesis_model", "test-model");
     setSetting(globalProject.id, "synthesis_endpoint", endpoint());
     setSetting(globalProject.id, "synthesis_allow_private_network", "true");
-    process.env.INGENIUM_API_PORT = String(mockPort);
     mockMessages = [{
       text: "I prefer external project review summaries to be concise and actionable.",
       time_created: startedAt + 1,
@@ -286,7 +297,10 @@ describe("external project extraction", () => {
       }],
     })));
 
-    const result = await runExtraction(externalProject.id, externalProject.name, { limit: 10 });
+    const result = await runExtraction(externalProject.id, externalProject.name, {
+      limit: 10,
+      messagesClient: mockMessagesClient,
+    });
     const externalObservations = getObservations(externalProject.id);
     const extracted = externalObservations.find(
       (observation) => observation.content === "User prefers concise, actionable review summaries",

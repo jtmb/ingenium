@@ -123,7 +123,8 @@ User interacts with OpenCode (:4098)
   │   → POST /api/v1/observations → stored in DB (status: pending)
   │
   ├─ Server-Side Extraction Engine (extraction.ts, runs in API scheduler)
-  │   → reads OpenCode DB at /var/opencode/opencode.db via GET /api/v1/opencode/messages
+  │   → reads OpenCode DB through the API-owned authenticated
+  │     GET /api/v1/opencode/messages client
   │   → watermark-gated read + full-text content-hash dedup prevents re-processing
   │     (hashes the entire message, not a 200-char slice)
   │   → cheap regex pre-filter selects candidate messages (NOT final extraction)
@@ -261,9 +262,9 @@ The system uses two LLM dispatch modes depending on the feature:
 | Mode | Mechanism | Timeout | Used By | Configuration Source |
 |------|-----------|---------|---------|---------------------|
 | **Direct** | `callSynthesisLLM()` / `safeLlmFetch()` — calls LLM endpoint directly via HTTP | 60s | Self-learning pipeline (Phase 0 extraction, Phase 1 consolidation, Phase 2 skill synthesis), Email suggestions/summaries | `resolveLLMConfig()` — global→project→env vars chain |
-| **Broker** | `executeSynthesisBroker()` — creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s default hard cap**; only the server-owned Docs AI policy permits its requested 60s, with a broker-wide 60s maximum | Docs AI, RAG Ask, Job Suggestions | Docs AI uses the server-owned validated global Chat selection or server-derived default; RAG Ask and Job Suggestions use the synthesis primary/backup chain with dedup |
+| **Broker** | `executeSynthesisBroker()` — creates ephemeral OpenCode session, routes through OpenCode's provider infrastructure | **30s interactive default cap**; Docs AI permits 60s; background extraction/synthesis preserves a 60s request budget and may explicitly request up to a finite 180s | Docs AI, RAG Ask, Job Suggestions, background self-learning fallback | Docs AI uses the server-owned validated global Chat selection or server-derived default; RAG Ask and Job Suggestions use the synthesis primary/backup chain with dedup; background work uses the API-owned background policy |
 
-The core pipeline uses direct calls (60s timeout) for batch processing. Interactive broker consumers retain a 30-second cap for responsiveness and OpenCode model routing, except Docs AI's server-owned 60-second policy for longer document transformations.
+The core pipeline uses direct calls (60s timeout) for batch processing when an endpoint is configured. Its OpenCode broker fallback uses the API-owned background policy: the existing 60-second per-request budget is retained, explicitly longer background requests are capped at 180 seconds, and each ephemeral session is deleted on success, failure, and timeout. Interactive broker consumers retain a 30-second cap for responsiveness and OpenCode model routing, except Docs AI's server-owned 60-second policy for longer document transformations.
 
 | Trigger | Mechanism |
 |---------|-----------|

@@ -12,19 +12,59 @@ import { ensureExtensionProject } from "./project-resolver.js";
 import { apiRequestHeaders } from "./api-auth.js";
 
 const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
+const OBSERVER_API_REQUEST_TIMEOUT_MS = 10_000;
+
+/** Stable, credential-free diagnostics emitted by observer lifecycle hooks. */
+export type ObserverRequestFailure = "authentication" | "not_found" | "locked" | "timeout" | "request_failed";
+
+class ObserverApiRequestError extends Error {
+  constructor(readonly failure: ObserverRequestFailure) {
+    super("Observer API request failed");
+    this.name = "ObserverApiRequestError";
+  }
+}
+
+/** Map HTTP responses without propagating a status, body, URL, or credential. */
+export function classifyObserverHttpFailure(status: number): ObserverRequestFailure {
+  if (status === 401 || status === 403) return "authentication";
+  if (status === 404) return "not_found";
+  if (status === 423) return "locked";
+  return "request_failed";
+}
+
+export function classifyObserverFailure(error: unknown): ObserverRequestFailure {
+  if (error instanceof ObserverApiRequestError) return error.failure;
+  if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+    return "timeout";
+  }
+  return "request_failed";
+}
 
 async function apiFetch(worktree: string, path: string, options?: RequestInit): Promise<any> {
   const url = `${API_BASE}${path}`;
   const headers = apiRequestHeaders(worktree, options?.headers);
   if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const res = await fetch(url, {
-    ...options,
-    headers,
-  });
-  if (!res.ok) {
-    throw new Error(`API request failed (HTTP ${res.status})`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OBSERVER_API_REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      throw new ObserverApiRequestError(classifyObserverHttpFailure(res.status));
+    }
+    return res.json();
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new ObserverApiRequestError("timeout");
+    }
+    if (error instanceof ObserverApiRequestError) throw error;
+    throw new ObserverApiRequestError(classifyObserverFailure(error));
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json();
 }
 
 /**
@@ -57,7 +97,7 @@ export async function logPipelineEvent(
   } catch (error) {
     // Non-fatal — observability should never block pipeline, but never drop it silently.
     // Do not include API response text here: it can contain upstream diagnostics or credentials.
-    process.stderr.write(`${JSON.stringify({ event: "pipeline_event_rejected", reason: "request_failed", eventType, eventSource })}\n`);
+    process.stderr.write(`${JSON.stringify({ event: "pipeline_event_rejected", reason: classifyObserverFailure(error), eventType, eventSource })}\n`);
   }
 }
 
@@ -145,7 +185,11 @@ export async function importObservationsFromFile(worktree: string): Promise<{ im
  * Trigger the synthesis pipeline via the API.
  * The API processes pending observations into personality traits and skill updates.
  */
-export async function triggerSynthesis(worktree: string, sessionId?: string): Promise<{ triggered: boolean; message: string }> {
+export async function triggerSynthesis(worktree: string, sessionId?: string): Promise<{
+  triggered: boolean;
+  message: string;
+  failure?: ObserverRequestFailure;
+}> {
   try {
     const project = await ensureExtensionProject(worktree, API_BASE);
     await logPipelineEvent(
@@ -163,7 +207,11 @@ export async function triggerSynthesis(worktree: string, sessionId?: string): Pr
       method: "POST",
     });
     return { triggered: true, message: JSON.stringify(result.data) };
-  } catch {
-    return { triggered: false, message: "Synthesis request failed" };
+  } catch (error) {
+    return {
+      triggered: false,
+      message: "Synthesis request failed",
+      failure: classifyObserverFailure(error),
+    };
   }
 }

@@ -141,4 +141,24 @@ describe("ObserverPlugin — session.created error reporting", () => {
     expect(output).toContain("trigger_synthesis");
     expect(output).not.toContain("secret-token");
   });
+
+  it.each([
+    ["authentication", "Bearer secret-token 401"],
+    ["not_found", "private API path 404"],
+    ["locked", "resource lease 423"],
+    ["timeout", "Bearer secret-token request timed out"],
+  ] as const)("reports the safe %s synthesis failure category without diagnostic text", async (failure, unsafeMessage) => {
+    mockLogPipelineEvent.mockResolvedValueOnce(undefined);
+    mockImportObservations.mockResolvedValueOnce({ imported: 0, skipped: 0 });
+    mockTriggerSynthesis.mockResolvedValueOnce({ triggered: false, message: unsafeMessage, failure });
+    const plugin = await ObserverPlugin({ worktree: "/tmp/test-safe-observer-failure", client: { app: { log: vi.fn() } } });
+
+    await expect(plugin.event({ event: { type: "session.created" } })).resolves.toBeUndefined();
+
+    const output = stderrChunks.join("");
+    expect(output).toContain(`"reason":"${failure}"`);
+    expect(output).not.toContain("secret-token");
+    expect(output).not.toContain("private API path");
+    expect(output).not.toContain("resource lease");
+  });
 });
