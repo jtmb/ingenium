@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { api, type OAuthClientSecretOperation, type OAuthClientSecretSetting } from "../../../../lib/api";
-import { useProject } from "../../../../lib/ProjectContext";
+import { resolveGlobalProjectName, useProject } from "../../../../lib/ProjectContext";
 import SettingRow from "../SettingRow";
 
 type SecretField = "gmail" | "outlook";
@@ -75,25 +75,17 @@ export default function MailPanel() {
   }, [toast]);
 
   // Resolve the server's canonical global project before any mail setting can
-  // be read or written. A test-only fallback keeps this component renderable
-  // when a focused mock omits the projects client; production always has it.
+  // be read or written. Mail settings belong to the active global namespace,
+  // not to whichever external worktree is selected in the dashboard.
   useEffect(() => {
     let cancelled = false;
     setGlobalProjectLoading(true);
-    const projectsClient = api.projects?.list;
-    if (typeof projectsClient !== "function") {
-      // This branch is only for isolated component tests. Never use this
-      // fallback when the real API client is present.
-      setGlobalProject(project === "global-default" ? project : null);
-      setGlobalProjectLoading(false);
-      return () => { cancelled = true; };
-    }
 
-    projectsClient()
+    api.projects.list()
       .then((response) => {
         if (cancelled) return;
-        const global = response.data?.find((candidate) => candidate.is_global && !candidate.archived_at);
-        setGlobalProject(global?.name ?? null);
+        const resolved = resolveGlobalProjectName(response.data);
+        setGlobalProject(resolved);
       })
       .catch(() => {
         if (!cancelled) setGlobalProject(null);

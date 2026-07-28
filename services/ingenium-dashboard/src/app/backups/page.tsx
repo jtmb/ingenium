@@ -2,7 +2,6 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useCallback } from "react";
-import { useProject } from "../../lib/ProjectContext";
 import { api, Backup, BackupSchedule } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
@@ -109,7 +108,7 @@ function StatusBadge({ status }: { status: Backup["status"] }) {
 }
 
 /** Schedule section card — shows hourly/daily toggle and next-run countdown. */
-function ScheduleCard({ project }: { project: string }) {
+function ScheduleCard() {
   const [schedule, setSchedule] = useState<BackupSchedule | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -118,14 +117,14 @@ function ScheduleCard({ project }: { project: string }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.backups.schedule.get(project);
+      const res = await api.backups.schedule.get();
       setSchedule(res.data);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load schedule");
     } finally {
       setLoading(false);
     }
-  }, [project]);
+  }, []);
 
   useEffect(() => {
     fetchSchedule();
@@ -137,13 +136,13 @@ function ScheduleCard({ project }: { project: string }) {
         const payload = type === "hourly"
           ? { hourly: { enabled } }
           : { daily: { enabled } };
-        const res = await api.backups.schedule.set(payload, project);
+        const res = await api.backups.schedule.set(payload);
         setSchedule(res.data);
       } catch (e: any) {
         setError(e?.message ?? "Failed to update schedule");
       }
     },
-    [project],
+    [],
   );
 
   return (
@@ -234,8 +233,6 @@ function ScheduleCard({ project }: { project: string }) {
  * with toggle switches and next-run countdown.
  */
 export default function BackupsPage() {
-  const project = useProject();
-
   const [backups, setBackups] = useState<Backup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -246,14 +243,14 @@ export default function BackupsPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.backups.list(project);
+      const res = await api.backups.list();
       setBackups(res.data ?? []);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load backups");
     } finally {
       setLoading(false);
     }
-  }, [project]);
+  }, []);
 
   useEffect(() => {
     fetchBackups();
@@ -263,7 +260,7 @@ export default function BackupsPage() {
     setCreating(true);
     setCreateError(null);
     try {
-      await api.backups.create(project);
+      await api.backups.create();
       await fetchBackups();
     } catch (e: any) {
       setCreateError(e?.message ?? "Failed to create backup");
@@ -275,7 +272,7 @@ export default function BackupsPage() {
   const handleDelete = async (backup: Backup) => {
     if (!confirm(`Delete backup "${backup.filename}"? This cannot be undone.`)) return;
     try {
-      await api.backups.delete(backup.id, project);
+      await api.backups.delete(backup.id);
       setBackups((prev) => prev.filter((b) => b.id !== backup.id));
     } catch (e: any) {
       setError(e?.message ?? "Failed to delete backup");
@@ -283,7 +280,7 @@ export default function BackupsPage() {
   };
 
   const handleDownload = (backup: Backup) => {
-    const url = api.backups.download(backup.id, project);
+    const url = api.backups.download(backup.id);
     // Open the download URL in a new tab (or trigger a download via anchor)
     const a = document.createElement("a");
     a.href = url;
@@ -435,7 +432,7 @@ export default function BackupsPage() {
       </div>
 
       {/* Schedule section */}
-      <ScheduleCard project={project} />
+      <ScheduleCard />
     </div>
   );
 }

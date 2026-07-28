@@ -3,16 +3,22 @@ import { useState, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useProject, persistProject } from "@/lib/ProjectContext";
 import { api } from "@/lib/api";
+import { buildProjectNavigationHref } from "@/lib/project-navigation";
 
 /**
  * Project switcher dropdown in the top navigation bar.
  *
- * Disabled on `/mail`, `/opencode`, and `/chat` pages because those views operate on the
+ * Disabled on `/backups`, `/mail`, `/opencode`, and `/chat` pages because those views operate on the
  * global project context and switching projects mid-session would break the UX.
  */
+export function isProjectSwitchingDisabled(pathname: string | null): boolean {
+  const globalOnlyRoutes = ["/backups", "/mail", "/opencode", "/chat"];
+  return pathname ? globalOnlyRoutes.some((route) => pathname.startsWith(route)) : false;
+}
+
 export default function ProjectDropdown() {
   const pathname = usePathname();
-  const disabled = pathname?.startsWith("/mail") || pathname?.startsWith("/opencode") || pathname?.startsWith("/chat");
+  const disabled = isProjectSwitchingDisabled(pathname);
   const activeProject = useProject();
   const [open, setOpen] = useState(false);
   const [projects, setProjects] = useState<any[]>([]);
@@ -36,8 +42,14 @@ export default function ProjectDropdown() {
   function selectProject(name: string) {
     persistProject(name);
     setOpen(false);
-    // Full page reload to re-initialise all data-fetching hooks with the new project
-    window.location.href = window.location.pathname;
+    // Full page reload re-initialises data hooks while retaining route state and
+    // making the selected namespace explicit in the destination URL.
+    window.location.assign(buildProjectNavigationHref(
+      window.location.pathname,
+      name,
+      window.location.search,
+      window.location.hash,
+    ));
   }
 
   return (
@@ -70,7 +82,7 @@ export default function ProjectDropdown() {
               {p.name === activeProject && <span>✓</span>}
             </button>
           ))}
-          <a href="/projects" className="block px-3 py-2 text-xs text-[var(--color-text-link)] hover:underline border-t border-[var(--color-border)]">Manage projects →</a>
+          <a href={buildProjectNavigationHref("/projects", activeProject)} className="block px-3 py-2 text-xs text-[var(--color-text-link)] hover:underline border-t border-[var(--color-border)]">Manage projects →</a>
         </div>
       )}
     </div>

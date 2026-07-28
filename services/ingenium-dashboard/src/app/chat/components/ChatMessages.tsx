@@ -9,6 +9,7 @@ import type { ToolState } from "./ToolCallCard";
 import type { OpenCodePart, ToolPart, FilePart } from "../../../lib/opencode";
 import type { PermissionRequest } from "../../../lib/use-opencode-chat";
 import type { QuestionItem as ChatQuestionItem } from "./QuestionPrompt";
+import type { ActivitySelection } from "./chat-activity";
 
 export interface ChatMessage {
   id: string;
@@ -40,6 +41,10 @@ interface ChatMessagesProps {
   questions?: ChatQuestionItem[];
   /** Send a reply to the agent's question as a regular prompt. */
   onSendReply?: (text: string) => void;
+  /** Open the selected Web Search activity in the shared drawer. */
+  onActivityOpen?: (messageId: string, partId: string) => void;
+  /** Current drawer selection, used to expose expanded state on the trigger. */
+  activitySelection?: ActivitySelection | null;
 }
 
 /** Map OpenCode ToolPart status to ToolCallCard state. */
@@ -362,6 +367,8 @@ export default function ChatMessages({
   onDismissError,
   questions: activeQuestions,
   onSendReply,
+  onActivityOpen,
+  activitySelection,
 }: ChatMessagesProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
@@ -627,6 +634,15 @@ export default function ChatMessages({
                         }
                         output={tp.state?.output}
                         error={tp.state?.error}
+                        onWebSearchOpen={
+                          onActivityOpen
+                            ? () => onActivityOpen(msg.id, tp.id)
+                            : undefined
+                        }
+                        isActivityOpen={
+                          activitySelection?.messageId === msg.id &&
+                          activitySelection.partId === tp.id
+                        }
                       />
                       {/* Revert button on failed tool parts */}
                       {onRevert && tp.state?.status === "error" && (

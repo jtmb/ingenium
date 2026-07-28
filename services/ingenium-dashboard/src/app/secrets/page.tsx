@@ -61,9 +61,9 @@ export default function SecretsPage() {
             setShowUnseal(true);
           }
         }
-      } catch (e: any) {
+      } catch {
         if (cancelled) return;
-        setError(e.message ?? "Failed to check vault status");
+        setError("Unable to check vault status. Try again.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -85,9 +85,9 @@ export default function SecretsPage() {
         if (cancelled) return;
         setFolders(foldersRes.data);
         setItems(itemsRes.data);
-      } catch (e: any) {
+      } catch {
         if (cancelled) return;
-        setError(e.message ?? "Failed to load vault data");
+        setError("Unable to load vault data. Try again after unlocking the vault.");
       }
     };
     load();
@@ -149,8 +149,8 @@ export default function SecretsPage() {
       setFolders([]);
       setSelectedFolder(null);
       setSelectedItem(null);
-    } catch (e: any) {
-      setError(e.message ?? "Failed to seal vault");
+    } catch {
+      setError("Unable to lock the vault. Try again.");
     }
   }, [project]);
 
@@ -199,7 +199,7 @@ export default function SecretsPage() {
               </svg>
             </div>
             <p className="text-[var(--color-text-secondary)] mb-4">
-              Create a passphrase to secure your vault.
+              No vault exists yet. Create a passphrase of at least 12 characters to secure it.
             </p>
             <button
               onClick={() => setShowCreateVault(true)}

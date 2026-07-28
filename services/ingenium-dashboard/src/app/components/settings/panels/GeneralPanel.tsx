@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { api } from "../../../../lib/api";
+import { useGlobalProject } from "../../../../lib/ProjectContext";
 import { useTheme } from "../../ThemeProvider";
 import SettingRow from "../SettingRow";
 
@@ -12,10 +13,12 @@ import SettingRow from "../SettingRow";
  */
 export default function GeneralPanel() {
   const { theme, setTheme } = useTheme();
+  const { project: globalProject, loading: globalProjectLoading, error: globalProjectError } = useGlobalProject();
   const [retentionDays, setRetentionDays] = useState<number | null>(null);
   const [loadingRetention, setLoadingRetention] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState("");
+  const [retentionError, setRetentionError] = useState("");
 
   // Auto-dismiss toast notification after 3s.
   useEffect(() => {
@@ -25,23 +28,39 @@ export default function GeneralPanel() {
   }, [toast]);
 
   useEffect(() => {
-    api.settings.get("archive_retention_days", "global-default")
+    if (globalProjectLoading) return;
+    if (!globalProject) {
+      setLoadingRetention(false);
+      return;
+    }
+
+    setLoadingRetention(true);
+    api.settings.get("archive_retention_days", globalProject)
       .then((r) => {
         const val = parseInt(r.data.value, 10);
         if (!isNaN(val)) setRetentionDays(val);
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        setRetentionError(error instanceof Error ? error.message : "Unable to load archive retention");
+      })
       .finally(() => setLoadingRetention(false));
-  }, []);
+  }, [globalProject, globalProjectLoading]);
 
   const saveRetention = async (days: number) => {
+    if (!globalProject) {
+      setRetentionError("Archive retention is unavailable until the global project is resolved.");
+      return;
+    }
+    const previous = retentionDays;
+    setRetentionError("");
     setRetentionDays(days);
     setSaving(true);
     try {
-      await api.settings.set("archive_retention_days", String(days), "global-default");
+      await api.settings.set("archive_retention_days", String(days), globalProject);
       setToast("Saved ✓");
-    } catch (err: any) {
-      setToast(`Error: ${err.message}`);
+    } catch (error: unknown) {
+      setRetentionDays(previous);
+      setRetentionError(error instanceof Error ? error.message : "Archive retention could not be saved");
     }
     setSaving(false);
   };
@@ -61,8 +80,12 @@ export default function GeneralPanel() {
       </SettingRow>
 
       <SettingRow label="Archive retention" description="Days before archived projects are purged (1–365)">
-        {loadingRetention ? (
+        {globalProjectLoading || loadingRetention ? (
           <span className="text-xs text-[var(--color-text-muted)] animate-pulse">Loading...</span>
+        ) : !globalProject ? (
+          <span className="text-xs text-[var(--color-error-text)]">
+            {globalProjectError ? "Global project could not be resolved." : "No active global project is configured."}
+          </span>
         ) : (
           <div className="flex items-center gap-2">
             <input
@@ -71,9 +94,17 @@ export default function GeneralPanel() {
               max={365}
               value={retentionDays ?? ""}
               onChange={(e) => {
-                const v = parseInt(e.target.value, 10);
-                if (!isNaN(v) && v >= 1 && v <= 365) saveRetention(v);
+                const raw = e.target.value;
+                const v = Number(raw);
+                if (!raw || !Number.isInteger(v) || v < 1 || v > 365) {
+                  setRetentionError("Enter a whole number from 1 to 365.");
+                  return;
+                }
+                setRetentionError("");
+                void saveRetention(v);
               }}
+              aria-invalid={Boolean(retentionError)}
+              aria-describedby={retentionError ? "archive-retention-error" : undefined}
               className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] w-20 text-[var(--color-text-primary)]"
               placeholder="7"
             />
@@ -82,6 +113,12 @@ export default function GeneralPanel() {
           </div>
         )}
       </SettingRow>
+
+      {retentionError && (
+        <p id="archive-retention-error" role="alert" className="px-6 -mt-2 mb-3 text-xs text-[var(--color-error-text)]">
+          {retentionError}
+        </p>
+      )}
 
       {toast && (
         <div className="fixed bottom-4 right-4 bg-green-600 text-white px-4 py-2 rounded shadow-lg z-50 text-sm">

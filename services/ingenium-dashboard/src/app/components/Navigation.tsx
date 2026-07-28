@@ -116,6 +116,15 @@ function IconGitBranch() {
   );
 }
 
+function IconHistory() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M3 7.5a5 5 0 109.25-2.65M3 3.5v4h4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 5v3l2 1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function IconClock() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -267,6 +276,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Agents", href: "/agents", icon: <IconBot /> },
       { label: "Observations", href: "/observations", icon: <IconEye /> },
       { label: "Personality", href: "/personality", icon: <IconUser /> },
+      { label: "Context", href: "/context", icon: <IconHistory /> },
       { label: "Pipeline", href: "/pipeline", icon: <IconGitBranch /> },
     ],
   },

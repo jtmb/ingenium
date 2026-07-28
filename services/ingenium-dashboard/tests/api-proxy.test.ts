@@ -148,6 +148,19 @@ describe("dashboard authenticated API proxy", () => {
     expect(headers.get("x-forwarded-port")).toBeNull();
   });
 
+  it("strips the child-MCP server-only handoff assertion from dashboard traffic", () => {
+    const secretCanary = "child-mcp-secret-canary";
+    const headers = buildDashboardApiProxyHeaders(
+      new Headers({
+        "x-ingenium-child-mcp-runtime": secretCanary,
+      }),
+      "server-token",
+    );
+
+    expect(headers.get("x-ingenium-child-mcp-runtime")).toBeNull();
+    expect(JSON.stringify(Array.from(headers.entries()))).not.toContain(secretCanary);
+  });
+
   it.each(["development", "test", "production"])(
     "requires a protected token file in %s mode",
     (nodeEnv) => {
@@ -466,5 +479,6 @@ describe("dashboard authenticated API proxy", () => {
     expect(config.matcher).toEqual(["/api/v1", "/api/v1/:path*"]);
     expect(config.matcher).not.toContain("/auth/callback");
     expect(config.matcher).not.toContain("/_ingenium/health");
+    expect(config.matcher).not.toContain("/_ingenium/child-mcp-runtime");
   });
 });

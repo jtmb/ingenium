@@ -7,7 +7,7 @@ import { EditorState } from "@codemirror/state";
 import { markdown } from "@codemirror/lang-markdown";
 import { oneDark } from "@codemirror/theme-one-dark";
 import EditorToolbar, { type EditorMode } from "./EditorToolbar";
-import AIActions from "./AIActions";
+import AIActions, { type AIApplyPayload, type AISelectionRange } from "./AIActions";
 import DictationButton from "./DictationButton";
 import type { DocPage, DocDraft } from "@/lib/docs-types";
 import { dashboardFetch, getApiBase } from "@/lib/api";
@@ -26,6 +26,66 @@ const API_BASE = getApiBase();
 const AUTOSAVE_INTERVAL = 5000;
 /** PREVIEW_DEBOUNCE: shorter than autosave — only drives the live preview panel, not persistence. */
 const PREVIEW_DEBOUNCE = 300;
+
+export interface AIApplyResult {
+  content: string;
+  applied: boolean;
+}
+
+const PAGE_WIDE_ACTIONS = new Set<AIApplyPayload["action"]>([
+  "outline",
+  "summarize",
+  "fix_grammar",
+  "tone_professional",
+  "tone_casual",
+  "tone_technical",
+]);
+
+/**
+ * Apply an AI operation against the editor's latest content.
+ *
+ * Page-wide results require an unchanged source snapshot. Continue appends to
+ * the latest content, while Rewrite is deliberately range- and text-checked:
+ * edits made while either request was pending must never be overwritten.
+ */
+export function applyAIResult(currentContent: string, application: AIApplyPayload): AIApplyResult {
+  if (PAGE_WIDE_ACTIONS.has(application.action) && application.sourceContent !== currentContent) {
+    return { content: currentContent, applied: false };
+  }
+
+  if (application.action === "continue") {
+    return { content: currentContent + application.result, applied: true };
+  }
+
+  if (application.action === "rewrite") {
+    const range = application.selectionRange;
+    const selectedText = application.selectedText;
+    const hasValidRange = Boolean(
+      range
+      && typeof selectedText === "string"
+      && selectedText.trim()
+      && Number.isInteger(range.start)
+      && Number.isInteger(range.end)
+      && range.start >= 0
+      && range.end > range.start
+      && range.end <= currentContent.length
+      && currentContent.slice(range.start, range.end) === selectedText,
+    );
+
+    if (!hasValidRange || !range) {
+      return { content: currentContent, applied: false };
+    }
+
+    return {
+      content: currentContent.slice(0, range.start) + application.result + currentContent.slice(range.end),
+      applied: true,
+    };
+  }
+
+  // Outline, summarize, grammar, and tone actions intentionally replace the
+  // whole content because their results describe or rewrite the full page.
+  return { content: application.result, applied: true };
+}
 
 async function fetchDraft(pageId: number): Promise<DocDraft | null> {
   try {
@@ -140,6 +200,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   const [showDraftPrompt, setShowDraftPrompt] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedText, setSelectedText] = useState<string | undefined>();
+  const [selectionRange, setSelectionRange] = useState<AISelectionRange | undefined>();
 
   /**
    * contentRef tracks latest content for the autosave interval callback,
@@ -248,12 +309,14 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         const newContent = update.state.doc.toString();
+        contentRef.current = newContent;
         setContent(newContent);
       }
       if (update.selectionSet) {
         const selection = update.state.selection.main;
         const selected = update.state.sliceDoc(selection.from, selection.to);
         setSelectedText(selected || undefined);
+        setSelectionRange(selected ? { start: selection.from, end: selection.to } : undefined);
       }
     });
     const view = new EditorView({
@@ -299,6 +362,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
         const start = ta.selectionStart;
         const end = ta.selectionEnd;
         const { newValue, cursorOffset } = buildMarkdownInsertion(content, start, end, syntax);
+        contentRef.current = newValue;
         setContent(newValue);
         // Restore cursor position after React re-render
         requestAnimationFrame(() => {
@@ -325,6 +389,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   // ── Content change handler (textarea) ──────────────────────────────────────
   const handleContentChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      contentRef.current = e.target.value;
       setContent(e.target.value);
     },
     [],
@@ -335,6 +400,9 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
       const textarea = event.currentTarget;
       const selected = textarea.value.slice(textarea.selectionStart, textarea.selectionEnd);
       setSelectedText(selected || undefined);
+      setSelectionRange(selected
+        ? { start: textarea.selectionStart, end: textarea.selectionEnd }
+        : undefined);
     },
     [],
   );
@@ -370,6 +438,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
   const handleRestoreDraft = useCallback(async () => {
     const draft = await fetchDraft(page.id);
     if (draft && draft.content) {
+      contentRef.current = draft.content;
       setContent(draft.content);
     }
     setShowDraftPrompt(false);
@@ -383,8 +452,17 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
 
   // ── AI apply handler ───────────────────────────────────────────────────────
   const handleAIApply = useCallback(
-    (aiResult: string) => {
-      setContent(aiResult);
+    (application: AIApplyPayload): boolean => {
+      const currentContent = codeMirrorViewRef.current?.state.doc.toString() ?? contentRef.current;
+      const applied = applyAIResult(currentContent, application);
+
+      if (!applied.applied) {
+        setSaveError("AI result was not applied because the page changed while AI was working. Your edits were kept. Review the preview and retry or discard it.");
+        return false;
+      }
+
+      contentRef.current = applied.content;
+      setContent(applied.content);
       if (textareaRef.current) {
         textareaRef.current.focus();
       }
@@ -392,10 +470,11 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
         const view = codeMirrorViewRef.current;
         const current = view.state.doc.toString();
         view.dispatch({
-          changes: { from: 0, to: current.length, insert: aiResult },
+          changes: { from: 0, to: current.length, insert: applied.content },
         });
         view.focus();
       }
+      return true;
     },
     [],
   );
@@ -407,7 +486,9 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
         setContent((prev) => {
           const trimmed = prev.trimEnd();
           const separator = trimmed ? " " : "";
-          return trimmed + separator + text;
+          const nextContent = trimmed + separator + text;
+          contentRef.current = nextContent;
+          return nextContent;
         });
       }
       // Interim text is not appended — shown only during dictation
@@ -481,6 +562,7 @@ const DocsEditor: React.FC<DocsEditorProps> = ({ page, mode, onSave, draftConten
           <DictationButton onText={handleDictation} />
           <AIActions
             selectedText={selectedText}
+            selectionRange={selectionRange}
             fullContent={content}
             pageTitle={page.title}
             onApply={handleAIApply}

@@ -148,7 +148,7 @@ describe("ChatShell MCP refresh and action errors", () => {
     render(<ChatShell />);
 
     await openDrawer();
-    expect((await screen.findByRole("alert")).textContent).toContain("Unable to refresh MCP server status. Try again.");
+    expect((await screen.findByRole("alert")).textContent).toContain("MCP status is unavailable. Verify OpenCode is running, then retry.");
     expect(screen.queryByText("private upstream diagnostic")).toBeNull();
   });
 
@@ -164,6 +164,15 @@ describe("ChatShell MCP refresh and action errors", () => {
 
     await waitFor(() => expect(mocks.connect).toHaveBeenCalledWith("alpha"));
     await waitFor(() => expect(screen.getByText("Connected")).toBeTruthy());
+  });
+
+  it("shows the actionable packaged-launcher diagnostic for a failed Ingenium connection", async () => {
+    mocks.mcpStatus.mockResolvedValue({ ingenium: { status: "failed" } });
+    render(<ChatShell />);
+
+    await openDrawer();
+    expect(await screen.findByText("Ingenium MCP could not connect. Build the extension launcher, then verify the protected API token and project identity.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
   });
 
   it("reports a connect failure and still refreshes the remote state", async () => {

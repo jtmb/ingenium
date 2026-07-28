@@ -38,6 +38,15 @@ const FORWARDED_ORIGIN_HEADERS = [
   "x-forwarded-port",
 ] as const;
 
+/**
+ * This header is accepted only by the non-`/api/v1` child-MCP runtime handoff.
+ * The dashboard must never relay a browser-supplied value if a future rewrite
+ * configuration is broadened accidentally.
+ */
+const SERVER_ONLY_HANDOFF_HEADERS = [
+  "x-ingenium-child-mcp-runtime",
+] as const;
+
 type ProxyEnvironment = Readonly<Record<string, string | undefined>>;
 
 /**
@@ -69,6 +78,7 @@ export function buildDashboardApiProxyHeaders(
   headers.delete("authorization");
   headers.delete("proxy-authorization");
   headers.delete(DASHBOARD_MARKER_HEADER);
+  for (const header of SERVER_ONLY_HANDOFF_HEADERS) headers.delete(header);
   // These values are trusted only at the Nginx → Next boundary while deriving
   // the external Origin below. Do not let a downstream service accidentally
   // treat them as a client identity or proxy-chain assertion.

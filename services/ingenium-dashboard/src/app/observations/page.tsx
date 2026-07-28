@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useProject } from "../../lib/ProjectContext";
 import { api, Observation } from "../../lib/api";
+import { buildProjectNavigationHref } from "../../lib/project-navigation";
 import Overlay from "../components/Overlay";
 import { badgeTones, BADGE_BASE } from "@/lib/badgeTones";
 
@@ -132,7 +133,7 @@ export default function ObservationsPage() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    router.push(`/observations/${o.id}`);
+                    router.push(buildProjectNavigationHref(`/observations/${o.id}`, project));
                   }}
                   className="text-xs text-[var(--color-text-link)] hover:text-blue-800 underline"
                   title="View full details"

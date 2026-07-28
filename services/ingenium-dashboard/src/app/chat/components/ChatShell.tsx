@@ -6,6 +6,8 @@ import ChatSessionSidebar from "./ChatSessionSidebar";
 import ChatHeader from "./ChatHeader";
 import ChatMessages from "./ChatMessages";
 import ChatInput, { type Attachment } from "./ChatInput";
+import ActivityDrawer from "./ActivityDrawer";
+import type { ActivitySelection } from "./chat-activity";
 import MCPDrawer from "./MCPDrawer";
 import {
   normalizeMcpServers,
@@ -60,6 +62,10 @@ export default function ChatShell() {
   const [mcpRefreshing, setMcpRefreshing] = useState(false);
   const [mcpActionPending, setMcpActionPending] = useState<string | null>(null);
 
+  /* ---- Activity drawer state ---- */
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [activitySelection, setActivitySelection] = useState<ActivitySelection | null>(null);
+
   /* ---- OpenCode hooks ---- */
   const {
     sessions,
@@ -77,6 +83,22 @@ export default function ChatShell() {
 
   const chat = useOpenCodeChat(activeId);
 
+  const openActivity = useCallback((messageId: string, partId: string) => {
+    setActivitySelection({ messageId, partId });
+    setActivityOpen(true);
+  }, []);
+
+  const closeActivity = useCallback(() => {
+    setActivityOpen(false);
+    setActivitySelection(null);
+  }, []);
+
+  // A selection belongs to one session and one turn. Do not let an old
+  // selected tool remain visible while a new session is loading.
+  useEffect(() => {
+    closeActivity();
+  }, [activeId, closeActivity]);
+
   /** Reset dismissed error when error changes to something new. */
   const displayError =
     chat.error && chat.error !== dismissedError ? chat.error : null;
@@ -92,6 +114,10 @@ export default function ChatShell() {
   const [chatConfig, setChatConfig] = useState<ChatConfigResponse | null>(null);
   const [chatConfigLoading, setChatConfigLoading] = useState(true);
   const [chatConfigError, setChatConfigError] = useState<string | null>(null);
+  // The catalog is not ready until the selection-recovery effect has resolved
+  // the current provider/model pair. This prevents a valid delayed catalog
+  // from briefly looking like an empty one between renders.
+  const [chatConfigReady, setChatConfigReady] = useState(false);
 
   /* ---- Rate-limit recovery ---- */
   const [rateLimitSeconds, setRateLimitSeconds] = useState<number | null>(null);
@@ -121,6 +147,7 @@ export default function ChatShell() {
   const fetchChatConfig = useCallback(async (isRetry = false) => {
     try {
       setChatConfigLoading(true);
+      setChatConfigReady(false);
       if (!isRetry) setChatConfigError(null);
       const result = await api.settings.chatConfig();
       setChatConfig(result.data);
@@ -190,9 +217,12 @@ export default function ChatShell() {
   // selection. Provider and model share one state update so a provider switch
   // cannot render or persist a transient cross-provider model pairing.
   useEffect(() => {
-    if (!chatConfig || chatConfigLoading) return;
+    if (!chatConfig || chatConfigLoading || chatConfigError || rateLimitSeconds !== null) return;
     const currentProvider = chatConfig.providers.find((candidate) => candidate.providerId === providerId);
-    if (currentProvider?.models.some((model) => model.id === modelId)) return;
+    if (currentProvider?.models.some((model) => model.id === modelId)) {
+      setChatConfigReady(true);
+      return;
+    }
     const preferred = chatConfig.defaultSelection
       ?? (chatConfig.configured && chatConfig.primary
         ? { providerId: chatConfig.primary.providerId, modelId: chatConfig.primary.modelId }
@@ -201,6 +231,7 @@ export default function ChatShell() {
       ?? chatConfig.providers.find((candidate) => candidate.models.length > 0);
     if (!provider) {
       if (providerId || modelId) setSelection({ providerId: "", modelId: "" });
+      setChatConfigReady(true);
       return;
     }
     const preferredModelId = provider.providerId === preferred?.providerId ? preferred.modelId : undefined;
@@ -212,7 +243,8 @@ export default function ChatShell() {
     if (providerId !== provider.providerId || modelId !== nextModelId) {
       setSelection({ providerId: provider.providerId, modelId: nextModelId });
     }
-  }, [chatConfig, chatConfigLoading, modelId, providerId]);
+    setChatConfigReady(true);
+  }, [chatConfig, chatConfigError, chatConfigLoading, modelId, providerId, rateLimitSeconds]);
 
   /* ---- Attachment state ---- */
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -260,7 +292,7 @@ export default function ChatShell() {
   /** Provider recovery remains available when only the selected model is stale. */
   // A missing default must not disable recovery when the catalog still offers
   // providers. Only an empty catalog disables the provider and agent selectors.
-  const selectorsDisabled = chatConfigLoading || !!chatConfigError
+  const selectorsDisabled = !chatConfigReady || chatConfigLoading || !!chatConfigError
     || rateLimitSeconds !== null || availableProviders.length === 0;
 
   const handleProviderChange = useCallback((nextProviderId: string) => {
@@ -314,7 +346,7 @@ export default function ChatShell() {
       setMcpServers(servers);
       return true;
     } catch {
-      setMcpError("Unable to refresh MCP server status. Try again.");
+      setMcpError("MCP status is unavailable. Verify OpenCode is running, then retry.");
       return false;
     } finally {
       setMcpRefreshing(false);
@@ -363,23 +395,26 @@ export default function ChatShell() {
   /* ---- Session handlers ---- */
 
   const handleNew = useCallback(async () => {
+    closeActivity();
     await create("New conversation");
     setMobileDrawerOpen(false);
-  }, [create]);
+  }, [closeActivity, create]);
 
   const handleSelect = useCallback(
     (id: string) => {
+      closeActivity();
       select(id);
       setMobileDrawerOpen(false);
     },
-    [select],
+    [closeActivity, select],
   );
 
   const handleDelete = useCallback(
     async (id: string) => {
+      if (id === activeId) closeActivity();
       await removeSession(id);
     },
-    [removeSession],
+    [activeId, closeActivity, removeSession],
   );
 
   const handleRename = useCallback(
@@ -507,8 +542,9 @@ export default function ChatShell() {
   }, [activeId, providerId, modelId]);
 
   const handleRetry = useCallback(async () => {
+    closeActivity();
     await chat.retry();
-  }, [chat]);
+  }, [chat, closeActivity]);
 
   /** Send a reply to the agent's structured question as a regular prompt. */
   const handleSendReply = useCallback(
@@ -609,7 +645,7 @@ export default function ChatShell() {
           permissionCount={chat.permissions.length}
         />
         {/* No-LLM-configured warning */}
-        {!hasSelectableModel && !chatConfigLoading && !chatConfigError && (
+        {chatConfigReady && !hasSelectableModel && !chatConfigLoading && !chatConfigError && (
           <div className="px-4 py-2 bg-blue-50 dark:bg-blue-950 border-b border-blue-200 dark:border-blue-800 text-sm text-blue-700 dark:text-blue-300 flex items-center gap-2 shrink-0">
             <svg
               width="14"
@@ -721,6 +757,8 @@ export default function ChatShell() {
               replyPermission={chat.replyPermission}
               questions={chat.questions}
               onSendReply={handleSendReply}
+              onActivityOpen={openActivity}
+              activitySelection={activitySelection}
             />
             {/* Disabled composer — waiting for auto-created session */}
             <div className="shrink-0 px-4 pb-4 pt-2 w-full">
@@ -849,6 +887,8 @@ export default function ChatShell() {
               replyPermission={chat.replyPermission}
               questions={chat.questions}
               onSendReply={handleSendReply}
+              onActivityOpen={openActivity}
+              activitySelection={activitySelection}
             />
             <ChatInput
               onSend={handleSend}
@@ -873,6 +913,12 @@ export default function ChatShell() {
         onRefresh={() => refreshMcpStatus()}
         onConnect={(name) => changeMcpConnection(name, "connect")}
         onDisconnect={(name) => changeMcpConnection(name, "disconnect")}
+      />
+      <ActivityDrawer
+        isOpen={activityOpen}
+        selection={activitySelection}
+        messages={chat.messages}
+        onClose={closeActivity}
       />
     </div>
   );

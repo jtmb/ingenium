@@ -41,6 +41,10 @@ vi.mock("../src/lib/opencode", () => ({
   },
 }));
 
+vi.mock("../src/lib/ProjectContext", () => ({
+  useGlobalProject: () => ({ project: "global-default", loading: false, error: null }),
+}));
+
 import PipelinePanel from "../src/app/components/settings/panels/PipelinePanel";
 
 const providerFixture = [

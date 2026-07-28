@@ -115,24 +115,32 @@ test.describe("Chat — end-to-end smoke", () => {
     await expect(toolTrace.locator('[data-testid="chat-tool-status"]')).toHaveCount(0);
     await expect(toolTrace).not.toHaveClass(/\b(?:border|rounded|bg-)/);
 
-    // Web Search remains the only tool disclosure and exposes concrete fixture
-    // results/visited sites, not URLs derived from its query.
+    // Web Search remains the only compact activity trigger. It opens the
+    // shared drawer and exposes concrete fixture results/visited sites, not
+    // URLs derived from its query.
     const webSearchTrace = page
       .locator('[data-testid="chat-tool-call"]')
       .filter({ hasText: "Web Search" });
     await expect(webSearchTrace).toBeVisible({ timeout: 10000 });
     await webSearchTrace.locator('[data-testid="chat-tool-trigger"]').click();
-    await expect(webSearchTrace.locator('[data-label="Visited"]')).toBeVisible();
-    await expect(webSearchTrace.locator('[data-label="Results"]')).toBeVisible();
+    const activityDrawer = page.getByRole("dialog", { name: "Activity" });
+    await expect(activityDrawer).toBeVisible();
+    await expect(activityDrawer.locator('[data-label="Visited"]')).toBeVisible();
+    await expect(activityDrawer.locator('[data-label="Results"]')).toBeVisible();
     await expect(
-      webSearchTrace.locator('[data-testid="chat-web-search-link"]'),
+      activityDrawer.locator('[data-testid="chat-activity-site-link"]'),
     ).toHaveCount(2);
     await expect(
-      webSearchTrace.getByRole("link", { name: "https://visited.example.test/stream-lifecycle" }),
+      activityDrawer.getByRole("link", { name: "https://visited.example.test/stream-lifecycle" }),
     ).toHaveAttribute("href", "https://visited.example.test/stream-lifecycle");
     await expect(
-      webSearchTrace.getByRole("link", { name: "https://results.example.test/chat-streaming" }),
+      activityDrawer.getByRole("link", { name: "https://results.example.test/chat-streaming" }),
     ).toHaveAttribute("target", "_blank");
+    await expect(webSearchTrace.locator('[data-testid="chat-tool-details"]')).toHaveCount(0);
+
+    await activityDrawer.getByRole("button", { name: "Close activity drawer" }).click();
+    await expect(activityDrawer).toBeHidden();
+    await expect(webSearchTrace.locator('[data-testid="chat-tool-trigger"]')).toBeFocused();
 
     // The fixture emits completed message metadata before session.idle.
     await expect(finalResponse).toBeVisible({ timeout: 10000 });
@@ -153,5 +161,39 @@ test.describe("Chat — end-to-end smoke", () => {
     await expect(page.locator('[data-testid="chat-send-btn"]')).toBeVisible({ timeout: 30000 });
     await expect(page.locator('[data-testid="chat-stop-btn"]')).toBeHidden({ timeout: 10000 });
     expect(await reasoning.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false);
+  });
+
+  test("activity drawer is live and fills the viewport on mobile", async ({ page }) => {
+    test.setTimeout(90000);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.goto("/chat", { waitUntil: "domcontentloaded" });
+    await expect(page.locator('[data-testid="chat-header-provider"]')).toBeEnabled({ timeout: 20000 });
+
+    const composer = page.locator('[data-testid="chat-composer"]');
+    await expect(composer).toBeEnabled({ timeout: 15000 });
+    await composer.fill("Test activity drawer");
+    await composer.press("Enter");
+
+    const webSearchTrigger = page.locator('[data-testid="chat-tool-trigger"]');
+    await expect(webSearchTrigger).toBeVisible({ timeout: 30000 });
+    await webSearchTrigger.click();
+
+    const desktopDrawer = page.getByRole("dialog", { name: "Activity" });
+    await expect(desktopDrawer).toBeVisible();
+    const desktopBox = await desktopDrawer.boundingBox();
+    expect(desktopBox?.width).toBe(400);
+    await expect(desktopDrawer.getByText("transparent chat streaming")).toBeVisible();
+    await expect(
+      desktopDrawer.getByText("I've completed the analysis. The chat pipeline is working correctly."),
+    ).toBeVisible({ timeout: 15000 });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileDrawer = page.getByRole("dialog", { name: "Activity" });
+    const mobileBox = await mobileDrawer.boundingBox();
+    expect(mobileBox?.width).toBe(390);
+    expect(mobileBox?.height).toBe(844);
+
+    await page.keyboard.press("Escape");
+    await expect(mobileDrawer).toBeHidden();
   });
 });

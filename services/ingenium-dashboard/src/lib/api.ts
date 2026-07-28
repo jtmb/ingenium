@@ -255,6 +255,66 @@ export type Agent = {
 /** An MCP server configuration. */
 export type Server = { id: string; name: string; command: string; running: boolean; enabled: boolean; source?: "opencode" | "ingenium" };
 
+/** A canonical child MCP server definition returned by /mcp-servers. */
+export type ChildMcpDiscoveryStatus = "pending" | "ready" | "failed";
+export type ChildMcpDiscoveryDiagnostic = "unavailable" | "unauthorized" | "invalid_response" | "timeout";
+export type ChildMcpScope = "project" | "global";
+
+export interface ChildMcpServer {
+  id: string;
+  project_id: string;
+  name: string;
+  executable: string;
+  args: string[];
+  scope: ChildMcpScope;
+  enabled: boolean;
+  discovery_status: ChildMcpDiscoveryStatus;
+  discovery_diagnostic: ChildMcpDiscoveryDiagnostic | null;
+  last_discovered_at: string | null;
+  created_at: string;
+  updated_at: string;
+  /** Environment values are intentionally represented only by vault references. */
+  environment: Record<string, { vault_item_id: string }>;
+}
+
+export interface ChildMcpServerInput {
+  name: string;
+  executable: string;
+  args?: string[];
+  environment?: Record<string, { vault_item_id: string }>;
+  scope?: ChildMcpScope;
+}
+
+export interface ChildMcpDiscoveredTool {
+  id: string;
+  server_id: string;
+  source_name: string;
+  canonical_name: string;
+  /** Child tools are grouped by server: `Child MCP / <server>`. */
+  category: `Child MCP / ${string}`;
+  description: string;
+  input_schema: string;
+  discovered_at: string;
+  project_id?: string;
+  scope?: ChildMcpScope;
+}
+
+export interface McpToolState {
+  id?: number;
+  project_id?: string;
+  tool_name: string;
+  enabled: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CategorizedMcpTool {
+  category: string;
+  enabled_count: number;
+  total_count: number;
+  tools: Array<{ tool_name: string; enabled: boolean }>;
+}
+
 /** An observation recorded by the agent during interactions. */
 export type Observation = {
   id: number;
@@ -268,6 +328,78 @@ export type Observation = {
   session_id?: string;
   created_at: string;
   updated_at: string;
+};
+
+/** Immutable, project-scoped context conversation metadata. */
+export type ContextConversation = {
+  id: string;
+  project_id: string;
+  title: string;
+  tags: string;
+  priority: number;
+  metadata: string;
+  created_at: string;
+};
+
+/** Conversation metadata enriched with immutable stream and checkpoint counts. */
+export type ContextConversationSummary = ContextConversation & {
+  revision: number;
+  message_count: number;
+  checkpoint_count: number;
+  latest_message_id: string | null;
+};
+
+export type ContextMessageRole = "system" | "user" | "assistant" | "tool";
+
+/** A message list/search projection. Content requires an explicit retrieve call. */
+export type ContextMessageSummary = {
+  id: string;
+  project_id: string;
+  conversation_id: string;
+  sequence: number;
+  role: ContextMessageRole;
+  content_hash: string;
+  tags: string;
+  priority: number;
+  metadata: string;
+  created_at: string;
+};
+
+/** An explicitly retrieved immutable context message, including its content. */
+export type ContextMessage = ContextMessageSummary & { content: string };
+
+export type ContextMessageSearchResult = ContextMessageSummary & { rank: number };
+
+export type ContextCheckpoint = {
+  id: string;
+  project_id: string;
+  conversation_id: string;
+  sequence: number;
+  through_message_id: string;
+  message_count: number;
+  state_hash: string;
+  metadata: string;
+  created_at: string;
+};
+
+export type ContextCheckpointRagSource = {
+  project_id: string;
+  checkpoint_id: string;
+  rag_source_id: string;
+  ordinal: number;
+  metadata: string;
+  created_at: string;
+};
+
+export type ContextKeysetPage<T> = { data: T[]; nextCursor: string | null };
+
+export type ContextMessageBatch = { messages: ContextMessage[]; missingIds: string[] };
+
+export type ContextCheckpointRestoreResult = {
+  conversation: ContextConversationSummary;
+  checkpoint: ContextCheckpoint;
+  revision: number;
+  idempotent: boolean;
 };
 
 /** A system log entry from the Ingenium server. */
@@ -469,11 +601,10 @@ export interface VaultItemDetail extends VaultItem {
 }
 
 export interface AuditEntry {
-  id: string;
-  item_id: string;
-  item_name: string;
-  action: string;
-  actor?: string;
+  id: number;
+  item_id: string | null;
+  event_type: string;
+  actor: string;
   created_at: string;
 }
 
@@ -849,6 +980,24 @@ export const api = {
     create: (name: string, command: string, project = DEFAULT_PROJECT) =>
       request<{ data: Server }>(`/servers?project=${project}`, { method: "POST", body: JSON.stringify({ name, command }) }),
   },
+  /** Canonical child MCP definitions and persisted discovery metadata. */
+  mcpServers: {
+    list: (project = DEFAULT_PROJECT) =>
+      request<{ data: ChildMcpServer[]; total: number }>(`/mcp-servers?project=${encodeURIComponent(project)}`),
+    listTools: (project = DEFAULT_PROJECT) =>
+      request<{ data: ChildMcpDiscoveredTool[]; total: number }>(`/mcp-servers/tools?project=${encodeURIComponent(project)}`),
+    listServerTools: (name: string, project = DEFAULT_PROJECT) =>
+      request<{ data: ChildMcpDiscoveredTool[]; total: number }>(
+        `/mcp-servers/${encodeURIComponent(name)}/tools?project=${encodeURIComponent(project)}`,
+      ),
+    create: (data: ChildMcpServerInput, project = DEFAULT_PROJECT) =>
+      request<{ data: ChildMcpServer }>(`/mcp-servers?project=${encodeURIComponent(project)}`, {
+        method: "POST",
+        body: JSON.stringify(data),
+      }),
+    remove: (name: string, project = DEFAULT_PROJECT) =>
+      request(`/mcp-servers/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, { method: "DELETE" }),
+  },
   observations: {
     list: (project = DEFAULT_PROJECT, status?: string, type?: string) => {
       const params = new URLSearchParams({ project });
@@ -893,6 +1042,70 @@ export const api = {
       if (options?.source) params.set("source", options.source);
       if (options?.limit) params.set("limit", String(options.limit));
       return request<{ data: any[]; total: number }>(`/pipeline/timeline?${params}`);
+    },
+  },
+  /** Immutable, project-scoped conversation memory. */
+  context: {
+    conversations: {
+      list: (project = DEFAULT_PROJECT, options?: { limit?: number; cursor?: string }) => {
+        const params = new URLSearchParams({ project });
+        if (options?.limit !== undefined) params.set("limit", String(options.limit));
+        if (options?.cursor) params.set("cursor", options.cursor);
+        return request<{ data: ContextKeysetPage<ContextConversationSummary> }>(
+          `/context/conversations?${params}`,
+        );
+      },
+      get: (conversationId: string, project = DEFAULT_PROJECT) =>
+        request<{ data: ContextConversationSummary }>(
+          `/context/conversations/${encodeURIComponent(conversationId)}?project=${encodeURIComponent(project)}`,
+        ),
+    },
+    messages: {
+      list: (conversationId: string, project = DEFAULT_PROJECT, options?: { limit?: number; cursor?: string }) => {
+        const params = new URLSearchParams({ project });
+        if (options?.limit !== undefined) params.set("limit", String(options.limit));
+        if (options?.cursor) params.set("cursor", options.cursor);
+        return request<{ data: ContextKeysetPage<ContextMessageSummary> }>(
+          `/context/conversations/${encodeURIComponent(conversationId)}/messages?${params}`,
+        );
+      },
+      search: (conversationId: string, query: string, project = DEFAULT_PROJECT, limit?: number) => {
+        const params = new URLSearchParams({ project, q: query });
+        if (limit !== undefined) params.set("limit", String(limit));
+        return request<{ data: ContextMessageSearchResult[] }>(
+          `/context/conversations/${encodeURIComponent(conversationId)}/messages/search?${params}`,
+        );
+      },
+      batch: (conversationId: string, messageIds: string[], project = DEFAULT_PROJECT) =>
+        request<{ data: ContextMessageBatch }>(
+          `/context/conversations/${encodeURIComponent(conversationId)}/messages/batch?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify({ messageIds }) },
+        ),
+    },
+    checkpoints: {
+      list: (conversationId: string, project = DEFAULT_PROJECT, options?: { limit?: number; cursor?: string }) => {
+        const params = new URLSearchParams({ project });
+        if (options?.limit !== undefined) params.set("limit", String(options.limit));
+        if (options?.cursor) params.set("cursor", options.cursor);
+        return request<{ data: ContextKeysetPage<ContextCheckpoint> }>(
+          `/context/conversations/${encodeURIComponent(conversationId)}/checkpoints?${params}`,
+        );
+      },
+      restore: (
+        conversationId: string,
+        checkpointId: string,
+        input: {
+          expectedRevision: number;
+          title?: string;
+          metadata?: Record<string, unknown>;
+          idempotencyKey?: string;
+        },
+        project = DEFAULT_PROJECT,
+      ) =>
+        request<{ data: ContextCheckpointRestoreResult }>(
+          `/context/conversations/${encodeURIComponent(conversationId)}/checkpoints/${encodeURIComponent(checkpointId)}/restore?project=${encodeURIComponent(project)}`,
+          { method: "POST", body: JSON.stringify(input) },
+        ),
     },
   },
   emails: {
@@ -1060,13 +1273,13 @@ export const api = {
   },
   mcpTools: {
     list: (project = DEFAULT_PROJECT, includeCategories = false) =>
-      request<{ data: any[]; total: number }>(`/mcp-tools?project=${encodeURIComponent(project)}&include_categories=${includeCategories}`),
+      request<{ data: CategorizedMcpTool[]; total: number }>(`/mcp-tools?project=${encodeURIComponent(project)}&include_categories=${includeCategories}`),
     toggle: (name: string, enabled: boolean, project = DEFAULT_PROJECT) =>
-      request<{ data: any }>(`/mcp-tools/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, {
+      request<{ data: McpToolState }>(`/mcp-tools/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`, {
         method: "PUT", body: JSON.stringify({ enabled }),
       }),
     toggleCategory: (category: string, enabled: boolean, project = DEFAULT_PROJECT) =>
-      request<{ data: any }>(`/mcp-tools/category/${encodeURIComponent(category)}?project=${encodeURIComponent(project)}`, {
+      request<{ data: { category: string; enabled: boolean; tools_changed: number } }>(`/mcp-tools/category/${encodeURIComponent(category)}?project=${encodeURIComponent(project)}`, {
         method: "PUT", body: JSON.stringify({ enabled }),
       }),
   },
@@ -1509,9 +1722,15 @@ export const api = {
     },
   },
   vault: {
-    /** GET /vault/status — returns { sealed: boolean } */
+    /** GET /vault/status — returns lock state plus an actionable nextAction. */
     status: (project = DEFAULT_PROJECT) =>
-      request<{ data: { sealed: boolean; initialized: boolean; stats?: { itemCount: number; folderCount: number }; created_at?: string } }>(
+      request<{ data: {
+        sealed: boolean;
+        initialized: boolean;
+        nextAction?: "initialize" | "unseal" | null;
+        stats?: { itemCount: number; folderCount: number };
+        created_at?: string;
+      } }>(
         `/vault/status?project=${encodeURIComponent(project)}`,
       ),
 

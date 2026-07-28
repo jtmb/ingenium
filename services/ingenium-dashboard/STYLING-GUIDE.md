@@ -861,15 +861,16 @@ The CreateVaultModal (`components/CreateVaultModal.tsx`) is a passphrase creatio
 | State | Visual Indicator | Derivation |
 |-------|-----------------|------------|
 | **Empty** | Both fields empty, placeholder text shown ("At least 12 characters") | `passphrase.length === 0 && confirmation.length === 0` |
-| **Too short** | Passphrase field shows red `(n/12)` counter below input. `aria-invalid` set on input. | `passphrase.length > 0 && passphrase.length < 12` |
+| **Too short** | Passphrase field shows red `(n/12)` counter below input. `aria-invalid` set on input. | Unicode passphrase length is below 12 |
 | **Mismatch** | Confirmation shows red "Passphrases do not match" text. `aria-invalid` set on confirmation input. | `passphrase.length > 0 && confirmation.length > 0 && passphrase !== confirmation` |
 | **Match** | Green checkmark SVG + "Passphrases match" text | `passphrase.length > 0 && confirmation.length > 0 && passphrase === confirmation && passphrase.length >= 12` |
-| **Length OK** | Hint text turns green | `passphrase.length >= 12` |
+| **Length OK** | Hint text turns green | At least 12 Unicode characters and not whitespace-only |
+| **Rate limited** | Error alert shows the server `Retry-After` countdown and submit action is disabled. No automatic retry occurs. | Initialization or unseal receives HTTP 429 |
 
 **Form gating logic**:
 ```typescript
-const passwordsMatch = passphrase === confirmation && passphrase.length >= 12;
-const canSubmit = acknowledged && passwordsMatch && !loading;
+const passwordsMatch = passphrase === confirmation && hasNonWhitespaceContent && passphraseLength >= 12;
+const canSubmit = acknowledged && passwordsMatch && !loading && !isCoolingDown;
 ```
 
 The submit button is disabled until all three conditions are met: acknowledgement checkbox checked, passwords match and valid length, and not currently saving.
@@ -895,7 +896,7 @@ Simpler than CreateVaultModal — single passphrase field, no confirmation, no c
 |---------|---------|
 | Dialog card | `bg-[var(--color-surface)] p-6 rounded-lg shadow-xl w-96` |
 | Passphrase input | Same styling as CreateVaultModal |
-| Actions | Cancel (ghost) + "Unseal Vault" (blue primary, `disabled:opacity-50` until non-empty) |
+| Actions | Cancel (ghost) + "Unseal Vault" (blue primary, `disabled:opacity-50` until non-empty or a `Retry-After` cooldown expires) |
 
 ### 3-Pane Unsealed Layout
 

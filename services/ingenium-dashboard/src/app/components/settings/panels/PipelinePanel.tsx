@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, type ManagedProviderConfig } from "../../../../lib/api";
+import { useGlobalProject } from "../../../../lib/ProjectContext";
 import {
   opencode,
   type OpenCodeIntegration,
@@ -61,6 +62,7 @@ function draftKey(provider: DraftProvider): string {
 }
 
 export default function PipelinePanel() {
+  const { project: globalProject, loading: globalProjectLoading, error: globalProjectError } = useGlobalProject();
   const [providers, setProviders] = useState<DraftProvider[]>([]);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
@@ -93,9 +95,16 @@ export default function PipelinePanel() {
   };
 
   useEffect(() => {
+    if (globalProjectLoading) return;
+    if (!globalProject) {
+      setStatus(globalProjectError?.message ?? "Provider settings are unavailable until the global project is resolved");
+      setLoading(false);
+      return;
+    }
+
     Promise.all([
-      api.settings.getProviderConfigs("global-default"),
-      api.settings.get("synthesis_interval_ms", "global-default"),
+      api.settings.getProviderConfigs(globalProject),
+      api.settings.get("synthesis_interval_ms", globalProject),
       opencode.providers.list("/workspace"),
       opencode.integrations.list("/workspace"),
     ])
@@ -114,7 +123,7 @@ export default function PipelinePanel() {
         setStatus(error instanceof Error ? error.message : "Unable to load provider configuration");
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [globalProject, globalProjectLoading, globalProjectError]);
 
   const updateProvider = (index: number, patch: Partial<ManagedProviderConfig>) => {
     setProviders((current) => current.map((provider, providerIndex) => (
@@ -158,6 +167,10 @@ export default function PipelinePanel() {
   };
 
   const save = async () => {
+    if (!globalProject) {
+      setStatus("Provider settings are unavailable until the global project is resolved");
+      return;
+    }
     setSaving(true);
     setStatus("");
     try {
@@ -168,11 +181,11 @@ export default function PipelinePanel() {
           return { ...rest, roles } as ManagedProviderConfig;
         },
       );
-      const response = await api.settings.saveProviderConfigs(providersToSave, "global-default", {
+      const response = await api.settings.saveProviderConfigs(providersToSave, globalProject, {
         primary: { providerId: primaryProviderId, modelId: primaryModelId || providers.find((p) => p.id === primaryProviderId)?.defaultModel || "" },
         secondary: { providerId: backupProviderId, modelId: backupModelId || providers.find((p) => p.id === backupProviderId)?.defaultModel || "" },
       });
-      const refreshed = await api.settings.getProviderConfigs("global-default");
+      const refreshed = await api.settings.getProviderConfigs(globalProject);
         setProviders(refreshed.data.providers);
         setPrimaryProviderId(refreshed.data.providers.find((provider) => provider.roles.includes("primary"))?.id ?? "");
         setBackupProviderId(refreshed.data.providers.find((provider) => provider.roles.includes("backup"))?.id ?? "");
@@ -187,9 +200,13 @@ export default function PipelinePanel() {
   };
 
   const saveInterval = async (minutes: number) => {
+    if (!globalProject) {
+      setStatus("Synthesis settings are unavailable until the global project is resolved");
+      return;
+    }
     setIntervalMin(minutes);
     try {
-      await api.settings.set("synthesis_interval_ms", String(minutes * 60000), "global-default");
+      await api.settings.set("synthesis_interval_ms", String(minutes * 60000), globalProject);
     } catch (error: unknown) {
       setStatus(error instanceof Error ? error.message : "Synthesis interval could not be saved");
     }
@@ -325,6 +342,20 @@ export default function PipelinePanel() {
   const selectedIntegration = integrations.find((integration) => integration.id === connectProviderId);
   const actionableMethods = selectedIntegration?.methods.filter((method) => method.type === "key" || method.type === "oauth") ?? [];
   const selectedNativeProvider = nativeProviders.find((provider) => provider.id === connectProviderId);
+
+  if (globalProjectLoading) {
+    return <div className="px-6 py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse">Resolving global provider project...</div>;
+  }
+
+  if (!globalProject) {
+    return (
+      <div className="m-6 rounded-lg border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-4" role="alert">
+        <p className="text-sm text-[var(--color-error-text)]">
+          {globalProjectError?.message ?? "Provider settings are unavailable until an active global project is configured."}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="px-6 py-5">

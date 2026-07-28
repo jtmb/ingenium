@@ -25,6 +25,7 @@ describe("Dashboard gateway and proxy configuration", () => {
     expect(getRewrites().fallback.some(({ source, destination }) =>
       /opencode-web|opencode-cli|4098|4099/.test(`${source} ${destination}`),
     )).toBe(false);
+    expect(JSON.stringify(getRewrites())).not.toContain("/_ingenium/child-mcp-runtime");
   });
 
   it("keeps API connectivity same-origin and allows direct ports in development", () => {

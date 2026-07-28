@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api } from "../../../lib/api";
+import { useVaultAttemptCooldown } from "./useVaultAttemptCooldown";
 
 interface UnsealModalProps {
   isOpen: boolean;
@@ -25,11 +26,14 @@ export default function UnsealModal({
   const [passphrase, setPassphrase] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { remainingSeconds, isCoolingDown, startCooldownFor } = useVaultAttemptCooldown();
+  const unsealAttemptRef = useRef(false);
 
   if (!isOpen) return null;
 
   const handleUnseal = async () => {
-    if (!passphrase.trim()) return;
+    if (!passphrase.trim() || loading || isCoolingDown || unsealAttemptRef.current) return;
+    unsealAttemptRef.current = true;
     setLoading(true);
     setError(null);
     try {
@@ -39,9 +43,14 @@ export default function UnsealModal({
       } else {
         setError("Failed to unseal vault. Check your passphrase.");
       }
-    } catch (e: any) {
-      setError(e.message ?? "Failed to unseal vault");
+    } catch (error: unknown) {
+      if (startCooldownFor(error)) {
+        setError("Too many unlock attempts. Wait for the countdown before trying again.");
+      } else {
+        setError("Unable to unseal the vault. Check the passphrase and try again.");
+      }
     } finally {
+      unsealAttemptRef.current = false;
       setLoading(false);
     }
   };
@@ -69,8 +78,9 @@ export default function UnsealModal({
         </div>
 
         {error && (
-          <div className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] p-2 rounded text-xs text-[var(--color-error-text)] mb-3">
+          <div role="alert" className="bg-[var(--color-error-bg)] border border-[var(--color-error-border)] p-2 rounded text-xs text-[var(--color-error-text)] mb-3">
             {error}
+            {remainingSeconds !== null && <span> Try again in {remainingSeconds}s.</span>}
           </div>
         )}
 
@@ -95,10 +105,10 @@ export default function UnsealModal({
           </button>
           <button
             onClick={handleUnseal}
-            disabled={!passphrase.trim() || loading}
+            disabled={!passphrase.trim() || loading || isCoolingDown}
             className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
-            {loading ? "Unsealing..." : "Unseal Vault"}
+            {loading ? "Unsealing..." : isCoolingDown ? `Try again in ${remainingSeconds}s` : "Unseal Vault"}
           </button>
         </div>
       </div>

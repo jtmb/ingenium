@@ -9,6 +9,7 @@ import { SettingsLauncher, SettingsOverlay } from "./components/settings";
 import ThemeProvider from "./components/ThemeProvider";
 import ProjectDropdown from "./components/ProjectDropdown";
 import Navigation, { NavigationProvider, NavigationTrigger } from "./components/Navigation";
+import { ProjectProvider } from "../lib/ProjectContext";
 
 /** Global metadata for the Ingenium Dashboard app. */
 export const metadata: Metadata = {
@@ -24,9 +25,8 @@ export const metadata: Metadata = {
  * It reads from both cookies (SSR-first) and localStorage (user preference)
  * with system-color-scheme fallback.
  *
- * Suspense boundaries around ProjectDropdown, SettingsLauncher, and
- * SettingsOverlay prevent blocking the main content during these async
- * component renders.
+ * ProjectProvider resolves and validates the active namespace before mounting
+ * dashboard content, while its Suspense boundary handles URL project selection.
  */
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
@@ -44,29 +44,33 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       </head>
       <body className="h-dvh bg-[var(--color-surface-muted)] text-[var(--color-text-primary)] overflow-x-hidden flex flex-col">
         <ThemeProvider>
-        <NavigationProvider>
-          <nav className="shrink-0 bg-[var(--color-surface)] border-b border-[var(--color-border)] px-6 py-3 flex items-center gap-4">
-            <NavigationTrigger />
-            <a href="/" className="font-bold text-lg text-[var(--color-text-primary)]">Ingenium</a>
-            <div className="ml-auto flex items-center gap-3">
-              <Suspense fallback={null}><ProjectDropdown /></Suspense>
-              <Suspense fallback={null}><SettingsLauncher /></Suspense>
-            </div>
-          </nav>
+          <Suspense fallback={null}>
+            <ProjectProvider>
+              <NavigationProvider>
+                <nav className="shrink-0 bg-[var(--color-surface)] border-b border-[var(--color-border)] px-6 py-3 flex items-center gap-4">
+                  <NavigationTrigger />
+                  <a href="/" className="font-bold text-lg text-[var(--color-text-primary)]">Ingenium</a>
+                  <div className="ml-auto flex items-center gap-3">
+                    <ProjectDropdown />
+                    <SettingsLauncher />
+                  </div>
+                </nav>
 
-          <div className="flex flex-1 min-h-0">
-            <Navigation />
-            <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-auto">
-              <div className="flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)]">
-                <MainContainer>
-                  <Suspense>{children}</Suspense>
-                </MainContainer>
-              </div>
-            </div>
-          </div>
+                <div className="flex flex-1 min-h-0">
+                  <Navigation />
+                  <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-auto">
+                    <div className="flex-1 min-h-0 grid grid-rows-[minmax(0,1fr)]">
+                      <MainContainer>
+                        <Suspense>{children}</Suspense>
+                      </MainContainer>
+                    </div>
+                  </div>
+                </div>
 
-          <Suspense fallback={null}><SettingsOverlay /></Suspense>
-        </NavigationProvider>
+                <SettingsOverlay />
+              </NavigationProvider>
+            </ProjectProvider>
+          </Suspense>
         </ThemeProvider>
       </body>
     </html>

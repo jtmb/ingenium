@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useProject } from "../../../lib/ProjectContext";
 import { api, Observation } from "../../../lib/api";
+import { buildProjectNavigationHref } from "../../../lib/project-navigation";
 
 const TYPE_COLORS: Record<string, string> = {
   correction: "bg-red-100 text-[var(--color-error-text)]",
@@ -66,7 +67,7 @@ export default function ObservationDetailPage() {
         <h1 className="text-4xl font-bold text-[var(--color-text-muted)]">404</h1>
         <p className="text-[var(--color-text-muted)] mt-2">Observation not found</p>
         <button
-          onClick={() => router.push("/observations")}
+          onClick={() => router.push(buildProjectNavigationHref("/observations", project))}
           className="mt-4 text-[var(--color-text-link)] hover:underline"
         >
           Back to observations
@@ -91,7 +92,7 @@ export default function ObservationDetailPage() {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Observation #{observation.id}</h1>
         <button
-          onClick={() => router.push("/observations")}
+          onClick={() => router.push(buildProjectNavigationHref("/observations", project))}
           className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
         >
           &larr; Back to list

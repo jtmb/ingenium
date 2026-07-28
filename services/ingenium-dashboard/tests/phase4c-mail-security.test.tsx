@@ -21,6 +21,8 @@ vi.mock("../src/lib/api", () => ({
 
 vi.mock("../src/lib/ProjectContext", () => ({
   useProject: () => selectedProject.value,
+  resolveGlobalProjectName: (projects: Array<{ name: string; is_global?: boolean; archived_at?: string }>) =>
+    projects.find((candidate) => Boolean(candidate.is_global) && !candidate.archived_at)?.name ?? null,
 }));
 
 import MailPanel from "../src/app/components/settings/panels/MailPanel";

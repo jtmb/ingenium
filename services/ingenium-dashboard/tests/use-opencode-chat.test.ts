@@ -739,6 +739,43 @@ describe("chatReducer", () => {
       expect(next.messages[0]!.role).toBe("assistant");
       expect(next.messages[0]!.isStreaming).toBe(true);
     });
+
+    it("keeps the provider's current tool state without inventing historical phases", () => {
+      const state = createInitialState({
+        messages: [
+          createMessage({
+            id: "assistant-1",
+            role: "assistant",
+            parts: [
+              {
+                id: "web-search-1",
+                sessionID: "sess-1",
+                messageID: "assistant-1",
+                type: "tool",
+                tool: "websearch",
+                state: { status: "pending", input: { query: "streaming" } },
+              },
+            ] as OpenCodePart[],
+          }),
+        ],
+      });
+
+      const next = reducer(state, {
+        type: "UPSERT_PART",
+        messageID: "assistant-1",
+        part: {
+          id: "web-search-1",
+          sessionID: "sess-1",
+          messageID: "assistant-1",
+          type: "tool",
+          tool: "websearch",
+          state: { status: "running", input: { query: "streaming" } },
+        } as OpenCodePart,
+      });
+
+      expect(next.messages[0]!.parts).toHaveLength(1);
+      expect((next.messages[0]!.parts[0] as OpenCodePart & { state?: { status: string } }).state?.status).toBe("running");
+    });
   });
 
   // ── CLEAR ────────────────────────────────────────────────────────
