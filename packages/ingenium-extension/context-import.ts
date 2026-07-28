@@ -233,9 +233,20 @@ async function importedMessageKeys(
   worktree: string,
   project: string,
   conversationId: string,
+  entries: ContextImportEntry[],
   abort: AbortSignal,
 ): Promise<Set<string>> {
   const keys = new Set<string>();
+  // Public Context message lists intentionally omit idempotency keys. Match the
+  // content-free summary projection that remains: role, content hash, and
+  // persisted metadata. This lets retries skip a previously written import
+  // entry before its expected revision can become stale.
+  const entryKeyBySummary = new Map(
+    entries.map((entry) => [
+      `${entry.role}\u0000${fingerprint(entry.content)}\u0000${JSON.stringify(entry.metadata)}`,
+      entry.idempotencyKey,
+    ]),
+  );
   let cursor: string | undefined;
   for (let page = 0; page < CONTEXT_MESSAGE_LIST_MAX_PAGES; page += 1) {
     const response = dataFrom(await contextRequest(
@@ -253,6 +264,13 @@ async function importedMessageKeys(
     for (const summary of response.data) {
       const item = record(summary);
       if (typeof item?.idempotency_key === "string") keys.add(item.idempotency_key);
+      if ((item?.role === "user" || item?.role === "assistant")
+        && typeof item.content_hash === "string" && typeof item.metadata === "string") {
+        const matchingKey = entryKeyBySummary.get(
+          `${item.role}\u0000${item.content_hash}\u0000${item.metadata}`,
+        );
+        if (matchingKey) keys.add(matchingKey);
+      }
     }
     if (response.nextCursor === null) return keys;
     cursor = response.nextCursor;
@@ -330,7 +348,7 @@ export function createContextImportTool(client: Pick<PluginInput["client"], "ses
 
         const project = await ensureExtensionProject(context.worktree, API_BASE);
         const conversation = await createConversation(context.worktree, project, title, context.sessionID, context.abort);
-        const existingKeys = await importedMessageKeys(context.worktree, project, conversation.id, context.abort);
+        const existingKeys = await importedMessageKeys(context.worktree, project, conversation.id, entries, context.abort);
         let revision = conversation.revision;
         let appended = 0;
         let skipped = 0;

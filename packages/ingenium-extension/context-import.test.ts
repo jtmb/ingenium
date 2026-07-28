@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildContextImportEntries,
@@ -74,7 +75,13 @@ function installApiMock(): void {
     if (url.pathname === "/api/v1/context/conversations/a8c8093f-dc51-45f3-bfa5-4d80e65cfd81/messages" && init?.method === "GET") {
       return response({
         data: {
-          data: messages.map((message) => ({ idempotency_key: message.idempotencyKey })),
+          // Production Context lists exclude idempotency keys. The importer
+          // must reconcile entries using the content-free summary projection.
+          data: messages.map((message) => ({
+            role: message.body.role,
+            content_hash: createHash("sha256").update(String(message.body.content), "utf8").digest("hex"),
+            metadata: JSON.stringify(message.body.metadata),
+          })),
           nextCursor: null,
         },
       });
