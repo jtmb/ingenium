@@ -17,6 +17,7 @@ import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const runtime = getDefaultSuiteRuntime();
 const API_BASE = runtime.apiBase;
+const dashboardRoute = runtime.dashboardRoute;
 
 /** Keep iframe rendering deterministic without contacting OpenCode. */
 async function mockOpenCodeHealth(page: Page) {
@@ -40,7 +41,7 @@ test.describe("Same-origin dashboard API requests", () => {
   /*  Assertion: All API requests go to the /api/v1 base path                 */
   /* ------------------------------------------------------------------------ */
 
-  test("homepage fetches /api/v1/dashboard/summary with project param", async ({ page }) => {
+  test("homepage fetches /api/v1/dashboard/summary with the manifest project", async ({ page }) => {
     const apiCalls: string[] = [];
 
     await page.route("**/api/v1/**", (route: Route) => {
@@ -48,8 +49,12 @@ test.describe("Same-origin dashboard API requests", () => {
       route.fallback();
     });
 
-    const summaryResponse = page.waitForResponse((response) => response.url().includes("/dashboard/summary"));
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    const summaryResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/dashboard/summary"
+        && url.searchParams.get("project") === runtime.project;
+    });
+    await page.goto(dashboardRoute("/"), { waitUntil: "domcontentloaded" });
     await summaryResponse;
 
     expect(apiCalls.length).toBeGreaterThanOrEqual(1);
@@ -59,11 +64,11 @@ test.describe("Same-origin dashboard API requests", () => {
       expect(new URL(url).pathname).toMatch(/^\/api\/v1\//);
     }
 
-    // At least one call must be to the dashboard summary endpoint with a project parameter
+    // At least one call must be to the dashboard summary endpoint for this run.
     const summaryCalls = apiCalls.filter((u) => u.includes("/dashboard/summary"));
-    if (summaryCalls.length > 0) {
-      const params = new URL(summaryCalls[0]).searchParams;
-      expect(params.has("project")).toBe(true);
+    expect(summaryCalls).not.toHaveLength(0);
+    for (const url of summaryCalls) {
+      expect(new URL(url).searchParams.get("project")).toBe(runtime.project);
     }
   });
 
@@ -75,7 +80,7 @@ test.describe("Same-origin dashboard API requests", () => {
     const headerRequest = page.waitForRequest((request) =>
       request.url().includes("/api/v1/") && request.headers()["x-ingenium-ui"] === "dashboard",
     );
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/"), { waitUntil: "domcontentloaded" });
     const request = await headerRequest;
 
     expect(request.headers()["x-ingenium-ui"]).toBe("dashboard");
@@ -92,7 +97,7 @@ test.describe("Same-origin dashboard API requests", () => {
   test("resource list endpoints pass project query parameter", async ({ page }) => {
     const projectParamUrls: string[] = [];
 
-    await page.route("**/api/v1/(skills|observations|tasks|projects|plugins|agents|jobs)**", (route: Route) => {
+    await page.route("**/api/v1/(skills|observations|tasks|plugins|agents|jobs)**", (route: Route) => {
       const url = route.request().url();
       const parsed = new URL(url);
       // Only GET requests retrieving resource lists
@@ -102,21 +107,23 @@ test.describe("Same-origin dashboard API requests", () => {
       route.fallback();
     });
 
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/"), { waitUntil: "domcontentloaded" });
 
     // Navigate to skills and wait for the page's list request instead of
     // sleeping for an arbitrary amount of time.
-    const skillsResponse = page.waitForResponse((response) =>
-      response.url().includes("/api/v1/skills") && response.request().method() === "GET",
-    );
-    await page.goto("/skills", { waitUntil: "domcontentloaded" });
+    const skillsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/skills"
+        && url.searchParams.get("project") === runtime.project
+        && response.request().method() === "GET";
+    });
+    await page.goto(dashboardRoute("/skills"), { waitUntil: "domcontentloaded" });
     await skillsResponse;
 
-    // All captured GET resource URLs must include project parameter
+    // All captured project-scoped resource URLs must target this fixture run.
     for (const url of projectParamUrls) {
       const params = new URL(url).searchParams;
-      expect(params.has("project")).toBe(true);
-      expect(params.get("project")).not.toBe("");
+      expect(params.get("project")).toBe(runtime.project);
     }
   });
 });
@@ -133,7 +140,7 @@ test.describe("Direct local iframe URL assertions", () => {
   /* ------------------------------------------------------------------------ */
 
   test("/opencode page renders Web iframe on the trusted root origin", async ({ page }) => {
-    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
     const webIframe = page.locator('iframe[title="OpenCode Web"]');
     await expect(webIframe).toBeAttached({ timeout: 10000 });
@@ -148,7 +155,7 @@ test.describe("Direct local iframe URL assertions", () => {
   /* ------------------------------------------------------------------------ */
 
   test("Web iframe is trusted first-party content without a sandbox attribute", async ({ page }) => {
-    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
     const webIframe = page.locator('iframe[title="OpenCode Web"]');
     await expect(webIframe).toBeAttached({ timeout: 10000 });
@@ -168,7 +175,7 @@ test.describe("Direct local iframe URL assertions", () => {
   /* ------------------------------------------------------------------------ */
 
   test("exactly one Web iframe, at most one CLI iframe", async ({ page }) => {
-    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
     const webIframes = page.locator('iframe[title="OpenCode Web"]');
     await expect(webIframes).toHaveCount(1);
@@ -185,7 +192,7 @@ test.describe("Direct local iframe URL assertions", () => {
   test("does not request the removed OpenCode sub-path proxies", async ({ page }) => {
     const requestedUrls: string[] = [];
     page.on("request", (request) => requestedUrls.push(request.url()));
-    await page.goto("/opencode", { waitUntil: "domcontentloaded" });
+    await page.goto(dashboardRoute("/opencode"), { waitUntil: "domcontentloaded" });
 
     const webIframe = page.locator('iframe[title="OpenCode Web"]');
     await expect(webIframe).toBeAttached({ timeout: 10000 });

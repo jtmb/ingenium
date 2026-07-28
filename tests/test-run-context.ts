@@ -33,6 +33,33 @@ export const TEST_RUN_CREATION_FAILURE_FILENAME = "creation-failure.json";
 const DEVELOPMENT_PORTS = new Set([3000, 4097, 4098, 4099, 4999]);
 export const TEST_RUN_API_TOKEN_FILENAME = "api-token";
 
+/**
+ * Derive the only project identity that the default Playwright fixture may
+ * use. Keeping it a deterministic manifest property prevents the fixture
+ * from ever falling back to a shared project namespace.
+ */
+export function getTestRunProjectName(runId: string): string {
+  return `playwright-test-${runId.slice(0, 8)}`;
+}
+
+/**
+ * Build a same-origin dashboard URL that always carries this fixture run's
+ * manifest-owned project. An explicit route project is deliberately replaced
+ * so browser coverage cannot silently fall back to the dashboard global.
+ */
+export function getTestRunDashboardUrl(
+  context: Pick<TestRunContext, "ports" | "project">,
+  route = "/",
+): string {
+  const origin = `http://127.0.0.1:${context.ports.dashboard}`;
+  const url = new URL(route, origin);
+  if (url.origin !== origin) {
+    throw new Error("Test-run dashboard URL must remain on the fixture origin");
+  }
+  url.searchParams.set("project", context.project);
+  return url.toString();
+}
+
 export interface TestRunPorts {
   api: number;
   dashboard: number;
@@ -73,6 +100,8 @@ export interface TestRunManifest {
   manifestPath: string;
   telemetryPath?: string;
   project: string;
+  /** Set only after the isolated project is accepted by the fixture API. */
+  projectProvisionedAt?: string;
   ports: TestRunPorts;
   portReservations?: TestRunPortReservation[];
   processes: TestRunProcess[];
@@ -1238,7 +1267,7 @@ export function createTestRunContext(options: CreateTestRunContextOptions = {}):
       apiTokenFile: join(homeDir, TEST_RUN_API_TOKEN_FILENAME),
       manifestPath: join(runDir, "run-manifest.json"),
       telemetryPath,
-      project: `playwright-test-${runId.slice(0, 8)}`,
+      project: getTestRunProjectName(runId),
       ports,
       portReservations,
       processes: [],
@@ -1335,6 +1364,7 @@ function parseManifest(value: string): TestRunContext {
     "manifestPath",
     "telemetryPath",
     "project",
+    "projectProvisionedAt",
     "ports",
     "portReservations",
     "processes",
@@ -1376,6 +1406,12 @@ function parseManifest(value: string): TestRunContext {
   }
   if (!manifest.project.trim() || /[\u0000-\u001f\u007f]/.test(manifest.project)) {
     throw new Error("Invalid test-run project identity");
+  }
+  if (manifest.project !== getTestRunProjectName(manifest.runId)) {
+    throw new Error("Test-run project identity is not run-owned");
+  }
+  if (manifest.projectProvisionedAt !== undefined && !isTimestamp(manifest.projectProvisionedAt)) {
+    throw new Error("Invalid test-run project provisioning timestamp");
   }
   const ports = manifest.ports as Partial<TestRunPorts>;
   if (Object.keys(ports).some((key) => key !== "api" && key !== "dashboard" && key !== "fixture")) {
@@ -1443,7 +1479,7 @@ export function getTestRunContext(): TestRunContext {
 
 export function updateTestRunManifest(
   manifestPath: string,
-  update: Partial<Pick<TestRunManifest, "status" | "portReservations" | "processes">>,
+  update: Partial<Pick<TestRunManifest, "status" | "projectProvisionedAt" | "portReservations" | "processes">>,
 ): TestRunContext {
   const manifest = readTestRunManifest(manifestPath);
   const updated: TestRunContext = { ...manifest, ...update };

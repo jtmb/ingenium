@@ -4,16 +4,20 @@ import { resolve } from "node:path";
 
 const DEFAULT_SUITE_FILES = [
   "tests/mcp-tools.spec.ts",
+  "tests/ingenium-dashboard/mcp-tool-controls.spec.ts",
   "tests/ingenium-dashboard/homepage.spec.ts",
   "tests/ingenium-dashboard/dashboard.spec.ts",
+  "tests/ingenium-dashboard/docs-ai.spec.ts",
   "tests/ingenium-dashboard/chat-states.spec.ts",
   "tests/ingenium-dashboard/chat-e2e-smoke.spec.ts",
+  "tests/ingenium-dashboard/opencode-chat.spec.ts",
   "tests/ingenium-dashboard/jobs.spec.ts",
   "tests/ingenium-dashboard/pipeline.spec.ts",
   "tests/ingenium-dashboard/settings-providers.spec.ts",
   "tests/ingenium-dashboard/vault-first-run.spec.ts",
   "tests/ingenium-dashboard/lan-api-assertions.spec.ts",
   "tests/ingenium-dashboard/theme-flash.spec.ts",
+  "tests/ingenium-dashboard/usage.spec.ts",
 ] as const;
 
 const OPT_IN_FILES = [

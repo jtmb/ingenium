@@ -11,8 +11,10 @@ import {
   cleanupTestRun,
   createTestRunContext,
   getApprovedTempRoot,
+  getTestRunDashboardUrl,
   getTestRunArtifactRoot,
   getTestRunPortLockPath,
+  getTestRunProjectName,
   markTestRunProcessCleared,
   releaseTestRunPortReservations,
   readTestRunTelemetry,
@@ -67,10 +69,29 @@ describe("test-run context", () => {
     expect(manifest.runDir.split("/").pop()).toMatch(new RegExp(`^${TEST_RUN_TEMP_PREFIX}`));
     expect(manifest.manifestPath).toBe(join(manifest.runDir, "run-manifest.json"));
     expect(manifest.dbPath).toBe(join(manifest.homeDir, "data.db"));
+    expect(manifest.project).toBe(getTestRunProjectName(manifest.runId));
+    expect(manifest.project).toBe(`playwright-test-${manifest.runId.slice(0, 8)}`);
     expect(new Set(Object.values(manifest.ports)).size).toBe(3);
     expect(manifest.portReservations).toHaveLength(3);
     expect(existsSync(getTestRunPortLockPath(manifest.ports.api))).toBe(true);
     expect(JSON.parse(readFileSync(manifest.manifestPath, "utf8")).runId).toBe(manifest.runId);
+  });
+
+  it("builds browser URLs with the manifest-owned project and no fallback", () => {
+    const context = createTestRunContext({
+      tempRoot: testTempRoot(),
+      ports: { api: 45171, dashboard: 45172, fixture: 45173 },
+    });
+    telemetryRoots.push(dirname(context.telemetryPath!));
+
+    const route = new URL(
+      getTestRunDashboardUrl(context, "/pipeline?project=global-default&source=agent"),
+    );
+    expect(route.origin).toBe(`http://127.0.0.1:${context.ports.dashboard}`);
+    expect(route.pathname).toBe("/pipeline");
+    expect(route.searchParams.get("project")).toBe(context.project);
+    expect(route.searchParams.get("source")).toBe("agent");
+    expect(() => getTestRunDashboardUrl(context, "https://example.test/pipeline")).toThrow(/fixture origin/);
   });
 
   it("uses atomic run-owned reservations for concurrent runners", () => {
@@ -243,6 +264,19 @@ describe("test-run context", () => {
     expect(() => cleanupTestRun(context.manifestPath)).toThrow(/unexpected test-run data paths|unowned path/);
     expect(readFileSync(outside, "utf8")).toBe("keep me");
     expect(() => readTestRunManifest(context.manifestPath)).toThrow(/unexpected test-run data paths|unowned path/);
+  });
+
+  it("rejects a shared project identity instead of allowing a fixture fallback", () => {
+    const context = createTestRunContext({ tempRoot: testTempRoot(), ports: { api: 45125, dashboard: 45126, fixture: 45127 } });
+    telemetryRoots.push(dirname(context.telemetryPath!));
+    const original = readFileSync(context.manifestPath, "utf8");
+
+    try {
+      writeFileSync(context.manifestPath, JSON.stringify({ ...JSON.parse(original), project: "global-default" }));
+      expect(() => readTestRunManifest(context.manifestPath)).toThrow(/not run-owned/);
+    } finally {
+      writeFileSync(context.manifestPath, original);
+    }
   });
 
   it("rejects a relocated run directory even when its name has the safe prefix", () => {

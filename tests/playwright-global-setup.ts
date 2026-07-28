@@ -1,4 +1,4 @@
-import { cleanupStaleTestRuns } from "./test-run-context";
+import { cleanupStaleTestRuns, readTestRunManifest } from "./test-run-context";
 import { getDefaultSuiteRuntime } from "./ingenium-dashboard/default-suite-runtime";
 import {
   installRunSignalHandlers,
@@ -26,6 +26,10 @@ export default async function globalSetup(): Promise<void> {
       build: process.env.INGENIUM_E2E_SKIP_BUILD !== "1",
       dashboardEnvironment: runtime.dashboardEnvironment,
     });
+    const started = readTestRunManifest(context.manifestPath);
+    if (started.project !== context.project || !started.projectProvisionedAt) {
+      throw new Error("Default Playwright fixture did not provision its manifest-owned project");
+    }
   } catch (error) {
     try {
       await stopRunFromManifest(context.manifestPath);

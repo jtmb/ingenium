@@ -24,6 +24,11 @@ export const SERVER_STOP_TIMEOUT_MS = 8_000;
 export const PRODUCTION_BUILD_TIMEOUT_MS = 180_000;
 export const READINESS_REQUEST_TIMEOUT_MS = 1_000;
 export const TEST_API_TOKEN = "A".repeat(48);
+export const FIXTURE_PROJECT_PROVISION_TIMEOUT_MS = 5_000;
+// The serialized fixture suite creates deliberate browser/API traffic. Keep
+// this bounded override local to its isolated API process; production retains
+// the configured default of 100 requests/minute.
+export const FIXTURE_API_RATE_LIMIT = 1_000;
 
 interface CommandResult {
   code: number | null;
@@ -99,6 +104,48 @@ export interface TestServerLifecycleOptions {
 export interface StopRunOptions {
   stopTimeoutMs?: number;
   cleanup?: boolean;
+}
+
+/**
+ * Create the manifest-owned project through the same authenticated API that
+ * the fixture exercises. A 409 means an interrupted setup already created
+ * this exact run project, so it is the idempotent success case.
+ */
+export async function provisionTestRunProject(
+  context: TestRunContext,
+  timeoutMs = FIXTURE_PROJECT_PROVISION_TIMEOUT_MS,
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const url = `http://127.0.0.1:${context.ports.api}/api/v1/projects`;
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${TEST_API_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: context.project, is_global: false }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to provision fixture project ${context.project}: ${reason}`);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.status !== 201 && response.status !== 409) {
+    throw new Error(`Unable to provision fixture project ${context.project}: API returned ${response.status}`);
+  }
+
+  // The run directory, database, and this manifest entry share one lifecycle:
+  // a successful teardown removes all three. Retained runs keep the timestamp
+  // as recovery evidence rather than redirecting fixture writes elsewhere.
+  updateTestRunManifest(context.manifestPath, {
+    projectProvisionedAt: new Date().toISOString(),
+  });
 }
 
 function npmCommand(): string {
@@ -177,6 +224,7 @@ export function getServerSpecs(
         INGENIUM_API_DISABLE_SCHEDULERS: "1",
         INGENIUM_API_DISABLE_MAIL_MAINTENANCE: "1",
         INGENIUM_API_DISABLE_MAIL: "1",
+        INGENIUM_API_RATE_LIMIT: String(FIXTURE_API_RATE_LIMIT),
       }),
       readinessUrl: `http://127.0.0.1:${context.ports.api}/api/v1/health`,
       readinessHeaders: { Authorization: `Bearer ${TEST_API_TOKEN}` },
@@ -1253,6 +1301,11 @@ export async function startTestServers(
         throw new Error(`${spec.name} process identity could not be bound to this test run`);
       }
       await waitForReady(spec, startTimeoutMs, options.readinessRequestTimeoutMs);
+      // No dashboard or fixture process is started until the API has accepted
+      // this exact manifest-owned project. This is the boundary before any
+      // project-scoped fixture write can occur; there is intentionally no
+      // global-project fallback.
+      if (spec.name === "api") await provisionTestRunProject(context);
       // The filesystem reservation protects the pre-listener race. The exact
       // readiness response is the ownership-transfer boundary; after it, the
       // child listener itself prevents another process from binding the port.

@@ -30,11 +30,13 @@ import {
 import globalTeardown from "./playwright-global-teardown";
 import {
   TEST_API_TOKEN,
+  FIXTURE_API_RATE_LIMIT,
   buildProductionArtifacts,
   captureSpawnedChildPgid,
   getServerSpecs,
   installRunSignalHandlers,
   inspectProcessIdentity,
+  provisionTestRunProject,
   recoverStoppingTestRun,
   startTestServers,
   stopRunFromManifest,
@@ -74,6 +76,7 @@ async function waitForProcessGoneOrZombie(pid: number, timeoutMs = 1_000): Promi
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   for (const manifest of manifests.splice(0)) cleanupTestRun(manifest);
   for (const root of telemetryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
   for (const directory of runDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -81,6 +84,46 @@ afterEach(() => {
 });
 
 describe("test server lifecycle contracts", () => {
+  it("provisions the manifest-owned project idempotently through the fixture API", async () => {
+    const context = createTestRunContext({ ports: { api: 45190, dashboard: 45191, fixture: 45192 } });
+    track(context);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { name: context.project } }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: "CONFLICT" } }), { status: 409 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await provisionTestRunProject(context);
+    const firstManifest = JSON.parse(readFileSync(context.manifestPath, "utf8")) as typeof context;
+    expect(firstManifest.project).toBe(context.project);
+    expect(firstManifest.projectProvisionedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    await provisionTestRunProject(context);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, request] of fetchMock.mock.calls) {
+      expect(url).toBe(`http://127.0.0.1:${context.ports.api}/api/v1/projects`);
+      expect(request).toMatchObject({
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${TEST_API_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      });
+      expect(JSON.parse(String(request.body))).toEqual({ name: context.project, is_global: false });
+    }
+  });
+
+  it("does not mark a fixture project as provisioned when the API rejects it", async () => {
+    const context = createTestRunContext({ ports: { api: 45193, dashboard: 45194, fixture: 45195 } });
+    track(context);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("failure", { status: 500 })));
+
+    await expect(provisionTestRunProject(context)).rejects.toThrow(/API returned 500/);
+
+    const manifest = JSON.parse(readFileSync(context.manifestPath, "utf8")) as typeof context;
+    expect(manifest.projectProvisionedAt).toBeUndefined();
+  });
+
   it("uses production dashboard startup and explicitly isolates all services", () => {
     const context = createTestRunContext({ ports: { api: 45201, dashboard: 45202, fixture: 45203 } });
     track(context);
@@ -99,7 +142,12 @@ describe("test server lifecycle contracts", () => {
     expect(specs[0]!.env.INGENIUM_API_DISABLE_SCHEDULERS).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_MAIL_MAINTENANCE).toBe("1");
     expect(specs[0]!.env.INGENIUM_API_DISABLE_MAIL).toBe("1");
+    expect(specs[0]!.env.INGENIUM_API_RATE_LIMIT).toBe(String(FIXTURE_API_RATE_LIMIT));
     expect(specs[0]!.env.INGENIUM_TEST_RUN_NONCE).toBe(context.runNonce);
+    for (const spec of specs) {
+      expect(spec.env.INGENIUM_PROJECT).toBe(context.project);
+      expect(spec.env.INGENIUM_PROJECT).not.toBe("global-default");
+    }
     expect(specs[1]!.readinessHeaders).toBeUndefined();
     expect(specs[2]!.readinessHeaders).toBeUndefined();
     expect(specs[0]!.readinessHeaders?.Authorization).toBe(`Bearer ${TEST_API_TOKEN}`);

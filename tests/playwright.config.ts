@@ -47,7 +47,9 @@ console.log(`[playwright] api=${context.ports.api} dashboard=${context.ports.das
 export default defineConfig({
   testDir: ".",
   // Explicit deterministic allow-list. Docker, live-provider, live-mail, and
-  // manual visual suites are selected only by their dedicated configs.
+  // manual visual suites are selected only by their dedicated configs. The
+  // current Context contract remains in mcp-tools.spec.ts; retired learning,
+  // archive, and server page suites are intentionally not selected.
   testMatch: [
     "**/mcp-tools.spec.ts",
     "**/ingenium-dashboard/mcp-tool-controls.spec.ts",

@@ -1,5 +1,9 @@
 import { TEST_API_TOKEN } from "../test-server-lifecycle";
-import { getTestRunContext, type TestRunContext } from "../test-run-context";
+import {
+  getTestRunContext,
+  getTestRunDashboardUrl,
+  type TestRunContext,
+} from "../test-run-context";
 import { getDashboardFixtureEnvironment } from "./fixture-credentials";
 
 const DEVELOPMENT_PORTS = new Set([3000, 4097, 4098, 4099, 4999]);
@@ -7,6 +11,7 @@ const DEVELOPMENT_PORTS = new Set([3000, 4097, 4098, 4099, 4999]);
 export interface DefaultSuiteRuntime {
   context: TestRunContext;
   dashboardUrl: string;
+  dashboardRoute: (route?: string) => string;
   apiBase: string;
   project: string;
   apiHeaders: Record<string, string>;
@@ -30,7 +35,8 @@ export function getDefaultSuiteRuntime(): DefaultSuiteRuntime {
 
   return {
     context,
-    dashboardUrl: `http://127.0.0.1:${context.ports.dashboard}`,
+    dashboardUrl: getTestRunDashboardUrl(context),
+    dashboardRoute: (route = "/") => getTestRunDashboardUrl(context, route),
     apiBase: `http://127.0.0.1:${context.ports.api}/api/v1`,
     project: context.project,
     apiHeaders: { authorization: `Bearer ${TEST_API_TOKEN}` },
