@@ -11,6 +11,7 @@ windows_helper="${repo_root}/scripts/windows-loopback-transport.ps1"
 env_example="${repo_root}/.env.example"
 supervisor_config="${repo_root}/supervisord.conf"
 image_provenance_validator="${repo_root}/scripts/validate-image-provenance.mjs"
+opencode_global_projector="${repo_root}/scripts/project-opencode-global-config.mjs"
 
 require_file() {
   path="$1"
@@ -38,7 +39,7 @@ reject_literal() {
   fi
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector"; do
   require_file "$path"
 done
 
@@ -83,6 +84,7 @@ require_literal "$compose_file" "127.0.0.1:4097:4097"
 require_literal "$compose_file" "127.0.0.1:1455:1455"
 require_literal "$compose_file" "INGENIUM_API_TOKEN=\${INGENIUM_API_TOKEN:-}"
 require_literal "$compose_file" "INGENIUM_API_TOKEN_FILE=\${INGENIUM_API_TOKEN_FILE:-}"
+require_literal "$compose_file" "INGENIUM_BACKUPS_DIR=\${INGENIUM_BACKUPS_DIR:-}"
 require_literal "$compose_file" "DASHBOARD_ALLOWED_ORIGINS=\${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"
 reject_literal "$compose_file" "1455:4097"
 require_literal "$compose_file" "driver: local"
@@ -109,11 +111,15 @@ require_literal "$env_example" "INGENIUM_API_TOKEN_FILE=/run/secrets/ingenium-ap
 reject_literal "$env_example" "INGENIUM_GATEWAY_PASSWORD"
 reject_literal "$env_example" "INGENIUM_GATEWAY_BCRYPT_COST"
 
-for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.sh start-opencode-web.sh start-ttyd.sh; do
+for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.sh run-init-project.sh start-opencode-web.sh start-ttyd.sh; do
   require_file "${repo_root}/scripts/${script}"
   require_literal "${repo_root}/scripts/${script}" "exec env -i"
 done
 require_literal "${repo_root}/scripts/run-api.sh" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
+require_literal "${repo_root}/scripts/run-api.sh" 'backup_dir="${INGENIUM_BACKUPS_DIR:-}"'
+require_literal "${repo_root}/scripts/run-api.sh" '*[![:space:]]*) ;;'
+require_literal "${repo_root}/scripts/run-api.sh" '*) backup_dir="/app/.ingenium/backups" ;;'
+require_literal "${repo_root}/scripts/run-api.sh" 'INGENIUM_BACKUPS_DIR="$backup_dir"'
 require_literal "${repo_root}/scripts/run-dashboard.sh" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
 require_literal "$supervisor_config" "command=/app/scripts/run-api.sh"
 require_literal "$supervisor_config" "command=/app/scripts/run-api-boundary-proxy.sh"
@@ -122,6 +128,15 @@ require_literal "$supervisor_config" "command=/app/scripts/run-gateway.sh"
 require_literal "$supervisor_config" "command=/app/scripts/start-opencode-web.sh"
 require_literal "$supervisor_config" "command=/app/scripts/start-ttyd.sh"
 reject_literal "$supervisor_config" "environment="
+require_literal "$dockerfile" "scripts/project-opencode-global-config.mjs"
+require_literal "$dockerfile" "scripts/run-init-project.sh"
+require_literal "$entrypoint" "project-opencode-global-config.mjs"
+require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/workspace"'
+require_literal "$entrypoint" '"/app/packages/ingenium-extension/resource-sync.ts"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_API_TOKEN_FILE=".opencode/.ingenium-api-token"'
+require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKTREE="/workspace"'
+require_literal "${repo_root}/scripts/run-init-project.sh" 'project="${INGENIUM_PROJECT:-global-default}"'
+require_literal "${repo_root}/scripts/run-init-project.sh" 'INGENIUM_API_TOKEN_FILE="$token_file"'
 
 # Nginx is supervised as appuser. It must not reopen /dev/stderr or write to
 # root-owned defaults when creating its pid, lock, and request buffers.
@@ -181,4 +196,5 @@ fi
 GATEWAY_VALIDATE_STATIC_ONLY=1 sh "${repo_root}/scripts/validate-gateway-config.sh" "${repo_root}/nginx/gateway.conf"
 sh "${repo_root}/scripts/validate-api-boundary.sh" "$repo_root"
 node --check "$image_provenance_validator"
+node --check "$opencode_global_projector"
 echo "Deployment static validation passed"

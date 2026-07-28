@@ -82,7 +82,8 @@ reject_text docker-compose.yml 'seccomp=unconfined'
 reject_text docker-compose.yml 'sudo'
 
 require_text Dockerfile 'COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf'
-require_text Dockerfile 'COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/'
+require_text Dockerfile 'COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/'
+require_text Dockerfile 'COPY --chown=appuser:appuser scripts/run-init-project.sh ./scripts/run-init-project.sh'
 require_text Dockerfile 'ARG NEXT_PUBLIC_OPENCODE_WEB_URL="http://opencode.localhost:3000/"'
 require_text Dockerfile 'ARG NEXT_PUBLIC_OPENCODE_CLI_URL="http://cli.localhost:3000/"'
 require_text Dockerfile 'FROM node:22-slim AS builder'
@@ -180,6 +181,11 @@ require_text scripts/docker-entrypoint.sh 'chmod 0600 "$runtime_token_tmp"'
 require_text scripts/docker-entrypoint.sh 'mv -f "$runtime_token_tmp" "$RUNTIME_API_TOKEN_FILE"'
 require_text scripts/docker-entrypoint.sh 'unset INGENIUM_API_TOKEN'
 require_text scripts/docker-entrypoint.sh 'export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"'
+require_text scripts/docker-entrypoint.sh 'project-opencode-global-config.mjs "$OC_CONFIG"'
+require_text scripts/docker-entrypoint.sh '"/app/packages/ingenium-extension/resource-sync.ts"'
+require_text scripts/start-opencode-web.sh 'INGENIUM_API_TOKEN_FILE=".opencode/.ingenium-api-token"'
+require_text scripts/start-opencode-web.sh 'INGENIUM_WORKTREE="/workspace"'
+require_text scripts/run-init-project.sh 'project="${INGENIUM_PROJECT:-global-default}"'
 
 # Express and token-bearing services remain container-only; the separate API
 # boundary is loopback-only and bearer-authenticated for host MCP clients.

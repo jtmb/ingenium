@@ -408,7 +408,11 @@ confirmation. The `all` scope covers repository Markdown plus `.opencode/skills`
 takes precedence over the validated worktree basename; the CLI never defaults
 to `global-default`. In the production image, the command is on `PATH` at the
 stable `/usr/local/bin/ingenium-init-project` path, independent of
-`/app/node_modules/.bin`.
+`/app/node_modules/.bin`. Before either mode contacts a project or repository
+route, the CLI calls the authenticated `GET /api/v1/auth/preflight` capability
+probe. Authentication failure is fail-closed and intentionally reports only a
+generic message; callers never receive a token, API URL, status, or upstream
+response body.
 
 This contract documents the available workflow; it does not assert that a live
 onboarding or apply run has occurred.

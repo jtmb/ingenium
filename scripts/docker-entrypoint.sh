@@ -122,19 +122,29 @@ if [ ! -f "$OC_CONFIG" ]; then
       "environment": {
         "INGENIUM_API_URL": "http://localhost:4097/api/v1",
         "INGENIUM_API_TOKEN_FILE": ".opencode/.ingenium-api-token",
-        "INGENIUM_PROJECT": "global-default"
+        "INGENIUM_PROJECT": "global-default",
+        "INGENIUM_WORKTREE": "/workspace"
       }
     }
   },
   "plugin": [
     "/app/packages/ingenium-extension/observer.ts",
     "/app/packages/ingenium-extension/auto-observer.ts",
-    "/app/packages/ingenium-extension/skill-sync.ts"
+    "/app/packages/ingenium-extension/resource-sync.ts"
   ]
 }
 OCEOF
   echo "Seeded OpenCode config with Ingenium MCP"
 fi
+
+# The global config lives on a persistent volume and may predate protected token
+# files or the unified resource-sync plugin. Project the container-owned entries
+# on every start while preserving unrelated operator configuration.
+runuser -u appuser -- env -i \
+  PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  HOME="/home/appuser" \
+  XDG_CONFIG_HOME="/home/appuser/.config" \
+  node /app/scripts/project-opencode-global-config.mjs "$OC_CONFIG"
 
 # OpenCode is launched with env -i, so its local MCP child cannot inherit the
 # runtime token-file path. Seed the only protected fallback path accepted by

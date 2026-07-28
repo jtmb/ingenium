@@ -2,8 +2,12 @@
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { preflightApiAuthentication } from "../api-auth.js";
 import { isValidProjectName } from "../project-resolver.js";
 import { repositorySync, type RepositorySyncScope } from "../resource-sync.js";
+
+const API_BASE = (typeof process !== "undefined" ? process.env.INGENIUM_API_URL : undefined) ?? "http://localhost:4097/api/v1";
+const AUTHENTICATION_FAILURE_MESSAGE = "Unable to authenticate with Ingenium API";
 
 export interface InitProjectArgs {
   dryRun: boolean;
@@ -71,7 +75,16 @@ export async function runInitProject(args = process.argv.slice(2), worktree = pr
     process.stdout.write(INIT_PROJECT_USAGE);
     return 0;
   }
-  const result = await repositorySync(resolve(worktree), options);
+  const resolvedWorktree = resolve(worktree);
+  const authentication = await preflightApiAuthentication(API_BASE, resolvedWorktree);
+  if (!authentication.authenticated) {
+    // Deliberately use the same generic error as the preflight helper. API
+    // status, URL, transport diagnostics, and token-source details must not be
+    // exposed by a command that may run in an interactive OpenCode session.
+    process.stderr.write(`${AUTHENTICATION_FAILURE_MESSAGE}\n`);
+    return 2;
+  }
+  const result = await repositorySync(resolvedWorktree, options);
   process.stdout.write(`${JSON.stringify(result)}\n`);
   return result.docs.errors + result.skills.errors + result.agents.errors + result.plugins.errors > 0 ? 1 : 0;
 }

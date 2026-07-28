@@ -74,6 +74,11 @@ function configuredTokenFile(worktree: string | undefined, reference: string | u
  */
 export function apiRequestHeaders(worktree?: string, headers?: HeadersInit): Headers {
   const requestHeaders = new Headers(headers);
+  // Callers must never be able to smuggle a caller-controlled credential onto
+  // an extension request. Only a token resolved from the protected sources
+  // below may be sent to the API.
+  requestHeaders.delete("Authorization");
+  requestHeaders.delete("Proxy-Authorization");
   const configuredToken = process.env.INGENIUM_API_TOKEN;
   const placeholder = configuredToken?.match(TOKEN_FILE_REFERENCE)?.[1];
   const token = placeholder !== undefined

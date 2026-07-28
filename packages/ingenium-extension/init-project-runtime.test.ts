@@ -15,6 +15,8 @@ const dockerfilePath = join(repositoryRoot, "Dockerfile");
 const tscPath = createRequire(import.meta.url).resolve("typescript/bin/tsc");
 const temporaryDirectories: string[] = [];
 const originalProject = process.env.INGENIUM_PROJECT;
+const originalToken = process.env.INGENIUM_API_TOKEN;
+const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
 const configuredPluginPaths = [
   "packages/ingenium-extension/auto-observer.ts",
   "packages/ingenium-extension/observer.ts",
@@ -62,6 +64,14 @@ function createRuntimeWorktree(): string {
   return worktree;
 }
 
+function writeProtectedFallbackToken(worktree: string, token: string): void {
+  const directory = join(worktree, ".opencode");
+  mkdirSync(directory, { recursive: true });
+  const tokenPath = join(directory, ".ingenium-api-token");
+  writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
+  chmodSync(tokenPath, 0o600);
+}
+
 function executeCli(
   entrypoint: string,
   args: string[],
@@ -86,6 +96,10 @@ function executeCli(
 afterEach(() => {
   if (originalProject === undefined) delete process.env.INGENIUM_PROJECT;
   else process.env.INGENIUM_PROJECT = originalProject;
+  if (originalToken === undefined) delete process.env.INGENIUM_API_TOKEN;
+  else process.env.INGENIUM_API_TOKEN = originalToken;
+  if (originalTokenFile === undefined) delete process.env.INGENIUM_API_TOKEN_FILE;
+  else process.env.INGENIUM_API_TOKEN_FILE = originalTokenFile;
   for (const directory of temporaryDirectories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -165,10 +179,56 @@ describe("ingenium-init-project production runtime contract", () => {
       expect(result.code, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all" });
       expect(requests).toEqual([
+        { method: "GET", url: "/api/v1/auth/preflight" },
         { method: "POST", url: "/api/v1/docs/repository/sync?project=ingenium" },
         { method: "POST", url: "/api/v1/repository/resources/sync?project=ingenium" },
       ]);
       expect(existsSync(join(worktree, ".opencode", ".ingenium-sync-state.json"))).toBe(false);
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => error ? rejectClose(error) : resolveClose());
+      });
+    }
+  });
+
+  it("fails closed at packaged CLI authentication preflight before provisioning or projection", async () => {
+    const distribution = buildCliDistribution();
+    const entrypoint = join(distribution, "scripts", "init-project.js");
+    const command = createRuntimeSymlink(entrypoint);
+    const worktree = temporaryDirectory("ingenium-init-project-auth-failure-");
+    mkdirSync(join(worktree, "docs"), { recursive: true });
+    writeFileSync(join(worktree, "docs", "index.md"), "# Auth fixture\n", "utf8");
+    const requests: Array<{ url: string; method: string; sentBearer: boolean }> = [];
+    const server = createServer((request, response) => {
+      requests.push({
+        url: request.url ?? "",
+        method: request.method ?? "",
+        sentBearer: request.headers.authorization !== undefined,
+      });
+      response.writeHead(401, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: { code: "UNAUTHORIZED", detail: "internal diagnostic" } }));
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Unable to start denied init-project test API");
+      const environment: NodeJS.ProcessEnv = {
+        ...process.env,
+        INGENIUM_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+        INGENIUM_WORKTREE: worktree,
+      };
+      delete environment.INGENIUM_API_TOKEN;
+      delete environment.INGENIUM_API_TOKEN_FILE;
+      const result = await executeCli(command, ["--apply", "--project", "denied-project"], environment, true);
+
+      expect(result.code).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toBe("Unable to authenticate with Ingenium API\n");
+      expect(result.stderr).not.toContain("http://");
+      expect(requests).toEqual([
+        { method: "GET", url: "/api/v1/auth/preflight", sentBearer: false },
+      ]);
     } finally {
       await new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => error ? rejectClose(error) : resolveClose());
@@ -218,11 +278,12 @@ describe("ingenium-init-project production runtime contract", () => {
       expect(result.code, result.stderr).toBe(0);
       expect(JSON.parse(result.stdout)).toMatchObject({ project: "ingenium", dryRun: true, scope: "all" });
       expect(requests.map(({ method, url }) => ({ method, url }))).toEqual([
+        { method: "GET", url: "/api/v1/auth/preflight" },
         { method: "POST", url: "/api/v1/docs/repository/sync?project=ingenium" },
         { method: "POST", url: "/api/v1/repository/resources/sync?project=ingenium" },
       ]);
 
-      const payload = JSON.parse(requests[1]!.body) as { manifest: {
+      const payload = JSON.parse(requests[2]!.body) as { manifest: {
         skills: Array<{ path: string }>;
         agents: Array<{ path: string; name: string }>;
         plugins: Array<{ path: string; source: string }>;
@@ -234,6 +295,71 @@ describe("ingenium-init-project production runtime contract", () => {
       for (const plugin of payload.manifest.plugins) {
         expect(plugin.source).toBe(readFileSync(join(repositoryRoot, plugin.path), "utf8"));
       }
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => error ? rejectClose(error) : resolveClose());
+      });
+    }
+  });
+
+  it("runs the packaged CLI preflight and project initialization through the protected fallback bearer", async () => {
+    const distribution = buildCliDistribution();
+    const entrypoint = join(distribution, "scripts", "init-project.js");
+    const command = createRuntimeSymlink(entrypoint);
+    const worktree = createRuntimeWorktree();
+    const token = "p".repeat(32);
+    writeProtectedFallbackToken(worktree, token);
+    const requests: Array<{ url: string; method: string; authenticated: boolean }> = [];
+    const server = createServer((request, response) => {
+      const authenticated = request.headers.authorization === `Bearer ${token}`;
+      requests.push({
+        url: request.url ?? "",
+        method: request.method ?? "",
+        authenticated,
+      });
+      if (!authenticated) {
+        response.writeHead(401, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: { code: "UNAUTHORIZED" } }));
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "application/json" });
+      if (request.url === "/api/v1/auth/preflight") {
+        response.end(JSON.stringify({ data: { authenticated: true } }));
+        return;
+      }
+      if (request.url?.startsWith("/api/v1/repository/resources/sync")) {
+        response.end(JSON.stringify({ data: { summary: {
+          skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
+          agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
+          plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 3 },
+        } } }));
+        return;
+      }
+      response.end(JSON.stringify({ data: { summary: { created: 0, updated: 0, renamed: 0, restored: 0, archived: 0, unchanged: 0 } } }));
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("Unable to start protected init-project test API");
+      const environment: NodeJS.ProcessEnv = {
+        ...process.env,
+        INGENIUM_API_URL: `http://127.0.0.1:${address.port}/api/v1`,
+        INGENIUM_WORKTREE: worktree,
+      };
+      delete environment.INGENIUM_API_TOKEN;
+      delete environment.INGENIUM_API_TOKEN_FILE;
+      const result = await executeCli(command, ["--apply", "--project", "packaged-plugin-project"], environment, true);
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).not.toContain(token);
+      expect(result.stderr).not.toContain(token);
+      expect(requests).toEqual([
+        { method: "GET", url: "/api/v1/auth/preflight", authenticated: true },
+        { method: "POST", url: "/api/v1/projects", authenticated: true },
+        { method: "POST", url: "/api/v1/docs/repository/sync?project=packaged-plugin-project", authenticated: true },
+        { method: "POST", url: "/api/v1/repository/resources/sync?project=packaged-plugin-project", authenticated: true },
+      ]);
     } finally {
       await new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => error ? rejectClose(error) : resolveClose());

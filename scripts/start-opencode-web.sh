@@ -9,5 +9,8 @@ exec env -i \
   XDG_CONFIG_HOME="/home/appuser/.config" \
   XDG_DATA_HOME="/home/appuser/.local/share" \
   OPENCODE_SERVER_PASSWORD="" \
+  INGENIUM_API_URL="http://localhost:4097/api/v1" \
+  INGENIUM_API_TOKEN_FILE=".opencode/.ingenium-api-token" \
+  INGENIUM_WORKTREE="/workspace" \
   INGENIUM_PROJECT="global-default" \
   opencode web --port 4098 --hostname 127.0.0.1

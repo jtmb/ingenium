@@ -43,6 +43,25 @@ describe("extension API authentication", () => {
     expect(headers.get("Content-Type")).toBe("application/json");
   });
 
+  it("replaces caller-provided authorization with the protected bearer source", () => {
+    const token = "f".repeat(32);
+    writeFallbackToken(token);
+
+    const headers = apiRequestHeaders(worktree, {
+      Authorization: "Bearer caller-controlled-token",
+      "Proxy-Authorization": "Bearer proxy-controlled-token",
+    });
+
+    expect(headers.get("Authorization")).toBe(`Bearer ${token}`);
+    expect(headers.has("Proxy-Authorization")).toBe(false);
+  });
+
+  it("does not forward a caller-provided authorization header when protected sources are unavailable", () => {
+    const headers = apiRequestHeaders(worktree, { Authorization: "Bearer caller-controlled-token" });
+
+    expect(headers.has("Authorization")).toBe(false);
+  });
+
   it("prefers the environment credential over the fallback file", () => {
     writeFallbackToken("f".repeat(32));
     process.env.INGENIUM_API_TOKEN = "e".repeat(32);

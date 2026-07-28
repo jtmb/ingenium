@@ -19,6 +19,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `NODE_ENV` | — | `logger.ts` | If `production`, JSON logging; otherwise pretty-print |
 | `INGENIUM_GLOBAL_CONFIG_PATH` | `/home/appuser/.config/opencode/` | `tools/paths.ts` | Global config path for skills/plugins/commands |
 | `INGENIUM_PROJECT` | _(none — required to override worktree)_ | extension plugins | **Extension session override.** When set, takes priority over worktree-derived project name. Required when the worktree path is `/workspace` (container mount) — see architecture docs. Never defaults to `global-default` in code; the Docker entrypoint sets this explicitly. |
+| `INGENIUM_WORKTREE` | current working directory | extension launcher and `ingenium-init-project` | Explicit worktree root for protected token-file lookup and project derivation. The container launcher explicitly sets `/workspace`; external sessions should omit it or set their own worktree and retain the normal project-isolation precedence. |
 
 ## API (`services/ingenium-api`)
 
@@ -27,7 +28,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 | `INGENIUM_API_PORT` | `4096` in Docker (`4097` standalone) | `config/index.ts` | Private Express API listen port in the container; public host bearer boundary remains `127.0.0.1:4097`. |
 | `INGENIUM_API_RATE_LIMIT` | `100` | `lib/middleware/rate-limit.ts` | Max requests per minute per IP |
 | `INGENIUM_API_TOKEN` | _(required; no default)_ | entrypoint, API boundary, `lib/middleware/auth.ts`, dashboard server proxy | Mandatory 32–128 character base64url bearer token. Bootstrap input is consumed into a protected runtime file and unset before supervisord; never place it in tracked OpenCode config. |
-| `INGENIUM_API_TOKEN_FILE` | _(optional bootstrap; runtime default `/run/ingenium-secrets/api-token` in container)_ | entrypoint, API boundary, API, dashboard, health probe, email watcher | Protected regular token file alternative to the inline variable. Must not be a symlink; runtime file is mode `0600` in a mode `0700` directory. Supports API access after supervised services clear inherited credential environment variables. |
+| `INGENIUM_API_TOKEN_FILE` | _(optional bootstrap; runtime default `/run/ingenium-secrets/api-token` in container)_ | entrypoint, API boundary, API, dashboard, health probe, email watcher, extension plugins | Protected regular token file alternative to the inline variable. Must not be a symlink; runtime file is mode `0600` in a mode `0700` directory. Extension plugins accept only the owner-only worktree-relative fallback or a protected absolute file. Supports API access after supervised services clear inherited credential environment variables. |
 | `DASHBOARD_ALLOWED_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` | dashboard `proxy.ts`, API `config/index.ts`, supervised launchers | Comma-separated **exact** HTTP(S) dashboard origins accepted by both dashboard-proxy CSRF and API CORS/CSRF. Entries cannot include paths, credentials, query/fragment, whitespace, or wildcards. |
 | `CORS_ORIGIN` | _(legacy single-origin fallback only)_ | `config/index.ts` | Backward-compatible non-container fallback when `DASHBOARD_ALLOWED_ORIGINS` is unset. New deployments must configure the explicit allowlist. |
 | `SYNTHESIS_INTERVAL_MS` | `900000` | `scheduler.ts` | Scheduled synthesis + extraction interval (15 min), 0 = disabled |
@@ -80,7 +81,7 @@ All environment variables used across the Ingenium monorepo. Any new variable ad
 
 | Variable | Default | Used By | Description |
 |----------|---------|---------|-------------|
-| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | `backup-scheduler.ts`, `routes/backups.ts` | Directory for backup snapshot files (Ingenium + OpenCode DB pairs) |
+| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | `backups.ts`, `backup-scheduler.ts`, `routes/backups.ts`, `scripts/run-api.sh` | Directory for backup snapshot files (Ingenium + OpenCode DB pairs). Empty or whitespace-only values are treated as unset. |
 
 ---
 

@@ -50,6 +50,13 @@ only `/workspace` session, so its generated OpenCode config explicitly uses
 `global-default`. This avoids a clone-specific local project value while never
 silently treating an external worktree as the global namespace.
 
+The container also projects its persistent global config at startup so the
+`auto-observer`, `observer`, and `resource-sync` plugins all resolve the
+owner-only worktree token file. `ingenium-init-project` preflights that bearer
+path before it provisions a project or syncs repository resources. A failed
+preflight returns a generic authentication error; it never emits the token or
+browser-accessible credential data.
+
 If the Chat MCP drawer reports that Ingenium cannot connect, rebuild the
 extension artifact, verify the owner-only token file, and verify the intended
 project identity. The drawer deliberately does not reveal upstream paths,

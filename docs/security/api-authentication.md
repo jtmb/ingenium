@@ -78,8 +78,27 @@ file reference; it does not contain the token bytes. The runtime API, boundary,
 and dashboard processes read the protected runtime file instead of inheriting
 the bootstrap secret.
 
+On every container start, the entrypoint projects the container-owned Ingenium
+MCP and plugin entries into the persistent global OpenCode config. This replaces
+the legacy `skill-sync` bootstrap entry with `resource-sync` and configures the
+`auto-observer`, `observer`, and `resource-sync` sources to resolve the same
+protected worktree token file. The projection removes an accidental inline
+`INGENIUM_API_TOKEN` value from the Ingenium MCP environment, preserves unrelated
+operator settings, and never logs credential contents.
+
 Do not add the token to a tracked `opencode.json` or `opencode.jsonc`. Those
 files should contain the MCP command, API URL, and non-secret settings only.
+
+### Extension project initialization preflight
+
+`ingenium-init-project` performs an authenticated `GET /api/v1/auth/preflight`
+before project provisioning or repository projection. A missing, unsafe, or
+incorrect protected token fails closed with the generic message `Unable to
+authenticate with Ingenium API`; it does not print a token source, API URL,
+status, response body, or bearer value. In the container, the stable command
+sets the explicit `/workspace` and `global-default` values only for the
+container-owned session. External sessions retain the normal precedence of
+explicit `--project`, `INGENIUM_PROJECT`, then a validated worktree basename.
 
 ## Dashboard proxy and CSRF behavior
 
