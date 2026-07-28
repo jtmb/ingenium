@@ -71,7 +71,7 @@ test.describe("Jobs — Edit from Detail View", () => {
     // ASSERT: Form fields are pre-populated with the job's data
     await expect(page.getByPlaceholder("e.g., Nightly Security Scan")).toHaveValue(jobName);
     // The prompt template textarea should contain the original prompt
-    await expect(page.getByPlaceholder(/Write the prompt template/)).toContainText("E2E test prompt");
+    await expect(page.getByPlaceholder(/Write the prompt template/)).toHaveValue("E2E test prompt {{input}}");
 
     // --- Step 4: Modify the job name ---
     await page.getByPlaceholder("e.g., Nightly Security Scan").fill(updatedName);
@@ -85,6 +85,10 @@ test.describe("Jobs — Edit from Detail View", () => {
     // ASSERT: Detail view shows the updated job name
     // The detail view's h1 displays the job name; wait for it to reflect the update
     await expect(page.locator("h1").filter({ hasText: updatedName })).toBeVisible({ timeout: 5000 });
+
+    // The successful mutation must leave the detail view in the updated state,
+    // not reopen the old edit overlay after the list refresh completes.
+    await expect(page.getByRole("button", { name: "Update Job" })).toHaveCount(0);
   });
 
   test("Edit overlay closes and reopens cleanly (no stale errors)", async ({ page }) => {

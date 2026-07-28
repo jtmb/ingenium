@@ -247,6 +247,7 @@ function JobFormOverlay({
     }
     setSaving(true);
     setError("");
+    let savedJob: Job | undefined;
     try {
       const payload = {
         name: form.name.trim(),
@@ -257,7 +258,6 @@ function JobFormOverlay({
         trigger_event: form.trigger_event || undefined,
         timeout_minutes: form.timeout_minutes,
       };
-      let savedJob: Job | undefined;
       if (initial) {
         const res = await api.jobs.update(initial.id, payload, project);
         savedJob = res.data;
@@ -265,13 +265,18 @@ function JobFormOverlay({
         const res = await api.jobs.create(payload, project);
         savedJob = res.data;
       }
-      onSaved(savedJob);
-      onClose();
     } catch (err: any) {
       setError(err?.message ?? "Save failed");
+      return;
     } finally {
       setSaving(false);
     }
+
+    // The mutation has completed successfully. Reset the local mutation state
+    // before unmounting the overlay, then let the parent close/reset its form
+    // state and refresh the list without delaying the close transition.
+    onSaved(savedJob);
+    onClose();
   };
 
   return (
@@ -896,11 +901,14 @@ export default function JobsPage() {
     setShowCreate(true);
   }, []);
 
-  const handleSaved = useCallback(async (savedJob?: Job) => {
-    await fetchJobs();
+  const handleSaved = useCallback((savedJob?: Job) => {
     if (editingJob && savedJob) {
       setSelectedJob(savedJob);
     }
+    // Keep the detail view on the API mutation response immediately. The list
+    // refresh is best-effort and must not delay closing the successful edit
+    // overlay or overwrite the selected job with stale state.
+    void fetchJobs();
   }, [fetchJobs, editingJob]);
 
   // Last-run status dot for a job card
