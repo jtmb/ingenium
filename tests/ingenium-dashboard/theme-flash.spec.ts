@@ -2,6 +2,12 @@ import { test, expect } from "@playwright/test";
 import { getDefaultSuiteRuntime } from "./default-suite-runtime";
 
 const { dashboardUrl } = getDefaultSuiteRuntime();
+const themeCookieUrl = new URL("/", dashboardUrl).toString();
+
+function themeCookie(value: "light" | "dark") {
+  // Playwright accepts either a URL or a domain/path pair, not both forms.
+  return { name: "theme", value, url: themeCookieUrl };
+}
 
 test.describe("Theme flash prevention", () => {
   test("light-theme user on dark OS — class never flips to dark during load", async ({ page }) => {
@@ -32,7 +38,7 @@ test.describe("Theme flash prevention", () => {
     });
 
     // Set the cookie so the server renders light
-    await page.context().addCookies([{ name: "theme", value: "light", path: "/", url: dashboardUrl }]);
+    await page.context().addCookies([themeCookie("light")]);
 
     // Navigate to several pages (each is a full load — simulating real nav)
     for (const path of ["/", "/mail", "/skills", "/observations"]) {
@@ -53,12 +59,12 @@ test.describe("Theme flash prevention", () => {
 
   test("dark-theme user on dark OS — no white flash, dark class present from server render", async ({ page, request }) => {
     await page.emulateMedia({ colorScheme: "dark" });
-    await page.context().addCookies([{ name: "theme", value: "dark", path: "/", url: dashboardUrl }]);
+    await page.context().addCookies([themeCookie("dark")]);
 
     // Check server HTML directly — dark class must be present in the first byte
     const resp = await page.request.get("/");
     const html = await resp.text();
-    expect(html, "Server HTML must contain dark class").toContain('class="dark"');
+    expect(html, "Server HTML must contain dark class").toMatch(/<html\b[^>]*class="[^"]*\bdark\b[^"]*"/);
 
     // Now navigate and verify it never drops
     await page.goto("/");
@@ -103,8 +109,9 @@ test.describe("Dark-mode computed style assertions", () => {
       localStorage.setItem("theme", "dark");
     });
 
-    await page.context().addCookies([{ name: "theme", value: "dark", url: dashboardUrl }]);
+    await page.context().addCookies([themeCookie("dark")]);
     await page.goto("/skills");
+    await expect(page.locator("nav").first()).toBeAttached();
 
     // Body background = --color-surface-muted
     const bodyBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
@@ -137,8 +144,9 @@ test.describe("Dark-mode computed style assertions", () => {
       localStorage.setItem("theme", "dark");
     });
 
-    await page.context().addCookies([{ name: "theme", value: "dark", url: dashboardUrl }]);
+    await page.context().addCookies([themeCookie("dark")]);
     await page.goto("/skills");
+    await expect(page.locator("nav").first()).toBeAttached();
 
     const navBg = await page.evaluate(() => {
       const nav = document.querySelector("nav");

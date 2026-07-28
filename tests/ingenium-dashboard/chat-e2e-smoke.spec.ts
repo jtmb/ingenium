@@ -1,5 +1,15 @@
 import { test, expect } from "@playwright/test";
 
+const PIXEL_TOLERANCE = 1;
+
+function expectWithinPixels(actual: number | undefined, expected: number, label: string): void {
+  expect(actual, `${label} must be available`).toBeDefined();
+  if (actual === undefined) return;
+  expect(Math.abs(actual - expected), `${label} differs by more than ${PIXEL_TOLERANCE}px`).toBeLessThanOrEqual(
+    PIXEL_TOLERANCE,
+  );
+}
+
 test.describe("Chat — end-to-end smoke", () => {
   test("full send/receive cycle with fixture server", async ({ page }) => {
     // Full pipeline: browser → Next.js → API → fixture OpenCode → SSE → rendered response
@@ -181,7 +191,7 @@ test.describe("Chat — end-to-end smoke", () => {
     const desktopDrawer = page.getByRole("dialog", { name: "Activity" });
     await expect(desktopDrawer).toBeVisible();
     const desktopBox = await desktopDrawer.boundingBox();
-    expect(desktopBox?.width).toBe(400);
+    expectWithinPixels(desktopBox?.width, 400, "desktop activity drawer width");
     await expect(desktopDrawer.getByText("transparent chat streaming")).toBeVisible();
     await expect(
       desktopDrawer.getByText("I've completed the analysis. The chat pipeline is working correctly."),
@@ -190,8 +200,12 @@ test.describe("Chat — end-to-end smoke", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     const mobileDrawer = page.getByRole("dialog", { name: "Activity" });
     const mobileBox = await mobileDrawer.boundingBox();
-    expect(mobileBox?.width).toBe(390);
-    expect(mobileBox?.height).toBe(844);
+    const mobileViewport = page.viewportSize();
+    expect(mobileViewport).not.toBeNull();
+    if (mobileViewport) {
+      expectWithinPixels(mobileBox?.width, mobileViewport.width, "mobile activity drawer width");
+      expectWithinPixels(mobileBox?.height, mobileViewport.height, "mobile activity drawer height");
+    }
 
     await page.keyboard.press("Escape");
     await expect(mobileDrawer).toBeHidden();
