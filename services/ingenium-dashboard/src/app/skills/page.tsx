@@ -392,16 +392,18 @@ export default function SkillsPage() {
               </p>
             )}
             {filtered.map((s) => (
-              <div
+              <button
+                type="button"
                 key={s.id}
                 onClick={() => fetchSkill(s.name)}
-                className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow cursor-pointer"
+                className="w-full bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] hover:shadow-md transition-shadow cursor-pointer text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-link)]"
                 data-testid={`skill-card-${s.name}`}
+                aria-label={`Open skill ${s.name}`}
               >
-                <h3 className="font-medium text-[var(--color-text-primary)]">{s.name}</h3>
-                <p className="text-sm text-[var(--color-text-muted)] truncate">{s.description}</p>
-                {s.tags && <p className="text-xs mt-1" style={{ color: "var(--color-text-link)" }}>{s.tags}</p>}
-              </div>
+                <span className="block font-medium text-[var(--color-text-primary)]">{s.name}</span>
+                <span className="block text-sm text-[var(--color-text-muted)] truncate">{s.description}</span>
+                {s.tags && <span className="block text-xs mt-1" style={{ color: "var(--color-text-link)" }}>{s.tags}</span>}
+              </button>
             ))}
           </div>
 

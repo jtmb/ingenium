@@ -130,6 +130,25 @@ test.describe("Ingenium Dashboard", () => {
     await expect(page.getByPlaceholder("Search skills...", { exact: true })).toBeVisible();
   });
 
+  test("skills card opens by keyboard and restores focus after Escape", async ({ page }) => {
+    await mockSkillsDetail(page);
+    await page.goto("/skills", { waitUntil: "domcontentloaded" });
+
+    const opener = page.getByTestId("skill-card-skills-layout");
+    await expect(opener).toHaveAttribute("type", "button");
+    await expect(page.getByRole("button", { name: "Open skill skills-layout", exact: true })).toBeVisible();
+    await opener.focus();
+
+    for (const key of ["Enter", "Space"]) {
+      await opener.press(key);
+      const dialog = page.getByRole("dialog", { name: "skills-layout" });
+      await expect(dialog).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect(opener).toBeFocused();
+    }
+  });
+
   test("skills detail stays viewport-bounded beside nested wide Markdown on desktop", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     const dialog = await openLayoutSkill(page);

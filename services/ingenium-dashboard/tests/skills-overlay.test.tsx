@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import type { Skill } from "../src/lib/api";
 
@@ -53,6 +53,23 @@ describe("SkillsPage detail overlay", () => {
   });
 
   afterEach(cleanup);
+
+  it("opens from the native skill control and restores focus after Escape", async () => {
+    render(<SkillsPage />);
+
+    const opener = await screen.findByTestId("skill-card-layout-skill");
+    expect(opener.tagName).toBe("BUTTON");
+    expect(opener.getAttribute("aria-label")).toBe("Open skill layout-skill");
+    expect(opener.querySelectorAll("button, a, input, select, textarea, [role='button']").length).toBe(0);
+
+    opener.focus();
+    fireEvent.click(opener);
+    expect(await screen.findByRole("dialog", { name: "layout-skill" })).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "layout-skill" })).toBeNull());
+    expect(document.activeElement).toBe(opener);
+  });
 
   it("uses the shared accessible dialog with a viewport-bounded responsive preview", async () => {
     render(<SkillsPage />);
