@@ -99,4 +99,4 @@ Web and CLI sessions share the same backend process state.
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 - The `appuser` has passwordless `sudo` access inside the container for package installation.
-- Use the OpenCode interface to interact with the built-in 267-tool Ingenium MCP catalog across 28 baseline categories; project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the built-in 269-tool Ingenium MCP catalog across 28 baseline categories (266 server registrations plus 3 extension tools); project-scoped child discovery can add tools and categories dynamically.

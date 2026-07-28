@@ -15,7 +15,7 @@ Technical reference documents for the Ingenium system.
 |----------|-------------|
 | [Roadmap](./ROADMAP.md) | Canonical execution-ready roadmap contracts, gates, dependencies, and work-marker protocol |
 | [Environment Variables](./variables.md) | Canonical reference for all environment variables |
-| [MCP Tools Reference](./mcp-tools.md) | Built-in 267-tool catalog across 28 baseline categories plus dynamic child tools |
+| [MCP Tools Reference](./mcp-tools.md) | Built-in 269-tool catalog across 28 baseline categories (266 server + 3 extension) plus dynamic child tools |
 | [Skill Taxonomy Migration](./skill-taxonomy.md) | Phase 3 consolidation: 36→10 canonical skills with exact mapping and provenance |
 | [Docs Workspace](./docs-workspace.md) | Full documentation workspace reference: schema, API endpoints, editor modes, security |
 

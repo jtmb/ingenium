@@ -296,8 +296,13 @@ Input validation: `content` required, `priority` must be integer 0–10 (default
 
 #### Context RAG uploads and retrieval
 
-These routes are also project-scoped under `/api/v1/context`. They are API-only
-in CTX-003; no MCP or Dashboard UI surface is implied.
+These routes are also project-scoped under `/api/v1/context`. The OpenCode
+session-import route is exposed through the
+`ingenium_context_opencode_session_import` server MCP proxy; it is not a
+Dashboard UI route. The extension-native
+`ingenium_context_import_current_session` tool uses the trusted OpenCode
+plugin context and immutable conversation endpoints instead of this upload
+route.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -308,7 +313,7 @@ in CTX-003; no MCP or Dashboard UI surface is implied.
 | GET | `/uploads` | List context-upload source metadata and provenance without returning document bodies. |
 | GET | `/rag/search?q=` | Search only the current project's context-upload corpus and return provenance citations/snippets; no global fallback. |
 | POST | `/rag/ask` | Ask against only the current project's context-upload corpus. Returns an answer plus source-hash/provenance citations. |
-| POST | `/imports/opencode-session` | Opt-in OpenCode text-message import. Requires a safely project-bound `sessionId` and absolute `directory`; unavailable or mismatched sessions fail closed. |
+| POST | `/imports/opencode-session` | Opt-in OpenCode text-message import used by `ingenium_context_opencode_session_import`. Requires a safely project-bound `sessionId` and absolute `directory`; unavailable or mismatched sessions fail closed. Validated text is stored with the existing project-local SHA-256 content-hash deduplication semantics. |
 | GET | `/learning/current` | Retrieve bounded project-local observations/traits with latest input and trait timestamps. |
 | POST | `/learning/ingest` | Explicitly snapshot current learning into a RAG source, or return `{ noOp: true, reason: "NO_CURRENT_LEARNING" }`. |
 | GET | `/conversations/:conversationId/checkpoints/:checkpointId/rag/search?q=` | Search only the immutable RAG source set cited by that checkpoint and return historical citations. |

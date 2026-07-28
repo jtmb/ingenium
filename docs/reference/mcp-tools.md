@@ -1,12 +1,12 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 267-tool built-in Ingenium MCP catalog across 28 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 269-tool built-in Ingenium MCP catalog across 28 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **267 tools** across **28 baseline categories**:
-265 tools registered by the server and 2 extension tools. A project-scoped
+The built-in catalog contains **269 tools** across **28 baseline categories**:
+266 tools registered by the server and 3 extension tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** name (except where noted).
@@ -157,6 +157,34 @@ Immutable conversation tools are project-scoped and use optimistic `expectedRevi
 | `ingenium_context_conversation_archive` / `ingenium_context_conversation_unarchive` | Append reversible archive-state events after explicit confirmation; immutable conversations/checkpoints are never deleted |
 | `ingenium_context_checkpoint_audit_list` | Read bounded, content-free archive and restore-as-new audit evidence |
 | `ingenium_context_checkpoint_restore` | Restore a checkpoint by branching to a new immutable conversation after a matching one-time confirmation; the source is unchanged |
+| `ingenium_context_opencode_session_import` | Server MCP proxy for the API-owned OpenCode session import. The caller explicitly supplies a project-bound session ID and absolute directory; validated user/assistant text is ingested into Context RAG with the existing upload/content-hash deduplication semantics. |
+
+The two session-import tools deliberately have different trust boundaries:
+
+- `ingenium_context_import_current_session` is an extension-native tool. Its
+  trusted `ToolContext` and plugin client identify the current OpenCode session;
+  callers cannot select a session, directory, worktree, or Ingenium project.
+  It preserves source order, imports only ordinary user text and completed
+  assistant text, filters non-text/synthetic/ignored parts, and appends the
+  entries to an immutable Context conversation. Imports are bounded (`limit`
+  1–100, 32,000-character chunks, at most 512 chunks), and stable idempotency
+  keys make replay safe by skipping already imported entries.
+- `ingenium_context_opencode_session_import` is the server MCP proxy. MCP
+  cannot infer the external caller's OpenCode session, so `project`,
+  `sessionId`, `directory`, `title`, and `limit` are explicit inputs. The
+  launcher project must match; the session ID and absolute directory are
+  validated, the directory basename must match the project, and the API must
+  report the same session and directory before message bodies are read. The
+  API accepts at most 100 messages and only validated text parts, enforcing
+  chronological/session ownership and the 1 MiB content, 256-part, and 64 KiB
+  per-part limits. No-text imports are a no-op. Successful retries use the
+  existing project-local SHA-256 content-hash semantics and return a
+  deduplicated result rather than creating another source.
+
+The extension-native tool is loaded by the extension plugin, not discovered by
+an already-running OpenCode process. Rebuild `@ingenium/extension` after
+changing the launcher/plugin and restart OpenCode to load the tool; restart the
+MCP transport after changing the server proxy.
 
 There is no checkpoint-delete MCP tool. Confirmation tokens are capabilities:
 keep them out of transcripts and logs, use each once before it expires, and do
@@ -267,6 +295,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 267 tools across 28 categories.** Project-scoped child
+**Built-in baseline: 269 tools across 28 categories (266 server + 3 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

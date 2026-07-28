@@ -162,7 +162,7 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **265 built-in registered tools** across **28 baseline categories**. Two extension-registered tools bring the built-in catalog to **267**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **266 built-in registered tools** across **28 baseline categories**. Three extension-registered tools bring the built-in catalog to **269**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
 
 ## Usage Telemetry
@@ -708,6 +708,22 @@ Agent (MCP tool) ──▶ ingenium_context_get / ingenium_context_update
 
 The `plan_*` tools remain supported for backward compatibility. The `context_*` tools provide the canonical CRUD surface. Both read/write the same `context_entries` table.
 
+Session import has two separate execution paths. The server MCP tool
+`ingenium_context_opencode_session_import` is an API proxy: because an external
+MCP caller does not provide a trusted OpenCode `ToolContext`, it requires an
+explicit project-bound session ID and absolute directory and retains the
+API-owned Context RAG upload, validation, and content-hash deduplication
+semantics. The extension-native
+`ingenium_context_import_current_session` instead receives the current session
+ID, directory, worktree, and abort signal from trusted `ToolContext` plus the
+OpenCode plugin client. It writes ordered user/completed-assistant text into
+immutable Context conversations, filters to text-only non-synthetic/non-ignored
+parts, and uses stable idempotency keys so replay skips existing entries.
+Neither path can use the server MCP tool to infer an external caller's session.
+The native tool requires a rebuilt extension and an OpenCode restart after its
+plugin registration changes; the server proxy requires the MCP transport to be
+restarted after its server build changes.
+
 ### WAL Safety
 
 All context operations follow the HARD RULE `checkpointAfterWrite()` must be called OUTSIDE `execTransaction()`. Calling checkpoint inside a transaction causes `SQLITE_LOCKED`.
@@ -721,7 +737,8 @@ the generic RAG route's optional global-project fallback.
 |-------|-------|---------------------|
 | Direct text / Markdown / JSON / JSONL | `POST /api/v1/context/uploads` | ≤1 MiB UTF-8; SHA-256 deduplicated per project; source, chunks, embeddings, and provenance commit together. |
 | Chunked document | `POST /api/v1/context/uploads/chunked`, then `.../:id/chunks` and `.../:id/complete` | ≤2 MiB total, ≤32 chunks, ≤64 KiB each; staged chunks are not searchable until ordered byte-size and SHA-256 verification succeeds in the final transaction. |
-| OpenCode session | `POST /api/v1/context/imports/opencode-session` | Opt-in only. The caller must provide an absolute directory whose basename equals the requested project, and OpenCode must report that exact directory before text parts are read. Reasoning and tool parts are excluded. |
+| OpenCode session (server MCP proxy) | `POST /api/v1/context/imports/opencode-session` | Opt-in only. `ingenium_context_opencode_session_import` supplies a safe session ID and absolute directory whose basename equals the requested project; OpenCode must report that exact directory before text parts are read. The API retains project-local SHA-256 content-hash deduplication. Reasoning, tool, synthetic, ignored, and other non-text parts are excluded. |
+| Current OpenCode session (extension-native) | Immutable Context conversations | `ingenium_context_import_current_session` receives trusted `ToolContext` identity and the plugin client, so it imports the current session without caller-selected session/directory/project inputs. It preserves user/completed-assistant order and uses idempotent message appends. |
 | Current learning | `POST /api/v1/context/learning/ingest` | Explicit snapshot of current project observations and active traits; returns an explainable no-op when neither exists. |
 
 The durable `context_rag_uploads` rows retain a source hash, provenance
@@ -932,8 +949,8 @@ Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` em
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **267 tools** across **28 baseline
-categories**. Project-scoped child discovery can increase the effective total
+The built-in system catalog exposes **269 tools** across **28 baseline
+categories** (**266 server + 3 extension**). Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
@@ -962,6 +979,10 @@ and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-t
 | Jobs | 10 | list, create, update, delete, run, runs, run_logs, run_cancel, get, suggest |
 | Dashboard | 1 | dashboard_summary |
 | Documentation | 48 | list_spaces, get_space, create_space, update_space, delete_space, list_pages, get_page_tree, get_page, create_page, update_page, delete_page, restore_page, move_page, search, get_draft, save_draft, delete_draft, list_versions, get_version, restore_version, list_comments, create_comment, resolve_comment, delete_comment, list_tags, get_page_tags, add_tag, remove_tag, get_backlinks, list_attachments, delete_attachment, list_templates, get_template, create_template, update_template, delete_template, link_project, unlink_project, get_projects, toggle_favorite, get_favorites, import_pages, export_space, get_stats, publish_page, trash_list, trash_purge, attachment_download |
+
+The category table counts server registrations; the three extension tools are
+`synthesize_observations`, `auto_observe_now`, and
+`ingenium_context_import_current_session`.
 
 ---
 
