@@ -100,7 +100,7 @@ fi
 # container may run as non-root in some environments (e.g. OpenShift);
 # the directories themselves are the critical requirement, ownership
 # is best-effort
-for dir in /app/.ingenium /app/.ingenium/logs /app/.opencode/skills /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log; do
+for dir in /app/.ingenium /app/.ingenium/logs /app/.opencode/skills /home/appuser/.config/opencode /home/appuser/.config/opencode/agents /home/appuser/.local/share/opencode/log; do
   if [ ! -d "$dir" ]; then
     mkdir -p "$dir"
   fi
@@ -189,6 +189,21 @@ if ! cmp -s "$RUNTIME_API_TOKEN_FILE" "$WORKSPACE_MCP_TOKEN_FILE"; then
   echo "ERROR: OpenCode MCP token file does not match the runtime token file"
   exit 1
 fi
+
+# Project the two server-owned profiles into OpenCode's persistent global
+# discovery directory. OpenCode runs from /workspace but loads its persisted
+# global config from /home/appuser/.config/opencode; keeping these copies global
+# makes the chat and broker profiles discoverable without overwriting operator
+# profiles. The containing directory is created before the recursive ownership
+# repair above so a persisted opencode-config volume remains writable by appuser.
+GLOBAL_AGENTS_DIR="/home/appuser/.config/opencode/agents"
+if [ -L "$GLOBAL_AGENTS_DIR" ] || { [ -e "$GLOBAL_AGENTS_DIR" ] && [ ! -d "$GLOBAL_AGENTS_DIR" ]; }; then
+  echo "ERROR: OpenCode global agents directory must be a real directory"
+  exit 1
+fi
+mkdir -p "$GLOBAL_AGENTS_DIR"
+chmod 0700 "$GLOBAL_AGENTS_DIR"
+/app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents "$GLOBAL_AGENTS_DIR"
 
 # Copy all agent profiles to the workspace before OpenCode starts. OpenCode scans its
 # worktree's .opencode/agents/ directory, while the source agents live in /app.

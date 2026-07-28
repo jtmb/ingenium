@@ -203,6 +203,8 @@ require_text scripts/docker-entrypoint.sh 'unset INGENIUM_API_TOKEN'
 require_text scripts/docker-entrypoint.sh 'export INGENIUM_API_TOKEN_FILE="$RUNTIME_API_TOKEN_FILE"'
 require_text scripts/docker-entrypoint.sh 'project-opencode-global-config.mjs "$OC_CONFIG"'
 require_text scripts/docker-entrypoint.sh '"/app/packages/ingenium-extension/resource-sync.ts"'
+require_text scripts/docker-entrypoint.sh 'GLOBAL_AGENTS_DIR="/home/appuser/.config/opencode/agents"'
+require_text scripts/docker-entrypoint.sh '/app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents "$GLOBAL_AGENTS_DIR"'
 require_text scripts/docker-entrypoint.sh '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
 require_text scripts/run-init-project.sh '/app/scripts/normalize-agent-profiles.sh "$worktree/.opencode/agents"'
 require_text scripts/normalize-agent-profiles.sh 'find -P "$agents_dir" -type f -name "*.md" -exec chmod 0644 {} +'
@@ -214,6 +216,8 @@ require_text scripts/start-opencode-web.sh 'INGENIUM_OPENCODE_START_CLEAN_ENV="1
 require_text scripts/start-opencode-web.sh 'attempts=10'
 require_text scripts/start-opencode-web.sh 'node /app/scripts/probe-api.mjs'
 require_text scripts/run-init-project.sh 'project="${INGENIUM_PROJECT:-global-default}"'
+
+bash "$REPO_ROOT/tests/test-opencode-global-agent-profiles.sh"
 
 # Express and token-bearing services remain container-only; the separate API
 # boundary is loopback-only and bearer-authenticated for host MCP clients.
