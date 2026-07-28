@@ -678,9 +678,9 @@ function WelcomeScreen() {
     <div className="flex items-center justify-center h-full">
       <div className="text-center space-y-4 max-w-sm">
         <IconFile />
-        <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
+        <h1 className="text-xl font-semibold text-[var(--color-text-primary)]">
           Welcome to Docs
-        </h2>
+        </h1>
         <p className="text-sm text-[var(--color-text-muted)]">
           Select a page from the tree or create a new one to get started.
         </p>

@@ -362,7 +362,9 @@ export default function SkillsPage() {
               className="border border-[var(--color-border)] p-2 rounded text-sm flex-1 h-10"
               data-testid="skills-search"
             />
+            <label htmlFor="skills-sort" className="sr-only">Sort skills</label>
             <select
+              id="skills-sort"
               value={sortMode}
               onChange={(e) => setSortMode(e.target.value as any)}
               className="border border-[var(--color-border)] rounded p-2 text-sm bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer h-10"
@@ -448,7 +450,13 @@ export default function SkillsPage() {
                   </div>
                   <div data-testid="skill-preview-content" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
                     {editMode ? (
-                      <textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="h-full min-h-0 w-full p-4 border rounded font-mono text-sm resize-none" />
+                      <textarea
+                        id="skill-editor"
+                        aria-label={`Edit ${selectedFile}`}
+                        value={editText}
+                        onChange={(e) => setEditText(e.target.value)}
+                        className="h-full min-h-0 w-full p-4 border rounded font-mono text-sm resize-none"
+                      />
                     ) : (
                       <div className="min-w-0 break-words [overflow-wrap:anywhere]">
                         <MarkdownViewer content={fileContent} isMarkdown={isMarkdown} language={lang} />

@@ -57,6 +57,8 @@ describe("SkillsPage detail overlay", () => {
   it("opens from the native skill control and restores focus after Escape", async () => {
     render(<SkillsPage />);
 
+    expect(screen.getByRole("combobox", { name: "Sort skills" })).toBeTruthy();
+
     const opener = await screen.findByTestId("skill-card-layout-skill");
     expect(opener.tagName).toBe("BUTTON");
     expect(opener.getAttribute("aria-label")).toBe("Open skill layout-skill");
@@ -65,6 +67,13 @@ describe("SkillsPage detail overlay", () => {
     opener.focus();
     fireEvent.click(opener);
     expect(await screen.findByRole("dialog", { name: "layout-skill" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("textbox", { name: "Edit SKILL.md" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open references/nested/a-path-that-is-deliberately-long-to-test-overflow.md" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("textbox", { name: "Edit references/nested/a-path-that-is-deliberately-long-to-test-overflow.md" })).toBeTruthy();
 
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "layout-skill" })).toBeNull());
