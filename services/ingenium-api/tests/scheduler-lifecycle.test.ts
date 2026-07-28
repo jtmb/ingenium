@@ -26,6 +26,7 @@ const core = vi.hoisted(() => ({
     cleanupExpiredLocks: vi.fn(() => 0),
   },
   checkpointAfterWrite: vi.fn(),
+  resolveCoreDbPath: vi.fn(() => "/tmp/ingenium-scheduler-lifecycle.db"),
   backups: { listBackups: vi.fn(() => []) },
 }));
 

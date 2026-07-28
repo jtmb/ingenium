@@ -9,6 +9,7 @@ import {
   providerErrorDiagnostic,
 } from "ingenium-email";
 import { loadApiToken } from "./middleware/api-token.js";
+import { createBackgroundSynthesisBrokerExecutor } from "./opencode-client.js";
 
 /**
  * Default synthesis interval: 15 minutes (900,000ms).
@@ -115,7 +116,9 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
 
       // 1. Extraction — LLM-based observation extraction from OpenCode messages.
       try {
-        const extractResult = await extraction.runExtraction(p.id, p.name);
+        const extractResult = await extraction.runExtraction(p.id, p.name, {
+          llmExecutor: createBackgroundSynthesisBrokerExecutor(p.id),
+        });
         logger.info("scheduler", `Extraction for "${p.name}": scanned=${extractResult.scanned}, created=${extractResult.created}`);
       } catch (err: any) {
         logger.warn("scheduler", `Extraction for "${p.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
@@ -123,7 +126,9 @@ async function triggerSynthesisForAllProjects(port: number, generation: number):
 
       // 2. Synthesis — processes pending observations into traits + skills
       try {
-        const result = await synthesis.runSynthesis(p.id);
+        const result = await synthesis.runSynthesis(p.id, undefined, {
+          llmExecutor: createBackgroundSynthesisBrokerExecutor(p.id),
+        });
         logger.info(
           "scheduler",
           `Synthesis for "${p.name}": ${result.summary}`,

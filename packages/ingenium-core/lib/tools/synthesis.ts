@@ -3,7 +3,7 @@ import * as personality from "./personality.js";
 import * as skills from "./skills.js";
 import * as projects from "./projects.js";
 import * as synthesisLlm from "./synthesis-llm.js";
-import type { SynthesisLLMResult } from "./synthesis-llm.js";
+import type { LLMTextExecutor, SynthesisLLMResult } from "./synthesis-llm.js";
 import * as skillGovernance from "./skill-governance.js";
 import { getSetting, setSetting } from "./settings.js";
 import { logEvent } from "./pipeline-events.js";
@@ -48,7 +48,11 @@ export interface SynthesisResult {
  *   - "correction" → feedback_style, "preference" → code_preference, etc.
  *   - New traits started at 0.05-0.15 confidence (below display threshold 0.3)
  */
-export async function runSynthesis(projectId: string, sessionId?: string): Promise<SynthesisResult> {
+export async function runSynthesis(
+  projectId: string,
+  sessionId?: string,
+  opts?: { llmExecutor?: LLMTextExecutor },
+): Promise<SynthesisResult> {
   const result: SynthesisResult = {
     observations_processed: 0,
     traits_created: 0,
@@ -112,11 +116,12 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
     projectId,
     batch.map(o => ({ id: o.id, observation_type: o.observation_type, content: o.content })),
     existingActiveTraits.map(t => ({ id: t.id, trait_type: t.trait_type, trait_value: t.trait_value, confidence: t.confidence })),
+    opts?.llmExecutor,
   );
 
   if (!consolidation) {
     // LLM not configured or unavailable — leave observations PENDING for a future cycle
-    const reason = synthesisLlm.isLLMSynthesisConfigured(projectId)
+    const reason = synthesisLlm.getFullLLMSynthesisConfig(projectId) || opts?.llmExecutor
       ? "LLM consolidation API unreachable — leaving observations pending for retry"
       : "LLM synthesis not configured — leaving observations pending until configured";
     result.summary = reason;
@@ -259,18 +264,15 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
   // If user has configured an LLM for skill synthesis, use it
   // to analyze observations and create/update skills.
   let llmInsights: string[] = [];
-  if (synthesisLlm.isLLMSynthesisConfigured(projectId)) {
+  const directSynthesisConfig = synthesisLlm.getFullLLMSynthesisConfig(projectId);
+  if (directSynthesisConfig || opts?.llmExecutor) {
     try {
-      const config = synthesisLlm.getLLMSynthesisConfig(projectId);
-      const gid = projects.getGlobalProject()?.id;
-      const endpointSetting = gid ? getSetting(gid, "synthesis_endpoint") : undefined;
-      if (config && endpointSetting) {
-        const existingTraits = personality.getTraits(projectId);
-        const existingSkillsList = skills.listSkills(projectId);
+      const existingTraits = personality.getTraits(projectId);
+      const existingSkillsList = skills.listSkills(projectId);
 
-        let llmResult: SynthesisLLMResult;
-        try {
-          llmResult = await synthesisLlm.callSynthesisLLM(
+      let llmResult: SynthesisLLMResult;
+      if (directSynthesisConfig) {
+        llmResult = await synthesisLlm.callSynthesisLLM(
             batch, // the observations that were just processed
             existingSkillsList.map(s => ({ name: s.name, description: s.description })),
             existingTraits.map(t => ({
@@ -278,50 +280,29 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
               trait_value: t.trait_value,
               confidence: t.confidence
             })),
-            endpointSetting,
-            config.model,
-            config.apiKey,
+            directSynthesisConfig.endpoint!,
+            directSynthesisConfig.model,
+            directSynthesisConfig.apiKey,
             undefined,
-            gid ? getSetting(gid, "synthesis_allow_private_network") === "true" : false,
-          );
-          llmInsights = llmResult.insights || [];
-        } catch (primaryErr: any) {
-          // Try backup provider if primary fails
-          // NOTE: This backup fallback is duplicated in consolidateSkills().
-          //       Future work should extract to a shared helper.
-          const backupModel = gid ? getSetting(gid, "synthesis_backup_model") : undefined;
-          const backupEndpoint = gid ? getSetting(gid, "synthesis_backup_endpoint") : undefined;
-          const backupApiKey = gid ? getSetting(gid, "synthesis_backup_api_key") : undefined;
+            directSynthesisConfig.allowPrivateNetwork === true,
+        );
+        llmInsights = llmResult.insights || [];
+      } else {
+        llmResult = await synthesisLlm.callSynthesisLLMWithExecutor(
+            batch,
+            existingSkillsList.map(s => ({ name: s.name, description: s.description })),
+            existingTraits.map(t => ({
+              trait_type: t.trait_type,
+              trait_value: t.trait_value,
+              confidence: t.confidence,
+            })),
+            opts!.llmExecutor!,
+        );
+        llmInsights = llmResult.insights || [];
+      }
 
-          if (backupModel && backupEndpoint) {
-            try {
-              llmResult = await synthesisLlm.callSynthesisLLM(
-                batch,
-                existingSkillsList.map(s => ({ name: s.name, description: s.description })),
-                existingTraits.map(t => ({
-                  trait_type: t.trait_type,
-                  trait_value: t.trait_value,
-                  confidence: t.confidence
-                })),
-                backupEndpoint,
-                backupModel,
-                backupApiKey || undefined,
-                undefined,
-                gid ? getSetting(gid, "synthesis_backup_allow_private_network") === "true" : false,
-              );
-              llmInsights = llmResult.insights || [];
-            } catch (backupErr: any) {
-              // Both primary and backup failed
-              throw new Error(`Synthesis LLM failed (primary: ${primaryErr.message}, backup: ${backupErr.message})`);
-            }
-          } else {
-            // No backup configured — re-throw primary error
-            throw primaryErr;
-          }
-        }
-
-        // Execute skill create proposals (governance-gated)
-        for (const skillToCreate of llmResult.skills_to_create) {
+      // Execute skill create proposals (governance-gated)
+      for (const skillToCreate of llmResult.skills_to_create) {
           try {
             const fileTree = skillToCreate.reference_files && skillToCreate.reference_files.length > 0
               ? JSON.stringify(Object.fromEntries(skillToCreate.reference_files.map(rf => [rf.path, rf.content])))
@@ -365,10 +346,10 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
             logger.error("synthesis", `Skill create proposal "${skillToCreate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
             result.errors.push(`Skill create proposal "${skillToCreate.name}": ${err.message}`);
           }
-        }
+      }
 
-        // Execute skill update proposals (governance-gated)
-        for (const skillToUpdate of llmResult.skills_to_update) {
+      // Execute skill update proposals (governance-gated)
+      for (const skillToUpdate of llmResult.skills_to_update) {
           try {
             const existing = skills.getSkill(projectId, skillToUpdate.name);
             if (existing) {
@@ -424,10 +405,10 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
             logger.error("synthesis", `Skill update proposal "${skillToUpdate.name}" failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
             result.errors.push(`Skill update proposal "${skillToUpdate.name}": ${err.message}`);
           }
-        }
+      }
 
-        // Execute LLM personality_traits — these were silently dropped before
-        if (llmResult.personality_traits && llmResult.personality_traits.length > 0) {
+      // Execute LLM personality_traits — these were silently dropped before
+      if (llmResult.personality_traits && llmResult.personality_traits.length > 0) {
           for (const pt of llmResult.personality_traits) {
             try {
               const clampedConf = Math.min(0.95, Math.max(0.05, pt.confidence));
@@ -460,13 +441,12 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
               result.errors.push(`LLM trait "${pt.trait_value?.substring(0, 30)}": ${err.message}`);
             }
           }
-        }
+      }
 
-        // Update summary to include proposal info
-        const totalProposals = result.skills_created + llmResult.skills_to_update.filter(s => s.name).length;
-        if (totalProposals > 0) {
-          result.summary += ` LLM created ${totalProposals} governance proposal(s).`;
-        }
+      // Update summary to include proposal info
+      const totalProposals = result.skills_created + llmResult.skills_to_update.filter(s => s.name).length;
+      if (totalProposals > 0) {
+        result.summary += ` LLM created ${totalProposals} governance proposal(s).`;
       }
     } catch (err: any) {
       logger.error("synthesis", `LLM synthesis phase failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });
@@ -764,10 +744,14 @@ export interface ConsolidationResult {
  *          the middle of the merged document. If either skill lacks frontmatter,
  *          the merge still proceeds (the function returns the body unchanged).
  */
-export async function consolidateSkills(projectId: string): Promise<ConsolidationResult> {
-  // Skip if LLM not configured
+export async function consolidateSkills(
+  projectId: string,
+  opts?: { llmExecutor?: LLMTextExecutor },
+): Promise<ConsolidationResult> {
+  // Prefer direct configuration; use the API-owned broker only when none exists.
   const gid = projects.getGlobalProject()?.id;
-  if (!gid || !synthesisLlm.isLLMSynthesisConfigured(gid)) {
+  const directConfig = synthesisLlm.getFullLLMSynthesisConfig(projectId);
+  if (!directConfig && !opts?.llmExecutor) {
     return { merged: 0, deleted: 0, summary: "LLM not configured — skipping consolidation" };
   }
 
@@ -790,7 +774,14 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
   // Try primary LLM; fall back to backup provider on failure
   let result: synthesisLlm.ConsolidationSkillResult;
   try {
-    result = await synthesisLlm.callConsolidationLLM(projectId, prompt);
+    result = await synthesisLlm.callConsolidationLLM(
+      projectId,
+      prompt,
+      undefined,
+      undefined,
+      undefined,
+      opts?.llmExecutor,
+    );
   } catch (primaryErr: any) {
     logger.warn("synthesis", `Consolidation primary LLM failed: ${primaryErr.message} — trying backup`);
     result = { merges: [], delete: [] };
@@ -798,9 +789,9 @@ export async function consolidateSkills(projectId: string): Promise<Consolidatio
 
   // If primary returned empty (or threw), try backup provider
   if (result.merges.length === 0 && result.delete.length === 0) {
-    const backupModel = getSetting(gid, "synthesis_backup_model");
-    const backupEndpoint = getSetting(gid, "synthesis_backup_endpoint");
-    const backupApiKey = getSetting(gid, "synthesis_backup_api_key");
+    const backupModel = gid ? getSetting(gid, "synthesis_backup_model") : undefined;
+    const backupEndpoint = gid ? getSetting(gid, "synthesis_backup_endpoint") : undefined;
+    const backupApiKey = gid ? getSetting(gid, "synthesis_backup_api_key") : undefined;
 
     if (backupModel && backupEndpoint) {
       logger.info("synthesis", "Consolidation primary returned empty — falling back to backup provider");

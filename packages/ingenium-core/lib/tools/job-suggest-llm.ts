@@ -1,5 +1,5 @@
 import { logger } from "../logger.js";
-import type { LLMConfig } from "./synthesis-llm.js";
+import type { LLMConfig, LLMTextExecutor } from "./synthesis-llm.js";
 import { safeLlmFetch } from "./endpoint-policy.js";
 
 /** The result shape returned by generateJobConfig. All fields nullable on any error. */
@@ -16,7 +16,9 @@ const MAX_PROMPT_TEMPLATE = 4000;
 const MAX_CRON = 100;
 const MAX_TRIGGER_EVENT = 100;
 
-function buildPrompt(description: string): string {
+export const JOB_SUGGEST_SYSTEM_PROMPT = "You are a job configuration assistant that outputs only valid JSON.";
+
+export function buildJobSuggestPrompt(description: string): string {
   return `You are a job configuration assistant. Given a user's description of a recurring or event-driven
 task, derive the following JSON fields for an agent job:
 
@@ -87,6 +89,48 @@ function validateResult(raw: any): JobSuggestResult {
   return result;
 }
 
+/** Parse broker or direct-model content with the same defensive contract. */
+export function parseJobSuggestContent(content: string): JobSuggestResult {
+  if (!content || !content.trim()) {
+    return { prompt_template: null, schedule_cron: null, trigger_event: null };
+  }
+  return validateResult(tryParseJSON(content));
+}
+
+/**
+ * Run a job suggestion through a text-only executor. The API supplies this
+ * only after resolving a server-owned broker choice; callers cannot select a
+ * provider, model, agent, or tool via the job request body.
+ */
+export async function generateJobConfigWithExecutor(
+  executor: LLMTextExecutor,
+  description: string,
+): Promise<JobSuggestResult> {
+  if (!description?.trim()) {
+    return { prompt_template: null, schedule_cron: null, trigger_event: null };
+  }
+
+  try {
+    const result = await executor({
+      system: JOB_SUGGEST_SYSTEM_PROMPT,
+      user: buildJobSuggestPrompt(description.slice(0, MAX_DESCRIPTION)),
+      timeoutMs: 30_000,
+    });
+    if (!result.ok || !result.content.trim()) {
+      logger.warn("job-suggest-llm", "Broker job suggestion did not return usable content", {
+        outcome: result.ok ? "empty" : "failed",
+      });
+      return { prompt_template: null, schedule_cron: null, trigger_event: null };
+    }
+    return parseJobSuggestContent(result.content);
+  } catch (error) {
+    logger.warn("job-suggest-llm", "Broker job suggestion failed", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    return { prompt_template: null, schedule_cron: null, trigger_event: null };
+  }
+}
+
 /**
  * Derive a job configuration (prompt_template, schedule_cron, trigger_event)
  * from a free-text description using the configured Synthesis LLM.
@@ -113,7 +157,7 @@ export async function generateJobConfig(
   }
 
   const truncated = description.slice(0, MAX_DESCRIPTION);
-  const prompt = buildPrompt(truncated);
+  const prompt = buildJobSuggestPrompt(truncated);
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
@@ -127,7 +171,7 @@ export async function generateJobConfig(
       body: JSON.stringify({
         model: config.model,
         messages: [
-          { role: "system", content: "You are a job configuration assistant that outputs only valid JSON." },
+          { role: "system", content: JOB_SUGGEST_SYSTEM_PROMPT },
           { role: "user", content: prompt },
         ],
         temperature: 0.3, // Low temperature for deterministic JSON output — we want structure, not creativity

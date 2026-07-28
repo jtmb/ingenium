@@ -1,4 +1,4 @@
-import { logger, settings } from "ingenium-core";
+import { logger } from "ingenium-core";
 import { config } from "../config/index.js";
 
 /**
@@ -86,9 +86,11 @@ export const LLM_BROKER_AGENT = "ingenium-llm-broker";
  */
 export const DEFAULT_BROKER_TIMEOUT_MS = 30_000;
 export const DOCS_AI_BROKER_TIMEOUT_MS = 60_000;
+/** Background learning historically uses a 60-second direct-LLM timeout. */
+export const BACKGROUND_BROKER_TIMEOUT_MS = 60_000;
 export const MAX_BROKER_TIMEOUT_MS = DOCS_AI_BROKER_TIMEOUT_MS;
 
-export type BrokerTimeoutPolicy = "default" | "docs-ai";
+export type BrokerTimeoutPolicy = "default" | "docs-ai" | "background";
 
 export interface BrokerTimeoutResolution {
   policy: BrokerTimeoutPolicy;
@@ -101,12 +103,14 @@ export function resolveBrokerTimeout(
   timeoutMs: number | undefined,
   policy: BrokerTimeoutPolicy = "default",
 ): BrokerTimeoutResolution {
-  const policyDefaultTimeoutMs = policy === "docs-ai"
-    ? DOCS_AI_BROKER_TIMEOUT_MS
-    : DEFAULT_BROKER_TIMEOUT_MS;
-  const policyMaximumTimeoutMs = policy === "docs-ai"
-    ? DOCS_AI_BROKER_TIMEOUT_MS
-    : DEFAULT_BROKER_TIMEOUT_MS;
+  const policyDefaultTimeoutMs = policy === "default"
+    ? DEFAULT_BROKER_TIMEOUT_MS
+    : policy === "docs-ai"
+      ? DOCS_AI_BROKER_TIMEOUT_MS
+      : BACKGROUND_BROKER_TIMEOUT_MS;
+  const policyMaximumTimeoutMs = policy === "default"
+    ? DEFAULT_BROKER_TIMEOUT_MS
+    : MAX_BROKER_TIMEOUT_MS;
   const requestedTimeoutMs = typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
     ? timeoutMs
     : policyDefaultTimeoutMs;
@@ -1131,6 +1135,25 @@ export type SynthesisBrokerExecutor = (params: {
   timeoutPolicy?: BrokerTimeoutPolicy;
 }) => Promise<{ ok: boolean; content: string; error?: string }>;
 
+/**
+ * Narrow, text-only bridge passed into core background work. Core owns prompts
+ * and response parsing; the API retains provider resolution and the only path
+ * that can select the tool-denied OpenCode broker agent.
+ */
+export function createBackgroundSynthesisBrokerExecutor(projectId: string): (params: {
+  system: string;
+  user: string;
+  timeoutMs: number;
+}) => Promise<{ ok: boolean; content: string; error?: string }> {
+  return ({ system, user, timeoutMs }) => executeSynthesisBroker({
+    projectId,
+    system,
+    user,
+    timeoutMs,
+    timeoutPolicy: "background",
+  });
+}
+
 export async function executeSynthesisBroker(params: {
   projectId: string;
   system: string;
@@ -1152,18 +1175,19 @@ export async function executeSynthesisBroker(params: {
       timeoutPolicy: params.timeoutPolicy,
     });
   }
-  const primary = {
-    providerID: settings.getSetting(params.projectId, "synthesis_provider") || "",
-    modelID: settings.getSetting(params.projectId, "synthesis_model") || "",
-  };
-  const secondary = {
-    providerID: settings.getSetting(params.projectId, "synthesis_backup_provider") || "",
-    modelID: settings.getSetting(params.projectId, "synthesis_backup_model") || "",
-  };
-  const choices = [primary, secondary].filter((choice, index, all) =>
-    choice.providerID && choice.modelID && all.findIndex((other) =>
-      other.providerID === choice.providerID && other.modelID === choice.modelID) === index,
-  );
+  // This dynamic import avoids a static cycle: the Chat catalog itself gets
+  // OpenCode's runtime provider list through this client. Resolution runs only
+  // after this module has initialized and never accepts browser input.
+  let choices: Array<{ providerID: string; modelID: string }>;
+  try {
+    const { resolveSynthesisProviderSelections } = await import("./synthesis-provider-resolution.js");
+    choices = (await resolveSynthesisProviderSelections(params.projectId)).selections;
+  } catch (error) {
+    logger.warn("opencode-broker", "Unable to resolve synthesis provider choices", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+    choices = [];
+  }
   if (choices.length === 0) return { ok: false, content: "", error: "no synthesis provider configured" };
 
   for (const choice of choices) {

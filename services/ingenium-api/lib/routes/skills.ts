@@ -2,6 +2,7 @@ import { Router } from "express";
 import { skills, skillGovernance, synthesis, getSkillsBase, maintenanceLocks, observations } from "ingenium-core";
 import type { Skill, SkillVersion, SkillLineage, SkillProposal } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
 import fs from "fs";
 import path from "path";
 
@@ -1079,7 +1080,9 @@ skillsRouter.post("/consolidate", async (req, res) => {
   if (!checkSkillLock(req, res, projectId)) return;
 
   try {
-    const result = await synthesis.consolidateSkills(projectId);
+    const result = await synthesis.consolidateSkills(projectId, {
+      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+    });
     res.json({ data: result });
   } catch (err: any) {
     res.status(500).json({ error: { code: "CONSOLIDATION_ERROR", message: err.message } });

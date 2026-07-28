@@ -10,7 +10,7 @@
 import { getSetting, setSetting } from "./settings.js";
 import { storeObservation } from "./observations.js";
 import { logEvent } from "./pipeline-events.js";
-import { getFullLLMSynthesisConfig, isLLMSynthesisConfigured } from "./synthesis-llm.js";
+import { getFullLLMSynthesisConfig, type LLMTextExecutor } from "./synthesis-llm.js";
 import { getDb } from "../db.js";
 import { logger } from "../logger.js";
 import { safeLlmFetch } from "./endpoint-policy.js";
@@ -198,14 +198,44 @@ function buildBatchUserPrompt(messages: CandidateMessage[]): string {
 
 export async function callLLMForExtraction(
   messages: CandidateMessage[],
-  config: { model: string; endpoint: string; apiKey?: string; allowPrivateNetwork?: boolean },
+  config: { model: string; endpoint: string; apiKey?: string; allowPrivateNetwork?: boolean } | undefined,
+  executor?: LLMTextExecutor,
 ): Promise<{ rules: ExtractionRule[]; failed: boolean }> {
   const userContent = buildBatchUserPrompt(messages);
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
+  if (!config && !executor) return { rules: [], failed: true };
 
-  const baseEndpoint = config.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
+  if (!config && executor) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await executor({
+          system: EXTRACTION_SYSTEM_PROMPT,
+          user: userContent,
+          timeoutMs: 60_000,
+        });
+        if (!result.ok || !result.content.trim()) {
+          if (attempt === 0) continue;
+          logger.warn("extraction", "Broker extraction batch failed", {
+            outcome: result.ok ? "empty" : "failed",
+          });
+          return { rules: [], failed: true };
+        }
+        return { rules: parseExtractionResponse(result.content), failed: false };
+      } catch (error) {
+        if (attempt === 0) continue;
+        logger.warn("extraction", "Broker extraction batch failed", {
+          error: error instanceof Error ? error.name : "unknown",
+        });
+        return { rules: [], failed: true };
+      }
+    }
+    return { rules: [], failed: true };
+  }
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (config!.apiKey) headers["Authorization"] = `Bearer ${config!.apiKey}`;
+
+  const baseEndpoint = config!.endpoint.replace(/\/+v1\/?$/i, "").replace(/\/+$/, "");
 
   // Create a 60-second timeout per batch to prevent hanging forever
   const controller = new AbortController();
@@ -221,7 +251,7 @@ export async function callLLMForExtraction(
         method: "POST",
         headers,
         body: JSON.stringify({
-          model: config.model,
+          model: config!.model,
           messages: [
             { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
             { role: "user", content: userContent },
@@ -233,7 +263,7 @@ export async function callLLMForExtraction(
           response_format: undefined,
         }),
         signal: controller.signal,
-      }, { allowPrivateNetwork: config.allowPrivateNetwork === true, timeoutMs: 60_000 });
+      }, { allowPrivateNetwork: config!.allowPrivateNetwork === true, timeoutMs: 60_000 });
 
       clearTimeout(timeout);
 
@@ -251,7 +281,7 @@ export async function callLLMForExtraction(
         logger.info("extraction", "LLM returned 0 rules from batch", {
           rawResponse: rawContent.slice(0, 500),
           batchSize: messages.length,
-          model: config.model,
+          model: config!.model,
         });
       } else {
         logger.info("extraction", `LLM extracted ${rules.length} rules from batch`, { batchSize: messages.length });
@@ -334,7 +364,7 @@ export function parseExtractionResponse(raw: string): ExtractionRule[] {
 export async function runExtraction(
   projectId: string,
   projectName: string,
-  opts?: { limit?: number },
+  opts?: { limit?: number; llmExecutor?: LLMTextExecutor },
 ): Promise<ExtractionResult> {
   const limit = opts?.limit ?? 500;
   let scanned = 0;
@@ -344,16 +374,19 @@ export async function runExtraction(
   let highestTimestamp = 0;
 
   try {
-    // 1. Check LLM config (with per-project fallback)
-    if (!isLLMSynthesisConfigured(projectId)) {
+    // 1. Prefer an explicitly configured direct endpoint. When it is absent,
+    // the API may provide a text-only, tool-denied broker executor.
+    const resolvedConfig = getFullLLMSynthesisConfig(projectId);
+    const llmConfig = resolvedConfig?.endpoint
+      ? {
+        model: resolvedConfig.model,
+        endpoint: resolvedConfig.endpoint,
+        apiKey: resolvedConfig.apiKey,
+        allowPrivateNetwork: resolvedConfig.allowPrivateNetwork,
+      }
+      : undefined;
+    if (!llmConfig && !opts?.llmExecutor) {
       const reason = "No synthesis LLM configured — check Settings page (synthesis_model) or set SYNTHESIS_MODEL env var. Self-learning disabled.";
-      logger.warn("extraction", reason, { projectId });
-      return { scanned: 0, candidates: 0, created: 0, skipped: 0, failedBatches: 0, watermark: 0, reason };
-    }
-
-    const llmConfig = getFullLLMSynthesisConfig(projectId);
-    if (!llmConfig || !llmConfig.endpoint) {
-      const reason = "Synthesis LLM endpoint not configured — set synthesis_endpoint in Settings or SYNTHESIS_ENDPOINT env var";
       logger.warn("extraction", reason, { projectId });
       return { scanned: 0, candidates: 0, created: 0, skipped: 0, failedBatches: 0, watermark: 0, reason };
     }
@@ -409,12 +442,11 @@ export async function runExtraction(
     for (let i = 0; i < rawCandidates.length; i += BATCH_SIZE) {
       logger.info("extraction", `Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(rawCandidates.length / BATCH_SIZE)} (${rawCandidates.length} candidates total)`);
       const batch = rawCandidates.slice(i, i + BATCH_SIZE);
-      const { rules, failed } = await callLLMForExtraction(batch, {
-        model: llmConfig.model,
-        endpoint: llmConfig.endpoint,
-        apiKey: llmConfig.apiKey,
-        allowPrivateNetwork: llmConfig.allowPrivateNetwork,
-      });
+      const { rules, failed } = await callLLMForExtraction(
+        batch,
+        llmConfig ?? undefined,
+        opts?.llmExecutor,
+      );
 
       if (failed) {
         failedBatches++;
@@ -483,7 +515,7 @@ export async function runExtraction(
           created,
           skipped,
           failedBatches,
-          model: llmConfig.model,
+          model: llmConfig?.model ?? "broker",
         },
       );
     } catch (err: any) {

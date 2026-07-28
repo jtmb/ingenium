@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { synthesis, logger, maintenanceLocks } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
 
 /** Handles /api/v1/synthesis — triggers the self-learning pipeline (per-project and cross-project). */
 export const synthesisRouter = Router();
@@ -64,7 +65,9 @@ async function scheduleAsync(projectId: string, sessionId: string | undefined, o
       }
     }, RENEW_INTERVAL_MS);
 
-    const result = await synthesis.runSynthesis(projectId, sessionId);
+    const result = await synthesis.runSynthesis(projectId, sessionId, {
+      llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+    });
     logger.info("synthesis", `Completed: ${JSON.stringify(result)}`);
   } catch (err: any) {
     logger.error("synthesis", `Synthesis pipeline failed: ${err.message}`, {

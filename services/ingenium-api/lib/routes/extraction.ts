@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { extraction, logger } from "ingenium-core";
 import { requireProject } from "../helpers.js";
+import { createBackgroundSynthesisBrokerExecutor } from "../opencode-client.js";
 
 /**
  * Observation extraction — the thin HTTP trigger for the auto-observer pipeline.
@@ -27,7 +28,10 @@ extractionRouter.post("/run", (req, res) => {
 
   setImmediate(async () => {
     try {
-      const result = await extraction.runExtraction(projectId, projectName, { limit });
+      const result = await extraction.runExtraction(projectId, projectName, {
+        limit,
+        llmExecutor: createBackgroundSynthesisBrokerExecutor(projectId),
+      });
       logger.info("extraction", `Completed: scanned=${result.scanned} candidates=${result.candidates} created=${result.created}`);
     } catch (err: any) {
       logger.error("extraction", `Extraction run failed: ${err.message}`, { error: err.message, name: err.name, stack: err.stack?.split("\n").slice(0, 5).join("\n") });

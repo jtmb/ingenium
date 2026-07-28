@@ -2,6 +2,8 @@ import { Router } from "express";
 import { jobs, synthesisLlm, jobSuggestLlm } from "ingenium-core";
 import { requireProject } from "../helpers.js";
 import { executeJobRun, killRunProcess } from "../job-runner.js";
+import { executeSynthesisBroker } from "../opencode-client.js";
+import { resolveSynthesisProviderSelections } from "../synthesis-provider-resolution.js";
 
 /**
  * CRUD + execution routes for per-project scheduled jobs.
@@ -100,7 +102,7 @@ jobsRouter.get("/runs/:runId/logs", (req, res) => {
 // ============================================================================
 
 // POST /suggest — derive job config from description using Synthesis LLM
-jobsRouter.post("/suggest", (req, res) => {
+jobsRouter.post("/suggest", async (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
 
@@ -110,23 +112,35 @@ jobsRouter.post("/suggest", (req, res) => {
     return;
   }
 
-  const llmConfig = synthesisLlm.resolveLLMConfig(projectId);
-  if (!llmConfig || !llmConfig.model) {
-    res.json({ data: { prompt_template: null, schedule_cron: null, trigger_event: null, configured: false } });
-    return;
-  }
-
-  jobSuggestLlm.generateJobConfig(llmConfig, description.trim())
-    .then((result) => {
+  try {
+    const directConfig = synthesisLlm.getFullLLMSynthesisConfig(projectId);
+    if (directConfig) {
+      const result = await jobSuggestLlm.generateJobConfig(directConfig, description.trim());
       res.json({ data: { ...result, configured: true } });
-    })
-    .catch((err: Error) => {
-      (async () => {
-        const { logger } = await import("ingenium-core");
-        logger.error("jobs-suggest", `LLM generation failed: ${err.message}`, { error: err.message });
-      })();
-      res.status(500).json({ error: { code: "LLM_ERROR", message: "Job suggestion generation failed" } });
+      return;
+    }
+
+    // Resolve only server-owned choices. Request bodies intentionally contain
+    // no provider/model fields, so a browser cannot redirect this work away
+    // from the managed primary/backup or validated Chat/Zen fallback.
+    const resolution = await resolveSynthesisProviderSelections(projectId);
+    if (resolution.selections.length === 0) {
+      res.json({ data: { prompt_template: null, schedule_cron: null, trigger_event: null, configured: false } });
+      return;
+    }
+
+    const result = await jobSuggestLlm.generateJobConfigWithExecutor(
+      ({ system, user, timeoutMs }) => executeSynthesisBroker({ projectId, system, user, timeoutMs }),
+      description.trim(),
+    );
+    res.json({ data: { ...result, configured: true } });
+  } catch (error) {
+    const { logger } = await import("ingenium-core");
+    logger.error("jobs-suggest", "LLM generation failed", {
+      error: error instanceof Error ? error.name : "unknown",
     });
+    res.status(500).json({ error: { code: "LLM_ERROR", message: "Job suggestion generation failed" } });
+  }
 });
 
 // ============================================================================
