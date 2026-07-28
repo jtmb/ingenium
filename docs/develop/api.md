@@ -302,7 +302,15 @@ session-import route is exposed through the
 Dashboard UI route. The extension-native
 `ingenium_context_import_current_session` tool uses the trusted OpenCode
 plugin context and immutable conversation endpoints instead of this upload
-route.
+route. Its optional native arguments are `title` and `maxSourceEnvelopes`
+(1–12,800), not `limit`. When the envelope bound is omitted, the native
+importer completes cursor pagination within finite caps (128 pages of 100
+source envelopes, 16,384 output entries, and 64 MiB of UTF-8 text), orders
+source envelopes chronologically, and retains only ordinary user and completed
+assistant text parts that are not synthetic or ignored. Its v2 deterministic
+replay uses stable content-based idempotency keys. The server MCP
+`ingenium_context_opencode_session_import` remains separate: its API-owned RAG
+import still requires `limit` in the range 1–100.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|

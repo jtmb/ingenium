@@ -164,14 +164,19 @@ The two session-import tools deliberately have different trust boundaries:
 - `ingenium_context_import_current_session` is an extension-native tool. Its
   trusted `ToolContext` and plugin client identify the current OpenCode session;
   callers cannot select a session, directory, worktree, or Ingenium project.
-  It preserves source order, imports only ordinary user text and completed
-  assistant text, filters non-text/synthetic/ignored parts, and appends the
-  entries to an immutable Context conversation. Imports are bounded (`limit`
-  1–100, 32,000-character chunks, at most 512 chunks), and stable idempotency
-  keys make replay safe by skipping already imported entries.
+  Its optional native arguments are `title` and `maxSourceEnvelopes` (1–12,800);
+  it does not accept the server proxy's `limit` argument. Without
+  `maxSourceEnvelopes`, it follows cursor pagination to import the complete
+  source snapshot, subject to finite caps of 128 pages × 100 source envelopes,
+  16,384 output entries, and 64 MiB of UTF-8 text. It sorts source envelopes
+  chronologically, keeps only ordinary user text and completed-assistant text,
+  and filters non-text, synthetic, and ignored parts. The v2 importer uses
+  stable content-based idempotency keys, so deterministic replays skip entries
+  already imported while changed or newly completed assistant text can append.
 - `ingenium_context_opencode_session_import` is the server MCP proxy. MCP
   cannot infer the external caller's OpenCode session, so `project`,
-  `sessionId`, `directory`, `title`, and `limit` are explicit inputs. The
+  `sessionId`, `directory`, `title`, and `limit` are explicit inputs; this
+  separate API-owned RAG import accepts `limit` from 1–100. The
   launcher project must match; the session ID and absolute directory are
   validated, the directory basename must match the project, and the API must
   report the same session and directory before message bodies are read. The

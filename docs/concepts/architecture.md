@@ -718,7 +718,13 @@ semantics. The extension-native
 ID, directory, worktree, and abort signal from trusted `ToolContext` plus the
 OpenCode plugin client. It writes ordered user/completed-assistant text into
 immutable Context conversations, filters to text-only non-synthetic/non-ignored
-parts, and uses stable idempotency keys so replay skips existing entries.
+parts, and uses v2 stable content-based idempotency keys for deterministic
+replay. Its optional native arguments are `title` and `maxSourceEnvelopes`
+(1–12,800); omitting the envelope bound imports the complete cursor-paginated
+source snapshot within finite caps (128 pages × 100 source envelopes, 16,384
+output entries, and 64 MiB of UTF-8 text). The separate server MCP proxy
+`ingenium_context_opencode_session_import` remains API-owned RAG import and
+continues to accept `limit` 1–100.
 Neither path can use the server MCP tool to infer an external caller's session.
 The native tool requires a rebuilt extension and an OpenCode restart after its
 plugin registration changes; the server proxy requires the MCP transport to be
