@@ -273,6 +273,69 @@ describe("callLLMForExtraction", () => {
   });
 });
 
+describe("partial extraction retry safety", () => {
+  it("persists successful batch hashes when a later batch fails", async () => {
+    const startedAt = Date.now();
+    mockMessages = Array.from({ length: 16 }, (_, index) => ({
+      text: `I prefer structured deployment reports with explicit evidence item ${index + 1}.`,
+      time_created: startedAt + index + 1,
+      hash: `partial-batch-${index + 1}`,
+    }));
+
+    let firstRunCalls = 0;
+    const firstRun = await runExtraction(projectId, "test-project", {
+      limit: 20,
+      messagesClient: mockMessagesClient,
+      llmExecutor: async () => {
+        firstRunCalls += 1;
+        if (firstRunCalls === 1) {
+          return {
+            ok: true,
+            content: JSON.stringify({
+              rules: [{
+                content: "User prefers structured deployment reports with explicit evidence",
+                type: "preference",
+                importance: 7,
+              }],
+            }),
+          };
+        }
+        return { ok: false, content: "", error: "temporary provider failure" };
+      },
+    });
+
+    expect(firstRun).toMatchObject({ candidates: 16, created: 1, failedBatches: 1 });
+
+    const retriedPrompts: string[] = [];
+    const retryRun = await runExtraction(projectId, "test-project", {
+      limit: 20,
+      messagesClient: mockMessagesClient,
+      llmExecutor: async ({ user }) => {
+        retriedPrompts.push(user);
+        return {
+          ok: true,
+          content: JSON.stringify({
+            rules: [{
+              content: "User prefers deployment reports to include actionable follow-up",
+              type: "workflow",
+              importance: 7,
+            }],
+          }),
+        };
+      },
+    });
+
+    expect(retryRun).toMatchObject({ candidates: 1, created: 1, failedBatches: 0 });
+    expect(retriedPrompts).toHaveLength(1);
+    expect(retriedPrompts[0]).toContain("item 16");
+    expect(retriedPrompts[0]).not.toMatch(/item (?:[1-9]|1[0-5])\./);
+    expect(getObservations(projectId).filter((observation) =>
+      observation.content.startsWith("User prefers structured deployment reports")
+      || observation.content.startsWith("User prefers deployment reports to include actionable"),
+    )).toHaveLength(2);
+  });
+});
+
 describe("external project extraction", () => {
   it("writes a fresh extracted observation only to the requested external project", async () => {
     const globalProject = createProject("global-default", true);

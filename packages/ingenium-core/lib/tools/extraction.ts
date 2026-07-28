@@ -430,6 +430,11 @@ export async function runExtraction(
 
     // 4. Pre-filter candidates
     const seenHashes = getSeenHashes(projectId);
+    // Keep this run's candidate deduplication separate from the persisted
+    // success set. A failed batch must remain eligible for retry, while a
+    // successful sibling batch must not create duplicate observations when the
+    // overall watermark cannot advance.
+    const candidateHashes = new Set(seenHashes);
     let newHashesAdded = false;
 
     const rawCandidates: CandidateMessage[] = [];
@@ -440,10 +445,9 @@ export async function runExtraction(
       if (!isCandidate(m.text)) continue;
 
       const hash = hashText(m.text.trim());
-      if (seenHashes.has(hash)) continue;
+      if (candidateHashes.has(hash)) continue;
 
-      seenHashes.add(hash);
-      newHashesAdded = true;
+      candidateHashes.add(hash);
       rawCandidates.push({ ...m, hash });
     }
 
@@ -476,6 +480,16 @@ export async function runExtraction(
       if (failed) {
         failedBatches++;
         continue; // do NOT process rules from failed batches
+      }
+
+      // Mark only this successful batch as seen. If a later batch fails, these
+      // hashes are still persisted below so retrying the failed batch cannot
+      // duplicate observations created here.
+      for (const candidate of batch) {
+        if (!seenHashes.has(candidate.hash)) {
+          seenHashes.add(candidate.hash);
+          newHashesAdded = true;
+        }
       }
 
       for (const rule of rules) {
@@ -519,11 +533,10 @@ export async function runExtraction(
       logger.warn("extraction", `Skipping watermark advance: ${failedBatches}/${Math.ceil(rawCandidates.length / BATCH_SIZE)} batches failed`);
     }
 
-    // 7. Persist seen hashes — ONLY if no batches failed
-    if (failedBatches === 0 && newHashesAdded) {
+    // 7. Persist successfully processed hashes even when another batch failed.
+    // Failed-batch hashes were never added, so they remain eligible for retry.
+    if (newHashesAdded) {
       saveSeenHashes(projectId, seenHashes);
-    } else if (failedBatches > 0) {
-      logger.warn("extraction", "Skipping seen-hash save due to batch failures");
     }
 
     // 8. Log pipeline event
