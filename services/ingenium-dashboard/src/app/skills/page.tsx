@@ -6,6 +6,7 @@ import { api, Skill } from "../../lib/api";
 import { badgeTones, BADGE_BASE } from "../../lib/badgeTones";
 import FileTree from "../components/FileTree";
 import MarkdownViewer from "../components/MarkdownViewer";
+import Overlay from "../components/Overlay";
 import ProposalReviewOverlay, { EnrichedObservation as EnrichedObs } from "../components/proposals/ProposalReviewOverlay";
 
 /** Active tab selection for the skills page. */
@@ -404,54 +405,57 @@ export default function SkillsPage() {
             ))}
           </div>
 
-          {/* Overlay with split layout */}
+          {/* Viewport-bounded skill detail overlay */}
           {selectedSkill && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center" data-testid="skill-overlay">
-              <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedSkill(null)} />
-              <div className="relative mt-8 mb-8 w-11/12 max-w-7xl bg-[var(--color-surface)] rounded-lg shadow-2xl flex flex-col max-h-[90vh]">
-                {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
-                  <div>
-                    <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{selectedSkill.name}</h2>
-                    <p className="text-sm text-[var(--color-text-muted)]">{selectedSkill.description}</p>
-                  </div>
-                  <button onClick={() => setSelectedSkill(null)} className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] rounded-full">✕</button>
-                </div>
-                {/* Body: split layout */}
-                <div className="flex flex-1 overflow-hidden">
-                  <FileTree
-                    fileTreeJson={selectedSkill.file_tree ?? undefined}
-                    skillContent={selectedSkill.content}
-                    skillName={selectedSkill.name}
-                    tags={selectedSkill.tags ?? undefined}
-                    alwaysApply={selectedSkill.always_apply}
-                    onSelectFile={handleSelectFile}
-                    selectedFile={selectedFile}
-                  />
-                  <div className="flex-1 overflow-y-auto p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="text-sm text-[var(--color-text-muted)] font-mono">{selectedFile}</span>
-                      <div className="flex gap-2">
-                        {!editMode && (
-                          <button onClick={handleEdit} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Edit</button>
-                        )}
-                        {editMode && (
-                          <>
-                            <button onClick={() => { setEditMode(false); setEditText(fileContent); }} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Cancel</button>
-                            <button onClick={handleSave} disabled={saving} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
-                          </>
-                        )}
-                      </div>
+            <Overlay
+              isOpen
+              onClose={() => setSelectedSkill(null)}
+              title={selectedSkill.name}
+              subtitle={selectedSkill.description}
+              panelClassName="mt-[5dvh] w-11/12 max-w-7xl h-[90dvh] min-h-0"
+              bodyClassName="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
+            >
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row" data-testid="skill-modal-body">
+                <FileTree
+                  fileTreeJson={selectedSkill.file_tree ?? undefined}
+                  skillContent={selectedSkill.content}
+                  skillName={selectedSkill.name}
+                  tags={selectedSkill.tags ?? undefined}
+                  alwaysApply={selectedSkill.always_apply}
+                  onSelectFile={handleSelectFile}
+                  selectedFile={selectedFile}
+                />
+                <section
+                  aria-label={`Preview ${selectedFile}`}
+                  data-testid="skill-preview"
+                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                >
+                  <div className="flex min-w-0 shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] p-4">
+                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text-muted)] font-mono" title={selectedFile}>{selectedFile}</span>
+                    <div className="flex shrink-0 gap-2">
+                      {!editMode && (
+                        <button onClick={handleEdit} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Edit</button>
+                      )}
+                      {editMode && (
+                        <>
+                          <button onClick={() => { setEditMode(false); setEditText(fileContent); }} className="text-xs px-3 py-1 border rounded hover:bg-[var(--color-surface-hover)]">Cancel</button>
+                          <button onClick={handleSave} disabled={saving} className="text-xs px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
+                        </>
+                      )}
                     </div>
+                  </div>
+                  <div data-testid="skill-preview-content" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
                     {editMode ? (
-                      <textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="w-full h-full min-h-[400px] p-4 border rounded font-mono text-sm resize-none" />
+                      <textarea value={editText} onChange={(e) => setEditText(e.target.value)} className="h-full min-h-0 w-full p-4 border rounded font-mono text-sm resize-none" />
                     ) : (
-                      <MarkdownViewer content={fileContent} isMarkdown={isMarkdown} language={lang} />
+                      <div className="min-w-0 break-words [overflow-wrap:anywhere]">
+                        <MarkdownViewer content={fileContent} isMarkdown={isMarkdown} language={lang} />
+                      </div>
                     )}
                   </div>
-                </div>
+                </section>
               </div>
-            </div>
+            </Overlay>
           )}
         </>
       )}
@@ -568,4 +572,3 @@ export default function SkillsPage() {
     </div>
   );
 }
-

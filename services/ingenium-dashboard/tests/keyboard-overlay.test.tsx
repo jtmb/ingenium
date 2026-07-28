@@ -278,6 +278,24 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     expect(document.activeElement).toBe(btn1);
   });
 
+  it("returns Tab focus to the dialog when focus escapes to the inert background", async () => {
+    render(
+      <div>
+        <button type="button" data-testid="background-focus">Background</button>
+        <Overlay isOpen onClose={vi.fn()} title="Test">
+          <button type="button">Inside</button>
+        </Overlay>
+      </div>,
+    );
+
+    await flushTimers();
+    const background = screen.getByTestId("background-focus");
+    background.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+
+    expect(document.activeElement).toBe(screen.getByLabelText("Close"));
+  });
+
   // ── Focus trap — non-Tab keys are unaffected ────────────────────────────────
 
   it("does not intercept non-Tab non-Escape keys", () => {
@@ -356,6 +374,30 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     expect(dialog!.getAttribute("aria-modal")).toBe("true");
   });
 
+  it("puts dialog semantics on the panel and restores background inertness", () => {
+    const onClose = vi.fn();
+    const background = document.createElement("main");
+    background.setAttribute("aria-hidden", "false");
+    document.body.appendChild(background);
+    const originalInert = background.inert;
+
+    const { unmount } = render(
+      <Overlay isOpen onClose={onClose} title="Test">
+        <p>Content</p>
+      </Overlay>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Test" });
+    expect(dialog.parentElement?.getAttribute("role")).toBeNull();
+    expect(background.inert).toBe(true);
+    expect(background.getAttribute("aria-hidden")).toBe("true");
+
+    unmount();
+
+    expect(background.inert).toBe(originalInert);
+    expect(background.getAttribute("aria-hidden")).toBe("false");
+  });
+
   it("cleans up portals on unmount", () => {
     const onClose = vi.fn();
     const { unmount } = render(
@@ -370,5 +412,3 @@ describe("Overlay — A11Y-001 keyboard focus contract", () => {
     expect(document.body.style.overflow).toBe("");
   });
 });
-
-
