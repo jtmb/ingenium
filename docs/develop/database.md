@@ -84,7 +84,7 @@ another Compose project volume.
 
 ---
 
-### Feature Migrations (045–065)
+### Feature Migrations (045–066)
 
 | # | File | Purpose |
 |---|------|---------|
@@ -106,6 +106,7 @@ another Compose project volume.
 | 060 | `060_repository_resource_sync.sql` | Creates repository-authoritative synchronization state for skills, agents, and plugins, including semantic payload and source hashes. |
 | 061 | `061_global_backup_ownership.sql` | Creates an idempotent migration marker and backfills legacy backup records and restore jobs to the sole active global project. Startup retries the backfill after global-project initialization. |
 | 065 | `065_context_rag_ingestion.sql` | Creates project-scoped direct/chunked context-upload state and durable provenance rows, freezes checkpoint-linked RAG sources/chunks, and stores immutable checkpoint citation snapshots. |
+| 066 | `066_context_checkpoint_governance.sql` | Creates short-lived, one-time project-scoped maintenance authorizations plus append-only archive/unarchive/restore-as-new audit records. Archive state is derived from events; checkpoints are never deleted. |
 
 *See the companion file at `packages/ingenium-core/data/migrations/` for individual migration SQL.*
 

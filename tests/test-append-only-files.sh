@@ -93,10 +93,22 @@ validate_roadmap_markers() {
     fi
 
     local marker_lines evidence_lines
-    marker_lines=$(awk '/^### Work marker log/{in_log=1; next} in_log && /<!--/{print}' "$file" || true)
+    marker_lines=$(awk '
+        /^```/ { in_fence = !in_fence; next }
+        in_fence { next }
+        /^### Historical work marker log$/ { in_log=1; historical=1; next }
+        /^### Work marker log( \(continued\))?$/ { in_log=1; historical=0; next }
+        /^### / { in_log=0; historical=0 }
+        /<!--/ && !in_log { print "__MARKER_OUTSIDE_APPROVED_LOG__"; next }
+        in_log && !historical && /<!--/ { print }
+    ' "$file" || true)
     if [[ -z "$marker_lines" ]]; then
         pass "ROADMAP.md has no work markers yet (valid baseline state)"
         return 0
+    fi
+    if [[ "$marker_lines" == *"__MARKER_OUTSIDE_APPROVED_LOG__"* ]]; then
+        fail "ROADMAP.md — work marker is outside an approved marker-log heading"
+        return 1
     fi
 
     local marker_pattern='^<!-- \(work-(started|complete)\) (BUG-[0-9]{3}|MCP-[0-9]{3}|CTX-[0-9]{3}|DOC-[0-9]{3}) ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z) ([^[:space:]]+) -->$'
@@ -126,6 +138,10 @@ validate_roadmap_markers() {
                 fail "ROADMAP.md — task has duplicate active start marker: $task"
                 return 1
             fi
+            if [[ -n "${completed_ids[$task]+x}" ]]; then
+                fail "ROADMAP.md — task restarted after completion: $task"
+                return 1
+            fi
             active_ids[$task]=1
         else
             if [[ -z "${active_ids[$task]+x}" ]]; then
@@ -137,7 +153,14 @@ validate_roadmap_markers() {
         fi
     done <<<"$marker_lines"
 
-    evidence_lines=$(awk '/^### Work marker log/{in_log=1; next} in_log && /^Evidence /{print}' "$file" || true)
+    evidence_lines=$(awk '
+        /^```/ { in_fence = !in_fence; next }
+        in_fence { next }
+        /^### Historical work marker log$/ { in_log=1; historical=1; next }
+        /^### Work marker log( \(continued\))?$/ { in_log=1; historical=0; next }
+        /^### / { in_log=0; historical=0 }
+        in_log && !historical && /^Evidence / { print }
+    ' "$file" || true)
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
         if [[ ! "$line" =~ ^Evidence\ ((BUG|MCP|CTX|DOC)-[0-9]{3}):[[:space:]]+.+$ ]]; then
@@ -209,7 +232,13 @@ Evidence BUG-000: implementation tests passed'
     if ! validate_roadmap_markers "$tmp/parallel.md"; then fail "marker parser rejected independent parallel starts"; return 1; fi
     printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:01Z agent-name -->\nEvidence BUG-000: implementation tests passed\n' >"$tmp/duplicate-complete.md"
     if validate_roadmap_markers "$tmp/duplicate-complete.md" >/dev/null 2>&1; then fail "marker parser accepted duplicate completion"; return 1; fi
-    pass "Marker parser accepts valid/parallel pairs and rejects malformed, ordering, duplicate, and unknown-ID cases"
+    printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\nEvidence BUG-000: implementation tests passed\n### Work marker log (continued)\n<!-- (work-started) BUG-001 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/continued.md"
+    if ! validate_roadmap_markers "$tmp/continued.md"; then fail "marker parser rejected a continued marker log"; return 1; fi
+    printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n### Other heading\n<!-- (work-started) BUG-001 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/outside-heading.md"
+    if validate_roadmap_markers "$tmp/outside-heading.md" >/dev/null 2>&1; then fail "marker parser accepted marker outside approved heading"; return 1; fi
+    printf '### Work marker log\n<!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->\n<!-- (work-complete) BUG-000 2026-01-01T01:00:00Z agent-name -->\n### Work marker log (continued)\n<!-- (work-started) BUG-000 2026-01-01T02:00:00Z agent-name -->\n' >"$tmp/restart.md"
+    if validate_roadmap_markers "$tmp/restart.md" >/dev/null 2>&1; then fail "marker parser accepted restart after completion"; return 1; fi
+    pass "Marker parser accepts valid/parallel/continued pairs and rejects malformed, ordering, duplicate, restart, and unknown-ID cases"
 }
 
 run_all_tests() {

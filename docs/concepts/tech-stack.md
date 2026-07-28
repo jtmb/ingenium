@@ -10,7 +10,7 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 - **Package Manager**: npm workspaces (monorepo)
 - **API**: Express.js on private container port 4096 behind the authenticated host-loopback boundary on 4097, JSON body limit 2MB (`express.json({ limit: "2mb" })`), helmet + CORS middleware
 - **Database**: SQLite via better-sqlite3 with WAL mode + FTS5 full-text search
-- **MCP**: @modelcontextprotocol/sdk for stdio transport (245 catalog tools across 28 categories; 243 registered by the server and 2 by the extension)
+- **MCP**: @modelcontextprotocol/sdk for stdio transport (267 built-in catalog tools across 28 baseline categories; 265 registered by the server and 2 by the extension, with project-scoped child tools added dynamically)
 - **Frontend**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Syntax Highlighting**: highlight.js (`github.css` + custom `hljs-dark.css`) — Preview and Source modes in skill detail overlay
 - **State / Persistence**: Docs RAG system for cross-session context
@@ -27,7 +27,7 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 
 ## Database Migrations
 
-Ingenium currently has 61 numbered migrations (`001`–`061`):
+Ingenium currently has 66 numbered migrations (`001`–`066`):
 
 - `001`–`028`: platform, self-learning, tasks/jobs, skill project isolation, and email persistence
 - `029`–`040`: documentation workspace schema and integrity repair
@@ -44,5 +44,8 @@ Ingenium currently has 61 numbered migrations (`001`–`061`):
 - `058`: connection-independent reserved broker canonical-template and REPLACE collision protection
 - `059`–`060`: repository-authoritative Docs and resource synchronization state
 - `061`: canonical global ownership backfill for legacy backup records and restore jobs
+- `062`–`064`: child MCP definition/category persistence and immutable conversation/checkpoint foundations
+- `065`: context RAG ingestion, checkpoint source freezing, and immutable citation snapshots
+- `066`: context checkpoint maintenance authorization and append-only audit governance
 
 The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.

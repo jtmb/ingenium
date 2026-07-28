@@ -16,6 +16,7 @@ Deployment, maintenance, and recovery procedures for the Ingenium system.
 | [Getting Started](getting-started.md) | Step-by-step setup guide for OpenCode |
 | [Deployment](deployment.md) | Docker deployment guide: services, ports, volumes, health checks |
 | [Backup & Restore](backup-restore.md) | Database backup and restore procedures, migration recovery |
+| [Context Checkpoint Maintenance](context-maintenance.md) | Safe immutable-context preview, authorization, archive, audit, and restore-as-new procedure |
 | [Jobs](jobs.md) | Job queue and background task monitoring |
 | [Logs](logs.md) | Structured logging and event viewer |
 | [Status](status.md) | Service status page — process and application monitoring |

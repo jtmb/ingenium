@@ -1,11 +1,15 @@
 ---
 title: MCP Tools Reference
-description: Complete reference for all 245 Ingenium MCP tools across 28 categories.
+description: Reference for the 267-tool built-in Ingenium MCP catalog across 28 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-All **245 tools** across **28 categories**, grouped by what they do. Every tool needs a **project** name (except where noted).
+The built-in catalog contains **267 tools** across **28 baseline categories**:
+265 tools registered by the server and 2 extension tools. A project-scoped
+catalog may contain additional dynamically discovered child tools, so dashboard
+totals and category counts are runtime values rather than a fixed global count.
+Every tool needs a **project** name (except where noted).
 
 The canonical catalog (source of truth) lives at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
@@ -122,7 +126,7 @@ include bearer tokens or upstream error text.
 
 Context entries are project-isolated, taggable, priority-ranked (0–10), and FTS5-searchable. They persist working context across sessions — the task management and plan surface reads from the same `context_entries` table. The `plan_*` tools remain supported for backward compatibility; `context_*` tools provide the canonical CRUD surface. See `services/ingenium-api/lib/routes/context.ts` and `packages/ingenium-core/lib/tools/context.ts`.
 
-Immutable conversation tools are project-scoped and use optimistic `expectedRevision` values for message appends, checkpoint creation, and restore. Optional idempotency keys make creation retries safe; reusing a key with a different request returns a conflict. List and search tools return only metadata and content hashes. Content is returned only by the explicit retrieve tools.
+Immutable conversation tools are project-scoped and use optimistic `expectedRevision` values for message appends, checkpoint creation, and maintenance. Optional idempotency keys make creation retries safe; reusing a key with a different request returns a conflict. List and search tools return only metadata and content hashes. Content is returned only by the explicit retrieve tools.
 
 | Tool | What it does |
 |------|-------------|
@@ -133,7 +137,15 @@ Immutable conversation tools are project-scoped and use optimistic `expectedRevi
 | `ingenium_context_message_retrieve` / `ingenium_context_message_batch_retrieve` | Explicitly retrieve content; batch retrieval preserves requested-ID order and reports missing IDs |
 | `ingenium_context_checkpoint_create` | Create a hash-addressed checkpoint with optional source provenance IDs |
 | `ingenium_context_checkpoint_get` / `ingenium_context_checkpoint_list` | Retrieve or keyset-paginate checkpoint history |
-| `ingenium_context_checkpoint_restore` | Restore a checkpoint by branching to a new immutable conversation; the source is unchanged |
+| `ingenium_context_checkpoint_maintenance_preview` | Preview up to 100 content-free stale, divergent, invalid, or restore-branch candidates; this does not modify context or apply an implicit retention policy |
+| `ingenium_context_checkpoint_maintenance_authorize` | Issue a short-lived, one-time confirmation token bound to a project-owned archive, unarchive, or restore-as-new action and revision |
+| `ingenium_context_conversation_archive` / `ingenium_context_conversation_unarchive` | Append reversible archive-state events after explicit confirmation; immutable conversations/checkpoints are never deleted |
+| `ingenium_context_checkpoint_audit_list` | Read bounded, content-free archive and restore-as-new audit evidence |
+| `ingenium_context_checkpoint_restore` | Restore a checkpoint by branching to a new immutable conversation after a matching one-time confirmation; the source is unchanged |
+
+There is no checkpoint-delete MCP tool. Confirmation tokens are capabilities:
+keep them out of transcripts and logs, use each once before it expires, and do
+not expect them in audit responses.
 
 ## PLUGINS — Add-ons
 
@@ -209,7 +221,12 @@ Immutable conversation tools are project-scoped and use optimistic `expectedRevi
 
 ## SERVERS — Child MCP servers
 
-`ingenium_server_list`, `ingenium_server_add`, `ingenium_server_remove`, `ingenium_server_update`, `ingenium_server_sync_all`.
+Legacy server-definition compatibility tools: `ingenium_server_list`,
+`ingenium_server_add`, `ingenium_server_remove`, `ingenium_server_update`, and
+`ingenium_server_sync_all`. Canonical child-server definitions are exposed by
+the `/api/v1/mcp-servers` API and use shell-free executables plus vault
+environment references. Discovered child tools use exactly one lowercase
+`ingenium_<server>_<tool>` namespace.
 
 ## AGENTS — AI sub-personalities
 
@@ -235,4 +252,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Grand total: 245 tools across 28 categories — Projects, Skills, Observe, Observations, Personality, Synthesis, Extraction, Pipeline, Status, Health, OpenCode, Tasks, Plans, Plugins, Commands, Settings, Config, Providers, Vault, Backups, RAG, Servers, Agents, Email, Logs, Jobs, Documentation, Dashboard.**
+**Built-in baseline: 267 tools across 28 categories.** Project-scoped child
+discovery can add tools and categories at runtime; use the project-scoped
+catalog endpoint for the current total.

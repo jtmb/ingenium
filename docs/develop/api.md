@@ -283,6 +283,28 @@ Context checkpoint links freeze their referenced RAG source/chunks and persist a
 citation snapshot. Attempts to re-ingest or delete such a source are rejected;
 normal checkpoint and source ownership checks remain project-scoped.
 
+#### Immutable conversation checkpoint maintenance (CTX-004)
+
+Conversation maintenance is deliberately opt-in and append-only. It never
+deletes or updates a conversation, message, checkpoint, or checkpoint source.
+All maintenance routes require the normal project scope and do not expose
+message content through preview or audit responses.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/conversations/maintenance/preview` | Return at most 100 content-free candidate summaries. Callers may provide an explicit `staleBefore` cutoff; there is no automatic retention policy. The preview can also report checkpoint divergence, integrity failures, and multiple active restore branches. |
+| POST | `/conversations/:conversationId/maintenance/authorize` | Issue a 15-minute, one-time confirmation token bound to one project-owned archive, unarchive, or restore-as-new action and its `expectedRevision`. The raw token is never persisted in audit output. |
+| POST | `/conversations/:conversationId/archive` | Append an archive event after `{ expectedRevision, confirmationToken }`. Archived conversations are hidden from ordinary conversation lists and reject new messages/checkpoints; their immutable history remains readable by explicit project-scoped APIs. |
+| POST | `/conversations/:conversationId/unarchive` | Append a reversible unarchive event after a separately authorized `{ expectedRevision, confirmationToken }` request. |
+| GET | `/conversations/:conversationId/maintenance/audit` | Return bounded, content-free archive/unarchive/restore-as-new evidence (IDs, revisions, state hashes, and timestamps only). |
+| POST | `/conversations/:conversationId/checkpoints/:checkpointId/restore` | Branch the checkpoint into a new immutable conversation. Requires `{ expectedRevision, confirmationToken }`; it never modifies the source conversation or checkpoint. |
+
+There is intentionally no checkpoint delete endpoint. The database rejects
+direct checkpoint updates/deletes and rejects changes to append-only audit rows.
+Expired, consumed, wrong-project, or mismatched confirmation tokens all return
+the same `409 MAINTENANCE_AUTHORIZATION_INVALID` response without reflecting
+the token or conversation content.
+
 ### RAG (Retrieval-Augmented Generation)
 All routes prefixed with `/api/v1/rag`.
 
@@ -439,7 +461,7 @@ itself remains private and bearer-protected. SSE routes stream
 | POST | `/api/v1/opencode/sessions/:id/init` | Initialize a session |
 | GET | `/api/v1/opencode/sessions/:id/events` | SSE event stream (per-session). The dashboard-owned route is a dedicated unbuffered Node handler that forwards the persistent upstream readable stream directly; it sets `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`. Do not send this path through the generic compressed Next rewrite, which can buffer or transform an open SSE response and prevent live frames from reaching Chat. |
 | GET | `/api/v1/opencode/events` | Global SSE event stream (no session filter) |
-| GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, defaultSelection }`. The allowlisted DTO merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). It excludes API keys, `synthesis_endpoint`, base URLs, headers, packages, and provider/internal topology. `defaultSelection` prefers a valid server-owned Chat selection, then the managed primary or OpenCode Zen runtime default. OpenCode live-reloads provider config changes — no restart required. Legacy `primary` and `backup` DTO fields are emitted only when their exact stored provider/model pair exists in this current allowlisted catalog; raw legacy setting values are otherwise omitted. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. Recognized OpenCode network-startup failures return fixed `503 OPENCODE_UNAVAILABLE`; other catalog lookup failures return fixed `503 LLM_CATALOG_UNAVAILABLE`, without upstream diagnostics. |
+| GET | `/api/v1/opencode/chat-config` | **Sanitized Chat config** — returns `{ configured, primary, backup, providers: [...], agents, defaultSelection }`. The allowlisted DTO merges managed entries (`source: "managed"`) with the runtime-discovered OpenCode Zen builtin entry (`source: "builtin"`). It excludes API keys, `synthesis_endpoint`, base URLs, headers, packages, and provider/internal topology. `defaultSelection` prefers a valid server-owned Chat selection, then a managed primary, a valid legacy primary, or the OpenCode Zen runtime default. OpenCode live-reloads provider config changes — no restart required. Legacy `primary` and `backup` DTO fields are emitted only when their exact stored provider/model pair exists in this current allowlisted catalog; raw legacy setting values are otherwise omitted. Returns `{ configured: false, defaultSelection: null }` when no LLM is set up and no builtin is available. Recognized OpenCode network-startup failures return fixed `503 OPENCODE_UNAVAILABLE`; other catalog lookup failures return fixed `503 LLM_CATALOG_UNAVAILABLE`, without upstream diagnostics. |
 | PUT | `/api/v1/opencode/chat-selection` | **Authenticated global Chat selection** — accepts `{ providerId, modelId }`, rejects project overrides, validates the exact pair against the active global server catalog, then saves the non-secret selection under the active global project. Docs AI never accepts this pair in its request DTO. |
 | GET | `/api/v1/opencode/builtin-providers` | **Runtime OpenCode Zen free model discovery** — queries the OpenCode runtime provider catalog, filters to only free models (`cost.input === 0 && cost.output === 0`) from the `opencode` provider ID. Response: `{ data: { providerId, providerName, models: [{id, name, providerID}], defaultModel, source: "runtime" } }`. When OpenCode is unreachable, returns `{ models: [], defaultModel: null, source: "unavailable" }`. Sanitized — no `apiKey`, `options`, or `env` fields leak through. |
 | GET | `/api/v1/opencode/providers` | List providers + models |

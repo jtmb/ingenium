@@ -35,7 +35,9 @@ or a permitted `ESCALATE_USER` condition is proven.
 
 ## Marker protocol
 
-Only exact markers appended under **Work marker log** are valid:
+Only exact markers appended under an approved marker-log heading are valid.
+`Historical work marker log` retains immutable legacy markers; `Work marker
+log` and `Work marker log (continued)` are the live append-only sections:
 
 ```text
 <!-- (work-started) BUG-000 2026-01-01T00:00:00Z agent-name -->
@@ -44,28 +46,33 @@ Only exact markers appended under **Work marker log** are valid:
 
 Rules:
 
-1. Append; never edit, reorder, or delete an existing marker.
+1. Append; never edit, reorder, or delete an existing marker. Historical
+   markers remain retained and are not reopened as live work.
 2. IDs must be defined in this document, timestamps must be UTC ISO-8601
    seconds, and the actor must contain no whitespace.
 3. Starts and completions need not alternate globally. A task may not start
-   twice while active, and a completion must close its own active ID exactly
-   once. A completion for an unstarted/already-completed task, malformed text,
-   or an unknown ID fails validation.
+   twice while active or restart after completion, and a completion must close
+   its own active ID exactly once. A completion for an unstarted/already-
+   completed task, a marker outside an approved heading, malformed text, or an
+   unknown ID fails validation.
 4. Every completed task must have non-empty implementation evidence in the
    log (`Evidence TASK-ID: ...`).
 5. TodoWrite remains separate and authoritative for execution checklists.
 
-### Work marker log
+### Historical work marker log
 
-The marker log below is the current append-only execution state; active markers
-are unfinished work, not a baseline declaration. No final completion may be
-reported until every active marker is closed and reconciled.
+These retained markers are historical audit data and are not reopened as live
+work.
 <!-- (work-started) BUG-000 2026-07-27T18:36:47Z ingenium-docs -->
 <!-- (work-complete) BUG-000 2026-07-27T18:36:48Z ingenium-docs -->
 <!-- (work-started) BUG-001 2026-07-27T18:36:49Z ingenium-docs -->
 <!-- (work-complete) BUG-001 2026-07-27T18:36:50Z ingenium-docs -->
 <!-- (work-started) BUG-002 2026-07-27T18:36:51Z ingenium-docs -->
 <!-- (work-complete) BUG-002 2026-07-27T18:36:52Z ingenium-docs -->
+### Work marker log
+The marker log below is the current append-only execution state; active markers
+are unfinished work, not a baseline declaration. No final completion may be
+reported until every active marker is closed and reconciled.
 <!-- (work-started) BUG-000 2026-07-27T19:22:30Z ingenium-docs -->
 <!-- (work-complete) BUG-000 2026-07-27T19:22:31Z ingenium-docs -->
 Evidence BUG-000: Phase 1 writer verification — `services/ingenium-api/tests/docs-ai-security.test.ts`, `services/ingenium-dashboard/tests/docs-ai-actions.test.ts`, `tests/ingenium-dashboard/docs-ai.spec.ts`.
@@ -377,6 +384,7 @@ Phase 0 establishes contracts only. Future execution must declare exact files,
 route/agent ownership, acceptance evidence, and rollback before writing. Any
 marker pair is appended only after the corresponding TodoWrite task and tests
 are complete.
+### Work marker log (continued)
 <!-- (work-started) MCP-002 2026-07-27T22:41:35Z ingenium-docs -->
 <!-- (work-started) MCP-003 2026-07-27T22:41:36Z ingenium-docs -->
 <!-- (work-started) MCP-004 2026-07-27T22:41:37Z ingenium-docs -->
@@ -386,3 +394,5 @@ are complete.
 <!-- (work-started) CTX-004 2026-07-27T22:41:41Z ingenium-docs -->
 <!-- (work-started) CTX-005 2026-07-27T22:41:42Z ingenium-docs -->
 <!-- (work-started) DOC-001 2026-07-27T22:41:43Z ingenium-docs -->
+<!-- (work-complete) CTX-004 2026-07-28T01:59:11Z ingenium-software-engineer-premium -->
+Evidence CTX-004: Core/API/MCP checkpoint governance with migration 066, focused core/API/server tests, typechecks, and DB-isolation enforcement.

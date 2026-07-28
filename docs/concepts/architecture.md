@@ -162,7 +162,7 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **243 registered tools** across **28 categories**. Two extension-registered tools bring the complete catalog to **245**. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **265 built-in registered tools** across **28 baseline categories**. Two extension-registered tools bring the built-in catalog to **267**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **20 primary routes plus the Settings overlay**. It talks to the API over HTTP.
 
 ## Provider Adapter Layer
@@ -699,6 +699,25 @@ MIME type, provenance, and source reference seen at checkpoint creation.
 `GET /context/conversations/:conversationId/checkpoints/:checkpointId/rag/search`
 therefore searches only that frozen source set and returns historical citations.
 
+### Context checkpoint governance (CTX-004)
+
+Maintenance is a project-scoped, two-step workflow: a bounded, content-free
+candidate preview is reviewed first, then an authorization operation issues a
+single-use 15-minute confirmation token bound to a concrete target and observed
+conversation revision. Archive and unarchive append audit events rather than
+changing conversation rows. A derived archive state hides archived
+conversations from ordinary lists and rejects new messages/checkpoints; an
+unarchive event reverses that visibility state without changing history.
+
+Checkpoint restoration stays restore-as-new. It validates the source revision,
+checkpoint state hash, and confirmation token, copies the checkpoint stream to
+a new immutable conversation, and appends an audit event connecting source
+conversation/checkpoint, source state hash, authorization, and target
+conversation. Audit APIs return IDs, event types, revisions, hashes, and
+timestamps only—never message bodies, free-form metadata, or raw tokens.
+There is no checkpoint deletion path; database immutability triggers protect
+checkpoints and maintenance audit rows even from direct SQL mutation.
+
 ## RAG Indexing Architecture (Phase 3)
 
 The RAG (Retrieval-Augmented Generation) system provides two indexing paths feeding a unified search index.
@@ -829,7 +848,7 @@ Citations are deduplicated by source ID. The LLM prompt includes `"Answer with c
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 243 tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 265 built-in tools. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
 | `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 20 primary routes plus the Settings overlay. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
@@ -874,7 +893,9 @@ Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` em
 
 ### MCP Tool Count
 
-The system exposes **245 catalog tools** across **28 categories**. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
+The built-in system catalog exposes **267 tools** across **28 baseline
+categories**. Project-scoped child discovery can increase the effective total
+and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
 |----------|-------|-------|
