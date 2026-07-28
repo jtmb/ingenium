@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { getMcpTransportUrl, preflightMcpLauncher } from "./scripts/mcp-server.js";
+import { getMcpTransportUrl, preflightMcpLauncher, runMcpLauncher } from "./scripts/mcp-server.js";
 
 const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = resolve(extensionRoot, "../..");
@@ -102,5 +102,21 @@ describe("packaged Ingenium MCP launcher", () => {
     expect(getMcpTransportUrl("file:///tmp/extension/dist/scripts/mcp-server.js").href).toBe(
       "file:///tmp/extension/dist/scripts/mcp-transport.js",
     );
+  });
+
+  it("forwards the validated project to the packaged transport before it imports", async () => {
+    writeProtectedToken();
+    let projectDuringImport: string | undefined;
+    let importedTransport: URL | undefined;
+
+    await expect(runMcpLauncher(worktree, {
+      importTransport: async (transportUrl) => {
+        projectDuringImport = process.env.INGENIUM_PROJECT;
+        importedTransport = transportUrl;
+      },
+    })).resolves.toBe(0);
+
+    expect(projectDuringImport).toBe(basename(worktree));
+    expect(importedTransport).toEqual(getMcpTransportUrl());
   });
 });

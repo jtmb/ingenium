@@ -9,6 +9,11 @@ export type McpLauncherPreflight =
   | { ok: true; project: string }
   | { ok: false; message: string };
 
+export interface McpLauncherOptions {
+  /** Injectable only so the preflight-to-transport environment handoff is testable. */
+  importTransport?: (transportUrl: URL) => Promise<unknown>;
+}
+
 const MISSING_TOKEN_MESSAGE = "Ingenium MCP could not read a protected API token. Run scripts/bootstrap-local-secrets.sh for local development or configure INGENIUM_API_TOKEN_FILE.";
 const INVALID_PROJECT_MESSAGE = "Ingenium MCP could not resolve a safe project identity. Set INGENIUM_PROJECT to a valid project name.";
 const TRANSPORT_LOAD_MESSAGE = "Ingenium MCP launcher is incomplete. Build @ingenium/extension before starting OpenCode.";
@@ -56,6 +61,7 @@ export function isMcpLauncherMain(
 
 export async function runMcpLauncher(
   worktree = process.env.INGENIUM_WORKTREE ?? process.cwd(),
+  options: McpLauncherOptions = {},
 ): Promise<number> {
   const preflight = preflightMcpLauncher(worktree);
   if (!preflight.ok) {
@@ -64,7 +70,12 @@ export async function runMcpLauncher(
   }
 
   try {
-    await import(getMcpTransportUrl().href);
+    // The packaged transport resolves its project from the process environment.
+    // Preserve the validated preflight result rather than repeating resolution
+    // after its dynamic import has started.
+    process.env.INGENIUM_PROJECT = preflight.project;
+    const importTransport = options.importTransport ?? ((transportUrl: URL) => import(transportUrl.href));
+    await importTransport(getMcpTransportUrl());
     return 0;
   } catch {
     // The transport import can reveal source paths or dependency details. Keep
