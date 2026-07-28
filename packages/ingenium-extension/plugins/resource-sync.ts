@@ -1,4 +1,4 @@
-import { ResourceSyncPlugin } from "./resource-sync.js";
+import { ResourceSyncPlugin } from "../resource-sync.js";
 
 export default {
   id: "ingenium-resource-sync",

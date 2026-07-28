@@ -688,8 +688,8 @@ describe("Plugin opencode.json Merge", () => {
 
     mockFetch([
       { pattern: "/plugins?project=test-project", status: 200, body: { data: [
-        { name: "observer", file_path: "./packages/ingenium-extension/observer-plugin.ts", enabled: true },
-        { name: "resource-sync", file_path: "./packages/ingenium-extension/resource-sync-plugin.ts", enabled: true },
+        { name: "observer", file_path: "./packages/ingenium-extension/plugins/observer.ts", enabled: true },
+        { name: "resource-sync", file_path: "./packages/ingenium-extension/plugins/resource-sync.ts", enabled: true },
       ] } },
     ]);
 
@@ -702,8 +702,8 @@ describe("Plugin opencode.json Merge", () => {
 
       // Check that opencode.json was updated
       const updated = JSON.parse(readFileSync(resolve(worktree, "opencode.json"), "utf-8"));
-      expect(updated.plugin).toContain("./packages/ingenium-extension/observer-plugin.ts");
-      expect(updated.plugin).toContain("./packages/ingenium-extension/resource-sync-plugin.ts");
+      expect(updated.plugin).toContain("./packages/ingenium-extension/plugins/observer.ts");
+      expect(updated.plugin).toContain("./packages/ingenium-extension/plugins/resource-sync.ts");
     } finally {
       restoreFetch();
     }
@@ -712,12 +712,12 @@ describe("Plugin opencode.json Merge", () => {
   it("preserves non-ingenium user plugins", async () => {
     createOpenCodeConfig([
       "./my-custom-plugin.ts",
-      "./packages/ingenium-extension/observer-plugin.ts",
+      "./packages/ingenium-extension/plugins/observer.ts",
     ]);
 
     mockFetch([
       { pattern: "/plugins?project=test-project", status: 200, body: { data: [
-        { name: "observer", file_path: "./packages/ingenium-extension/observer-plugin.ts", enabled: true },
+        { name: "observer", file_path: "./packages/ingenium-extension/plugins/observer.ts", enabled: true },
       ] } },
     ]);
 
@@ -738,9 +738,9 @@ describe("Plugin opencode.json Merge", () => {
 
   it("preserves core extension bootstrap plugins when the recreated API project is empty", async () => {
     createOpenCodeConfig([
-      "./packages/ingenium-extension/auto-observer-plugin.ts",
-      "./packages/ingenium-extension/observer-plugin.ts",
-      "./packages/ingenium-extension/resource-sync-plugin.ts",
+      "./packages/ingenium-extension/plugins/auto-observer.ts",
+      "./packages/ingenium-extension/plugins/observer.ts",
+      "./packages/ingenium-extension/plugins/resource-sync.ts",
     ]);
     mockFetch([
       { pattern: "/plugins?project=test-project", status: 200, body: { data: [] } },
@@ -753,9 +753,9 @@ describe("Plugin opencode.json Merge", () => {
 
       const updated = JSON.parse(readFileSync(resolve(worktree, "opencode.json"), "utf-8"));
       expect(updated.plugin).toEqual([
-        "./packages/ingenium-extension/auto-observer-plugin.ts",
-        "./packages/ingenium-extension/observer-plugin.ts",
-        "./packages/ingenium-extension/resource-sync-plugin.ts",
+        "./packages/ingenium-extension/plugins/auto-observer.ts",
+        "./packages/ingenium-extension/plugins/observer.ts",
+        "./packages/ingenium-extension/plugins/resource-sync.ts",
       ]);
     } finally {
       restoreFetch();
@@ -764,14 +764,14 @@ describe("Plugin opencode.json Merge", () => {
 
   it("removes disabled plugins from opencode.json plugin[] array", async () => {
     createOpenCodeConfig([
-      "./packages/ingenium-extension/observer-plugin.ts",
+      "./packages/ingenium-extension/plugins/observer.ts",
       "./packages/ingenium-extension/old-plugin.ts",
     ]);
 
     // API returns only observer (old-plugin disabled/removed)
     mockFetch([
       { pattern: "/plugins?project=test-project", status: 200, body: { data: [
-        { name: "observer", file_path: "./packages/ingenium-extension/observer-plugin.ts", enabled: true },
+        { name: "observer", file_path: "./packages/ingenium-extension/plugins/observer.ts", enabled: true },
       ] } },
     ]);
 
@@ -783,7 +783,7 @@ describe("Plugin opencode.json Merge", () => {
       await syncPlugins(worktree, "test-project", manifest, { isInitialSync: false });
 
       const updated = JSON.parse(readFileSync(resolve(worktree, "opencode.json"), "utf-8"));
-      expect(updated.plugin).toContain("./packages/ingenium-extension/observer-plugin.ts");
+      expect(updated.plugin).toContain("./packages/ingenium-extension/plugins/observer.ts");
       expect(updated.plugin).not.toContain("./packages/ingenium-extension/old-plugin.ts");
     } finally {
       restoreFetch();

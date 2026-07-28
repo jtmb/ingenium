@@ -103,11 +103,11 @@ COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/pac
 # OpenCode loads these TypeScript entrypoints directly, so retain their explicit
 # local import closure without copying the entire extension workspace.
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/auto-observer.ts ./packages/ingenium-extension/auto-observer.ts
-COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/auto-observer-plugin.ts ./packages/ingenium-extension/auto-observer-plugin.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/plugins/auto-observer.ts ./packages/ingenium-extension/plugins/auto-observer.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer.ts ./packages/ingenium-extension/observer.ts
-COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer-plugin.ts ./packages/ingenium-extension/observer-plugin.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/plugins/observer.ts ./packages/ingenium-extension/plugins/observer.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/resource-sync.ts ./packages/ingenium-extension/resource-sync.ts
-COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/resource-sync-plugin.ts ./packages/ingenium-extension/resource-sync-plugin.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/plugins/resource-sync.ts ./packages/ingenium-extension/plugins/resource-sync.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/context-import.ts ./packages/ingenium-extension/context-import.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer-core.ts ./packages/ingenium-extension/observer-core.ts
@@ -156,7 +156,7 @@ RUN mkdir -p /app/config /app/.ingenium/logs /app/.opencode/skills /workspace &&
 # Pre-create appuser home for OpenCode config persistence
 RUN mkdir -p /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log && chown -R appuser:appuser /home/appuser
 # Pre-create both the container default and the fallback opencode.json
- RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["/app/packages/ingenium-extension/auto-observer-plugin.ts","/app/packages/ingenium-extension/observer-plugin.ts","/app/packages/ingenium-extension/resource-sync-plugin.ts"]}' > /app/config/opencode.container.json && \
+ RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["/app/packages/ingenium-extension/plugins/auto-observer.ts","/app/packages/ingenium-extension/plugins/observer.ts","/app/packages/ingenium-extension/plugins/resource-sync.ts"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 

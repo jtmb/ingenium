@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resetEnsuredProjects } from "./project-resolver.js";
@@ -8,9 +8,9 @@ import { resetProjectCache } from "./resource-sync.js";
 const extensionRoot = resolve(dirname(fileURLToPath(import.meta.url)));
 const repositoryRoot = resolve(extensionRoot, "../..");
 const wrapperSpecs = [
-  "./packages/ingenium-extension/auto-observer-plugin.ts",
-  "./packages/ingenium-extension/observer-plugin.ts",
-  "./packages/ingenium-extension/resource-sync-plugin.ts",
+  "./packages/ingenium-extension/plugins/auto-observer.ts",
+  "./packages/ingenium-extension/plugins/observer.ts",
+  "./packages/ingenium-extension/plugins/resource-sync.ts",
 ] as const;
 
 type V1Plugin = {
@@ -34,6 +34,23 @@ function resolveOpenCode1189PathPlugin(spec: string, cwd: string): string {
   }
   const path = spec.startsWith("file://") ? fileURLToPath(spec) : resolve(cwd, spec);
   return spec.startsWith("file://") ? spec : pathToFileURL(path).href;
+}
+
+/**
+ * Mirrors the server-entry selection OpenCode performs after resolving a local
+ * path. It only probes `package.json` adjacent to the target, so wrapper files
+ * must not sit alongside the extension package manifest (whose `main` points
+ * to the broad named-export entrypoint).
+ */
+function resolveOpenCode1189ServerEntrypoint(spec: string, cwd: string): string {
+  const target = resolveOpenCode1189PathPlugin(spec, cwd);
+  const targetPath = fileURLToPath(target);
+  const packagePath = resolve(dirname(targetPath), "package.json");
+  if (!existsSync(packagePath)) return target;
+
+  const packageJson = JSON.parse(readFileSync(packagePath, "utf8")) as { main?: unknown };
+  if (typeof packageJson.main !== "string" || packageJson.main.trim().length === 0) return target;
+  return pathToFileURL(resolve(dirname(targetPath), packageJson.main)).href;
 }
 
 /**
@@ -82,17 +99,23 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
       expect(resolveOpenCode1189PathPlugin(spec, repositoryRoot)).toBe(
         pathToFileURL(resolve(repositoryRoot, spec)).href,
       );
+      expect(resolveOpenCode1189ServerEntrypoint(spec, repositoryRoot)).toBe(
+        pathToFileURL(resolve(repositoryRoot, spec)).href,
+      );
     }
 
     expect(() => resolveOpenCode1189PathPlugin("packages/ingenium-extension/resource-sync.ts", repositoryRoot))
       .toThrow("npm package spec");
+    expect(resolveOpenCode1189ServerEntrypoint("./packages/ingenium-extension/resource-sync.ts", repositoryRoot)).toBe(
+      pathToFileURL(resolve(extensionRoot, "dist/index.js")).href,
+    );
   });
 
   it("packages V1-only default wrappers and invokes only their server implementations", async () => {
     const [autoWrapper, observerWrapper, resourceWrapper, autoImplementation, observerImplementation, resourceImplementation] = await Promise.all([
-      import("./auto-observer-plugin.js"),
-      import("./observer-plugin.js"),
-      import("./resource-sync-plugin.js"),
+      import("./plugins/auto-observer.js"),
+      import("./plugins/observer.js"),
+      import("./plugins/resource-sync.js"),
       import("./auto-observer.js"),
       import("./observer.js"),
       import("./resource-sync.js"),
@@ -135,9 +158,9 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     }));
 
     const [autoWrapper, observerWrapper, resourceWrapper] = await Promise.all([
-      import("./auto-observer-plugin.js"),
-      import("./observer-plugin.js"),
-      import("./resource-sync-plugin.js"),
+      import("./plugins/auto-observer.js"),
+      import("./plugins/observer.js"),
+      import("./plugins/resource-sync.js"),
     ]);
     const input = {
       worktree: "/safe/plugin-loader-v1-worktree",
@@ -179,16 +202,16 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     };
 
     expect(packageJson.exports["./plugins/auto-observer"]).toEqual({
-      types: "./dist/auto-observer-plugin.d.ts",
-      import: "./dist/auto-observer-plugin.js",
+      types: "./dist/plugins/auto-observer.d.ts",
+      import: "./dist/plugins/auto-observer.js",
     });
     expect(packageJson.exports["./plugins/observer"]).toEqual({
-      types: "./dist/observer-plugin.d.ts",
-      import: "./dist/observer-plugin.js",
+      types: "./dist/plugins/observer.d.ts",
+      import: "./dist/plugins/observer.js",
     });
     expect(packageJson.exports["./plugins/resource-sync"]).toEqual({
-      types: "./dist/resource-sync-plugin.d.ts",
-      import: "./dist/resource-sync-plugin.js",
+      types: "./dist/plugins/resource-sync.d.ts",
+      import: "./dist/plugins/resource-sync.js",
     });
   });
 });

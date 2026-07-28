@@ -18,9 +18,9 @@ const originalProject = process.env.INGENIUM_PROJECT;
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
 const configuredPluginPaths = [
-  "packages/ingenium-extension/auto-observer-plugin.ts",
-  "packages/ingenium-extension/observer-plugin.ts",
-  "packages/ingenium-extension/resource-sync-plugin.ts",
+  "packages/ingenium-extension/plugins/auto-observer.ts",
+  "packages/ingenium-extension/plugins/observer.ts",
+  "packages/ingenium-extension/plugins/resource-sync.ts",
 ];
 
 function temporaryDirectory(prefix: string): string {
