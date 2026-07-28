@@ -722,6 +722,151 @@ export interface ManagedProviderConfig {
   apiKey?: string;
 }
 
+function isApiRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function apiString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function apiStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (!isApiRecord(value)) return [];
+  return Object.keys(value);
+}
+
+function apiProviderSelection(value: unknown): { providerId: string; modelId: string } {
+  if (!isApiRecord(value)) return { providerId: "", modelId: "" };
+  return {
+    providerId: apiString(value.providerId ?? value.provider ?? value.id),
+    modelId: apiString(value.modelId ?? value.model),
+  };
+}
+
+function unwrapApiData(value: unknown): unknown {
+  let current = value;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!isApiRecord(current) || !("data" in current)) return current;
+    current = current.data;
+  }
+  return current;
+}
+
+/** Normalize current, legacy, and malformed provider-config responses at the API boundary. */
+export function normalizeManagedProviderConfigResponse(value: unknown): {
+  providers: ManagedProviderConfig[];
+  synthesis: {
+    primary: { providerId: string; modelId: string };
+    secondary: { providerId: string; modelId: string };
+  };
+} {
+  const root = unwrapApiData(value);
+  const record = isApiRecord(root) ? root : {};
+  const source = Array.isArray(root)
+    ? root
+    : Array.isArray(record.providers)
+      ? record.providers
+      : Array.isArray(record.configuredProviders)
+        ? record.configuredProviders
+        : [];
+  const providers = source.flatMap((entry): ManagedProviderConfig[] => {
+    if (!isApiRecord(entry)) return [];
+    const id = apiString(entry.id).trim();
+    if (!id) return [];
+    const models = apiStringArray(entry.models);
+    const rolesValue = Array.isArray(entry.roles) ? entry.roles : [entry.role];
+    const roles = rolesValue.filter(
+      (role): role is ProviderRole => role === "available" || role === "primary" || role === "backup",
+    );
+    if (!roles.includes("available") && (roles.includes("primary") || roles.includes("backup"))) {
+      roles.unshift("available");
+    }
+    return [{
+      id,
+      name: apiString(entry.name ?? entry.label, id),
+      npm: apiString(entry.npm, "@ai-sdk/openai-compatible"),
+      baseURL: apiString(entry.baseURL ?? entry.baseUrl),
+      models,
+      defaultModel: apiString(entry.defaultModel, models[0] ?? ""),
+      roles: roles.length > 0 ? roles : ["available"],
+      enabled: entry.enabled !== false,
+      allowPrivateNetwork: entry.allowPrivateNetwork === true,
+      apiKeySet: entry.apiKeySet === true,
+      ...(typeof entry.apiKey === "string" ? { apiKey: entry.apiKey } : {}),
+    }];
+  });
+  const synthesis = isApiRecord(record.synthesis) ? record.synthesis : {};
+  const secondaryValue = synthesis.secondary ?? synthesis.backup ?? record.secondary ?? record.backup;
+  return {
+    providers,
+    synthesis: {
+      primary: apiProviderSelection(synthesis.primary ?? record.primary),
+      secondary: apiProviderSelection(secondaryValue),
+    },
+  };
+}
+
+function normalizeChatProvider(value: unknown): ChatProviderInfo | null {
+  if (!isApiRecord(value)) return null;
+  const providerId = apiString(value.providerId ?? value.id).trim();
+  if (!providerId) return null;
+  const modelsValue = Array.isArray(value.models) ? value.models : [];
+  const models = modelsValue.flatMap((model): ChatProviderModel[] => {
+    if (typeof model === "string") return [{ id: model, label: model }];
+    if (!isApiRecord(model)) return [];
+    const id = apiString(model.id).trim();
+    return id ? [{ id, label: apiString(model.label ?? model.name, id) }] : [];
+  });
+  return {
+    providerId,
+    label: apiString(value.label ?? value.name, providerId),
+    models,
+    defaultModel: apiString(value.defaultModel, models[0]?.id ?? ""),
+    source: value.source === "builtin" ? "builtin" : "managed",
+  };
+}
+
+/** Keep ChatShell provider/model collections array-shaped even for old API payloads. */
+export function normalizeChatConfigResponse(value: unknown): ChatConfigResponse {
+  const root = unwrapApiData(value);
+  const record = isApiRecord(root) ? root : {};
+  const providers = (Array.isArray(record.providers) ? record.providers : [])
+    .map(normalizeChatProvider)
+    .filter((provider): provider is ChatProviderInfo => provider !== null);
+  const agents = (Array.isArray(record.agents) ? record.agents : []).flatMap((agent): Array<{ name: string; label: string }> => {
+    if (!isApiRecord(agent)) return [];
+    const name = apiString(agent.name).trim();
+    if (!name) return [];
+    return [{ name, label: apiString(agent.label ?? agent.name, name) }];
+  });
+  const primary = isApiRecord(record.primary) ? {
+    ...apiProviderSelection(record.primary),
+    label: apiString(record.primary.label, apiProviderSelection(record.primary).providerId),
+    isCustom: record.primary.isCustom === true,
+  } : null;
+  const backup = isApiRecord(record.backup) ? {
+    ...apiProviderSelection(record.backup),
+    label: apiString(record.backup.label, apiProviderSelection(record.backup).providerId),
+    isCustom: record.backup.isCustom === true,
+  } : null;
+  const defaultSelection = isApiRecord(record.defaultSelection)
+    ? apiProviderSelection(record.defaultSelection)
+    : null;
+  return {
+    configured: record.configured === true,
+    primary,
+    backup,
+    agents,
+    providers,
+    defaultSelection: defaultSelection && (defaultSelection.providerId || defaultSelection.modelId)
+      ? defaultSelection
+      : null,
+  };
+}
+
 interface LearningSummary {
   pendingObservations: number;
   displayTraitsCount: number;
@@ -1334,18 +1479,36 @@ export const api = {
     getLlmConfig: (project = DEFAULT_PROJECT) =>
       request<{ data: LlmConfigResponse }>(`/settings/llm-config?project=${project}`),
 
-    getProviderConfigs: (project = DEFAULT_PROJECT) =>
-      request<{ data: { providers: ManagedProviderConfig[]; synthesis: { primary: { providerId: string; modelId: string }; secondary: { providerId: string; modelId: string } } } }>(`/settings/provider-configs?project=${project}`),
+    getProviderConfigs: async (project = DEFAULT_PROJECT) => {
+      const response = await request<{ data: unknown }>(`/settings/provider-configs?project=${project}`);
+      return { data: normalizeManagedProviderConfigResponse(response.data) };
+    },
 
-    saveProviderConfigs: (providers: ManagedProviderConfig[], project = DEFAULT_PROJECT, synthesis?: { primary: { providerId: string; modelId: string }; secondary: { providerId: string; modelId: string } }) =>
-      request<{ data: { saved: boolean; warnings: string[] } }>(
+    saveProviderConfigs: async (
+      providers: ManagedProviderConfig[],
+      project = DEFAULT_PROJECT,
+      synthesis?: { primary: { providerId: string; modelId: string }; secondary: { providerId: string; modelId: string } },
+    ) => {
+      const response = await request<{ data: unknown }>(
         `/settings/provider-configs?project=${project}`,
         { method: "PUT", body: JSON.stringify({ providers, synthesis }) },
-      ),
+      );
+      const data = isApiRecord(response.data) ? response.data : {};
+      return {
+        data: {
+          saved: data.saved === true,
+          warnings: Array.isArray(data.warnings)
+            ? data.warnings.filter((warning): warning is string => typeof warning === "string")
+            : [],
+        },
+      };
+    },
 
     /** Sanitized Chat config — returns the configured providers/agents for the Chat page without exposing API keys. */
-    chatConfig: (project = DEFAULT_PROJECT) =>
-      request<{ data: ChatConfigResponse }>(`/opencode/chat-config?project=${project}`),
+    chatConfig: async (project = DEFAULT_PROJECT) => {
+      const response = await request<{ data: unknown }>(`/opencode/chat-config?project=${project}`);
+      return { data: normalizeChatConfigResponse(response.data) };
+    },
 
     /** Persist an exact, server-validated global Chat provider/model selection. */
     saveChatSelection: (selection: { providerId: string; modelId: string }) =>

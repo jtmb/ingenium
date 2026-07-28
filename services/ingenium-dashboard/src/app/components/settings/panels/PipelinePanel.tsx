@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type ManagedProviderConfig } from "../../../../lib/api";
 import { useGlobalProject } from "../../../../lib/ProjectContext";
 import {
@@ -14,6 +14,10 @@ import SettingRow from "../SettingRow";
 
 /** Internal type that adds a stable draft ID for React keys and collapse/key-visibility state. */
 type DraftProvider = ManagedProviderConfig & { _draftId?: string };
+
+function hasProviderRole(provider: ManagedProviderConfig, role: "primary" | "backup"): boolean {
+  return Array.isArray(provider.roles) && provider.roles.includes(role);
+}
 
 const PACKAGE_OPTIONS = [
   ["@ai-sdk/openai-compatible", "OpenAI compatible"],
@@ -67,6 +71,7 @@ export default function PipelinePanel() {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [visibleKeys, setVisibleKeys] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [configError, setConfigError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [intervalMin, setIntervalMin] = useState(15);
@@ -76,6 +81,8 @@ export default function PipelinePanel() {
   const [backupModelId, setBackupModelId] = useState("");
   const [nativeProviders, setNativeProviders] = useState<OpenCodeProvider[]>([]);
   const [integrations, setIntegrations] = useState<OpenCodeIntegration[]>([]);
+  const [nativeLoading, setNativeLoading] = useState(true);
+  const [nativeError, setNativeError] = useState<string | null>(null);
   const [connectProviderId, setConnectProviderId] = useState<string | null>(null);
   const [connectMethod, setConnectMethod] = useState<OpenCodeIntegrationMethod | null>(null);
   const [connectInputs, setConnectInputs] = useState<Record<string, string>>({});
@@ -85,14 +92,26 @@ export default function PipelinePanel() {
   const [connecting, setConnecting] = useState(false);
   const activeAttemptRef = useRef<string | null>(null);
 
-  const refreshNativeProviders = async () => {
-    const [runtime, integrationResponse] = await Promise.all([
-      opencode.providers.list("/workspace"),
-      opencode.integrations.list("/workspace"),
-    ]);
-    setNativeProviders(runtime.providers);
-    setIntegrations(integrationResponse.data);
-  };
+  const refreshNativeProviders = useCallback(async () => {
+    setNativeLoading(true);
+    setNativeError(null);
+    try {
+      const [runtime, integrationResponse] = await Promise.all([
+        opencode.providers.list("/workspace"),
+        opencode.integrations.list("/workspace"),
+      ]);
+      setNativeProviders(Array.isArray(runtime.providers) ? runtime.providers : []);
+      setIntegrations(Array.isArray(integrationResponse.data) ? integrationResponse.data : []);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to load native providers";
+      setNativeProviders([]);
+      setIntegrations([]);
+      setNativeError(message);
+      throw error;
+    } finally {
+      setNativeLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (globalProjectLoading) return;
@@ -102,28 +121,38 @@ export default function PipelinePanel() {
       return;
     }
 
+    setLoading(true);
+    setConfigError(null);
+    void refreshNativeProviders().catch((error: unknown) => {
+      setStatus(error instanceof Error ? error.message : "Unable to load native providers");
+    });
+
     Promise.all([
       api.settings.getProviderConfigs(globalProject),
       api.settings.get("synthesis_interval_ms", globalProject),
-      opencode.providers.list("/workspace"),
-      opencode.integrations.list("/workspace"),
     ])
-      .then(([providerResponse, intervalResponse, runtime, integrationResponse]) => {
-        setProviders(providerResponse.data.providers);
-        setPrimaryProviderId(providerResponse.data.synthesis?.primary.providerId ?? providerResponse.data.providers.find((provider) => provider.roles.includes("primary"))?.id ?? "");
-        setPrimaryModelId(providerResponse.data.synthesis?.primary.modelId ?? "");
-        setBackupProviderId(providerResponse.data.synthesis?.secondary.providerId ?? providerResponse.data.providers.find((provider) => provider.roles.includes("backup"))?.id ?? "");
-        setBackupModelId(providerResponse.data.synthesis?.secondary.modelId ?? "");
+      .then(([providerResponse, intervalResponse]) => {
+        const managedProviders = Array.isArray(providerResponse.data.providers)
+          ? providerResponse.data.providers
+          : [];
+        const primary = providerResponse.data.synthesis?.primary;
+        const secondary = providerResponse.data.synthesis?.secondary;
+        setProviders(managedProviders);
+        setPrimaryProviderId(primary?.providerId || managedProviders.find((provider) => hasProviderRole(provider, "primary"))?.id || "");
+        setPrimaryModelId(primary?.modelId || "");
+        setBackupProviderId(secondary?.providerId || managedProviders.find((provider) => hasProviderRole(provider, "backup"))?.id || "");
+        setBackupModelId(secondary?.modelId || "");
         const ms = Number(intervalResponse.data.value);
         if (Number.isFinite(ms) && ms >= 0) setIntervalMin(ms / 60000);
-        setNativeProviders(runtime.providers);
-        setIntegrations(integrationResponse.data);
+        setConfigError(null);
       })
       .catch((error: unknown) => {
-        setStatus(error instanceof Error ? error.message : "Unable to load provider configuration");
+        const message = error instanceof Error ? error.message : "Unable to load provider configuration";
+        setConfigError(message);
+        setStatus(message);
       })
       .finally(() => setLoading(false));
-  }, [globalProject, globalProjectLoading, globalProjectError]);
+  }, [globalProject, globalProjectLoading, globalProjectError, refreshNativeProviders]);
 
   const updateProvider = (index: number, patch: Partial<ManagedProviderConfig>) => {
     setProviders((current) => current.map((provider, providerIndex) => (
@@ -186,10 +215,14 @@ export default function PipelinePanel() {
         secondary: { providerId: backupProviderId, modelId: backupModelId || providers.find((p) => p.id === backupProviderId)?.defaultModel || "" },
       });
       const refreshed = await api.settings.getProviderConfigs(globalProject);
-        setProviders(refreshed.data.providers);
-        setPrimaryProviderId(refreshed.data.providers.find((provider) => provider.roles.includes("primary"))?.id ?? "");
-        setBackupProviderId(refreshed.data.providers.find((provider) => provider.roles.includes("backup"))?.id ?? "");
-        setStatus(response.data.warnings.length > 0
+      const refreshedProviders = Array.isArray(refreshed.data.providers) ? refreshed.data.providers : [];
+      setProviders(refreshedProviders);
+      setPrimaryProviderId(refreshed.data.synthesis?.primary.providerId || refreshedProviders.find((provider) => hasProviderRole(provider, "primary"))?.id || "");
+      setPrimaryModelId(refreshed.data.synthesis?.primary.modelId || "");
+      setBackupProviderId(refreshed.data.synthesis?.secondary.providerId || refreshedProviders.find((provider) => hasProviderRole(provider, "backup"))?.id || "");
+      setBackupModelId(refreshed.data.synthesis?.secondary.modelId || "");
+      setConfigError(null);
+      setStatus(response.data.warnings.length > 0
           ? `Saved. ${response.data.warnings.join(" ")}`
           : "Saved. OpenCode provider configuration reloaded.");
     } catch (error: unknown) {
@@ -212,14 +245,16 @@ export default function PipelinePanel() {
     }
   };
 
-  const isNativeConnected = (providerId: string) => (
-    Boolean(integrations.find((integration) => integration.id === providerId)?.connections.length)
-  );
+  const isNativeConnected = (providerId: string) => {
+    const integration = integrations.find((candidate) => candidate.id === providerId);
+    return Boolean(integration && Array.isArray(integration.connections) && integration.connections.length > 0);
+  };
 
   const openConnect = (providerId: string) => {
     const integration = integrations.find((candidate) => candidate.id === providerId);
-    const method = integration?.methods.find((candidate) => candidate.type === "oauth")
-      ?? integration?.methods.find((candidate) => candidate.type === "key")
+    const methods = integration?.methods ?? [];
+    const method = methods.find((candidate) => candidate.type === "oauth")
+      ?? methods.find((candidate) => candidate.type === "key")
       ?? null;
     setConnectProviderId(providerId);
     setConnectMethod(method);
@@ -340,8 +375,11 @@ export default function PipelinePanel() {
     isNativeConnected(provider.id) && !managedIds.has(provider.id)
   ));
   const selectedIntegration = integrations.find((integration) => integration.id === connectProviderId);
-  const actionableMethods = selectedIntegration?.methods.filter((method) => method.type === "key" || method.type === "oauth") ?? [];
+  const actionableMethods = (selectedIntegration?.methods ?? []).filter((method) => method.type === "key" || method.type === "oauth");
   const selectedNativeProvider = nativeProviders.find((provider) => provider.id === connectProviderId);
+
+  const selectedPrimaryProvider = providers.find((provider) => provider.id === primaryProviderId);
+  const selectedBackupProvider = providers.find((provider) => provider.id === backupProviderId);
 
   if (globalProjectLoading) {
     return <div className="px-6 py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse">Resolving global provider project...</div>;
@@ -378,7 +416,11 @@ export default function PipelinePanel() {
       <section className="mb-6">
         <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Connected providers</h4>
         <div className="mt-3 space-y-2">
-          {connectedNativeProviders.length === 0 ? (
+          {nativeLoading ? (
+            <p className="rounded-lg border border-dashed border-[var(--color-border)] px-4 py-5 text-sm text-[var(--color-text-muted)] animate-pulse">Loading native providers...</p>
+          ) : nativeError ? (
+            <p className="rounded-lg border border-[var(--color-error-border)] bg-[var(--color-error-bg)] px-4 py-5 text-sm text-[var(--color-error-text)]" role="alert">Native provider catalog unavailable: {nativeError}</p>
+          ) : connectedNativeProviders.length === 0 ? (
             <p className="rounded-lg border border-dashed border-[var(--color-border)] px-4 py-5 text-sm text-[var(--color-text-muted)]">No native providers connected.</p>
           ) : connectedNativeProviders.map((provider) => (
             <div key={provider.id} className="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
@@ -396,7 +438,11 @@ export default function PipelinePanel() {
         <h4 className="text-sm font-semibold text-[var(--color-text-primary)]">Native providers</h4>
         <p className="mt-1 text-xs text-[var(--color-text-muted)]">Authentication and model catalogs are managed by OpenCode.</p>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          {popularProviders.map((provider) => {
+          {nativeLoading ? (
+            <p className="text-sm text-[var(--color-text-muted)] animate-pulse">Loading native provider catalog...</p>
+          ) : nativeError ? null : popularProviders.length === 0 ? (
+            <p className="text-sm text-[var(--color-text-muted)]">No native providers are available.</p>
+          ) : popularProviders.map((provider) => {
             const connected = isNativeConnected(provider.id);
             return (
               <div key={provider.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
@@ -422,6 +468,10 @@ export default function PipelinePanel() {
 
       {loading ? (
         <div className="py-10 text-center text-sm text-[var(--color-text-muted)] animate-pulse">Loading providers...</div>
+      ) : configError ? (
+        <div className="rounded-lg border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-4" role="alert">
+          <p className="text-sm text-[var(--color-error-text)]">Provider configuration unavailable: {configError}</p>
+        </div>
       ) : providers.length === 0 ? (
         <button
           type="button"
@@ -578,7 +628,7 @@ export default function PipelinePanel() {
               </select>
               <select aria-label="Primary model" value={primaryModelId} onChange={(event) => setPrimaryModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!primaryProviderId}>
                 <option value="">Select model</option>
-                {providers.find((provider) => provider.id === primaryProviderId)?.models.filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
+                {(selectedPrimaryProvider?.models ?? []).filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
               </select>
             </label>
             <label className="text-xs font-medium text-[var(--color-text-secondary)]">
@@ -589,7 +639,7 @@ export default function PipelinePanel() {
               </select>
               <select aria-label="Secondary model" value={backupModelId} onChange={(event) => setBackupModelId(event.target.value)} className="mt-2 w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer" disabled={!backupProviderId}>
                 <option value="">Select model</option>
-                {providers.find((provider) => provider.id === backupProviderId)?.models.filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
+                {(selectedBackupProvider?.models ?? []).filter(Boolean).map((model) => <option key={model} value={model}>{model}</option>)}
               </select>
             </label>
           </div>

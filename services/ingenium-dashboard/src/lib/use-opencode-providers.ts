@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { opencode, type OpenCodeProvider, type OpenCodeAgent } from "./opencode";
+import {
+  normalizeOpenCodeProviderCatalog,
+  opencode,
+  type OpenCodeProvider,
+  type OpenCodeAgent,
+} from "./opencode";
 
 export interface FlattenedModel {
   id: string;
@@ -66,9 +71,12 @@ export function useOpenCodeProviders(
 
         if (cancelled || !mountedRef.current) return;
 
-        const providerList = providersRes.providers;
+        // Keep the hook safe when a test double, an older proxy, or a future
+        // upstream client bypasses the canonical provider DTO.
+        const providerList = normalizeOpenCodeProviderCatalog(providersRes).providers;
+        const agentList = Array.isArray(agentsRes) ? agentsRes : [];
         setProviders(providerList);
-        setAgents(agentsRes);
+        setAgents(agentList);
         setDefaults(Object.fromEntries(
           providerList
             .filter((provider) => provider.defaultModel)

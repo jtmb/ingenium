@@ -182,11 +182,36 @@ function nonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function unwrapDataEnvelope(input: unknown): unknown {
+  let value = input;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!isProviderRecord(value) || !("data" in value)) return value;
+    value = value.data;
+  }
+  return value;
+}
+
+function collectionValues(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (!isProviderRecord(value)) return [];
+  return Object.entries(value).map(([key, entry]) => {
+    if (!isProviderRecord(entry)) return entry;
+    return { ...entry, id: nonEmptyString(entry.id) ?? key };
+  });
+}
+
 function normalizeProviderModels(value: unknown): OpenCodeProviderModel[] {
   const models: OpenCodeProviderModel[] = [];
   const modelIds = new Set<string>();
 
   const addModel = (value: unknown, fallbackId?: string) => {
+    if (typeof value === "string") {
+      const id = nonEmptyString(value) ?? fallbackId ?? null;
+      if (!id || modelIds.has(id)) return;
+      models.push({ id, label: id });
+      modelIds.add(id);
+      return;
+    }
     if (!isProviderRecord(value)) return;
     const id = nonEmptyString(value.id) ?? fallbackId ?? null;
     if (!id || modelIds.has(id)) return;
@@ -209,7 +234,7 @@ function normalizeProviderModels(value: unknown): OpenCodeProviderModel[] {
  * OpenCode response (`all`) into one always-array catalog for callers.
  */
 export function normalizeOpenCodeProviderCatalog(input: unknown): OpenCodeProviderCatalog {
-  const root = isProviderRecord(input) && isProviderRecord(input.data) ? input.data : input;
+  const root = unwrapDataEnvelope(input);
   if (!isProviderRecord(root)) return { providers: [] };
 
   const defaults = isProviderRecord(root.default) ? root.default : {};
@@ -218,11 +243,7 @@ export function normalizeOpenCodeProviderCatalog(input: unknown): OpenCodeProvid
       ? root.connected.filter((value): value is string => typeof value === "string")
       : [],
   );
-  const candidates = Array.isArray(root.providers)
-    ? root.providers
-    : Array.isArray(root.all)
-      ? root.all
-      : [];
+  const candidates = collectionValues(root.providers ?? root.all);
   const providers: OpenCodeProvider[] = [];
   const providerIds = new Set<string>();
 
@@ -283,6 +304,111 @@ export interface OpenCodeIntegration {
   name: string;
   methods: OpenCodeIntegrationMethod[];
   connections: Array<{ type: string; id?: string; label?: string; name?: string }>;
+}
+
+function normalizeIntegrationPrompts(value: unknown): OpenCodeIntegrationPrompt[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((prompt): OpenCodeIntegrationPrompt[] => {
+    if (!isProviderRecord(prompt)) return [];
+    const type = prompt.type === "select" ? "select" : prompt.type === "text" ? "text" : null;
+    const key = nonEmptyString(prompt.key);
+    const message = nonEmptyString(prompt.message);
+    if (!type || !key || !message) return [];
+    const options = Array.isArray(prompt.options)
+      ? prompt.options.flatMap((option) => {
+        if (!isProviderRecord(option)) return [];
+        const label = nonEmptyString(option.label);
+        const value = nonEmptyString(option.value);
+        const hint = nonEmptyString(option.hint);
+        if (!label || !value) return [];
+        return [{ label, value, ...(hint ? { hint } : {}) }];
+      })
+      : undefined;
+    const placeholder = nonEmptyString(prompt.placeholder);
+    return [{
+      type,
+      key,
+      message,
+      ...(placeholder ? { placeholder } : {}),
+      ...(options ? { options } : {}),
+    }];
+  });
+}
+
+function normalizeOpenCodeIntegrations(input: unknown): OpenCodeIntegration[] {
+  const root = unwrapDataEnvelope(input);
+  const candidates = Array.isArray(root)
+    ? root
+    : isProviderRecord(root)
+      ? collectionValues(root.integrations ?? root.items ?? root.data)
+      : [];
+
+  return candidates.flatMap((candidate): OpenCodeIntegration[] => {
+    if (!isProviderRecord(candidate)) return [];
+    const id = nonEmptyString(candidate.id);
+    if (!id) return [];
+    const methods = Array.isArray(candidate.methods)
+      ? candidate.methods.flatMap((method): OpenCodeIntegrationMethod[] => {
+        if (!isProviderRecord(method)) return [];
+        const type = method.type === "key" || method.type === "env" || method.type === "oauth"
+          ? method.type
+          : null;
+        if (!type) return [];
+        const methodId = nonEmptyString(method.id);
+        const methodLabel = nonEmptyString(method.label);
+        return [{
+          type,
+          ...(methodId ? { id: methodId } : {}),
+          ...(methodLabel ? { label: methodLabel } : {}),
+          ...(Array.isArray(method.names)
+            ? { names: method.names.filter((name): name is string => typeof name === "string") }
+            : {}),
+          prompts: normalizeIntegrationPrompts(method.prompts),
+        }];
+      })
+      : [];
+    const connections = Array.isArray(candidate.connections)
+      ? candidate.connections.flatMap((connection) => {
+        if (!isProviderRecord(connection)) return [];
+        const type = nonEmptyString(connection.type);
+        if (!type) return [];
+        const connectionId = nonEmptyString(connection.id);
+        const connectionLabel = nonEmptyString(connection.label);
+        const connectionName = nonEmptyString(connection.name);
+        return [{
+          type,
+          ...(connectionId ? { id: connectionId } : {}),
+          ...(connectionLabel ? { label: connectionLabel } : {}),
+          ...(connectionName ? { name: connectionName } : {}),
+        }];
+      })
+      : [];
+    return [{
+      id,
+      name: nonEmptyString(candidate.name) ?? nonEmptyString(candidate.label) ?? id,
+      methods,
+      connections,
+    }];
+  });
+}
+
+function normalizeOpenCodeAgents(input: unknown): OpenCodeAgent[] {
+  const root = unwrapDataEnvelope(input);
+  if (!Array.isArray(root)) return [];
+  return root.flatMap((agent): OpenCodeAgent[] => {
+    if (!isProviderRecord(agent)) return [];
+    const name = nonEmptyString(agent.name);
+    if (!name) return [];
+    const description = nonEmptyString(agent.description);
+    return [{
+      name,
+      ...(description ? { description } : {}),
+      mode: typeof agent.mode === "string" ? agent.mode : "subagent",
+      ...(typeof agent.native === "boolean" ? { native: agent.native } : {}),
+      ...(typeof agent.hidden === "boolean" ? { hidden: agent.hidden } : {}),
+      ...(Array.isArray(agent.permission) ? { permission: agent.permission } : {}),
+    }];
+  });
 }
 
 export interface OpenCodeIntegrationAttempt {
@@ -461,10 +587,15 @@ export const opencode = {
   },
 
   integrations: {
-    list: (directory = "/workspace") =>
-      oc<{ location: Record<string, unknown>; data: OpenCodeIntegration[] }>(
+    list: async (directory = "/workspace") => {
+      const response = await oc<unknown>(
         `/opencode/integrations?directory=${encodeURIComponent(directory)}`,
-      ),
+      );
+      const location = isProviderRecord(response) && isProviderRecord(response.location)
+        ? response.location
+        : {};
+      return { location, data: normalizeOpenCodeIntegrations(response) };
+    },
 
     connectKey: (integrationID: string, key: string) =>
       oc<unknown>(`/opencode/integrations/${encodeURIComponent(integrationID)}/connect/key`, {
@@ -499,7 +630,7 @@ export const opencode = {
   },
 
   agents: {
-    list: () => oc<OpenCodeAgent[]>("/opencode/agents"),
+    list: async () => normalizeOpenCodeAgents(await oc<unknown>("/opencode/agents")),
   },
 
   mcp: {

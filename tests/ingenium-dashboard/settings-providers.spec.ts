@@ -6,13 +6,19 @@ import { test, expect } from "@playwright/test";
  * Tests the full lifecycle: open with deep-link, add a provider, validate the
  * private-network baseURL rejection, save, switch tabs, close, and re-open.
  *
- * Note: The server's provider-configs GET endpoint crashes due to
- * vault.findItemByName not being implemented; this affects the save
- * confirmation and reopen persistence. The test validates the UI flow
- * and error handling within those constraints.
+ * The provider catalog may be unavailable while OpenCode is starting. The
+ * panel must keep its loading/error/empty states explicit in that case and
+ * must never throw while normalizing the response.
  */
 test.describe("Settings — Providers Tab", () => {
   test("add provider, validate private network, save, close, re-open", async ({ page }) => {
+    const providerRenderErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      if (/undefined.*find|find.*undefined/i.test(error.message)) {
+        providerRenderErrors.push(error.message);
+      }
+    });
+
     /* ------------------------------------------------------------------ */
     /*  1. Navigate to /?settings=providers                               */
     /* ------------------------------------------------------------------ */
@@ -85,9 +91,8 @@ test.describe("Settings — Providers Tab", () => {
     /* ------------------------------------------------------------------ */
     await baseUrlInput.fill("");
 
-    // The save may fail due to a pre-existing server-side bug where
-    // vault.findItemByName is not implemented. Check if status appears,
-    // but be flexible about whether it succeeds or shows a server error.
+    // The save may fail when the fixture has no writable provider backend.
+    // The panel should still report the result without throwing.
     await saveBtn.click();
 
     // Either a success/error message appears, or the button was disabled during save
@@ -132,5 +137,7 @@ test.describe("Settings — Providers Tab", () => {
     // Close overlay
     await page.keyboard.press("Escape");
     await expect(page.getByRole("heading", { name: "Settings" })).not.toBeVisible({ timeout: 3000 });
+
+    expect(providerRenderErrors).toEqual([]);
   });
 });

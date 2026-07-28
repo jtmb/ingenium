@@ -284,6 +284,18 @@ describe("provider block panel", () => {
     expect(screen.getByRole("heading", { name: "Native providers", exact: true })).not.toBeNull();
   });
 
+  it("renders explicit empty states when provider collections are absent", async () => {
+    getProviderConfigs.mockResolvedValueOnce({ data: { providers: undefined, synthesis: {} } });
+    listProviders.mockResolvedValueOnce({ providers: undefined });
+    listIntegrations.mockResolvedValueOnce({ data: undefined });
+
+    render(<PipelinePanel />);
+
+    expect(await screen.findByText("No custom providers configured. Add your first custom provider.")).not.toBeNull();
+    expect(await screen.findByText("No native providers are available.")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Providers", exact: true })).not.toBeNull();
+  });
+
   it("offers OpenAI subscription OAuth methods from OpenCode", async () => {
     render(<PipelinePanel />);
     const openAi = await screen.findByText("OpenAI", { selector: "div.font-medium" });

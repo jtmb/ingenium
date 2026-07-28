@@ -5,21 +5,37 @@ import type { FlattenedModel } from "./use-opencode-providers";
 // Re-export FlattenedModel so importers can get it from one place
 export type { FlattenedModel };
 
+type ProviderWithModels = {
+  name?: string;
+  label?: string;
+  models?: unknown;
+};
+
 /**
  * Extract model entries from a provider object.
  * Works with both OpenCodeProvider and raw provider objects (PipelinePanel).
  */
 export function providerModels(
-  p: { models?: Record<string, any> } | undefined,
-): [string, any][] {
-  return Object.entries(p?.models ?? {}) as [string, any][];
+  p: ProviderWithModels | undefined,
+): [string, unknown][] {
+  if (!p || !p.models) return [];
+  if (Array.isArray(p.models)) {
+    return p.models.flatMap((model, index): [string, unknown][] => {
+      if (typeof model === "string") return [[model, model]];
+      if (!model || typeof model !== "object") return [];
+      const id = "id" in model && typeof model.id === "string" ? model.id : String(index);
+      return [[id, model]];
+    });
+  }
+  if (typeof p.models !== "object") return [];
+  return Object.entries(p.models as Record<string, unknown>);
 }
 
 /**
  * Sort providers for a dropdown: known providers first with a fixed ranking,
  * then alphabetically. Filters out providers with no models.
  */
-export function sortProviders<T extends { name: string; models?: Record<string, any> }>(
+export function sortProviders<T extends ProviderWithModels>(
   providers: T[],
 ): T[] {
   const pinned: [string, number][] = [
@@ -31,19 +47,19 @@ export function sortProviders<T extends { name: string; models?: Record<string, 
     ["zen", 5],
   ];
   const rank = (p: T): number => {
-    const name = (p.name || "").toLowerCase();
+    const name = (p.name ?? p.label ?? "").toLowerCase();
     for (const [kw, r] of pinned) {
       if (name.includes(kw)) return r;
     }
     return 999;
   };
   return [...providers]
-    .filter((p) => Object.keys(p.models ?? {}).length > 0)
+    .filter((p) => providerModels(p).length > 0)
     .sort((a, b) => {
       const ar = rank(a);
       const br = rank(b);
       if (ar !== br) return ar - br;
-      return a.name.localeCompare(b.name);
+      return (a.name ?? a.label ?? "").localeCompare(b.name ?? b.label ?? "");
     });
 }
 
@@ -58,14 +74,15 @@ export function sortProviders<T extends { name: string; models?: Record<string, 
 export function normalizeModelId(
   providerId: string,
   modelId: string,
-  models: FlattenedModel[],
+  models: FlattenedModel[] | undefined,
 ): FlattenedModel | undefined {
+  const modelList = Array.isArray(models) ? models : [];
   // First try: exact match on providerID + model id
-  const exact = models.find(
+  const exact = modelList.find(
     (m) => m.providerID === providerId && m.id === modelId,
   );
   if (exact) return exact;
 
   // Fallback: any model matching the ID (across any provider)
-  return models.find((m) => m.id === modelId);
+  return modelList.find((m) => m.id === modelId);
 }

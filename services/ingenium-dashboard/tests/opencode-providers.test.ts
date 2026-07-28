@@ -16,7 +16,7 @@ describe("OpenCode provider catalog client", () => {
     request.mockReset();
   });
 
-  it("uses the browser DTO providers array as the canonical shape", async () => {
+  it("normalizes the production GET /opencode/providers response shape", async () => {
     request.mockResolvedValue({
       data: {
         providers: [{
@@ -38,6 +38,21 @@ describe("OpenCode provider catalog client", () => {
         connected: true,
       }],
     });
+    expect(request).toHaveBeenCalledWith("/opencode/providers?directory=%2Fworkspace", undefined);
+  });
+
+  it("accepts a nested production envelope without leaving an optional collection undefined", () => {
+    expect(normalizeOpenCodeProviderCatalog({
+      data: {
+        providers: [{
+          id: "openai",
+          label: "OpenAI",
+          models: [{ id: "gpt-5", label: "GPT-5" }],
+          defaultModel: "gpt-5",
+          connected: true,
+        }],
+      },
+    }).providers).toHaveLength(1);
   });
 
   it("normalizes the legacy all/default/connected response without exposing it to callers", () => {
