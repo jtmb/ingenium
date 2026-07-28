@@ -47,7 +47,10 @@ services:
       - opencode-config:/home/appuser/.config
       - opencode-data:/home/appuser/.local
       - ./opencode.json:/app/opencode.json:ro
-      - ${HOME:-~}/repos/opencodeweb_workspace:/workspace
+      # Compose must be started from a WSL/Linux shell with HOME set. The
+      # complete host repository root is the workspace contract; do not replace
+      # it with a checkout-specific path.
+      - "${HOME:?HOME must be set for the /workspace bind mount}/repos:/workspace"
       - ${HOME:-~}/.local/share/opencode:/var/opencode:rw
     logging:
       driver: local

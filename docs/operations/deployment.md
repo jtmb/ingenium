@@ -192,7 +192,21 @@ rejected before proxying with `403`. The ttyd listener remains private on
 | `opencode-config` | `/home/appuser/.config` | OpenCode configuration (persists across rebuilds) |
 | `opencode-data` | `/home/appuser/.local` | OpenCode user data, session state |
 
-**Workspace bind-mount:** Your local `~/repos` is mounted at `/workspace` for file editing.
+### Workspace bind-mount (Windows + WSL)
+
+Compose requires `HOME` and mounts exactly `${HOME}/repos:/workspace`. Start
+Compose from a WSL/Linux shell where `$HOME/repos` is the host repository root;
+if `HOME` is absent, `docker compose config` fails with a bind-mount-specific
+error instead of selecting a fallback path. Do not replace this source with a
+checkout-specific directory.
+
+For example, the WSL host path `$HOME/repos/ingenium` appears in the container
+as `/workspace/ingenium`. On Windows, Docker's published `3000:3000` gateway is
+available through `http://localhost:3000` via WSL localhost forwarding, while
+the same WSL repository tree is available in Explorer at
+`\\wsl.localhost\<distribution>\home\<user>\repos`. These are two views of the
+same WSL-hosted repositories; do not substitute a Windows-drive path for the
+Compose bind source.
 
 ### Mail durability and Compose project identity
 

@@ -81,6 +81,12 @@ reject_text docker-compose.yml 'INGENIUM_GATEWAY_BCRYPT_COST'
 require_text docker-compose.yml 'OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?'
 require_text docker-compose.yml 'NEXT_PUBLIC_OPENCODE_WEB_URL:-http://opencode.localhost:3000/'
 require_text docker-compose.yml 'NEXT_PUBLIC_OPENCODE_CLI_URL:-http://cli.localhost:3000/'
+require_text docker-compose.yml '${HOME:?HOME must be set for the /workspace bind mount}/repos:/workspace'
+reject_text docker-compose.yml 'opencodeweb_workspace'
+reject_text docker-compose.yml '${HOME:-~}/repos'
+require_text docker-compose.yml 'ingenium-data:/app/.ingenium'
+require_text docker-compose.yml 'opencode-config:/home/appuser/.config'
+require_text docker-compose.yml 'opencode-data:/home/appuser/.local'
 if grep -Eq '(^|[[:space:]-])([0-9]+:)?409[89](:|$)' "$REPO_ROOT/docker-compose.yml"; then
   fail "docker-compose publishes a private OpenCode port"
 fi
