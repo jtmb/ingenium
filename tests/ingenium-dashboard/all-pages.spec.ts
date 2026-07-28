@@ -345,8 +345,8 @@ test.describe("Personality Page", () => {
     await expect(page.getByText("Sort:")).toBeVisible();
     await expect(page.locator("select").first()).toBeVisible();
 
-    // Trait count
-    await expect(page.getByText("trait(s)").first()).toBeVisible({ timeout: 5000 });
+    // Established and emerging trait counts
+    await expect(page.getByRole("status", { name: "Personality trait counts" })).toBeVisible({ timeout: 5000 });
   });
 
   test("shows trait cards grouped by type", async ({ page }) => {
@@ -368,8 +368,8 @@ test.describe("Personality Page", () => {
     await sortSelect.selectOption("Newest first");
     await waitForClientState(page);
 
-    // Should still show traits
-    await expect(page.getByText("trait(s)").first()).toBeVisible({ timeout: 3000 });
+    // Should still show the established/emerging counts
+    await expect(page.getByRole("status", { name: "Personality trait counts" })).toBeVisible({ timeout: 3000 });
   });
 
   test("dismiss button exists on trait cards", async ({ page }) => {
@@ -378,7 +378,7 @@ test.describe("Personality Page", () => {
     await waitForClientState(page);
 
     // Each trait card should have a dismiss (×) button
-    const dismissBtn = page.getByRole("button", { name: "×" }).first();
+    const dismissBtn = page.getByRole("button", { name: "Dismiss trait" }).first();
     await expect(dismissBtn).toBeVisible({ timeout: 5000 });
   });
 });

@@ -140,27 +140,26 @@ test.describe("Dashboard Integration (real API, no mocks)", () => {
     // Page heading
     await expect(page.locator("h1")).toContainText("Personality Profile");
 
-    // Should show "N trait(s)" text
-    const traitCount = page.locator("span.text-sm").filter({
-      hasText: /trait\(s\)/,
-    });
-    await expect(traitCount).toBeVisible({ timeout: 10000 });
+    // Should show established and emerging counts
+    const traitCounts = page.getByRole("status", { name: "Personality trait counts" });
+    await expect(traitCounts).toContainText("Established:", { timeout: 10000 });
+    await expect(traitCounts).toContainText("Emerging:");
 
     // The personality page has two display modes: "grouped" (default) and "newest".
     // If traits loaded, we should see either:
     // 1. Grouped sections with type headers, or
-    // 2. "all below the display threshold" banner, or
+    // 2. The emerging section for active sub-threshold traits, or
     // 3. Empty state "No personality traits learned yet"
 
     const emptyState = page.getByText("No personality traits learned yet");
-    const hiddenBanner = page.getByText(/all below the display threshold/);
+    const emergingSection = page.getByTestId("emerging-traits-section");
     const groupSections = page.locator(
       "div.border.rounded.overflow-hidden",
     );
 
     const isLoaded =
       (await groupSections.count()) > 0 ||
-      (await hiddenBanner.isVisible()) ||
+      (await emergingSection.isVisible()) ||
       (await emptyState.isVisible());
 
     expect(isLoaded).toBeTruthy();

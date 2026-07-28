@@ -126,13 +126,13 @@ The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 
 ## Personality
 
-**What it does**: View and manage the system's learned understanding of the user. The personality system tracks 6 developer-specific trait dimensions with confidence scores.
+**What it does**: View and manage the system's learned understanding of the user. The personality system tracks 10 developer-specific trait dimensions with confidence scores.
 
 **How to use**:
 - Navigate to `/personality` in the dashboard
-- View active traits grouped by type with confidence bars (0.0–1.0)
+- View active traits grouped by type with confidence bars (0.0–1.0), split into established (≥ 0.30) and emerging (< 0.30) traits
 - Click the **×** button on any trait card to dismiss it (marks `is_active = 0`)
-- Hidden traits (confidence below 0.30) can be toggled via the "N hidden" link
+- Emerging traits remain visible by default in the "Emerging traits — awaiting confirmation" section, including their current confidence
 
 ## Observations
 

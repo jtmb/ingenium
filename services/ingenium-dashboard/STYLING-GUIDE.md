@@ -307,6 +307,12 @@ Each setting row uses the `SettingRow` component:
 - **Route-linked panels**: Projects → `/projects`, Skills → `/skills`, Tasks → `/tasks`, Jobs → `/jobs`, Plugins → `/plugins`, Agents → `/agents`, MCP → `/mcp-servers`, Observations → `/observations`, Personality → `/personality`, and Logs → `/logs`
 - Route-linked panels use `RouteLinkedPanel`: a concise category description plus an **Open {label} workspace** link. They intentionally reuse the dedicated route's data loading, authorization, mutation flows, and responsive UI rather than rendering placeholder content in the overlay.
 
+### Personality Workspace
+- The header uses separate **Established** and **Emerging** counts; established means confidence `≥ 0.30`.
+- Active sub-threshold traits use the warning surface and border tokens in an **Emerging traits — awaiting confirmation** card.
+- Each emerging trait shows an `Emerging · N% confidence` badge and confidence bar. The card remains present in both grouped and newest sort modes.
+- Dismiss controls are available on every trait row and remove the row from the active view immediately.
+
 ### PipelinePanel — Draft Lifecycle & Native Provider Cards
 
 The PipelinePanel manages both **custom (managed) providers** and **native OpenCode provider integrations** in a single scrollable panel.

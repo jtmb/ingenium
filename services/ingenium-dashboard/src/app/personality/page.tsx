@@ -5,6 +5,9 @@ import { useProject } from "../../lib/ProjectContext";
 import { api, PersonalityTrait } from "../../lib/api";
 import Overlay from "../components/Overlay";
 
+const ESTABLISHED_CONFIDENCE_THRESHOLD = 0.3;
+type PersonalityTraitDetails = PersonalityTrait & { metadata?: string };
+
 const TYPE_ICONS: Record<string, string> = {
   communication_style: "💬",
   code_preference: "💻",
@@ -18,26 +21,48 @@ const TYPE_ICONS: Record<string, string> = {
   personality_trait: "🌟",
 };
 
+function confidencePercent(trait: PersonalityTrait): number {
+  return Math.round((trait.confidence || 0) * 100);
+}
+
+function ConfidenceBar({ trait, width = "w-20" }: { trait: PersonalityTrait; width?: string }) {
+  const percent = confidencePercent(trait);
+
+  return (
+    <div
+      className={`${width} h-2 bg-[var(--color-border-muted)] rounded-full overflow-hidden`}
+      role="progressbar"
+      aria-label={`${percent}% confidence`}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent}
+    >
+      <div
+        className="h-full bg-[var(--color-accent)] rounded-full"
+        style={{ width: `${percent}%` }}
+      />
+    </div>
+  );
+}
+
 /**
  * PersonalityPage — Learned personality traits from the self-learning pipeline.
  *
  * Traits are generated from observations by the synthesis engine. They have
- * a confidence score (0.0–1.0). Traits below the 0.30 threshold are hidden
- * by default — this threshold requires at least 2 confirming observations
- * before a trait becomes visible (starting confidence ~0.15, +0.15 per
- * confirmation). The "Show hidden" toggle exposes sub-threshold traits.
+ * a confidence score (0.0–1.0). Traits at or above the 0.30 threshold are
+ * established; active traits below the threshold remain visible as emerging
+ * traits so external projects can see what is still awaiting confirmation.
  */
 export default function PersonalityPage() {
   const project = useProject();
   const [traits, setTraits] = useState<PersonalityTrait[]>([]);
-  const [profile, setProfile] = useState<any>(null);
-  const [selectedTrait, setSelectedTrait] = useState<any>(null);
+  const [selectedTrait, setSelectedTrait] = useState<PersonalityTraitDetails | null>(null);
   const [sortMode, setSortMode] = useState<"grouped" | "newest">("grouped");
-  const [showHidden, setShowHidden] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [renderedAt] = useState(() => Date.now());
 
   function formatRelative(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
+    const diff = renderedAt - new Date(iso).getTime();
     const sec = Math.abs(Math.floor(diff / 1000));
     if (sec < 60) return `${sec}s ago`;
     const min = Math.floor(sec / 60);
@@ -48,31 +73,46 @@ export default function PersonalityPage() {
   }
 
   useEffect(() => {
-    setError(null);
     api.personality.list(project)
-      .then((r) => setTraits(r.data || []))
+      .then((r) => {
+        setError(null);
+        setTraits(r.data || []);
+      })
       .catch(() => setError("Failed to load personality traits — API may be unreachable"));
-    api.personality.profile(project)
-      .then((r) => setProfile(r.data || []))
-      .catch(() => { /* profile is supplementary */ });
   }, [project]);
 
-  const hiddenCount = traits.filter(t => (t.confidence || 0) < 0.3).length;
+  // The API contract describes is_active as a boolean, but SQLite-backed
+  // responses can still contain 0/1. Treat both false and 0 as inactive.
+  const activeTraits = traits.filter((trait) => trait.is_active === undefined || Boolean(trait.is_active));
+  const establishedTraits = activeTraits.filter(
+    (trait) => (trait.confidence || 0) >= ESTABLISHED_CONFIDENCE_THRESHOLD,
+  );
+  const emergingTraits = activeTraits.filter(
+    (trait) => (trait.confidence || 0) < ESTABLISHED_CONFIDENCE_THRESHOLD,
+  );
 
   const handleDismiss = async (id: number) => {
+    const dismissedTrait = traits.find((trait) => trait.id === id);
+    setTraits((prev) => prev.filter((trait) => trait.id !== id));
+    if (selectedTrait?.id === id) setSelectedTrait(null);
+
     try {
       await api.personality.dismiss(id, project);
-      setTraits(prev => prev.map(t => t.id === id ? { ...t, is_active: false } : t));
-    } catch {}
+    } catch {
+      if (dismissedTrait) {
+        setTraits((prev) => prev.some((trait) => trait.id === id) ? prev : [...prev, dismissedTrait]);
+      }
+      setError("Failed to dismiss personality trait — please try again");
+    }
   };
 
-  const grouped = traits.reduce((acc: Record<string, PersonalityTrait[]>, t: PersonalityTrait) => {
+  const grouped = establishedTraits.reduce((acc: Record<string, PersonalityTrait[]>, t: PersonalityTrait) => {
     (acc[t.trait_type] ??= []).push(t);
     return acc;
   }, {});
 
-  const allHidden = Object.keys(grouped).length > 0 && Object.values(grouped).every(
-    (typeTraits) => (typeTraits as PersonalityTrait[]).filter(t => (t.confidence || 0) >= 0.3).length === 0
+  const newestEmergingTraits = [...emergingTraits].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
 
   return (
@@ -81,25 +121,73 @@ export default function PersonalityPage() {
         <h1 className="text-3xl font-bold">Personality Profile</h1>
         <div className="flex items-center gap-3">
           <span className="text-sm text-[var(--color-text-muted)]">Sort:</span>
-          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as any)} className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
+          <select aria-label="Sort personality traits" value={sortMode} onChange={(e) => {
+            const nextMode = e.target.value;
+            if (nextMode === "grouped" || nextMode === "newest") setSortMode(nextMode);
+          }} className="border border-[var(--color-border)] rounded px-3 py-1.5 text-sm bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] cursor-pointer">
             <option value="grouped">Grouped by type</option>
             <option value="newest">Newest first</option>
           </select>
-          <span className="text-sm text-[var(--color-text-muted)]">
-            {traits.filter(t => (t.confidence || 0) >= 0.3).length} trait(s)
-            {hiddenCount > 0 && (
-              <button onClick={() => setShowHidden(!showHidden)} className="ml-2 text-sm text-[var(--color-text-link)] font-medium hover:underline cursor-pointer">
-                {showHidden ? "Hide" : `${hiddenCount} hidden`}
-              </button>
-            )}
-          </span>
+          <div className="text-sm text-[var(--color-text-muted)] flex items-center gap-3" role="status" aria-label="Personality trait counts">
+            <span>Established: <strong className="text-[var(--color-text-secondary)]">{establishedTraits.length}</strong></span>
+            <span>Emerging: <strong className="text-[var(--color-warning-text)]">{emergingTraits.length}</strong></span>
+          </div>
         </div>
       </div>
 
-      {sortMode === "newest" && (
+      {emergingTraits.length > 0 && (
+        <section
+          aria-labelledby="emerging-traits-heading"
+          data-testid="emerging-traits-section"
+          className="bg-[var(--color-warning-bg)] rounded border border-[var(--color-warning-border)] overflow-hidden"
+        >
+          <div className="px-4 py-3 border-b border-[var(--color-warning-border)] flex items-start justify-between gap-4">
+            <div>
+              <h2 id="emerging-traits-heading" className="font-semibold text-[var(--color-warning-text)]">
+                Emerging traits — awaiting confirmation
+              </h2>
+              <p className="text-sm text-[var(--color-warning-text)] mt-1">
+                These active traits are visible while they build enough confidence to become established.
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full border border-[var(--color-warning-border)] px-2 py-1 text-xs font-medium text-[var(--color-warning-text)]">
+              {emergingTraits.length} emerging
+            </span>
+          </div>
+          <div className="divide-y divide-[var(--color-warning-border)]">
+            {newestEmergingTraits.map((t) => (
+              <div
+                key={t.id}
+                data-testid={`emerging-trait-${t.id}`}
+                className="px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)] flex justify-between items-center gap-4"
+                onClick={() => setSelectedTrait(t)}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span aria-hidden="true">{TYPE_ICONS[t.trait_type] || "📌"}</span>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium">{t.display_label || t.trait_value}</span>
+                      <span className="rounded-full border border-[var(--color-warning-border)] px-2 py-0.5 text-xs font-medium text-[var(--color-warning-text)]">
+                        Emerging · {confidencePercent(t)}% confidence
+                      </span>
+                    </div>
+                    <span className="text-xs text-[var(--color-warning-text)] capitalize">{t.trait_type?.replace(/_/g, " ")}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] text-lg leading-none" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
+                  <span className="hidden sm:inline text-xs text-[var(--color-warning-text)]">{formatRelative(t.created_at)}</span>
+                  <ConfidenceBar trait={t} width="w-16" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {sortMode === "newest" && establishedTraits.length > 0 && (
         <div className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] divide-y hover:shadow-md transition-shadow">
-          {[...traits]
-            .filter(t => showHidden || (t.confidence || 0) >= 0.3)
+          {[...establishedTraits]
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             .map((t) => (
             <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)] flex justify-between items-center" onClick={() => setSelectedTrait(t)}>
@@ -111,11 +199,9 @@ export default function PersonalityPage() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Dismiss trait">&times;</button>
+                <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] text-lg leading-none" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
                 <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(t.created_at)}</span>
-                <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                      <div className="h-full bg-[var(--color-accent)] rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
-                </div>
+                <ConfidenceBar trait={t} width="w-16" />
               </div>
             </div>
           ))}
@@ -127,29 +213,13 @@ export default function PersonalityPage() {
           {error}
         </div>
       )}
-      {!error && sortMode === "grouped" && Object.entries(grouped).length === 0 && (
+      {!error && activeTraits.length === 0 && (
         <div className="bg-[var(--color-surface-muted)] p-8 rounded border border-[var(--color-border)] text-center text-[var(--color-text-muted)]">
           No personality traits learned yet. Traits are generated automatically from observations via the synthesis pipeline.
         </div>
       )}
 
-      {sortMode === "grouped" && allHidden && !showHidden && (
-        <div className="bg-[var(--color-warning-bg)] border border-[var(--color-warning-border)] rounded p-6 text-center">
-          <p className="text-[var(--color-warning-text)] font-medium mb-2">
-            {Object.keys(grouped).length} trait type(s) found, but all below the display threshold.
-          </p>
-          <p className="text-[var(--color-warning-text)] text-sm mb-3">
-            Traits need 2+ confirming observations to reach the 0.30 display threshold (confidence ≥ 30%).
-          </p>
-          <button onClick={() => setShowHidden(true)} className="px-4 py-2 bg-amber-100 text-[var(--color-warning-text)] rounded text-sm font-medium hover:bg-amber-200">
-            Show all ({hiddenCount} hidden)
-          </button>
-        </div>
-      )}
-
       {sortMode === "grouped" && Object.entries(grouped).map(([type, typeTraits]) => {
-        const visibleTraits = (typeTraits as PersonalityTrait[]).filter(t => showHidden || (t.confidence || 0) >= 0.3);
-        if (visibleTraits.length === 0) return null;
         return (
         <div key={type} className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] overflow-hidden hover:shadow-md transition-shadow">
           <div className="bg-[var(--color-surface-muted)] px-4 py-2 border-b font-semibold text-sm flex items-center gap-2">
@@ -157,19 +227,17 @@ export default function PersonalityPage() {
             <span className="capitalize">{type.replace(/_/g, " ")}</span>
           </div>
           <div className="divide-y">
-            {visibleTraits.map((t: PersonalityTrait) => (
+            {(typeTraits as PersonalityTrait[]).map((t: PersonalityTrait) => (
               <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)]" onClick={() => setSelectedTrait(t)}>
                 <div className="flex justify-between items-center">
                   <div>
                     <span className="font-medium">{t.display_label || t.trait_value}</span>
-                    {t.exemplar_text && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">"{t.exemplar_text.substring(0, 100)}"</p>}
+                    {t.exemplar_text && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">“{t.exemplar_text.substring(0, 100)}”</p>}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-gray-300 hover:text-red-500 text-lg leading-none" title="Dismiss trait">&times;</button>
-                    <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-[var(--color-accent)] rounded-full" style={{ width: `${(t.confidence || 0) * 100}%` }} />
-                    </div>
-                    <span className="text-xs text-[var(--color-text-muted)] w-8">{Math.round((t.confidence || 0) * 100)}%</span>
+                    <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] text-lg leading-none" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
+                    <ConfidenceBar trait={t} />
+                    <span className="text-xs text-[var(--color-text-muted)] w-8">{confidencePercent(t)}%</span>
                   </div>
                 </div>
               </div>

@@ -91,6 +91,26 @@ async function openPersonality(page: Page): Promise<void> {
   await listResponse;
 }
 
+async function createEmergingTrait(request: APIRequestContext, value: string): Promise<number> {
+  const response = await request.post(
+    `${runtime.apiBase}/personality?project=${projectQuery}`,
+    {
+      headers: runtime.apiHeaders,
+      data: {
+        trait_type: "code_preference",
+        trait_value: value,
+        display_label: `Emerging E2E trait ${value}`,
+        confidence: 0.15,
+        source: "manual",
+      },
+    },
+  );
+  expect(response.status()).toBe(201);
+  const body = await response.json() as { data?: { id?: number } };
+  expect(body.data?.id).toBeDefined();
+  return body.data!.id!;
+}
+
 /**
  * E2E coverage for the Pipeline, Observations, and Personality pages. Fixture
  * writes are asserted against the run-owned project through the API so page
@@ -184,6 +204,24 @@ test.describe("Personality Page", () => {
   test("personality page loads with trait groups", async ({ page }) => {
     await openPersonality(page);
     await expect(page.locator("h1")).toContainText("Personality Profile");
-    await expect(page.locator("text=trait(s)").first()).toBeVisible();
+    await expect(page.getByRole("status", { name: "Personality trait counts" })).toContainText("Established:");
+    await expect(page.getByRole("status", { name: "Personality trait counts" })).toContainText("Emerging:");
+  });
+
+  test("shows and dismisses an active emerging trait in both sort modes", async ({ page, request }) => {
+    const value = `emerging-${Date.now()}`;
+    const traitId = await createEmergingTrait(request, value);
+    await openPersonality(page);
+
+    const emergingSection = page.getByTestId("emerging-traits-section");
+    const emergingCard = page.getByTestId(`emerging-trait-${traitId}`);
+    await expect(emergingSection).toBeVisible();
+    await expect(emergingCard).toContainText("Emerging · 15% confidence");
+
+    await page.getByLabel("Sort personality traits").selectOption("newest");
+    await expect(page.getByTestId(`emerging-trait-${traitId}`)).toBeVisible();
+
+    await emergingCard.getByRole("button", { name: "Dismiss trait" }).click();
+    await expect(page.getByTestId(`emerging-trait-${traitId}`)).toHaveCount(0);
   });
 });
