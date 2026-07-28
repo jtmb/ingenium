@@ -105,6 +105,7 @@ COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/pac
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/auto-observer.ts ./packages/ingenium-extension/auto-observer.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer.ts ./packages/ingenium-extension/observer.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/resource-sync.ts ./packages/ingenium-extension/resource-sync.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/context-import.ts ./packages/ingenium-extension/context-import.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer-core.ts ./packages/ingenium-extension/observer-core.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/project-resolver.ts ./packages/ingenium-extension/project-resolver.ts
