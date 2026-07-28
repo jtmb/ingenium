@@ -87,12 +87,22 @@ beforeEach(() => {
   getProviderConfigs.mockResolvedValue({ data: { providers: providerFixture } });
   saveProviderConfigs.mockResolvedValue({ data: { saved: true, warnings: [] } });
   listProviders.mockResolvedValue({
-    all: [
-      { id: "deepseek", name: "DeepSeek", source: "custom", models: { "deepseek-chat": {}, "deepseek-reasoner": {} } },
-      { id: "openai", name: "OpenAI", source: "custom", models: { "gpt-5": {} } },
+    providers: [
+      {
+        id: "deepseek",
+        label: "DeepSeek",
+        models: [{ id: "deepseek-chat", label: "DeepSeek Chat" }, { id: "deepseek-reasoner", label: "DeepSeek Reasoner" }],
+        defaultModel: "deepseek-chat",
+        connected: false,
+      },
+      {
+        id: "openai",
+        label: "OpenAI",
+        models: [{ id: "gpt-5", label: "GPT-5" }],
+        defaultModel: "gpt-5",
+        connected: false,
+      },
     ],
-    default: {},
-    connected: [],
   });
   listIntegrations.mockResolvedValue({
     data: [
@@ -263,6 +273,15 @@ describe("provider block panel", () => {
 
     expect(await screen.findByText("DeepSeek", { selector: "div.font-medium" })).not.toBeNull();
     expect(screen.getByText("2 models")).not.toBeNull();
+  });
+
+  it("keeps the panel rendered and reports a native catalog error", async () => {
+    listProviders.mockRejectedValueOnce(new Error("provider catalog unavailable"));
+
+    render(<PipelinePanel />);
+
+    expect((await screen.findByRole("status")).textContent).toContain("provider catalog unavailable");
+    expect(screen.getByRole("heading", { name: "Native providers", exact: true })).not.toBeNull();
   });
 
   it("offers OpenAI subscription OAuth methods from OpenCode", async () => {

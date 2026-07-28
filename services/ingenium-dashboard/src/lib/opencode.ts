@@ -146,31 +146,111 @@ export type OpenCodePart =
 
 /* ----- Provider / Model / Agent ----- */
 
-export interface OpenCodeProvider {
+/**
+ * The browser-facing provider DTO returned by the API proxy.
+ *
+ * The proxy intentionally exposes a small, stable shape instead of the raw
+ * OpenCode provider object. Keep consumers on this shape so an upstream
+ * provider contract change cannot break the Settings panel at runtime.
+ */
+export interface OpenCodeProviderModel {
   id: string;
-  name: string;
-  source: string;
-  env?: string[];
-  options?: Record<string, unknown>;
-  models: Record<string, OpenCodeModel>;
+  label: string;
 }
 
-export interface OpenCodeModel {
+export interface OpenCodeProvider {
   id: string;
-  providerID: string;
-  name: string;
-  capabilities: {
-    temperature?: boolean;
-    reasoning?: boolean;
-    attachment?: boolean;
-    toolcall?: boolean;
-    input?: { text?: boolean; image?: boolean; audio?: boolean; video?: boolean };
-    output?: { text?: boolean; image?: boolean; audio?: boolean };
+  label: string;
+  models: OpenCodeProviderModel[];
+  defaultModel: string | null;
+  connected: boolean;
+}
+
+export interface OpenCodeProviderCatalog {
+  providers: OpenCodeProvider[];
+}
+
+interface ProviderRecord {
+  [key: string]: unknown;
+}
+
+function isProviderRecord(value: unknown): value is ProviderRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function normalizeProviderModels(value: unknown): OpenCodeProviderModel[] {
+  const models: OpenCodeProviderModel[] = [];
+  const modelIds = new Set<string>();
+
+  const addModel = (value: unknown, fallbackId?: string) => {
+    if (!isProviderRecord(value)) return;
+    const id = nonEmptyString(value.id) ?? fallbackId ?? null;
+    if (!id || modelIds.has(id)) return;
+    const label = nonEmptyString(value.label) ?? nonEmptyString(value.name) ?? id;
+    models.push({ id, label });
+    modelIds.add(id);
   };
-  cost: { input: number; output: number; cache?: { read: number; write: number } };
-  limit: { context: number; input?: number; output?: number };
-  status: string;
-  variants?: Record<string, { reasoningEffort?: string }>;
+
+  if (Array.isArray(value)) {
+    for (const model of value) addModel(model);
+  } else if (isProviderRecord(value)) {
+    for (const [modelId, model] of Object.entries(value)) addModel(model, modelId);
+  }
+
+  return models;
+}
+
+/**
+ * Normalize both the current browser DTO (`providers`) and the historical
+ * OpenCode response (`all`) into one always-array catalog for callers.
+ */
+export function normalizeOpenCodeProviderCatalog(input: unknown): OpenCodeProviderCatalog {
+  const root = isProviderRecord(input) && isProviderRecord(input.data) ? input.data : input;
+  if (!isProviderRecord(root)) return { providers: [] };
+
+  const defaults = isProviderRecord(root.default) ? root.default : {};
+  const connected = new Set(
+    Array.isArray(root.connected)
+      ? root.connected.filter((value): value is string => typeof value === "string")
+      : [],
+  );
+  const candidates = Array.isArray(root.providers)
+    ? root.providers
+    : Array.isArray(root.all)
+      ? root.all
+      : [];
+  const providers: OpenCodeProvider[] = [];
+  const providerIds = new Set<string>();
+
+  for (const candidate of candidates) {
+    if (!isProviderRecord(candidate)) continue;
+    const id = nonEmptyString(candidate.id);
+    if (!id || providerIds.has(id)) continue;
+
+    const label = nonEmptyString(candidate.label) ?? nonEmptyString(candidate.name) ?? id;
+    const models = normalizeProviderModels(candidate.models);
+    const configuredDefault = nonEmptyString(candidate.defaultModel) ?? nonEmptyString(defaults[id]);
+    const defaultModel = configuredDefault && models.some((model) => model.id === configuredDefault)
+      ? configuredDefault
+      : null;
+
+    providers.push({
+      id,
+      label,
+      models,
+      defaultModel,
+      connected: typeof candidate.connected === "boolean"
+        ? candidate.connected
+        : connected.has(id),
+    });
+    providerIds.add(id);
+  }
+
+  return { providers };
 }
 
 export interface OpenCodeAgent {
@@ -372,14 +452,12 @@ export const opencode = {
   },
 
   providers: {
-    list: (directory?: string) =>
-      oc<{
-        all: OpenCodeProvider[];
-        default: Record<string, string>;
-        connected: string[];
-      }>(
+    list: async (directory?: string): Promise<OpenCodeProviderCatalog> => {
+      const response = await oc<unknown>(
         `/opencode/providers${directory ? `?directory=${encodeURIComponent(directory)}` : ""}`,
-      ),
+      );
+      return normalizeOpenCodeProviderCatalog(response);
+    },
   },
 
   integrations: {

@@ -25,6 +25,7 @@ test.describe("Settings — Providers Tab", () => {
     // its accessible panel heading as the concise "Providers" heading.
     const providersHeading = page.getByRole("heading", { name: "Providers", exact: true });
     await expect(providersHeading).toBeVisible({ timeout: 3000 });
+    await expect(page.getByRole("heading", { name: "Native providers", exact: true })).toBeVisible();
 
     // Verify the Providers tab is active in the sidebar
     const providersTab = page.locator('[role="tab"]', { hasText: "Providers" });

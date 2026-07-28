@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { opencode, type OpenCodeProvider, type OpenCodeModel, type OpenCodeAgent } from "./opencode";
+import { opencode, type OpenCodeProvider, type OpenCodeAgent } from "./opencode";
 
 export interface FlattenedModel {
   id: string;
@@ -66,26 +66,24 @@ export function useOpenCodeProviders(
 
         if (cancelled || !mountedRef.current) return;
 
-        const providerList = providersRes.all ?? [];
+        const providerList = providersRes.providers;
         setProviders(providerList);
         setAgents(agentsRes);
-        setDefaults(providersRes.default ?? null);
+        setDefaults(Object.fromEntries(
+          providerList
+            .filter((provider) => provider.defaultModel)
+            .map((provider) => [provider.id, provider.defaultModel as string]),
+        ));
 
         // Flatten models from all providers
         const flattened: FlattenedModel[] = [];
-        for (const p of providerList) {
-          const entries = p.models ?? {};
-          for (const [_key, m] of Object.entries(entries)) {
+        for (const provider of providerList) {
+          for (const model of provider.models) {
             flattened.push({
-              id: m.id,
-              providerID: m.providerID,
-              providerName: p.name,
-              name: m.name,
-              capabilities: m.capabilities,
-              cost: m.cost,
-              limit: m.limit,
-              status: m.status,
-              variants: m.variants,
+              id: model.id,
+              providerID: provider.id,
+              providerName: provider.label,
+              name: model.label,
             });
           }
         }

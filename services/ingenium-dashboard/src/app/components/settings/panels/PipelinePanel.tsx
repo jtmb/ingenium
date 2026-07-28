@@ -90,7 +90,7 @@ export default function PipelinePanel() {
       opencode.providers.list("/workspace"),
       opencode.integrations.list("/workspace"),
     ]);
-    setNativeProviders(runtime.all);
+    setNativeProviders(runtime.providers);
     setIntegrations(integrationResponse.data);
   };
 
@@ -116,7 +116,7 @@ export default function PipelinePanel() {
         setBackupModelId(providerResponse.data.synthesis?.secondary.modelId ?? "");
         const ms = Number(intervalResponse.data.value);
         if (Number.isFinite(ms) && ms >= 0) setIntervalMin(ms / 60000);
-        setNativeProviders(runtime.all);
+        setNativeProviders(runtime.providers);
         setIntegrations(integrationResponse.data);
       })
       .catch((error: unknown) => {
@@ -383,8 +383,8 @@ export default function PipelinePanel() {
           ) : connectedNativeProviders.map((provider) => (
             <div key={provider.id} className="flex items-center justify-between gap-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
               <div className="min-w-0">
-                <div className="font-medium text-sm text-[var(--color-text-primary)]">{provider.name}</div>
-                <div className="text-xs text-[var(--color-text-muted)]">{Object.keys(provider.models).length} models available automatically</div>
+                <div className="font-medium text-sm text-[var(--color-text-primary)]">{provider.label}</div>
+                <div className="text-xs text-[var(--color-text-muted)]">{provider.models.length} models available automatically</div>
               </div>
               <button type="button" onClick={() => disconnectNativeProvider(provider.id)} className="text-xs font-medium text-red-500 hover:underline cursor-pointer">Disconnect</button>
             </div>
@@ -401,8 +401,8 @@ export default function PipelinePanel() {
             return (
               <div key={provider.id} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
                 <div className="min-w-0">
-                  <div className="font-medium text-sm text-[var(--color-text-primary)]">{provider.name}</div>
-                  <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{Object.keys(provider.models).length} models</div>
+                  <div className="font-medium text-sm text-[var(--color-text-primary)]">{provider.label}</div>
+                  <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">{provider.models.length} models</div>
                 </div>
                 {connected ? (
                   <span className="rounded-full bg-green-500/15 px-2 py-1 text-[11px] font-medium text-green-600 dark:text-green-400">Connected</span>
@@ -614,11 +614,11 @@ export default function PipelinePanel() {
       </div>
 
       {connectProviderId && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={`Connect ${selectedNativeProvider?.name ?? connectProviderId}`}>
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label={`Connect ${selectedNativeProvider?.label ?? connectProviderId}`}>
           <div className="w-full max-w-lg rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h4 className="text-base font-semibold text-[var(--color-text-primary)]">Connect {selectedNativeProvider?.name ?? connectProviderId}</h4>
+                <h4 className="text-base font-semibold text-[var(--color-text-primary)]">Connect {selectedNativeProvider?.label ?? connectProviderId}</h4>
                 <p className="mt-1 text-xs text-[var(--color-text-muted)]">Models will be loaded automatically from OpenCode.</p>
               </div>
               <button type="button" onClick={closeConnect} aria-label="Close provider connection" className="text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] cursor-pointer">×</button>
