@@ -177,6 +177,18 @@ Selected items in FileTree also use the token:
 | Card Grid (Desktop) | 3 columns | `grid grid-cols-1 md:grid-cols-3` |
 | Card Gap | 16px | `gap-4` |
 
+## Usage Analytics
+
+The `/usage` workspace uses an analytical, provider-neutral presentation: compact
+metric cards, a responsive SVG request trend, and horizontally scrollable data
+tables. It must retain the dashboard token system and not borrow provider branding.
+
+- **Metrics:** Use `rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow` cards. Availability is a subdued token-based pill; unavailable values are text, never synthetic zeroes. Reasoning-token cards use the same known/partial/unavailable treatment as other token counters.
+- **Filters:** Keep UTC explicit in labels and supporting copy. The `From` boundary is inclusive and the `To` boundary is visibly labelled exclusive in both controls and the applied-range label. Native selects use `bg-[var(--color-surface)]`, `hover:bg-[var(--color-surface-hover)]`, and `cursor-pointer`. Agent selection is disabled with an explicit unavailable state until reported attribution is present; status selection uses the API's canonical status values.
+- **Charts:** Use `--color-accent` for analytical lines and `--color-border` / `--color-border-muted` for axes and guides. SVG charts require a visible heading plus programmatic title and description, and must have a semantic data-table alternative.
+- **Tables:** Keep semantic `<table>` markup inside `overflow-x-auto` wrappers so analytical columns remain readable on mobile. Raw provider, model, and reported agent identifiers use a compact monospace treatment without renaming. Daily, breakdown, and event cost cells include the API availability label (`Known`, `Partial`, or `Unavailable`) alongside the amount; a `Partial` event may validly have no amount.
+- **Unknown telemetry:** Cost, cache counters, reasoning counters, and unsupported attribution must read `Unavailable` or `Partial` as supplied by the API. Do not calculate a cache-hit rate, currency conversion, or agent attribution when the API does not report it. Truncated CSV exports expose a continuation action only when the API supplies a continuation cursor.
+
 ## 🔴 Universal Card Component — Every Card Uses `hover:shadow-md transition-shadow`
 
 Every card on every page of the dashboard MUST use `hover:shadow-md transition-shadow`. This is a universal rule — not optional, not per-page. The only variation is size (`p-4` for list items, `p-6` for feature cards) and border radius (`rounded` for compact, `rounded-lg` for feature).

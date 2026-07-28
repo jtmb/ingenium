@@ -159,6 +159,19 @@ function IconHeart() {
   );
 }
 
+function IconUsage() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2 13.5V2.5M2 13.5h12" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      <path d="M4 10l2.4-2.5 2.2 1.6L12.5 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx="4" cy="10" r=".8" fill="currentColor" />
+      <circle cx="6.4" cy="7.5" r=".8" fill="currentColor" />
+      <circle cx="8.6" cy="9.1" r=".8" fill="currentColor" />
+      <circle cx="12.5" cy="4" r=".8" fill="currentColor" />
+    </svg>
+  );
+}
+
 function IconMessageSquare() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -288,6 +301,7 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Jobs", href: "/jobs", icon: <IconClock /> },
       { label: "Backups", href: "/backups", icon: <IconSave /> },
       { label: "Logs", href: "/logs", icon: <IconList /> },
+      { label: "Usage", href: "/usage", icon: <IconUsage /> },
       { label: "Status", href: "/status", icon: <IconHeart /> },
     ],
   },

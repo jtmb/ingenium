@@ -805,6 +805,104 @@ export interface DashboardSummary {
   generatedAt: string;
 }
 
+/** Provider-neutral usage telemetry returned by the usage API. */
+export type UsageAvailability = "known" | "partial" | "unavailable";
+export type UsageStatus = "success" | "error" | "partial" | "unknown";
+
+export interface UsageMetricValue {
+  value: number | null;
+  availability: UsageAvailability;
+}
+
+export interface UsageMetrics {
+  requests: number;
+  tokens: {
+    total: UsageMetricValue;
+    input: UsageMetricValue;
+    output: UsageMetricValue;
+    reasoning: UsageMetricValue;
+  };
+  cache: {
+    read: UsageMetricValue;
+    write: UsageMetricValue;
+  };
+  cost: UsageMetricValue;
+}
+
+export interface UsageDailyRow extends UsageMetrics {
+  day: string;
+}
+
+export interface UsageBreakdownRow extends UsageMetrics {
+  providerId: string | null;
+  modelId: string | null;
+  agentId: string | null;
+}
+
+export interface UsageSummary {
+  range: { from: string; to: string };
+  totals: UsageMetrics;
+  daily: UsageDailyRow[];
+  freshness: {
+    latestEventAt: string | null;
+    lastSyncCompletedAt: string | null;
+    lastSuccessfulSyncAt: string | null;
+  };
+}
+
+export interface UsageEvent {
+  id: string;
+  sourceInstance: string;
+  sourcePartId: string;
+  sourceSessionId: string;
+  sourceMessageId: string;
+  sourceProjectId: string;
+  providerId: string | null;
+  modelId: string | null;
+  agentId: string | null;
+  status: UsageStatus;
+  occurredAt: string;
+  tokens: {
+    total: number | null;
+    input: number | null;
+    output: number | null;
+    reasoning: number | null;
+  };
+  cache: {
+    read: number | null;
+    write: number | null;
+  };
+  cost: { amount: number | null; availability: UsageAvailability };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UsageEventsPage {
+  data: UsageEvent[];
+  pagination: { nextCursor: string | null; hasMore: boolean; total: number };
+}
+
+export interface UsageQuery {
+  from: string;
+  to: string;
+  providerIds?: string[];
+  modelIds?: string[];
+  agentIds?: string[];
+  statuses?: UsageStatus[];
+}
+
+/** Serialize raw usage filter values without normalizing provider or model IDs. */
+export function usageQueryParams(project: string, query: UsageQuery, extras?: { limit?: number; cursor?: string }): URLSearchParams {
+  const params = new URLSearchParams({ project, from: query.from, to: query.to });
+  query.providerIds?.forEach((providerId) => params.append("provider", providerId));
+  query.modelIds?.forEach((modelId) => params.append("model", modelId));
+  query.agentIds?.forEach((agentId) => params.append("agent", agentId));
+  query.statuses?.forEach((status) => params.append("status", status));
+  if (extras?.limit !== undefined) params.set("limit", String(extras.limit));
+  if (extras?.cursor) params.set("cursor", extras.cursor);
+  return params;
+}
+
 /** ========== Docs Types (re-exported from canonical docs-types.ts) ========== */
 
 export type {
@@ -1681,6 +1779,16 @@ export const api = {
       request<{ data: DashboardSummary; unavailable: string[] }>(
         `/dashboard/summary?project=${encodeURIComponent(project)}`,
       ),
+  },
+  usage: {
+    summary: (query: UsageQuery, project = DEFAULT_PROJECT) =>
+      request<{ data: UsageSummary }>(`/usage/summary?${usageQueryParams(project, query)}`),
+    breakdown: (query: UsageQuery, project = DEFAULT_PROJECT) =>
+      request<{ data: UsageBreakdownRow[] }>(`/usage/breakdown?${usageQueryParams(project, query)}`),
+    events: (query: UsageQuery, project = DEFAULT_PROJECT, options?: { limit?: number; cursor?: string }) =>
+      request<UsageEventsPage>(`/usage/events?${usageQueryParams(project, query, options)}`),
+    exportUrl: (query: UsageQuery, project = DEFAULT_PROJECT, options?: { limit?: number; cursor?: string }) =>
+      `${getApiBase()}/usage/export?${usageQueryParams(project, query, options)}`,
   },
   backups: {
     /** GET /backups — list all backups */
