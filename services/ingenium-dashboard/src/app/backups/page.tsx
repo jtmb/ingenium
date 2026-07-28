@@ -166,16 +166,19 @@ function ScheduleCard() {
       {!loading && schedule && (
         <div className="space-y-3">
           {/* Hourly */}
-          <div className="flex items-center justify-between py-2 px-3 bg-[var(--color-surface-muted)] rounded">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col items-start gap-3 rounded bg-[var(--color-surface-muted)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
+                  role="switch"
+                  aria-label="Enable hourly backups"
+                  aria-checked={schedule.hourly.enabled}
                   checked={schedule.hourly.enabled}
                   onChange={(e) => handleToggle("hourly", e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--color-accent)]" />
+                <div aria-hidden="true" className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--color-accent)]" />
               </label>
               <div>
                 <p className="text-sm font-medium text-[var(--color-text-primary)]">Hourly</p>
@@ -187,16 +190,19 @@ function ScheduleCard() {
           </div>
 
           {/* Daily */}
-          <div className="flex items-center justify-between py-2 px-3 bg-[var(--color-surface-muted)] rounded">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col items-start gap-3 rounded bg-[var(--color-surface-muted)] px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
               <label className="relative inline-flex items-center cursor-pointer">
                 <input
                   type="checkbox"
+                  role="switch"
+                  aria-label="Enable daily backups"
+                  aria-checked={schedule.daily.enabled}
                   checked={schedule.daily.enabled}
                   onChange={(e) => handleToggle("daily", e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--color-accent)]" />
+                <div aria-hidden="true" className="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[var(--color-accent)]" />
               </label>
               <div>
                 <p className="text-sm font-medium text-[var(--color-text-primary)]">Daily</p>
@@ -291,14 +297,14 @@ export default function BackupsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-[var(--color-text-primary)]">Backups</h1>
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold text-[var(--color-text-primary)]">Backups</h1>
         <button
           onClick={handleCreate}
           disabled={creating}
-          className="bg-blue-600 text-white py-2 px-4 rounded text-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          className="flex w-full items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
         >
           {creating ? (
             <>
@@ -326,7 +332,7 @@ export default function BackupsPage() {
       )}
 
       {error && (
-        <div className="text-[var(--color-error-text)] text-sm bg-[var(--color-error-bg)] border border-[var(--color-error-border)] rounded p-3 flex items-center justify-between">
+        <div className="flex flex-col items-start gap-2 rounded border border-[var(--color-error-border)] bg-[var(--color-error-bg)] p-3 text-sm text-[var(--color-error-text)] sm:flex-row sm:items-center sm:justify-between">
           <span>{error}</span>
           <button
             onClick={fetchBackups}
@@ -338,9 +344,10 @@ export default function BackupsPage() {
       )}
 
       {/* Backups table */}
-      <div className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] overflow-hidden hover:shadow-md transition-shadow">
+      <div className="min-w-0 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] hover:shadow-md transition-shadow">
         {loading ? (
-          <table className="w-full text-sm">
+          <div role="region" aria-label="Backups table" tabIndex={0} className="max-w-full overflow-x-auto overscroll-x-contain">
+          <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border)] text-left text-xs text-[var(--color-text-muted)]">
                 <th className="px-4 py-3 font-medium">Filename</th>
@@ -357,6 +364,7 @@ export default function BackupsPage() {
               <SkeletonRow />
             </tbody>
           </table>
+          </div>
         ) : backups.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <svg className="w-12 h-12 text-[var(--color-text-muted)] mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -366,8 +374,8 @@ export default function BackupsPage() {
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Create your first backup.</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div role="region" aria-label="Backups table" tabIndex={0} className="max-w-full overflow-x-auto overscroll-x-contain">
+            <table className="w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="border-b border-[var(--color-border)] text-left text-xs text-[var(--color-text-muted)]">
                   <th className="px-4 py-3 font-medium">Filename</th>
@@ -384,7 +392,7 @@ export default function BackupsPage() {
                     key={backup.id}
                     className="border-b border-[var(--color-border-muted)] hover:bg-[var(--color-surface-hover)] transition-colors"
                   >
-                    <td className="px-4 py-3 font-mono text-xs text-[var(--color-text-primary)]">
+                    <td className="px-4 py-3 break-all font-mono text-xs text-[var(--color-text-primary)]">
                       {backup.filename}
                     </td>
                     <td className="px-4 py-3">

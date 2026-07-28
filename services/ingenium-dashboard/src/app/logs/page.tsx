@@ -242,16 +242,16 @@ export default function LogsPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       {/* ── Status Header ──────────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-3xl font-bold">System Logs</h1>
+        <div className="min-w-0">
+          <h1 className="break-words text-3xl font-bold">System Logs</h1>
           <p className="text-sm text-[var(--color-text-muted)] mt-1">
             Live log stream from the Ingenium server
           </p>
         </div>
-        <div className="flex items-center gap-4 text-sm text-[var(--color-text-secondary)]">
+        <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 text-sm text-[var(--color-text-secondary)] sm:w-auto sm:justify-end">
           <span>
             Total: <strong>{total}</strong>
           </span>
@@ -320,7 +320,7 @@ export default function LogsPage() {
         </div>
 
         {/* Level checkboxes + search */}
-        <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
           <span className="text-xs text-[var(--color-text-muted)] font-medium">Levels:</span>
           {ALL_LEVELS.map((lvl) => {
             const isSelected = selectedLevels.has(lvl);
@@ -347,7 +347,7 @@ export default function LogsPage() {
               </label>
             );
           })}
-          <div className="flex-1 min-w-[200px]">
+          <div className="w-full min-w-0 sm:min-w-[200px] sm:flex-1">
             <input
               type="text"
               value={searchText}
@@ -383,9 +383,12 @@ export default function LogsPage() {
         <div
           ref={scrollRef}
           onScroll={handleScroll}
-          className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded overflow-y-auto max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
+          role="region"
+          aria-label="System logs table"
+          tabIndex={0}
+          className="min-w-0 max-w-full overflow-x-auto overflow-y-auto overscroll-x-contain rounded border border-[var(--color-border)] bg-[var(--color-surface)] max-h-[calc(100vh-24rem)] hover:shadow-md transition-shadow"
         >
-          <table className="w-full text-sm font-mono">
+          <table className="w-full min-w-[680px] text-sm font-mono">
             <thead className="sticky top-0 bg-[var(--color-surface-muted)] border-b border-[var(--color-border)] z-10">
               <tr className="text-left text-xs text-[var(--color-text-muted)] uppercase tracking-wider">
                 <th className="px-4 py-2 whitespace-nowrap w-[80px]">Time</th>

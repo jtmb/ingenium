@@ -92,14 +92,14 @@ export default function ProjectsPage() {
     .filter(p => !searchQuery || p.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Projects</h1>
-        <button onClick={() => setShowCreate(true)} className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">+ New Project</button>
+    <div className="space-y-6 min-w-0">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold">Projects</h1>
+        <button onClick={() => setShowCreate(true)} className="w-full rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 sm:w-auto">+ New Project</button>
       </div>
 
       {/* View toggle + search */}
-      <div className="flex gap-2 justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex gap-2 items-center">
           <button onClick={() => setView("active")} className={`px-3 py-1 rounded text-sm font-medium ${view === "active" ? "bg-blue-600 text-white" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"}`}>Active</button>
           <button onClick={() => setView("archived")} className={`px-3 py-1 rounded text-sm font-medium ${view === "archived" ? "bg-blue-600 text-white" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]"}`}>Archived</button>
@@ -108,7 +108,7 @@ export default function ProjectsPage() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search projects..."
-          className="border border-[var(--color-border)] p-2 rounded text-sm w-64"
+          className="w-full min-w-0 rounded border border-[var(--color-border)] p-2 text-sm sm:w-64"
         />
       </div>
 
@@ -120,12 +120,12 @@ export default function ProjectsPage() {
           const synthCount = synth ? formatRelative(synth) : "—";
 
           return (
-            <div key={p.id} onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] overflow-hidden hover:shadow-md transition-shadow cursor-pointer">
+            <div key={p.id} onClick={() => setExpanded(expanded === p.name ? null : p.name)} className="min-w-0 cursor-pointer overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-surface)] hover:shadow-md transition-shadow">
               {/* Card header */}
-              <div className="px-5 py-4 border-b border-[var(--color-border-muted)] flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-semibold">{p.name}</span>
+              <div className="flex flex-col items-start gap-3 border-b border-[var(--color-border-muted)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="break-all text-lg font-semibold">{p.name}</span>
                     {!!p.is_global && <span className={`text-xs ${badgeTones('blue')} px-2 py-0.5 rounded font-medium`}>GLOBAL</span>}
                     {!p.archived_at && p.name === activeName && (
                       <span className={`text-xs ${badgeTones('green')} px-2 py-0.5 rounded font-medium`}>ACTIVE</span>
@@ -134,31 +134,31 @@ export default function ProjectsPage() {
                   </div>
                   <div className="text-xs text-[var(--color-text-muted)] mt-0.5">Created {formatRelative(p.created_at)}</div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:shrink-0">
                   {view === "active" && (
                     <>
                       {p.name !== activeName && (
                         <button
                           onClick={(e) => { e.stopPropagation(); persistProject(p.name); setActiveName(p.name); }}
-                          className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]"
+                          className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] sm:flex-none"
                         >Set Active</button>
                       )}
-                      <button onClick={(e) => { e.stopPropagation(); rename(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]">Rename</button>
-                      <button onClick={(e) => { e.stopPropagation(); archive(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-error-bg)] text-[var(--color-error-text)]">Archive</button>
+                        <button onClick={(e) => { e.stopPropagation(); rename(p.name); }} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] sm:flex-none">Rename</button>
+                        <button onClick={(e) => { e.stopPropagation(); archive(p.name); }} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] sm:flex-none">Archive</button>
                     </>
                   )}
                   {view === "archived" && (
-                    <div className="flex gap-2">
-                      <button onClick={(e) => { e.stopPropagation(); restore(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-success-bg)] text-[var(--color-success-text)]">Restore</button>
-                      <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(p.name); }} className="text-xs px-3 py-1.5 border border-[var(--color-border)] rounded hover:bg-[var(--color-error-bg)] text-[var(--color-error-text)]">Delete</button>
+                    <div className="flex w-full gap-2 sm:w-auto">
+                      <button onClick={(e) => { e.stopPropagation(); restore(p.name); }} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-success-text)] hover:bg-[var(--color-success-bg)] sm:flex-none">Restore</button>
+                      <button onClick={(e) => { e.stopPropagation(); setConfirmDelete(p.name); }} className="flex-1 rounded border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-error-text)] hover:bg-[var(--color-error-bg)] sm:flex-none">Delete</button>
                     </div>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); setExpanded(expanded === p.name ? null : p.name); }} className="text-xs px-3 py-1.5 bg-[var(--color-surface-muted)] hover:bg-[var(--color-surface-hover)] rounded text-[var(--color-text-secondary)] font-medium">{expanded === p.name ? "Collapse" : "Detail ▸"}</button>
+                  <button onClick={(e) => { e.stopPropagation(); setExpanded(expanded === p.name ? null : p.name); }} className="flex-1 rounded bg-[var(--color-surface-muted)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] sm:flex-none">{expanded === p.name ? "Collapse" : "Detail ▸"}</button>
                 </div>
               </div>
 
               {/* Stats grid */}
-              <div className="px-5 py-3 flex gap-6 text-sm">
+              <div className="flex flex-col gap-2 px-5 py-3 text-sm sm:flex-row sm:flex-wrap sm:gap-x-6 sm:gap-y-2">
                 <div className="text-[var(--color-text-muted)]">
                   <span className="font-semibold text-[var(--color-text-primary)]">{d?.skills_count ?? "..."}</span> Skills
                 </div>
@@ -172,23 +172,23 @@ export default function ProjectsPage() {
                 <div className="text-[var(--color-text-muted)]">
                   <span className="text-[var(--color-text-muted)]">Last synthesis:</span> <span className="font-medium text-[var(--color-text-primary)]">{synthCount}</span>
                 </div>
-                <div className="flex-1" />
-                {p.path && <div className="text-xs text-[var(--color-text-muted)] truncate max-w-[200px]" title={p.path}>{p.path}</div>}
+                <div className="hidden flex-1 sm:block" />
+                {p.path && <div className="max-w-full break-all text-xs text-[var(--color-text-muted)] sm:max-w-[200px] sm:truncate" title={p.path}>{p.path}</div>}
               </div>
 
               {/* Expanded detail */}
               {expanded === p.name && d && (
                 <div className="border-t border-[var(--color-border-muted)] px-5 py-4 bg-[var(--color-surface-muted)]">
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                     {/* Recent skills */}
                     <div>
                       <h3 className="font-semibold text-sm mb-2 text-[var(--color-text-primary)]">Recent Skills</h3>
                       {d.recent_skills?.length > 0 ? (
                         <div className="space-y-1">
                           {d.recent_skills.slice(0, 5).map((s: any) => (
-                            <div key={s.name} className="text-sm flex justify-between">
-                              <span className="text-[var(--color-text-link)]">{s.name}</span>
-                              <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(s.created_at)}</span>
+                            <div key={s.name} className="flex min-w-0 justify-between gap-2 text-sm">
+                              <span className="min-w-0 break-all text-[var(--color-text-link)]">{s.name}</span>
+                              <span className="shrink-0 text-xs text-[var(--color-text-muted)]">{formatRelative(s.created_at)}</span>
                             </div>
                           ))}
                         </div>
@@ -201,9 +201,9 @@ export default function ProjectsPage() {
                       {d.observation_stats?.recent?.length > 0 ? (
                         <div className="space-y-1">
                           {d.observation_stats.recent.slice(0, 5).map((o: any, i: number) => (
-                            <div key={i} className="text-xs flex justify-between">
-                              <span className="text-[var(--color-text-secondary)] truncate max-w-[200px]">{o.content?.substring(0, 80)}</span>
-                              <span className="text-[var(--color-text-muted)] ml-2">{formatRelative(o.created_at)}</span>
+                            <div key={i} className="flex min-w-0 justify-between gap-2 text-xs">
+                              <span className="min-w-0 break-words text-[var(--color-text-secondary)] sm:max-w-[200px] sm:truncate">{o.content?.substring(0, 80)}</span>
+                              <span className="ml-2 shrink-0 text-[var(--color-text-muted)]">{formatRelative(o.created_at)}</span>
                             </div>
                           ))}
                         </div>
@@ -211,20 +211,20 @@ export default function ProjectsPage() {
                     </div>
 
                     {/* Pipeline events */}
-                    <div className="col-span-2">
+                    <div className="sm:col-span-2">
                       <h3 className="font-semibold text-sm mb-2 text-[var(--color-text-primary)]">Recent Pipeline Activity</h3>
                       {d.pipeline?.length > 0 ? (
                         <div className="space-y-1">
                           {d.pipeline.map((e: any) => (
-                            <div key={e.created_at} className="text-xs flex gap-3">
+                            <div key={e.created_at} className="flex min-w-0 gap-3 text-xs">
                               <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                                 e.event_type?.startsWith("synthesis") ? badgeTones('emerald') :
                                 e.event_type?.startsWith("trait") ? badgeTones('blue') :
                                 e.event_type?.startsWith("obs") ? badgeTones('amber') :
                                 "bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]"
                               }`}>{e.event_type}</span>
-                              <span className="text-[var(--color-text-secondary)] flex-1">{e.title}</span>
-                              <span className="text-[var(--color-text-muted)]">{formatRelative(e.created_at)}</span>
+                              <span className="min-w-0 flex-1 break-words text-[var(--color-text-secondary)]">{e.title}</span>
+                              <span className="shrink-0 text-[var(--color-text-muted)]">{formatRelative(e.created_at)}</span>
                             </div>
                           ))}
                         </div>
@@ -241,9 +241,9 @@ export default function ProjectsPage() {
 
       {/* Create modal */}
       {showCreate && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setShowCreate(false)}>
-          <div className="bg-[var(--color-surface)] p-6 rounded-lg shadow-xl w-96" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-lg font-semibold mb-4">New Project</h3>
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:items-center" onClick={() => setShowCreate(false)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="new-project-title" className="my-auto max-h-full w-full max-w-md overflow-y-auto rounded-lg bg-[var(--color-surface)] p-4 shadow-xl sm:p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 id="new-project-title" className="mb-4 text-lg font-semibold">New Project</h3>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -251,12 +251,12 @@ export default function ProjectsPage() {
               className="border border-[var(--color-border)] p-2 rounded text-sm w-full mb-3"
               autoFocus
             />
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowCreate(false)} className="px-3 py-1.5 rounded border border-[var(--color-border)] text-sm text-[var(--color-text-secondary)]">Cancel</button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button onClick={() => setShowCreate(false)} className="w-full rounded border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] sm:w-auto">Cancel</button>
               <button
                 onClick={() => { create(); setShowCreate(false); }}
                 disabled={!name}
-                className="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+                className="w-full rounded bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50 sm:w-auto"
               >Create</button>
             </div>
           </div>
@@ -272,9 +272,9 @@ export default function ProjectsPage() {
               Are you sure you want to permanently delete <strong>{confirmDelete}</strong>?
               All skills, observations, pipeline events, and settings for this project will be permanently removed.
             </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 border border-[var(--color-border)] rounded text-sm hover:bg-[var(--color-surface-hover)]">Cancel</button>
-              <button onClick={() => handleDelete(confirmDelete)} className="px-4 py-2 bg-red-600 text-white rounded text-sm hover:bg-red-700">Delete</button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button onClick={() => setConfirmDelete(null)} className="w-full rounded border border-[var(--color-border)] px-4 py-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">Cancel</button>
+              <button onClick={() => handleDelete(confirmDelete)} className="w-full rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 sm:w-auto">Delete</button>
             </div>
           </div>
         )}

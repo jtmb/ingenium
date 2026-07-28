@@ -88,9 +88,9 @@ export default function ObservationDetailPage() {
   const parsedContext = safeParseJson(observation.context);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Observation #{observation.id}</h1>
+    <div className="space-y-6 min-w-0">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold">Observation #{observation.id}</h1>
         <button
           onClick={() => router.push(buildProjectNavigationHref("/observations", project))}
           className="text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)]"
@@ -99,9 +99,9 @@ export default function ObservationDetailPage() {
         </button>
       </div>
 
-      <div className="bg-[var(--color-surface)] p-6 rounded border border-[var(--color-border)] shadow-sm space-y-6">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-          <div>
+      <div className="space-y-6 rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-6 shadow-sm">
+        <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 md:grid-cols-3">
+          <div className="break-words">
             <span className="font-semibold">Type:</span>{" "}
             <span
               className={`inline-block px-2 py-0.5 rounded text-xs ${
@@ -111,7 +111,7 @@ export default function ObservationDetailPage() {
               {observation.observation_type}
             </span>
           </div>
-          <div>
+          <div className="break-words">
             <span className="font-semibold">Status:</span>{" "}
             <span
               className={`inline-block px-2 py-0.5 rounded text-xs ${
@@ -121,21 +121,21 @@ export default function ObservationDetailPage() {
               {observation.status}
             </span>
           </div>
-          <div>
+          <div className="break-words">
             <span className="font-semibold">Importance:</span>{" "}
             <span className="text-[var(--color-text-secondary)]">{observation.importance ?? 5}/10</span>
           </div>
-          <div>
+          <div className="break-words">
             <span className="font-semibold">Source:</span>{" "}
             <span className="text-[var(--color-text-secondary)]">{observation.source || "agent"}</span>
           </div>
-          <div>
+          <div className="break-words">
             <span className="font-semibold">Created:</span>{" "}
             <span className="text-[var(--color-text-secondary)]">
               {new Date(observation.created_at).toLocaleString()}
             </span>
           </div>
-          <div>
+          <div className="break-words">
             <span className="font-semibold">Project:</span>{" "}
             <span className="text-[var(--color-text-secondary)]">{observation.project_id}</span>
           </div>
@@ -143,7 +143,7 @@ export default function ObservationDetailPage() {
 
         <div>
           <h3 className="font-semibold mb-2">Content</h3>
-          <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-sm font-mono whitespace-pre-wrap">
+          <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-sm font-mono whitespace-pre-wrap">
             {observation.content}
           </pre>
         </div>
@@ -152,11 +152,11 @@ export default function ObservationDetailPage() {
           <div>
             <h3 className="font-semibold mb-2">Context</h3>
             {parsedContext ? (
-              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono">
+              <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono">
                 {JSON.stringify(parsedContext, null, 2)}
               </pre>
             ) : (
-              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">
+              <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">
                 {observation.context}
               </pre>
             )}

@@ -116,10 +116,10 @@ export default function PersonalityPage() {
   );
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Personality Profile</h1>
-        <div className="flex items-center gap-3">
+    <div className="space-y-6 min-w-0">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold">Personality Profile</h1>
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto sm:justify-end">
           <span className="text-sm text-[var(--color-text-muted)]">Sort:</span>
           <select aria-label="Sort personality traits" value={sortMode} onChange={(e) => {
             const nextMode = e.target.value;
@@ -128,7 +128,7 @@ export default function PersonalityPage() {
             <option value="grouped">Grouped by type</option>
             <option value="newest">Newest first</option>
           </select>
-          <div className="text-sm text-[var(--color-text-muted)] flex items-center gap-3" role="status" aria-label="Personality trait counts">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--color-text-muted)]" role="status" aria-label="Personality trait counts">
             <span>Established: <strong className="text-[var(--color-text-secondary)]">{establishedTraits.length}</strong></span>
             <span>Emerging: <strong className="text-[var(--color-warning-text)]">{emergingTraits.length}</strong></span>
           </div>
@@ -159,14 +159,14 @@ export default function PersonalityPage() {
               <div
                 key={t.id}
                 data-testid={`emerging-trait-${t.id}`}
-                className="px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)] flex justify-between items-center gap-4"
+                className="flex flex-col items-start gap-3 px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)] sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                 onClick={() => setSelectedTrait(t)}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <span aria-hidden="true">{TYPE_ICONS[t.trait_type] || "📌"}</span>
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium">{t.display_label || t.trait_value}</span>
+                      <span className="font-medium break-words">{t.display_label || t.trait_value}</span>
                       <span className="rounded-full border border-[var(--color-warning-border)] px-2 py-0.5 text-xs font-medium text-[var(--color-warning-text)]">
                         Emerging · {confidencePercent(t)}% confidence
                       </span>
@@ -174,8 +174,8 @@ export default function PersonalityPage() {
                     <span className="text-xs text-[var(--color-warning-text)] capitalize">{t.trait_type?.replace(/_/g, " ")}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 shrink-0">
-                  <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] text-lg leading-none" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
+                <div className="flex w-full items-center justify-end gap-3 sm:w-auto sm:shrink-0">
+                  <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="-m-2 p-2 text-lg leading-none text-[var(--color-text-muted)] hover:text-[var(--color-error-text)]" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
                   <span className="hidden sm:inline text-xs text-[var(--color-warning-text)]">{formatRelative(t.created_at)}</span>
                   <ConfidenceBar trait={t} width="w-16" />
                 </div>
@@ -190,16 +190,16 @@ export default function PersonalityPage() {
           {[...establishedTraits]
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
             .map((t) => (
-            <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)] flex justify-between items-center" onClick={() => setSelectedTrait(t)}>
-              <div className="flex items-center gap-3">
+            <div key={t.id} className="flex flex-col items-start gap-3 px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)] sm:flex-row sm:items-center sm:justify-between" onClick={() => setSelectedTrait(t)}>
+              <div className="flex min-w-0 items-center gap-3">
                 <span>{TYPE_ICONS[t.trait_type] || "📌"}</span>
-                <div>
-                  <span className="font-medium">{t.display_label || t.trait_value}</span>
-                  <span className="text-xs text-[var(--color-text-muted)] ml-2 capitalize">{t.trait_type?.replace(/_/g, " ")}</span>
+                <div className="min-w-0">
+                  <span className="font-medium break-words">{t.display_label || t.trait_value}</span>
+                  <span className="ml-2 text-xs capitalize text-[var(--color-text-muted)]">{t.trait_type?.replace(/_/g, " ")}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] text-lg leading-none" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
+              <div className="flex w-full items-center justify-end gap-3 sm:w-auto sm:shrink-0">
+                <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="-m-2 p-2 text-lg leading-none text-[var(--color-text-muted)] hover:text-[var(--color-error-text)]" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
                 <span className="text-xs text-[var(--color-text-muted)]">{formatRelative(t.created_at)}</span>
                 <ConfidenceBar trait={t} width="w-16" />
               </div>
@@ -222,20 +222,20 @@ export default function PersonalityPage() {
       {sortMode === "grouped" && Object.entries(grouped).map(([type, typeTraits]) => {
         return (
         <div key={type} className="bg-[var(--color-surface)] rounded border border-[var(--color-border)] overflow-hidden hover:shadow-md transition-shadow">
-          <div className="bg-[var(--color-surface-muted)] px-4 py-2 border-b font-semibold text-sm flex items-center gap-2">
+          <div className="flex items-center gap-2 border-b bg-[var(--color-surface-muted)] px-4 py-2 text-sm font-semibold">
             <span>{TYPE_ICONS[type] || "📌"}</span>
             <span className="capitalize">{type.replace(/_/g, " ")}</span>
           </div>
           <div className="divide-y">
             {(typeTraits as PersonalityTrait[]).map((t: PersonalityTrait) => (
               <div key={t.id} className="px-4 py-3 cursor-pointer hover:bg-[var(--color-surface-hover)]" onClick={() => setSelectedTrait(t)}>
-                <div className="flex justify-between items-center">
-                  <div>
-                    <span className="font-medium">{t.display_label || t.trait_value}</span>
-                    {t.exemplar_text && <p className="text-xs text-[var(--color-text-muted)] mt-0.5">“{t.exemplar_text.substring(0, 100)}”</p>}
+                <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <span className="font-medium break-words">{t.display_label || t.trait_value}</span>
+                    {t.exemplar_text && <p className="mt-0.5 break-words text-xs text-[var(--color-text-muted)]">“{t.exemplar_text.substring(0, 100)}”</p>}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="text-[var(--color-text-muted)] hover:text-[var(--color-error-text)] text-lg leading-none" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
+                  <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); handleDismiss(t.id); }} className="-m-2 p-2 text-lg leading-none text-[var(--color-text-muted)] hover:text-[var(--color-error-text)]" title="Dismiss trait" aria-label="Dismiss trait">&times;</button>
                     <ConfidenceBar trait={t} />
                     <span className="text-xs text-[var(--color-text-muted)] w-8">{confidencePercent(t)}%</span>
                   </div>
@@ -251,22 +251,22 @@ export default function PersonalityPage() {
         subtitle={`${selectedTrait?.trait_type?.replace(/_/g, " ")} — ${Math.round((selectedTrait?.confidence || 0) * 100)}% confidence`}>
         {selectedTrait && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="font-semibold">Type:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.trait_type}</span></div>
-              <div><span className="font-semibold">Value:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.trait_value}</span></div>
-              <div><span className="font-semibold">Confidence:</span> <span className="text-[var(--color-text-secondary)]">{Math.round((selectedTrait.confidence || 0) * 100)}%</span></div>
-              <div><span className="font-semibold">Source:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.source}</span></div>
+            <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+              <div className="break-words"><span className="font-semibold">Type:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.trait_type}</span></div>
+              <div className="break-words"><span className="font-semibold">Value:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.trait_value}</span></div>
+              <div className="break-words"><span className="font-semibold">Confidence:</span> <span className="text-[var(--color-text-secondary)]">{Math.round((selectedTrait.confidence || 0) * 100)}%</span></div>
+              <div className="break-words"><span className="font-semibold">Source:</span> <span className="text-[var(--color-text-secondary)]">{selectedTrait.source}</span></div>
             </div>
             {selectedTrait.exemplar_text && (
               <div>
                 <h3 className="font-semibold mb-1">Exemplar</h3>
-                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] text-sm">{selectedTrait.exemplar_text}</pre>
+                <pre className="overflow-x-auto break-words rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-sm whitespace-pre-wrap">{selectedTrait.exemplar_text}</pre>
               </div>
             )}
             {selectedTrait.metadata && (
               <div>
                 <h3 className="font-semibold mb-1">Metadata</h3>
-                <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] text-xs font-mono">{selectedTrait.metadata}</pre>
+                <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono whitespace-pre-wrap">{selectedTrait.metadata}</pre>
               </div>
             )}
             <div className="flex gap-2 pt-2">

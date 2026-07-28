@@ -66,6 +66,7 @@ export default defineConfig({
     "**/ingenium-dashboard/lan-api-assertions.spec.ts",
     "**/ingenium-dashboard/theme-flash.spec.ts",
     "**/ingenium-dashboard/usage.spec.ts",
+    "**/ingenium-dashboard/route-responsive.spec.ts",
   ],
   timeout: 30_000,
   expect: { timeout: 10_000 },

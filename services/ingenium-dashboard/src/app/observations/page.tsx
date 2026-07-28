@@ -73,24 +73,24 @@ export default function ObservationsPage() {
   }, [project, statusFilter, typeFilter]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold">Observations</h1>
-        <div className="text-sm text-[var(--color-text-muted)] space-x-4">
+    <div className="space-y-6 min-w-0">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="min-w-0 break-words text-3xl font-bold">Observations</h1>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-text-muted)]">
           <span>Total: <strong>{stats.total}</strong></span>
           <span>Pending: <strong className="text-yellow-600">{stats.pending}</strong></span>
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <select aria-label="Filter observations by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
           <option value="">All statuses</option>
           <option value="pending">Pending</option>
           <option value="processed">Processed</option>
           <option value="skipped">Skipped</option>
           <option value="failed">Failed</option>
         </select>
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="border p-2 rounded text-sm hover:bg-[var(--color-surface-hover)] cursor-pointer">
+        <select aria-label="Filter observations by type" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full min-w-0 cursor-pointer rounded border p-2 text-sm hover:bg-[var(--color-surface-hover)] sm:w-auto">
           <option value="">All types</option>
           <option value="correction">Correction</option>
           <option value="preference">Preference</option>
@@ -119,17 +119,17 @@ export default function ObservationsPage() {
         {observations.map((o: Observation) => (
           <div
             key={o.id}
-            className="bg-[var(--color-surface)] p-4 rounded border border-[var(--color-border)] cursor-pointer hover:shadow-md transition-shadow group"
+            className="group min-w-0 cursor-pointer rounded border border-[var(--color-border)] bg-[var(--color-surface)] p-4 hover:shadow-md transition-shadow"
             onClick={() => setSelected(o)}
           >
-            <div className="flex gap-2 items-center mb-1 flex-wrap">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
               <span className={`${BADGE_BASE} ${typeColors(o.observation_type)}`}>
                 {o.observation_type}
               </span>
               <span className={`${BADGE_BASE} ${statusColors(o.status)}`}>{o.status}</span>
               <span className="text-xs text-[var(--color-text-muted)]">{new Date(o.created_at).toLocaleString()}</span>
               {o.importance && <span className="text-xs text-[var(--color-text-muted)]">Importance: {o.importance}/10</span>}
-              <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="ml-0 opacity-100 transition-opacity sm:ml-auto sm:opacity-0 sm:group-hover:opacity-100">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -142,8 +142,8 @@ export default function ObservationsPage() {
                 </button>
               </span>
             </div>
-            <p className="text-sm">{o.content}</p>
-            {o.context && <pre className="text-xs text-[var(--color-text-muted)] mt-1 truncate">{o.context}</pre>}
+            <p className="break-words text-sm">{o.content}</p>
+            {o.context && <pre className="mt-1 break-all whitespace-pre-wrap text-xs text-[var(--color-text-muted)]">{o.context}</pre>}
           </div>
         ))}
       </div>
@@ -152,16 +152,16 @@ export default function ObservationsPage() {
         subtitle={selected?.observation_type ? `Type: ${selected.observation_type}` : undefined}>
         {selected && (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><span className="font-semibold">Type:</span> <span className={`inline-block ${BADGE_BASE} ${typeColors(selected.observation_type)}`}>{selected.observation_type}</span></div>
-              <div><span className="font-semibold">Status:</span> <span className={`inline-block ${BADGE_BASE} ${statusColors(selected.status)}`}>{selected.status}</span></div>
-              <div><span className="font-semibold">Importance:</span> <span className="text-[var(--color-text-secondary)]">{selected.importance ?? 5}/10</span></div>
-              <div><span className="font-semibold">Source:</span> <span className="text-[var(--color-text-secondary)]">{selected.source || "agent"}</span></div>
-              <div><span className="font-semibold">Created:</span> <span className="text-[var(--color-text-secondary)]">{new Date(selected.created_at).toLocaleString()}</span></div>
+            <div className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+              <div className="break-words"><span className="font-semibold">Type:</span> <span className={`inline-block ${BADGE_BASE} ${typeColors(selected.observation_type)}`}>{selected.observation_type}</span></div>
+              <div className="break-words"><span className="font-semibold">Status:</span> <span className={`inline-block ${BADGE_BASE} ${statusColors(selected.status)}`}>{selected.status}</span></div>
+              <div className="break-words"><span className="font-semibold">Importance:</span> <span className="text-[var(--color-text-secondary)]">{selected.importance ?? 5}/10</span></div>
+              <div className="break-words"><span className="font-semibold">Source:</span> <span className="text-[var(--color-text-secondary)]">{selected.source || "agent"}</span></div>
+              <div className="break-words"><span className="font-semibold">Created:</span> <span className="text-[var(--color-text-secondary)]">{new Date(selected.created_at).toLocaleString()}</span></div>
             </div>
             <div>
               <h3 className="font-semibold mb-1">Content</h3>
-              <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-sm font-mono whitespace-pre-wrap">{selected.content}</pre>
+              <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-sm font-mono whitespace-pre-wrap">{selected.content}</pre>
             </div>
             {selected.context && (
               <div>
@@ -169,9 +169,9 @@ export default function ObservationsPage() {
                 {(() => {
                   const parsed = safeParseJson(selected.context);
                   return parsed ? (
-                    <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono">{JSON.stringify(parsed, null, 2)}</pre>
+                    <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono">{JSON.stringify(parsed, null, 2)}</pre>
                   ) : (
-                    <pre className="bg-[var(--color-surface-muted)] p-4 rounded border border-[var(--color-border)] overflow-x-auto text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">{selected.context}</pre>
+                    <pre className="overflow-x-auto break-all rounded border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-4 text-xs font-mono whitespace-pre-wrap text-[var(--color-text-secondary)]">{selected.context}</pre>
                   );
                 })()}
               </div>
