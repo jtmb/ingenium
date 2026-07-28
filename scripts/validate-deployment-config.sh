@@ -128,6 +128,7 @@ for script in run-api.sh run-api-boundary-proxy.sh run-dashboard.sh run-gateway.
   require_literal "${repo_root}/scripts/${script}" "exec env -i"
 done
 require_file "${repo_root}/scripts/normalize-agent-profiles.sh"
+require_file "${repo_root}/scripts/project-agent-profiles.mjs"
 require_literal "${repo_root}/scripts/run-api.sh" 'DASHBOARD_ALLOWED_ORIGINS="${DASHBOARD_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}"'
 require_literal "${repo_root}/scripts/run-api.sh" 'backup_dir="${INGENIUM_BACKUPS_DIR:-}"'
 require_literal "${repo_root}/scripts/run-api.sh" '*[![:space:]]*) ;;'
@@ -144,10 +145,10 @@ reject_literal "$supervisor_config" "environment="
 require_literal "$dockerfile" "scripts/project-opencode-global-config.mjs"
 require_literal "$dockerfile" "scripts/run-init-project.sh"
 require_literal "$dockerfile" "scripts/normalize-agent-profiles.sh"
-require_literal "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh"
+require_literal "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/"
 require_literal "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh"
-require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh" "COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh"
-require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh" "/usr/local/bin/ingenium-init-project --help"
+require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/" "COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh"
+require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/" "/usr/local/bin/ingenium-init-project --help"
 require_literal "$entrypoint" "project-opencode-global-config.mjs"
 require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/workspace"'
 require_literal "$entrypoint" '"/app/packages/ingenium-extension/resource-sync.ts"'
@@ -160,7 +161,11 @@ require_literal "${repo_root}/scripts/start-opencode-web.sh" 'node /app/scripts/
 require_literal "${repo_root}/scripts/run-init-project.sh" 'project="${INGENIUM_PROJECT:-global-default}"'
 require_literal "${repo_root}/scripts/run-init-project.sh" 'INGENIUM_API_TOKEN_FILE="$token_file"'
 require_literal "${repo_root}/scripts/run-init-project.sh" '/app/scripts/normalize-agent-profiles.sh "$worktree/.opencode/agents"'
-require_literal "${repo_root}/scripts/normalize-agent-profiles.sh" 'find -P "$agents_dir" -type f -name "*.md" -exec chmod 0644 {} +'
+require_literal "${repo_root}/scripts/normalize-agent-profiles.sh" 'exec node "$script_dir/project-agent-profiles.mjs" "$@"'
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" "constants.O_NOFOLLOW"
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" "constants.O_EXCL"
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" "fchmodSync"
+require_literal "${repo_root}/scripts/project-agent-profiles.mjs" "fsyncSync"
 reject_literal "${repo_root}/scripts/normalize-agent-profiles.sh" "chmod -R"
 reject_literal "${repo_root}/scripts/normalize-agent-profiles.sh" "chown"
 

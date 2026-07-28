@@ -55,6 +55,7 @@ for path in \
   scripts/run-dashboard.mjs \
   scripts/validate-gateway-config.sh \
   scripts/normalize-agent-profiles.sh \
+  scripts/project-agent-profiles.mjs \
   scripts/healthcheck.sh \
   scripts/start-opencode-web.sh \
   scripts/start-ttyd.sh \
@@ -96,9 +97,9 @@ reject_text docker-compose.yml 'sudo'
 
 require_text Dockerfile 'COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf'
 require_text Dockerfile 'COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/'
-require_text Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh'
+require_text Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/'
 require_text Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh'
-normalizer_copy_line="$(line_number Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh')"
+normalizer_copy_line="$(line_number Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/')"
 init_wrapper_copy_line="$(line_number Dockerfile 'COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh')"
 init_smoke_line="$(line_number Dockerfile '/usr/local/bin/ingenium-init-project --help')"
 if [[ -z "$normalizer_copy_line" || -z "$init_wrapper_copy_line" || -z "$init_smoke_line" || "$normalizer_copy_line" -ge "$init_wrapper_copy_line" || "$normalizer_copy_line" -ge "$init_smoke_line" ]]; then
@@ -207,7 +208,11 @@ require_text scripts/docker-entrypoint.sh 'GLOBAL_AGENTS_DIR="/home/appuser/.con
 require_text scripts/docker-entrypoint.sh '/app/scripts/normalize-agent-profiles.sh --project-server-owned /app/.opencode/agents "$GLOBAL_AGENTS_DIR"'
 require_text scripts/docker-entrypoint.sh '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
 require_text scripts/run-init-project.sh '/app/scripts/normalize-agent-profiles.sh "$worktree/.opencode/agents"'
-require_text scripts/normalize-agent-profiles.sh 'find -P "$agents_dir" -type f -name "*.md" -exec chmod 0644 {} +'
+require_text scripts/normalize-agent-profiles.sh 'exec node "$script_dir/project-agent-profiles.mjs" "$@"'
+require_text scripts/project-agent-profiles.mjs 'constants.O_NOFOLLOW'
+require_text scripts/project-agent-profiles.mjs 'constants.O_EXCL'
+require_text scripts/project-agent-profiles.mjs 'fchmodSync'
+require_text scripts/project-agent-profiles.mjs 'fsyncSync'
 reject_text scripts/normalize-agent-profiles.sh 'chmod -R'
 reject_text scripts/normalize-agent-profiles.sh 'chown'
 require_text scripts/start-opencode-web.sh 'INGENIUM_API_TOKEN_FILE="/workspace/.opencode/.ingenium-api-token"'

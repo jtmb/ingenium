@@ -510,6 +510,7 @@ export default function Navigation() {
       <div className="px-2 pt-3 pb-1">
         <Link
           href={HOME_ITEM.href}
+          prefetch={false}
           className={`${itemLinkBaseClasses} rounded ${
             isActive(HOME_ITEM.href) ? activeItemClasses : inactiveItemClasses
           }`}
@@ -558,6 +559,7 @@ export default function Navigation() {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      prefetch={false}
                       className={`${itemLinkBaseClasses} rounded ${
                         isActive(item.href) ? activeItemClasses : inactiveItemClasses
                       }`}

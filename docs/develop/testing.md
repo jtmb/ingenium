@@ -182,8 +182,12 @@ environment or secret manager; never add them to docs, source, or config.
 Strict mode discovers dynamic ports from the manifest and retained telemetry,
 then fails on unexpected listening ports, retained managed processes,
 `stopping` recovery state, malformed telemetry, leftover Playwright temporary
-directories, or RSS above the configured limit. For an intentionally non-default
-port set, provide it explicitly:
+directories, or RSS above the configured limit. A repository-wide strict scan
+retains (and reports as informational) only validated telemetry that is older
+than the stale-run interval, has a missing—not malformed—manifest, and proves
+that every recorded process and port is gone. Fresh, live, malformed, or
+explicitly selected run evidence remains a strict failure. For an intentionally
+non-default port set, provide it explicitly:
 
 ```bash
 INGENIUM_AUDIT_PORTS=41001,41002,41003 \

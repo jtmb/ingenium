@@ -25,6 +25,9 @@ import { inspectProcessIdentity, type ProcessIdentity } from "./test-server-life
 const DEFAULT_PORTS = [3000, 4097, 4098, 4099, 4999];
 const DEFAULT_TEMP_PREFIX = "ingenium-playwright-";
 const DEFAULT_RSS_LIMIT = 512 * 1024 * 1024;
+// A missing manifest can only be treated as retained historical evidence after
+// a full stale-run interval. Fresh evidence remains a strict recovery failure.
+const HISTORICAL_INERT_EVIDENCE_AFTER_MS = 60 * 60 * 1_000;
 
 interface PortState {
   port: number;
@@ -67,6 +70,23 @@ export interface ArtifactEvidenceClassification {
   disposition: "informational" | "failure";
 }
 
+export type TelemetryEvidenceDisposition = "current" | "historical-inert";
+
+export interface TelemetryAuditEntry {
+  path: string;
+  manifestPath: string;
+  runId: string;
+  status: TestRunTelemetry["status"];
+  updatedAt: string;
+  failures: string[];
+  resolution?: TestRunTelemetry["resolution"];
+  activeProcessCount: number;
+  manifestState: TelemetryManifestState;
+  manifestError?: string;
+  /** Current evidence fails strictly; authenticated inert history is retained. */
+  evidenceDisposition: TelemetryEvidenceDisposition;
+}
+
 export interface ContainmentAuditReport {
   repoRoot: string;
   manifestPath?: string;
@@ -89,13 +109,7 @@ export interface ContainmentAuditReport {
   artifactResiduals: string[];
   /** True when the repository-wide artifact scan is enabled for strict audit. */
   repositoryArtifactScan: boolean;
-  telemetry: Array<Pick<TestRunTelemetry, "runId" | "status" | "updatedAt" | "failures" | "resolution"> & {
-    path: string;
-    manifestPath: string;
-    activeProcessCount: number;
-    manifestState: "valid" | "missing" | "invalid";
-    manifestError?: string;
-  }>;
+  telemetry: TelemetryAuditEntry[];
   process: { activeHandles: number; rssBytes: number };
   rssLimitBytes: number;
 }
@@ -377,6 +391,20 @@ function telemetryCandidates(
   return [...candidates];
 }
 
+function scopedTelemetryPaths(
+  manifest: TestRunManifest | undefined,
+  options: ContainmentAuditOptions,
+): Set<string> {
+  const configured = options.telemetryPaths ?? (
+    process.env[TEST_RUN_TELEMETRY_ENV] !== undefined
+      ? [process.env[TEST_RUN_TELEMETRY_ENV] as string]
+      : []
+  );
+  const paths = new Set(configured.map((path) => resolve(path)));
+  if (manifest) paths.add(getTestRunTelemetryPath(manifest));
+  return paths;
+}
+
 function loadManifest(repoRoot: string, configuredManifestPath = process.env[TEST_RUN_MANIFEST_ENV]): { manifest?: TestRunManifest; error?: string } {
   const manifestPath = configuredManifestPath;
   if (!manifestPath) return {};
@@ -538,10 +566,27 @@ export function discoverRepositoryProcesses(repoRoot: string): DiscoveredProcess
 
 export const discoverManifestlessProcesses = discoverRepositoryProcesses;
 
+function isHistoricalInertTelemetry(
+  entry: TestRunTelemetry,
+  telemetryPath: string,
+  manifestCheck: TelemetryManifestCheck,
+  ports: PortState[],
+  scopedTelemetry: Set<string>,
+  selectedManifestPath: string | undefined,
+  repositoryArtifactScan: boolean,
+): boolean {
+  if (!repositoryArtifactScan || scopedTelemetry.has(telemetryPath) || manifestCheck.state !== "missing") return false;
+  if (selectedManifestPath !== undefined && resolve(entry.manifestPath) === resolve(selectedManifestPath)) return false;
+  if (Date.now() - Date.parse(entry.updatedAt) < HISTORICAL_INERT_EVIDENCE_AFTER_MS) return false;
+  if (entry.activeProcesses.some((record) => inspectManagedProcess(record, entry.runNonce).state !== "exited")) return false;
+  return Object.values(entry.ports).every((port) => !ports.some((state) => state.port === port && state.listening));
+}
+
 export async function auditSuiteContainment(options: ContainmentAuditOptions = {}): Promise<ContainmentAuditReport> {
   const repoRoot = getCanonicalRepoRoot(process.env.INGENIUM_PLAYWRIGHT_REPO_ROOT ?? process.cwd());
   const loadedManifest = loadManifest(repoRoot, options.manifestPath);
   const telemetryPaths = telemetryCandidates(repoRoot, loadedManifest.manifest, options);
+  const scopedTelemetry = scopedTelemetryPaths(loadedManifest.manifest, options);
   const telemetry: TestRunTelemetry[] = [];
   const telemetryErrors: string[] = [];
   const legacyEvidence = legacyEvidenceDirectories(repoRoot);
@@ -587,6 +632,35 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
   );
   const rssLimit = Number(process.env.INGENIUM_AUDIT_RSS_LIMIT ?? DEFAULT_RSS_LIMIT);
   const selectedManifestPath = options.manifestPath ?? process.env[TEST_RUN_MANIFEST_ENV];
+  const telemetryReport = telemetry.map((entry) => {
+    const manifestCheck = checkTelemetryManifest(entry, repoRoot);
+    const path = getTestRunTelemetryPath(entry);
+    const evidenceDisposition = isHistoricalInertTelemetry(
+      entry,
+      path,
+      manifestCheck,
+      ports,
+      scopedTelemetry,
+      selectedManifestPath,
+      options.includeRepositoryTelemetry === true,
+    ) ? "historical-inert" : "current";
+    return {
+      manifestState: manifestCheck.state,
+      ...(manifestCheck.error ? { manifestError: manifestCheck.error } : {}),
+      path,
+      manifestPath: entry.manifestPath,
+      runId: entry.runId,
+      status: entry.status,
+      updatedAt: entry.updatedAt,
+      failures: entry.failures,
+      ...(entry.resolution ? { resolution: entry.resolution } : {}),
+      activeProcessCount: entry.activeProcesses.length,
+      evidenceDisposition,
+    };
+  });
+  const inertHistoricalEvidence = telemetryReport
+    .filter((entry) => entry.evidenceDisposition === "historical-inert")
+    .map((entry) => `validated inert historical telemetry retained (non-runnable): ${entry.path}`);
   return {
     repoRoot,
     ...(selectedManifestPath ? { manifestPath: selectedManifestPath } : {}),
@@ -600,25 +674,14 @@ export async function auditSuiteContainment(options: ContainmentAuditOptions = {
     holds,
     telemetryErrors,
     legacyEvidence,
-    informational: legacyEvidence.map((path) => `legacy evidence retained (non-runnable): ${path}`),
+    informational: [
+      ...legacyEvidence.map((path) => `legacy evidence retained (non-runnable): ${path}`),
+      ...inertHistoricalEvidence,
+    ],
     artifactClassifications,
     artifactResiduals,
     repositoryArtifactScan: options.includeRepositoryTelemetry === true,
-    telemetry: telemetry.map((entry) => {
-      const manifestCheck = checkTelemetryManifest(entry, repoRoot);
-      return {
-        manifestState: manifestCheck.state,
-        ...(manifestCheck.error ? { manifestError: manifestCheck.error } : {}),
-        path: getTestRunTelemetryPath(entry),
-        manifestPath: entry.manifestPath,
-        runId: entry.runId,
-        status: entry.status,
-        updatedAt: entry.updatedAt,
-        failures: entry.failures,
-        ...(entry.resolution ? { resolution: entry.resolution } : {}),
-        activeProcessCount: entry.activeProcesses.length,
-      };
-    }),
+    telemetry: telemetryReport,
     process: auditProcesses(),
     rssLimitBytes: rssLimit,
   };
@@ -652,6 +715,7 @@ export function strictFailures(report: ContainmentAuditReport, manifestError?: s
   if (report.holds.length > 0) failures.push(`containment holds: ${report.holds.join("; ")}`);
   if (report.manifestStatus === "stopping") failures.push("manifest remains in stopping recovery state");
   for (const telemetry of report.telemetry) {
+    if (telemetry.evidenceDisposition === "historical-inert") continue;
     const terminallyResolved = telemetry.status === "complete"
       && telemetry.activeProcessCount === 0
       && telemetry.resolution?.status === "resolved";

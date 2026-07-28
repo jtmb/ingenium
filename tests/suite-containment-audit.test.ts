@@ -21,6 +21,26 @@ import { auditSuiteContainment, strictFailures } from "./suite-containment-audit
 const contexts: Array<ReturnType<typeof createTestRunContext>> = [];
 const servers: Server[] = [];
 
+function createContextWithReservedPortRetry(
+  options: Parameters<typeof createTestRunContext>[0] = {},
+): ReturnType<typeof createTestRunContext> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const configuredPorts = options.ports ?? (() => {
+      const slot = Number.parseInt(randomUUID().slice(0, 6), 16) % 5_000;
+      const api = 41_000 + slot * 3;
+      return { api, dashboard: api + 1, fixture: api + 2 };
+    })();
+    try {
+      return createTestRunContext({ ...options, ports: configuredPorts });
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("already reserved by another runner")) throw error;
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 afterEach(async () => {
   for (const server of servers.splice(0)) {
     server.closeAllConnections();
@@ -138,10 +158,8 @@ describe("suite containment audit", () => {
     const missingManifestPaths: string[] = [];
     const telemetryPaths: string[] = [];
 
-    for (const [index, status] of statuses.entries()) {
-      const context = createTestRunContext({
-        ports: { api: 45331 + index * 3, dashboard: 45332 + index * 3, fixture: 45333 + index * 3 },
-      });
+    for (const status of statuses) {
+      const context = createContextWithReservedPortRetry({ applyEnvironment: false });
       contexts.push(context);
       updateTestRunManifest(context.manifestPath, { status });
       rmSync(context.manifestPath, { force: true });
@@ -291,6 +309,72 @@ describe("suite containment audit", () => {
       expect(strictFailures(report).some((failure) => failure.includes(legacyDirectory))).toBe(false);
     } finally {
       rmSync(legacyDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("retains validated aged telemetry as inert history only after its process and ports are gone", async () => {
+    const context = createContextWithReservedPortRetry({
+      applyEnvironment: false,
+      now: () => new Date("2020-01-01T00:00:00.000Z"),
+    });
+    contexts.push(context);
+    updateTestRunManifest(context.manifestPath, {
+      status: "stopping",
+      processes: [{
+        name: "api",
+        pid: 2_147_483_647,
+        port: context.ports.api,
+        startedAt: "2020-01-01T00:00:00.000Z",
+        runNonce: context.runNonce,
+        pidStartTime: "1",
+        pgid: 2_147_483_647,
+        executable: "/usr/bin/node",
+        groupIdentity: "2147483647:1",
+      }],
+    });
+    const historicalTelemetry = JSON.parse(readFileSync(context.telemetryPath!, "utf8")) as {
+      updatedAt: string;
+      processes: Array<{ updatedAt: string }>;
+    };
+    historicalTelemetry.updatedAt = "2020-01-01T00:00:00.000Z";
+    for (const process of historicalTelemetry.processes) process.updatedAt = historicalTelemetry.updatedAt;
+    writeFileSync(context.telemetryPath!, JSON.stringify(historicalTelemetry));
+    rmSync(context.manifestPath, { force: true });
+
+    const report = await auditSuiteContainment({ includeRepositoryTelemetry: true });
+    const entry = report.telemetry.find(({ runId }) => runId === context.runId);
+
+    expect(entry).toMatchObject({
+      manifestState: "missing",
+      activeProcessCount: 1,
+      evidenceDisposition: "historical-inert",
+    });
+    expect(report.informational).toContain(
+      `validated inert historical telemetry retained (non-runnable): ${context.telemetryPath}`,
+    );
+    expect(strictFailures(report).some((failure) => failure.includes(context.telemetryPath!))).toBe(false);
+  });
+
+  it("does not suppress fresh missing-manifest telemetry or malformed retained evidence", async () => {
+    const context = createContextWithReservedPortRetry({
+      applyEnvironment: false,
+    });
+    contexts.push(context);
+    rmSync(context.manifestPath, { force: true });
+    const malformedDirectory = join(getTestRunArtifactRoot(process.cwd()), randomUUID());
+    const malformedTelemetryPath = join(malformedDirectory, "runner-telemetry.json");
+    mkdirSync(malformedDirectory, { recursive: true, mode: 0o700 });
+    writeFileSync(malformedTelemetryPath, "not valid telemetry\n");
+    try {
+      const report = await auditSuiteContainment({ includeRepositoryTelemetry: true });
+      const current = report.telemetry.find(({ runId }) => runId === context.runId);
+
+      expect(current).toMatchObject({ manifestState: "missing", evidenceDisposition: "current" });
+      expect(strictFailures(report).some((failure) => failure.includes(context.telemetryPath!))).toBe(true);
+      expect(report.telemetryErrors.some((error) => error.includes(malformedTelemetryPath))).toBe(true);
+      expect(strictFailures(report).some((failure) => failure.includes(malformedTelemetryPath))).toBe(true);
+    } finally {
+      rmSync(malformedDirectory, { recursive: true, force: true });
     }
   });
 });

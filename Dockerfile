@@ -112,7 +112,7 @@ COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/api
 # The init wrapper invokes this helper during its build-time smoke check. Copy
 # the helper first with a non-writable executable mode so it is available without
 # widening the runtime copy surface or requiring a privileged repair.
-COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh ./scripts/normalize-agent-profiles.sh
+COPY --chown=appuser:appuser --chmod=0555 scripts/normalize-agent-profiles.sh scripts/project-agent-profiles.mjs ./scripts/
 COPY --chown=appuser:appuser --chmod=0555 scripts/run-init-project.sh ./scripts/run-init-project.sh
 RUN chmod 0555 /app/packages/ingenium-extension/dist/scripts/init-project.js && \
     ln -s /app/scripts/run-init-project.sh /usr/local/bin/ingenium-init-project && \
