@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildContextImportEntries,
   CONTEXT_IMPORT_CHUNK_CHARS,
+  CONTEXT_IMPORT_MAX_SOURCE_PAGES,
+  CONTEXT_IMPORT_SOURCE_PAGE_SIZE,
 } from "./context-import.js";
 
 const project = "context-import-project";
@@ -32,12 +34,21 @@ let requests: RequestRecord[];
 let conversations: Map<string, StoredConversation>;
 let messages: StoredMessage[];
 let failContextRequest = false;
+let contextRateLimitAttempts = 0;
 
-function response(data: unknown, status = 200): Response {
+function response(data: unknown, status = 200, headers: HeadersInit = {}): Response {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("Content-Type", "application/json");
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: responseHeaders,
   });
+}
+
+function sourcePage(data: unknown[], nextCursor: string | null = null, status = 200, headers: HeadersInit = {}) {
+  const responseHeaders = new Headers(headers);
+  if (nextCursor !== null) responseHeaders.set("X-Next-Cursor", nextCursor);
+  return { data, response: new Response(null, { status, headers: responseHeaders }) };
 }
 
 function installApiMock(): void {
@@ -59,6 +70,10 @@ function installApiMock(): void {
     if (failContextRequest && url.pathname.startsWith("/api/v1/context/")) {
       return response({ error: { detail: "absolute /secret/worktree and token must not leak" } }, 503);
     }
+    if (contextRateLimitAttempts > 0 && url.pathname.startsWith("/api/v1/context/")) {
+      contextRateLimitAttempts -= 1;
+      return response({ error: { detail: "must not be read" } }, 429, { "Retry-After": "0" });
+    }
 
     if (url.pathname === "/api/v1/context/conversations" && init?.method === "POST") {
       const key = headers.get("Idempotency-Key")!;
@@ -73,16 +88,20 @@ function installApiMock(): void {
     }
 
     if (url.pathname === "/api/v1/context/conversations/a8c8093f-dc51-45f3-bfa5-4d80e65cfd81/messages" && init?.method === "GET") {
+      const limit = Number(url.searchParams.get("limit") ?? "100");
+      const offset = Number(url.searchParams.get("cursor") ?? "0");
+      const page = messages.slice(offset, offset + limit);
+      const nextOffset = offset + page.length;
       return response({
         data: {
           // Production Context lists exclude idempotency keys. The importer
           // must reconcile entries using the content-free summary projection.
-          data: messages.map((message) => ({
+          data: page.map((message) => ({
             role: message.body.role,
             content_hash: createHash("sha256").update(String(message.body.content), "utf8").digest("hex"),
             metadata: JSON.stringify(message.body.metadata),
           })),
-          nextCursor: null,
+          nextCursor: nextOffset < messages.length ? String(nextOffset) : null,
         },
       });
     }
@@ -134,6 +153,27 @@ function assistantMessage(id: string, text: string, completed: boolean) {
   };
 }
 
+function chronologicalUserMessage(id: string, text: string, created: number) {
+  return { info: { id, role: "user", time: { created } }, parts: [{ type: "text", text }] };
+}
+
+function excludedMessage(id: string, created: number) {
+  return { info: { id, role: "tool", time: { created } }, parts: [{ type: "text", text: "excluded" }] };
+}
+
+function paginatedSourceClient(source: unknown[]) {
+  return {
+    session: {
+      messages: vi.fn(async ({ query }: { query: { cursor?: string; limit: number } }) => {
+        const offset = query.cursor === undefined ? 0 : Number(query.cursor);
+        const page = source.slice(offset, offset + query.limit);
+        const nextOffset = offset + page.length;
+        return sourcePage(page, nextOffset < source.length ? String(nextOffset) : null);
+      }),
+    },
+  };
+}
+
 beforeEach(() => {
   originalApiUrl = process.env.INGENIUM_API_URL;
   originalProject = process.env.INGENIUM_PROJECT;
@@ -145,6 +185,7 @@ beforeEach(() => {
   conversations = new Map();
   messages = [];
   failContextRequest = false;
+  contextRateLimitAttempts = 0;
   installApiMock();
   vi.resetModules();
 });
@@ -208,8 +249,8 @@ describe.sequential("current-session Context import", () => {
     const nativeTool = plugin.tool.ingenium_context_import_current_session;
 
     expect(Object.keys(plugin.tool)).toEqual(["ingenium_context_import_current_session"]);
-    expect(Object.keys(nativeTool.args)).toEqual(["title", "limit"]);
-    const result = JSON.parse(toolResultText(await nativeTool.execute({ limit: 1, project: "caller-override" } as never, toolContext({
+    expect(Object.keys(nativeTool.args)).toEqual(["title", "maxSourceEnvelopes"]);
+    const result = JSON.parse(toolResultText(await nativeTool.execute({ maxSourceEnvelopes: 1, project: "caller-override" } as never, toolContext({
       sessionID: "tool-context-session",
       directory: "/tool-context-directory",
       worktree: "/tool-context-worktree",
@@ -218,7 +259,7 @@ describe.sequential("current-session Context import", () => {
     expect(result).toMatchObject({ imported: true, appended: 1, skipped: 0 });
     expect(client.session.messages).toHaveBeenCalledWith({
       path: { id: "tool-context-session" },
-      query: { directory: "/tool-context-directory", limit: 1 },
+      query: { directory: "/tool-context-directory", limit: 100 },
     });
     expect(requests.every((request) => request.authorization === `Bearer ${token}`)).toBe(true);
     expect(requests.filter((request) => request.path.startsWith("/api/v1/context/")).every((request) => request.project === project)).toBe(true);
@@ -248,6 +289,168 @@ describe.sequential("current-session Context import", () => {
       "Completed answer",
       "Completed answer, corrected",
     ]);
+  });
+
+  it("paginates all 1,262 source envelopes into 907 chronological entries and replays without truncation", async () => {
+    const source = Array.from({ length: 1_262 }, (_, ordinal) => (
+      ordinal < 907
+        ? chronologicalUserMessage(`message-${ordinal}`, `message ${ordinal}`, ordinal)
+        : excludedMessage(`excluded-${ordinal}`, ordinal)
+    )).reverse();
+    const client = paginatedSourceClient(source);
+    const { createContextImportTool } = await import("./context-import.js");
+    const nativeTool = createContextImportTool(client as never);
+    conversations.set("context-import.v1.conversation.incomplete", {
+      id: "legacy-incomplete-conversation",
+      createBody: { legacy: true },
+    });
+
+    const first = JSON.parse(toolResultText(await nativeTool.execute({}, toolContext())));
+    expect(first).toMatchObject({
+      imported: true,
+      appended: 907,
+      skipped: 0,
+      sourceEnvelopes: 1_262,
+      sourceBounded: false,
+    });
+    expect(client.session.messages).toHaveBeenCalledTimes(13);
+    expect(client.session.messages).toHaveBeenNthCalledWith(1, {
+      path: { id: "current-session" },
+      query: { directory: "/safe/context-directory", limit: 100 },
+    });
+    expect(messages).toHaveLength(907);
+    expect(messages[0]!.body.content).toBe("message 0");
+    expect(messages[906]!.body.content).toBe("message 906");
+    expect(messages[906]!.body.expectedRevision).toBe(906);
+    expect(messages[0]!.idempotencyKey).toMatch(/^context-import\.v2\.message\./);
+
+    const replay = JSON.parse(toolResultText(await nativeTool.execute({}, toolContext())));
+    expect(replay).toMatchObject({
+      imported: true,
+      appended: 0,
+      skipped: 907,
+      sourceEnvelopes: 1_262,
+      sourceBounded: false,
+    });
+    expect(messages).toHaveLength(907);
+    expect(conversations.size).toBe(2);
+    expect([...conversations.keys()].some((key) => /^context-import\.v2\.conversation\./.test(key))).toBe(true);
+  });
+
+  it("supports more than 907 sequential revisions and idempotency keys", async () => {
+    const client = paginatedSourceClient(Array.from({ length: 908 }, (_, ordinal) => (
+      chronologicalUserMessage(`sequential-${ordinal}`, `sequential ${ordinal}`, ordinal)
+    )));
+    const { createContextImportTool } = await import("./context-import.js");
+    const nativeTool = createContextImportTool(client as never);
+
+    expect(JSON.parse(toolResultText(await nativeTool.execute({}, toolContext())))).toMatchObject({ appended: 908 });
+    expect(messages).toHaveLength(908);
+    expect(messages[907]!.body.expectedRevision).toBe(907);
+    expect(new Set(messages.map((message) => message.idempotencyKey)).size).toBe(908);
+  });
+
+  it("uses a source-envelope bound only when explicitly requested", async () => {
+    const client = paginatedSourceClient([
+      chronologicalUserMessage("one", "one", 1),
+      chronologicalUserMessage("two", "two", 2),
+      chronologicalUserMessage("three", "three", 3),
+    ]);
+    const { createContextImportTool } = await import("./context-import.js");
+    const nativeTool = createContextImportTool(client as never);
+
+    const result = JSON.parse(toolResultText(await nativeTool.execute({ maxSourceEnvelopes: 2 }, toolContext())));
+    expect(result).toMatchObject({ appended: 2, sourceEnvelopes: 2, sourceBounded: true });
+    expect(messages.map((message) => message.body.content)).toEqual(["one", "two"]);
+  });
+
+  it("rejects malformed, looping, duplicate, and cap-overflow source snapshots before creating a conversation", async () => {
+    const { createContextImportTool } = await import("./context-import.js");
+    const loopingTool = createContextImportTool({
+      session: {
+        messages: vi.fn(async () => sourcePage([chronologicalUserMessage("loop", "private loop", 1)], "loop")),
+      },
+    } as never);
+    const looping = JSON.parse(toolResultText(await loopingTool.execute({}, toolContext())));
+    expect(looping).toMatchObject({ imported: false, reason: "source_invalid" });
+    expect(JSON.stringify(looping)).not.toContain("private loop");
+
+    const duplicateTool = createContextImportTool({
+      session: {
+        messages: vi.fn(async () => ({
+          data: [
+            chronologicalUserMessage("duplicate", "first", 1),
+            chronologicalUserMessage("duplicate", "second", 2),
+          ],
+        })),
+      },
+    } as never);
+    expect(JSON.parse(toolResultText(await duplicateTool.execute({}, toolContext())))).toMatchObject({
+      imported: false,
+      reason: "source_invalid",
+    });
+
+    const malformedTool = createContextImportTool({
+      session: { messages: vi.fn(async () => ({ data: { not: "an array" } })) },
+    } as never);
+    expect(JSON.parse(toolResultText(await malformedTool.execute({}, toolContext())))).toMatchObject({
+      imported: false,
+      reason: "source_invalid",
+    });
+
+    let page = 0;
+    const overflowTool = createContextImportTool({
+      session: {
+        messages: vi.fn(async () => {
+          const currentPage = page;
+          page += 1;
+          return sourcePage(
+            Array.from({ length: CONTEXT_IMPORT_SOURCE_PAGE_SIZE }, (_, index) => (
+              chronologicalUserMessage(`page-${currentPage}-${index}`, "bounded", currentPage * 100 + index)
+            )),
+            `next-${page}`,
+          );
+        }),
+      },
+    } as never);
+    expect(JSON.parse(toolResultText(await overflowTool.execute({}, toolContext())))).toMatchObject({
+      imported: false,
+      reason: "bounds",
+    });
+    expect(page).toBe(CONTEXT_IMPORT_MAX_SOURCE_PAGES);
+    expect(conversations.size).toBe(0);
+  });
+
+  it("retries SDK and Context API rate limits only when Retry-After is supplied", async () => {
+    let sourceAttempts = 0;
+    const client = {
+      session: {
+        messages: vi.fn(async () => {
+          sourceAttempts += 1;
+          if (sourceAttempts === 1) {
+            return sourcePage([], null, 429, { "Retry-After": "0" });
+          }
+          return sourcePage([chronologicalUserMessage("retry", "retry succeeds", 1)]);
+        }),
+      },
+    };
+    contextRateLimitAttempts = 1;
+    const { createContextImportTool } = await import("./context-import.js");
+    const nativeTool = createContextImportTool(client as never);
+
+    expect(JSON.parse(toolResultText(await nativeTool.execute({}, toolContext())))).toMatchObject({ appended: 1 });
+    expect(sourceAttempts).toBe(2);
+    expect(requests.filter((request) => request.path === "/api/v1/context/conversations")).toHaveLength(2);
+
+    const noRetryMessages = vi.fn(async () => sourcePage([], null, 429));
+    const withoutRetryAfter = createContextImportTool({
+      session: { messages: noRetryMessages },
+    } as never);
+    expect(JSON.parse(toolResultText(await withoutRetryAfter.execute({}, toolContext())))).toMatchObject({
+      imported: false,
+      reason: "source_unavailable",
+    });
+    expect(noRetryMessages).toHaveBeenCalledTimes(1);
   });
 
   it("returns content-free failures for unavailable source, authentication, and API errors", async () => {
