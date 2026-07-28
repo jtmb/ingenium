@@ -24,11 +24,22 @@ const MAX_RETRIES = 3;
 /** Per-request timeout in milliseconds (from config — defaults to 10s). */
 const TIMEOUT_MS = config.apiTimeout;
 
+/**
+ * Deliberately outside the dashboard's `/api/v1` rewrite namespace. The value
+ * is an API/service contract, not a credential; the bearer header remains the
+ * authentication boundary.
+ */
+export const CHILD_MCP_RUNTIME_HANDOFF_PATH = "/_ingenium/child-mcp-runtime";
+export const CHILD_MCP_RUNTIME_HANDOFF_HEADER = "x-ingenium-child-mcp-runtime";
+const CHILD_MCP_RUNTIME_HANDOFF_VALUE = "1";
+
 /** Internal options for the fetch wrapper. Not exported — consumers use the typed `api` object. */
 interface RequestOptions {
   method: string;
   body?: unknown;
   params?: Record<string, string>;
+  /** Use only for the fixed child-MCP server-to-server secret handoff. */
+  trustedChildMcpRuntime?: boolean;
 }
 
 /**
@@ -43,10 +54,14 @@ interface RequestOptions {
  * AbortController handles the timeout case. The timer is always cleaned up in `finally`.
  */
 async function request(path: string, opts: RequestOptions, retries = MAX_RETRIES): Promise<Response> {
-  // Strip leading slash from the path so URL resolution works correctly when
-  // appended to the base URL (e.g. "skills/list" not "/skills/list").
-  const cleanPath = path.startsWith("/") ? path.slice(1) : path;
-  const url = new URL(cleanPath, config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/");
+  const url = opts.trustedChildMcpRuntime
+    ? new URL(path, new URL(config.apiUrl).origin)
+    : new URL(
+      // Strip leading slash from normal API paths so URL resolution works when
+      // appended to the v1 base URL (e.g. "skills/list" not "/skills/list").
+      path.startsWith("/") ? path.slice(1) : path,
+      config.apiUrl.endsWith("/") ? config.apiUrl : config.apiUrl + "/",
+    );
   if (opts.params) {
     for (const [k, v] of Object.entries(opts.params)) {
       url.searchParams.set(k, v);
@@ -62,6 +77,12 @@ async function request(path: string, opts: RequestOptions, retries = MAX_RETRIES
       signal: controller.signal,
       headers: apiRequestHeaders({ "Content-Type": "application/json" }),
     };
+    if (opts.trustedChildMcpRuntime) {
+      (init.headers as Headers).set(
+        CHILD_MCP_RUNTIME_HANDOFF_HEADER,
+        CHILD_MCP_RUNTIME_HANDOFF_VALUE,
+      );
+    }
     if (opts.body) init.body = JSON.stringify(opts.body);
 
     const response = await fetch(url.toString(), init);
@@ -97,6 +118,20 @@ async function request(path: string, opts: RequestOptions, retries = MAX_RETRIES
 export const api = {
   get: async (path: string, params?: Record<string, string>) => {
     const res = await request(path, { method: "GET", params });
+    const json = await res.json();
+    return { ok: res.ok, status: res.status, data: json.data ?? json };
+  },
+  /**
+   * Fetch plaintext environment values only for the parent MCP process. This
+   * cannot use `/api/v1`, because that namespace is available to dashboard
+   * proxy callers and must remain metadata-only.
+   */
+  getTrustedChildMcpRuntime: async (project: string) => {
+    const res = await request(CHILD_MCP_RUNTIME_HANDOFF_PATH, {
+      method: "GET",
+      params: { project },
+      trustedChildMcpRuntime: true,
+    });
     const json = await res.json();
     return { ok: res.ok, status: res.status, data: json.data ?? json };
   },

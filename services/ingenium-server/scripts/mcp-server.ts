@@ -10,7 +10,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { apiRequestHeaders, config } from "../config/index.js";
 import { logger } from "../lib/logger.js";
-import { stopAll } from "../lib/proxy.js";
+import {
+  ChildMcpGateway,
+  resolveChildMcpProjectIdentity,
+  type ChildMcpToolHost,
+} from "../lib/child-mcp-gateway.js";
 
 // Import MCP tool handlers
 import * as skillTools from "../lib/tools/skills.js";
@@ -42,37 +46,50 @@ import * as backupTools from "../lib/tools/backups.js";
 
 // ── Tool State Check Wrapper ──────────────────────────────
 /**
- * Checks whether a tool is enabled for the given project via the API.
- * Fail-open on error (network blip, API down) — a disabled tool is a nuisance,
- * but a false-negative blocks the user's workflow entirely.
+ * Checks whether a tool is enabled for the given project via the API. A state
+ * lookup failure is not authorization to execute: this boundary must fail
+ * closed so a disabled project tool cannot run during an API outage.
  */
-async function checkToolEnabled(toolName: string, project: string): Promise<boolean> {
+async function checkToolEnabled(
+  toolName: string,
+  project: string,
+): Promise<"enabled" | "disabled" | "unavailable"> {
   try {
     const res = await fetch(`${config.apiUrl}/mcp-tools/${encodeURIComponent(toolName)}/state?project=${encodeURIComponent(project)}`, {
       headers: apiRequestHeaders(),
     });
-    if (!res.ok) return true;
+    if (!res.ok) return "unavailable";
     const data = await res.json();
-    return data.data?.enabled !== false;
+    if (typeof data?.data?.enabled !== "boolean") return "unavailable";
+    return data.data.enabled ? "enabled" : "disabled";
   } catch {
-    return true;
+    return "unavailable";
   }
 }
 
 /**
  * Wraps a tool handler to check if the tool is enabled for the project before executing.
- * For tools without a project parameter, defaults to "global-default" for state checking.
- * This is the gateway through which ALL tool invocations flow — the enable/disable toggle
- * in the dashboard is enforced here, not in individual tool handlers.
+ * This is the gateway through which ALL tool invocations flow — the
+ * enable/disable toggle and explicit project identity are enforced here, not
+ * in individual tool handlers.
  */
 function wrapHandler(toolName: string, handler: (args: any) => Promise<any>) {
   return async (args: any) => {
-    const project = args?.project || "global-default";
-    const enabled = await checkToolEnabled(toolName, project);
-    if (!enabled) {
+    const project = resolveChildMcpProjectIdentity(args?.project);
+    if (!project) {
       return {
         content: [{ type: "text" as const, text: JSON.stringify({
-          error: { code: "TOOL_DISABLED", message: `Tool '${toolName}' is disabled for this project` }
+          error: { code: "PROJECT_IDENTITY_REQUIRED", message: "A valid explicit project identity is required." }
+        }) }]
+      };
+    }
+    const state = await checkToolEnabled(toolName, project);
+    if (state !== "enabled") {
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          error: state === "disabled"
+            ? { code: "TOOL_DISABLED", message: "This tool is disabled for the project." }
+            : { code: "TOOL_STATE_UNAVAILABLE", message: "The tool state could not be verified." }
         }) }]
       };
     }
@@ -93,11 +110,20 @@ const C = (name: string) => `ingenium_${name}`;
  * via ingenium_project_init or the dashboard. "global-default" is the singleton
  * global project created at container startup (see docker-entrypoint.sh).
  */
-const projectParam = z.string();
+const projectParam = z.string().min(1).max(64).refine(
+  (value) => resolveChildMcpProjectIdentity(value) !== null,
+  "A valid project identity is required",
+);
 
 const server = new McpServer(
   { name: config.mcpName, version: config.mcpVersion },
-  { capabilities: { tools: {}, resources: {} } },
+  { capabilities: { tools: { listChanged: true }, resources: {} } },
+);
+
+const childToolHost = server as unknown as ChildMcpToolHost;
+const childGateway = new ChildMcpGateway(
+  childToolHost,
+  resolveChildMcpProjectIdentity(process.env.INGENIUM_PROJECT),
 );
 
 // ── Settings ─────────────────────────────────────────────
@@ -863,6 +889,114 @@ server.registerTool("context_get", { description: "Get a canonical context entry
 server.registerTool("context_update", { description: "Update a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive(), fields: z.record(z.unknown()) } }, wrapHandler(C("context_update"), async ({ project, id, fields }) => contextTools.contextUpdate(project, id, fields)));
 server.registerTool("context_delete", { description: "Delete a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive() } }, wrapHandler(C("context_delete"), async ({ project, id }) => contextTools.contextDelete(project, id)));
 server.registerTool("context_batch_get", { description: "Retrieve a batch of canonical context entries.", inputSchema: { project: projectParam, ids: z.array(z.number().int().positive()).max(100) } }, wrapHandler(C("context_batch_get"), async ({ project, ids }) => contextTools.contextBatch(project, ids)));
+
+// Immutable conversation context. List/search tools return summaries only;
+// content is exposed only by the deliberate message-retrieve operations.
+const contextMetadataParam = z.record(z.unknown());
+const contextTagsParam = z.array(z.string().trim().min(1).max(64)).max(64);
+const contextIdempotencyKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const contextRevisionParam = z.number().int().nonnegative();
+const contextIdParam = z.string().uuid();
+
+server.registerTool(
+  "context_conversation_create",
+  {
+    description: "Create an immutable, project-scoped context conversation.",
+    inputSchema: {
+      project: projectParam,
+      title: z.string().trim().min(1).max(256),
+      tags: contextTagsParam.optional(),
+      priority: z.number().int().min(0).max(10).optional(),
+      metadata: contextMetadataParam.optional(),
+      idempotencyKey: contextIdempotencyKeyParam.optional(),
+    },
+  },
+  wrapHandler(C("context_conversation_create"), async (args) => contextTools.contextConversationCreate(
+    args.project, args.title, args.tags, args.priority, args.metadata, args.idempotencyKey,
+  )),
+);
+server.registerTool(
+  "context_conversation_get",
+  { description: "Get immutable conversation metadata and its current revision.", inputSchema: { project: projectParam, conversationId: contextIdParam } },
+  wrapHandler(C("context_conversation_get"), async ({ project, conversationId }) => contextTools.contextConversationGet(project, conversationId)),
+);
+server.registerTool(
+  "context_conversation_list",
+  { description: "Keyset-paginate immutable context conversations.", inputSchema: { project: projectParam, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(512).optional() } },
+  wrapHandler(C("context_conversation_list"), async ({ project, limit, cursor }) => contextTools.contextConversationList(project, limit, cursor)),
+);
+server.registerTool(
+  "context_message_append",
+  {
+    description: "Append an immutable message when expectedRevision matches the conversation.",
+    inputSchema: {
+      project: projectParam,
+      conversationId: contextIdParam,
+      role: z.enum(["system", "user", "assistant", "tool"]),
+      content: z.string().min(1).max(262_144),
+      expectedRevision: contextRevisionParam,
+      tags: contextTagsParam.optional(),
+      priority: z.number().int().min(0).max(10).optional(),
+      metadata: contextMetadataParam.optional(),
+      idempotencyKey: contextIdempotencyKeyParam.optional(),
+    },
+  },
+  wrapHandler(C("context_message_append"), async (args) => contextTools.contextMessageAppend(
+    args.project, args.conversationId, args.role, args.content, args.expectedRevision,
+    args.tags, args.priority, args.metadata, args.idempotencyKey,
+  )),
+);
+server.registerTool(
+  "context_message_list",
+  { description: "Keyset-paginate message summaries without exposing content.", inputSchema: { project: projectParam, conversationId: contextIdParam, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(512).optional() } },
+  wrapHandler(C("context_message_list"), async ({ project, conversationId, limit, cursor }) => contextTools.contextMessageList(project, conversationId, limit, cursor)),
+);
+server.registerTool(
+  "context_message_search",
+  { description: "Run bounded relevance search across one conversation without returning content.", inputSchema: { project: projectParam, conversationId: contextIdParam, query: z.string().trim().min(1).max(512), limit: z.number().int().min(1).max(100).optional() } },
+  wrapHandler(C("context_message_search"), async ({ project, conversationId, query, limit }) => contextTools.contextMessageSearch(project, conversationId, query, limit)),
+);
+server.registerTool(
+  "context_message_retrieve",
+  { description: "Explicitly retrieve one immutable context message, including content.", inputSchema: { project: projectParam, conversationId: contextIdParam, messageId: contextIdParam } },
+  wrapHandler(C("context_message_retrieve"), async ({ project, conversationId, messageId }) => contextTools.contextMessageRetrieve(project, conversationId, messageId)),
+);
+server.registerTool(
+  "context_message_batch_retrieve",
+  { description: "Explicitly retrieve up to 100 messages in requested-ID order and report missing IDs.", inputSchema: { project: projectParam, conversationId: contextIdParam, messageIds: z.array(contextIdParam).min(1).max(100) } },
+  wrapHandler(C("context_message_batch_retrieve"), async ({ project, conversationId, messageIds }) => contextTools.contextMessageBatchRetrieve(project, conversationId, messageIds)),
+);
+server.registerTool(
+  "context_checkpoint_create",
+  {
+    description: "Create a hash-addressed immutable checkpoint at expectedRevision.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, expectedRevision: contextRevisionParam, ragSourceIds: z.array(contextIdParam).max(64).optional(), metadata: contextMetadataParam.optional(), idempotencyKey: contextIdempotencyKeyParam.optional() },
+  },
+  wrapHandler(C("context_checkpoint_create"), async (args) => contextTools.contextCheckpointCreate(
+    args.project, args.conversationId, args.expectedRevision, args.ragSourceIds, args.metadata, args.idempotencyKey,
+  )),
+);
+server.registerTool(
+  "context_checkpoint_list",
+  { description: "Keyset-paginate immutable checkpoint history.", inputSchema: { project: projectParam, conversationId: contextIdParam, limit: z.number().int().min(1).max(100).optional(), cursor: z.string().max(512).optional() } },
+  wrapHandler(C("context_checkpoint_list"), async ({ project, conversationId, limit, cursor }) => contextTools.contextCheckpointList(project, conversationId, limit, cursor)),
+);
+server.registerTool(
+  "context_checkpoint_get",
+  { description: "Get one immutable checkpoint and its project-owned RAG-source identifiers.", inputSchema: { project: projectParam, conversationId: contextIdParam, checkpointId: contextIdParam } },
+  wrapHandler(C("context_checkpoint_get"), async ({ project, conversationId, checkpointId }) => contextTools.contextCheckpointGet(project, conversationId, checkpointId)),
+);
+server.registerTool(
+  "context_checkpoint_restore",
+  {
+    description: "Restore a checkpoint as a new immutable conversation; the source is never changed.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, checkpointId: contextIdParam, expectedRevision: contextRevisionParam, title: z.string().trim().min(1).max(256).optional(), metadata: contextMetadataParam.optional(), idempotencyKey: contextIdempotencyKeyParam.optional() },
+  },
+  wrapHandler(C("context_checkpoint_restore"), async (args) => contextTools.contextCheckpointRestore(
+    args.project, args.conversationId, args.checkpointId, args.expectedRevision,
+    args.title, args.metadata, args.idempotencyKey,
+  )),
+);
 
 // ── Projects ────────────────────────────────────────────
 
@@ -1638,7 +1772,7 @@ server.registerTool(
 
 server.registerTool(
   "health_check",
-  { description: "API health check — returns status and uptime. No project param needed.", inputSchema: {} },
+  { description: "API health check — returns status and uptime.", inputSchema: { project: projectParam } },
   wrapHandler(C("health_check"), async () => healthCheck()),
 );
 
@@ -2345,27 +2479,38 @@ server.registerTool(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  await childGateway.start();
   logger.info("ingenium-server MCP transport started on stdio");
 }
 
-main().catch((err) => {
-  logger.fatal({ err }, "Fatal error in MCP server");
-  stopAll();
-  process.exit(1);
+let shuttingDown = false;
+
+async function shutdown(exitCode: number, reason: "SIGTERM" | "SIGINT" | "fatal" | "unhandled-rejection"): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info({ reason }, "MCP server shutting down");
+  await childGateway.shutdown();
+  process.exit(exitCode);
+}
+
+main().catch(() => {
+  // Do not serialize the error: its message can include dependency payloads.
+  logger.fatal({ boundary: "parent-mcp-transport" }, "Fatal error in MCP server");
+  void shutdown(1, "fatal");
 });
 
-// Graceful shutdown: SIGTERM is sent by the parent process (or Docker) during
-// container stop. We must stop child MCP servers before
-// exiting to avoid orphaned processes.
-process.on("SIGTERM", () => {
-  logger.info("SIGTERM received, shutting down");
-  stopAll();
-  process.exit(0);
+// Graceful shutdown must await child transport close so the parent never
+// leaves a live direct child process behind.
+process.once("SIGTERM", () => {
+  void shutdown(0, "SIGTERM");
 });
 
-// Hard exit on unhandled rejections — the MCP protocol has no error-recovery
-// mechanism for a corrupted runtime. Better to restart cleanly via the host.
-process.on("unhandledRejection", (reason) => {
-  logger.fatal({ reason }, "Unhandled rejection");
-  process.exit(1);
+process.once("SIGINT", () => {
+  void shutdown(0, "SIGINT");
+});
+
+// The MCP protocol has no safe recovery path after an unhandled rejection.
+process.on("unhandledRejection", () => {
+  logger.fatal({ boundary: "parent-mcp-runtime" }, "Unhandled rejection");
+  void shutdown(1, "unhandled-rejection");
 });

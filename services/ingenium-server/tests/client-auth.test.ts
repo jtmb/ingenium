@@ -33,6 +33,30 @@ describe("Ingenium API client authentication", () => {
     expect(requestHeaders.get("Content-Type")).toBe("application/json");
   });
 
+  it("uses the dedicated server-only child-MCP runtime handoff outside the dashboard API namespace", async () => {
+    process.env.INGENIUM_API_TOKEN = "test-server-token";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { definitions: [], unavailable: [] } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const {
+      api,
+      CHILD_MCP_RUNTIME_HANDOFF_HEADER,
+      CHILD_MCP_RUNTIME_HANDOFF_PATH,
+    } = await import("../lib/client.js");
+    await api.getTrustedChildMcpRuntime("runtime project");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      `http://localhost:4097${CHILD_MCP_RUNTIME_HANDOFF_PATH}?project=runtime+project`,
+    );
+    const requestHeaders = new Headers(fetchMock.mock.calls[0]?.[1].headers);
+    expect(requestHeaders.get("Authorization")).toBe("Bearer test-server-token");
+    expect(requestHeaders.get(CHILD_MCP_RUNTIME_HANDOFF_HEADER)).toBe("1");
+  });
+
   it("does not synthesize an Authorization header when the API token is absent", async () => {
     delete process.env.INGENIUM_API_TOKEN;
     process.env.INGENIUM_API_TOKEN_FILE = ".opencode/not-a-token-file";
