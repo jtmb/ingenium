@@ -23,7 +23,7 @@ description: Canonical reference for all environment variables used across the I
 | `INGENIUM_API_TOKEN` | _(required, no default)_ | entrypoint, API boundary, ingenium-api, dashboard server proxy | Mandatory 32–128 character base64url bearer token. Never store it in tracked `opencode.json`; OpenCode may use the ignored mode-0600 worktree fallback. |
 | `INGENIUM_API_TOKEN_FILE` | _(optional bootstrap; container runtime default `/run/ingenium-secrets/api-token`)_ | entrypoint, API boundary, ingenium-api, dashboard, health probe | Protected regular-file source for the API token. Symlinks and unsafe permissions are rejected. |
 | `INGENIUM_API_URL` | `http://localhost:4097/api/v1` | ingenium-server | Base URL for API calls from MCP server |
-| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | ingenium-api | Backup snapshot storage directory |
+| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | ingenium-core, ingenium-api | Backup snapshot storage directory. Empty or whitespace-only values are treated as unset. |
 | `INGENIUM_CORE_DB_PATH` | `/app/.ingenium/data` in Docker; host fallback resolves to `.ingenium/data` | core + API | Canonical SQLite database file path; do not create a sibling `data.db` |
 | `INGENIUM_DOCS_ROOT` | _(none — required for repo indexing)_ | ingenium-core | Repository root directory for canonical docs indexing. `indexConfiguredDocs()` walks `{root}/docs/**/*.md`, skips symlinks, and rejects paths escaping the root. Used by `POST /api/v1/rag/ingest`. |
 | `INGENIUM_EMAIL_ENCRYPTION_KEY` | _(required, no default)_ | ingenium-email, docker-entrypoint.sh | **64 hex characters** (32 bytes) or a **64-character base64url secret** deterministically reduced to an AES-256 key for credential encryption |

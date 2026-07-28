@@ -29,6 +29,8 @@ services:
       - INGENIUM_API_TOKEN=${INGENIUM_API_TOKEN:-}
       - INGENIUM_API_TOKEN_FILE=${INGENIUM_API_TOKEN_FILE:-}
       - INGENIUM_CORE_DB_PATH=/app/.ingenium/data
+      # Forward an optional operator override; blank values fall back safely.
+      - INGENIUM_BACKUPS_DIR=${INGENIUM_BACKUPS_DIR:-}
       - INGENIUM_API_PORT=4096
       - INGENIUM_GLOBAL_CONFIG_PATH=/home/appuser/.config/opencode
       # Exact browser origins accepted by both the dashboard proxy and API

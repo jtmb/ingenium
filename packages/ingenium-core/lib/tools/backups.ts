@@ -26,8 +26,12 @@ function coreDbPath(): string {
   return process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db";
 }
 
-function backupDirectory(dbPath: string): string {
-  return process.env.INGENIUM_BACKUPS_DIR ?? resolve(dirname(dbPath), "backups");
+/** Resolve the single absolute directory used for all snapshot components. */
+export function resolveBackupDirectory(dbPath: string): string {
+  const configuredDirectory = process.env.INGENIUM_BACKUPS_DIR?.trim();
+  return configuredDirectory
+    ? resolve(configuredDirectory)
+    : resolve(dirname(dbPath), "backups");
 }
 
 function sha256(filePath: string): string {
@@ -51,7 +55,7 @@ function parseManifest(components: string): BackupManifest | null {
 }
 
 function componentPath(dbPath: string, filename: string): string | null {
-  const directory = backupDirectory(dbPath);
+  const directory = resolveBackupDirectory(dbPath);
   const path = resolve(directory, filename);
   return dirname(path) === directory && basename(path) === filename ? path : null;
 }
@@ -75,7 +79,7 @@ export async function createSnapshot(
   if (!existsSync(opencodeDbPath)) throw new Error(`OpenCode database does not exist: ${opencodeDbPath}`);
 
   const backupId = randomUUID();
-  const directory = backupDirectory(dbPath);
+  const directory = resolveBackupDirectory(dbPath);
   const filename = `${backupId}.db`;
   const opencodeFilename = `${backupId}.opencode.db`;
   const ingeniumSnapshotPath = resolve(directory, filename);

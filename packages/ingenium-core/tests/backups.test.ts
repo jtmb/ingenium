@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { createProject } from "../lib/tools/projects.js";
 import { getDb, execTransaction, resetDbForTest } from "../lib/db.js";
 import { randomUUID } from "node:crypto";
@@ -16,6 +16,8 @@ import {
   updateRestoreStatus,
   getRestoreStatus,
   migrateLegacyBackupOwnership,
+  getBackupComponentPath,
+  resolveBackupDirectory,
 } from "../lib/tools/backups.js";
 
 let tempDir: string;
@@ -23,10 +25,13 @@ let projectId: string;
 let externalProjectId: string;
 let dbPath: string;
 let opencodeDbPath: string;
+let originalBackupsDir: string | undefined;
 
 beforeAll(async () => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-test-backups-"));
   dbPath = join(tempDir, "test.db");
+  originalBackupsDir = process.env.INGENIUM_BACKUPS_DIR;
+  delete process.env.INGENIUM_BACKUPS_DIR;
   process.env.INGENIUM_CORE_DB_PATH = dbPath;
   getDb(dbPath);
 
@@ -43,6 +48,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   delete process.env.INGENIUM_CORE_DB_PATH;
+  if (originalBackupsDir === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
+  else process.env.INGENIUM_BACKUPS_DIR = originalBackupsDir;
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -89,6 +96,69 @@ function insertRestoreJob(
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+describe("backups — directory resolution", () => {
+  it("uses the canonical DB-relative directory for unset, empty, or whitespace-only overrides", () => {
+    const defaultDirectory = resolve(tempDir, "backups");
+    const previous = process.env.INGENIUM_BACKUPS_DIR;
+
+    try {
+      for (const configuredDirectory of [undefined, "", " \t\n "]) {
+        if (configuredDirectory === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
+        else process.env.INGENIUM_BACKUPS_DIR = configuredDirectory;
+
+        expect(resolveBackupDirectory(dbPath)).toBe(defaultDirectory);
+      }
+    } finally {
+      if (previous === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
+      else process.env.INGENIUM_BACKUPS_DIR = previous;
+    }
+  });
+
+  it("uses a normalized valid override and resolves existing components in the selected directory", async () => {
+    const defaultDirectory = resolve(tempDir, "backups");
+    const overrideDirectory = join(tempDir, "custom-backups");
+    const relativeOverride = relative(process.cwd(), overrideDirectory);
+    const scenarios: Array<{ configuredDirectory: string | undefined; expectedDirectory: string }> = [
+      { configuredDirectory: undefined, expectedDirectory: defaultDirectory },
+      { configuredDirectory: "", expectedDirectory: defaultDirectory },
+      { configuredDirectory: " \t ", expectedDirectory: defaultDirectory },
+      { configuredDirectory: relativeOverride, expectedDirectory: resolve(overrideDirectory) },
+    ];
+    const previous = process.env.INGENIUM_BACKUPS_DIR;
+    const snapshotIds: string[] = [];
+    let canonicalSnapshot: { backupId: string; filename: string } | undefined;
+
+    try {
+      for (const { configuredDirectory, expectedDirectory } of scenarios) {
+        if (configuredDirectory === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
+        else process.env.INGENIUM_BACKUPS_DIR = configuredDirectory;
+
+        const snapshot = await createSnapshot(projectId, "manual", dbPath, opencodeDbPath);
+        snapshotIds.push(snapshot.backupId);
+        if (expectedDirectory === defaultDirectory && !canonicalSnapshot) {
+          canonicalSnapshot = snapshot;
+        }
+        const existingSnapshot = expectedDirectory === defaultDirectory
+          ? canonicalSnapshot!
+          : snapshot;
+
+        expect(resolveBackupDirectory(dbPath)).toBe(expectedDirectory);
+        expect(existsSync(join(expectedDirectory, existingSnapshot.filename))).toBe(true);
+        expect(getBackupComponentPath(projectId, existingSnapshot.backupId)).toBe(
+          join(expectedDirectory, existingSnapshot.filename),
+        );
+        expect(validateRestorePreflight(existingSnapshot.backupId)).toMatchObject({ valid: true, errors: [] });
+      }
+
+      const existingRecordIds = listBackups(projectId).map((record) => record.id);
+      expect(existingRecordIds).toEqual(expect.arrayContaining(snapshotIds));
+    } finally {
+      if (previous === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
+      else process.env.INGENIUM_BACKUPS_DIR = previous;
+    }
+  });
+});
 
 describe("backups — createSnapshot", () => {
   // Note: createSnapshot is async and performs file I/O.

@@ -19,7 +19,7 @@ A background scheduler (`backup-scheduler.ts`) creates consistent snapshots on a
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | Directory for backup snapshot files |
+| `INGENIUM_BACKUPS_DIR` | `/app/.ingenium/backups` | Directory for backup snapshot files. Empty or whitespace-only values are treated as unset. |
 
 Schedule configuration is managed via:
 
@@ -47,6 +47,12 @@ Each backup creates two files in `INGENIUM_BACKUPS_DIR`:
 ```
 
 A `backup_records` DB table stores metadata: SHA-256 hashes, backup type, component manifest, and status. The manifest JSON includes `schema_version`, `ingenium` component (filename, sha256, size_bytes), and `opencode` component.
+
+The backup resolver normalizes the configured directory once for snapshot creation,
+downloads, and restore previews. When `INGENIUM_BACKUPS_DIR` is unset, empty, or
+whitespace-only, it uses the canonical directory beside the core database
+(`/app/.ingenium/backups` in Docker). Manifest component filenames must resolve
+to a direct child of that directory; paths outside it are rejected.
 
 ### Ownership and project context
 

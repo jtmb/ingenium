@@ -2,9 +2,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { createProject } from "../../../packages/ingenium-core/lib/tools/projects.js";
 import { getDb } from "../../../packages/ingenium-core/lib/db.js";
 import Database from "better-sqlite3";
@@ -14,6 +14,7 @@ import { backupsRouter } from "../lib/routes/backups.js";
 const tempDir = mkdtempSync(join(tmpdir(), "ingenium-backup-api-"));
 const coreDbPath = join(tempDir, "data.db");
 const backupsDir = join(tempDir, "backups");
+const overrideBackupsDir = join(tempDir, "override-backups");
 const opencodeDbPath = join(tempDir, "opencode.db");
 
 // Set env before any module initialization
@@ -103,6 +104,65 @@ describe("GET /api/v1/backups — list backups", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.every((backup: { id: string }) => backup.id)).toBe(true);
+  });
+});
+
+describe("backup directory resolution", () => {
+  it("uses one contained directory for create, list, download, and restore preview", async () => {
+    const defaultDirectory = resolve(tempDir, "backups");
+    const relativeOverride = relative(process.cwd(), overrideBackupsDir);
+    const scenarios: Array<{ configuredDirectory: string | undefined; expectedDirectory: string }> = [
+      { configuredDirectory: undefined, expectedDirectory: defaultDirectory },
+      { configuredDirectory: "", expectedDirectory: defaultDirectory },
+      { configuredDirectory: " \t ", expectedDirectory: defaultDirectory },
+      { configuredDirectory: relativeOverride, expectedDirectory: resolve(overrideBackupsDir) },
+    ];
+    const previous = process.env.INGENIUM_BACKUPS_DIR;
+    let canonicalSnapshot: { backupId: string; filename: string } | undefined;
+
+    try {
+      for (const { configuredDirectory, expectedDirectory } of scenarios) {
+        if (configuredDirectory === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
+        else process.env.INGENIUM_BACKUPS_DIR = configuredDirectory;
+
+        const created = await fetch(url(""), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        expect(created.status).toBe(201);
+        const createdBody = await created.json();
+        const backupId = createdBody.data.id as string;
+        const filename = createdBody.data.filename as string;
+        if (expectedDirectory === defaultDirectory && !canonicalSnapshot) {
+          canonicalSnapshot = { backupId, filename };
+        }
+        const existingSnapshot = expectedDirectory === defaultDirectory
+          ? canonicalSnapshot!
+          : { backupId, filename };
+
+        expect(existsSync(join(expectedDirectory, existingSnapshot.filename))).toBe(true);
+
+        const listed = await fetch(url(""));
+        expect(listed.status).toBe(200);
+        const listedBody = await listed.json();
+        expect(listedBody.data.some((record: { id: string }) => record.id === backupId)).toBe(true);
+
+        const downloaded = await fetch(url(`/${existingSnapshot.backupId}/download`));
+        expect(downloaded.status).toBe(200);
+        expect((await downloaded.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+        const preview = await fetch(url("/restore/preview"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ backupId: existingSnapshot.backupId }),
+        });
+        expect(preview.status).toBe(200);
+        expect((await preview.json()).data).toMatchObject({ valid: true, errors: [] });
+      }
+    } finally {
+      if (previous === undefined) delete process.env.INGENIUM_BACKUPS_DIR;
+      else process.env.INGENIUM_BACKUPS_DIR = previous;
+    }
   });
 });
 
