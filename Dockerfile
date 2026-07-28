@@ -82,7 +82,26 @@ COPY --from=builder --chown=appuser:appuser /app/services/ingenium-server/packag
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/.next/standalone ./
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/public ./services/ingenium-dashboard/public
 COPY --from=builder --chown=appuser:appuser /app/services/ingenium-dashboard/.next/static ./services/ingenium-dashboard/.next/static
-COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ ./packages/ingenium-extension/
+# The init CLI is an independently documented runtime command. Copy only the
+# package distribution and expose it via a stable PATH location rather than
+# relying on a workspace node_modules/.bin symlink surviving production pruning.
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/dist ./packages/ingenium-extension/dist
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/package.json ./packages/ingenium-extension/package.json
+# Repository sync records these configured source paths verbatim. Preserve the
+# source artifacts beside the runtime CLI instead of substituting dist paths.
+# OpenCode loads these TypeScript entrypoints directly, so retain their explicit
+# local import closure without copying the entire extension workspace.
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/auto-observer.ts ./packages/ingenium-extension/auto-observer.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer.ts ./packages/ingenium-extension/observer.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/resource-sync.ts ./packages/ingenium-extension/resource-sync.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer-core.ts ./packages/ingenium-extension/observer-core.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/project-resolver.ts ./packages/ingenium-extension/project-resolver.ts
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/api-auth.ts ./packages/ingenium-extension/api-auth.ts
+RUN chmod 0555 /app/packages/ingenium-extension/dist/scripts/init-project.js && \
+    ln -s /app/packages/ingenium-extension/dist/scripts/init-project.js /usr/local/bin/ingenium-init-project && \
+    test -x /usr/local/bin/ingenium-init-project && \
+    /usr/local/bin/ingenium-init-project --help
 
 # Copy process management config
 COPY --chown=appuser:appuser supervisord.conf ./supervisord.conf
@@ -101,6 +120,10 @@ RUN install -d -o appuser -g appuser -m 0700 \
     runuser -u appuser -- sh -ec 'for directory in /run/ingenium-gateway /run/ingenium-gateway/client_body /run/ingenium-gateway/proxy /run/ingenium-gateway/fastcgi /run/ingenium-gateway/uwsgi /run/ingenium-gateway/scgi; do test -w "$directory"; done' && \
     runuser -u appuser -- sh /app/scripts/validate-gateway-config.sh
 # Copy agent definitions, commands, and skills (excluded from .dockerignore)
+# The packaged init CLI scans repository Markdown from its worktree. Retain the
+# canonical documentation tree so its documented all-scope invocation can
+# project docs/**/*.md at runtime rather than silently submitting an empty set.
+COPY --chown=appuser:appuser docs ./docs
 COPY --chown=appuser:appuser .opencode/agents ./.opencode/agents
 COPY --chown=appuser:appuser .opencode/commands ./.opencode/commands
 COPY --chown=appuser:appuser .opencode/skills ./.opencode/skills
@@ -113,7 +136,7 @@ RUN mkdir -p /app/config /app/.ingenium/logs /app/.opencode/skills /workspace &&
 # Pre-create appuser home for OpenCode config persistence
 RUN mkdir -p /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log && chown -R appuser:appuser /home/appuser
 # Pre-create both the container default and the fallback opencode.json
- RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":[]}' > /app/config/opencode.container.json && \
+ RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["packages/ingenium-extension/auto-observer.ts","packages/ingenium-extension/observer.ts","packages/ingenium-extension/resource-sync.ts"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 

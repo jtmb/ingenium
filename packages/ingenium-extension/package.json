@@ -32,11 +32,12 @@
     }
   },
   "bin": {
-    "@ingenium/extension": "dist/scripts/mcp-server.js"
+    "@ingenium/extension": "./dist/scripts/mcp-server.js",
+    "ingenium-init-project": "./dist/scripts/init-project.js"
   },
   "files": ["dist/", "README.md"],
   "scripts": {
-    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp -r ../../services/ingenium-server/dist/scripts dist/scripts && test -f dist/config/index.js",
+    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp ../../services/ingenium-server/dist/scripts/mcp-server.js dist/scripts/mcp-transport.js && test -f dist/config/index.js && test -f dist/scripts/mcp-server.js && test -f dist/scripts/mcp-transport.js && test -f dist/scripts/init-project.js && chmod 0555 dist/scripts/mcp-server.js dist/scripts/init-project.js",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

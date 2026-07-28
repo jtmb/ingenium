@@ -193,14 +193,14 @@ describe("agent resource sync", () => {
     const opencodeDir = join(worktree, ".opencode");
     mkdirSync(opencodeDir);
     const tokenPath = join(opencodeDir, ".ingenium-api-token");
-    writeFileSync(tokenPath, "test-resource-sync-token\n", { mode: 0o600 });
+    writeFileSync(tokenPath, "test_resource_sync_token_0123456789\n", { mode: 0o600 });
     chmodSync(tokenPath, 0o600);
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 
     await syncAgents(worktree, "project", { version: 1, project: "project", lastFullSync: "", resources: { skills: {}, agents: {}, plugins: {}, commands: {}, config: {} } }, { isInitialSync: false });
 
-    expect(new Headers(fetchMock.mock.calls[0]![1].headers).get("Authorization")).toBe("Bearer test-resource-sync-token");
+    expect(new Headers(fetchMock.mock.calls[0]![1].headers).get("Authorization")).toBe("Bearer test_resource_sync_token_0123456789");
   });
 
   it("rejects an API-created arbitrary broker profile instead of trusting or writing it", async () => {

@@ -242,7 +242,7 @@ describe("Manifest", () => {
     vi.resetModules();
     const { loadManifest, resetProjectCache } = await import("../packages/ingenium-extension/resource-sync.js");
     const manifest = loadManifest(worktree, "test-project");
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
     expect(manifest.project).toBe("test-project");
     expect(manifest.resources.skills).toEqual({});
     expect(manifest.resources.agents).toEqual({});
@@ -323,7 +323,7 @@ describe("Manifest", () => {
     vi.resetModules();
     const { loadManifest } = await import("../packages/ingenium-extension/resource-sync.js");
     const manifest = loadManifest(worktree, "test-project");
-    expect(manifest.version).toBe(1);
+    expect(manifest.version).toBe(2);
     expect(manifest.resources.skills).toEqual({});
   });
 });
@@ -343,7 +343,7 @@ describe("API project recreation recovery", () => {
     vi.resetModules();
   });
 
-  it("pushes local resources instead of deleting them when the API project ID changes", async () => {
+  it("does not use legacy command synchronization when the API project ID changes", async () => {
     const commandPath = resolve(worktree, ".opencode", "commands", "keep-me.md");
     writeFile(commandPath, "# Keep me\n");
     writeFile(resolve(worktree, ".opencode", ".ingenium-sync-state.json"), JSON.stringify({
@@ -372,9 +372,9 @@ describe("API project recreation recovery", () => {
     const result = await fullSync(worktree);
 
     expect(existsSync(commandPath)).toBe(true);
-    expect(result.commands.pushed).toBe(1);
+    expect(result.commands.pushed).toBe(0);
     const manifest = JSON.parse(readFileSync(resolve(worktree, ".opencode", ".ingenium-sync-state.json"), "utf8"));
-    expect(manifest.projectId).toBe("new-project-id");
+    expect(manifest.projectId).toBe("old-project-id");
   });
 });
 

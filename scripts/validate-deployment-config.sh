@@ -49,6 +49,13 @@ reject_literal "$dockerfile" "FROM node:22-alpine AS builder"
 require_literal "$dockerfile" "RUN node -e 'require(\"better-sqlite3\")'"
 require_literal "$dockerfile" "RUN npm run build"
 require_literal "$dockerfile" "RUN sh scripts/validate-deployment-config.sh"
+# OpenCode loads the configured TypeScript plugins from source paths. Keep the
+# small local dependency closure required by those entrypoints, but do not
+# restore a broad extension-workspace copy to the production image.
+for extension_source in auto-observer.ts observer.ts resource-sync.ts skill-sync.ts observer-core.ts project-resolver.ts api-auth.ts; do
+  require_literal "$dockerfile" "COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/${extension_source} ./packages/ingenium-extension/${extension_source}"
+done
+reject_literal "$dockerfile" "COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ ./packages/ingenium-extension/"
 web_arg_line="$(grep -n -F 'ARG NEXT_PUBLIC_OPENCODE_WEB_URL=' "$dockerfile" | cut -d: -f1)"
 cli_arg_line="$(grep -n -F 'ARG NEXT_PUBLIC_OPENCODE_CLI_URL=' "$dockerfile" | cut -d: -f1)"
 build_line="$(grep -n -F 'RUN npm run build' "$dockerfile" | cut -d: -f1)"

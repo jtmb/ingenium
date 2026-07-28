@@ -28,7 +28,7 @@
       "command": [
         "/usr/bin/env",
         "node",
-        "services/ingenium-server/dist/scripts/mcp-server.js"
+        "packages/ingenium-extension/dist/scripts/mcp-server.js"
       ],
       "enabled": true,
       "environment": {
@@ -37,8 +37,7 @@
         "INGENIUM_API_TOKEN": "{file:.opencode/.ingenium-api-token}",
         "INGENIUM_API_TOKEN_FILE": ".opencode/.ingenium-api-token",
         "INGENIUM_API_TIMEOUT": "10000",
-        "LOG_LEVEL": "info",
-        "INGENIUM_PROJECT": "ingenium"
+        "LOG_LEVEL": "info"
       }
     },
     "playwright": {

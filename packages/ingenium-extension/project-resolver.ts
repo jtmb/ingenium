@@ -21,8 +21,17 @@ function rejectProjectResolution(reason: string): never {
   throw new Error(reason);
 }
 
-/** Resolve an extension session without ever silently sharing the global namespace. */
-export function resolveExtensionProject(worktree: string): string {
+/**
+ * Resolve an extension session without ever silently sharing the global namespace.
+ *
+ * An explicit CLI project takes precedence over the environment so operators can
+ * target a validated project without mutating the process environment.
+ */
+export function resolveExtensionProject(worktree: string, requestedProject?: string): string {
+  if (requestedProject !== undefined) {
+    if (!isValidProjectName(requestedProject)) return rejectProjectResolution("--project is not a safe project name");
+    return requestedProject;
+  }
   const explicit = process.env.INGENIUM_PROJECT;
   if (explicit !== undefined) {
     if (!isValidProjectName(explicit)) return rejectProjectResolution("INGENIUM_PROJECT is not a safe project name");
@@ -36,8 +45,12 @@ export function resolveExtensionProject(worktree: string): string {
 }
 
 /** Idempotently provision the resolved project before an extension writes resources. */
-export async function ensureExtensionProject(worktree: string, apiBase: string): Promise<string> {
-  const project = resolveExtensionProject(worktree);
+export async function ensureExtensionProject(
+  worktree: string,
+  apiBase: string,
+  requestedProject?: string,
+): Promise<string> {
+  const project = resolveExtensionProject(worktree, requestedProject);
   const normalizedApiBase = apiBase.replace(/\/+$/, "");
   const cacheKey = `${normalizedApiBase}\u0000${project}`;
   const existing = ensuredProjects.get(cacheKey);

@@ -11,9 +11,9 @@
  *
  * Sync manifest: .opencode/.ingenium-sync-state.json
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, lstatSync, unlinkSync, rmdirSync, realpathSync } from "node:fs";
-import { resolve, basename, dirname, isAbsolute, sep } from "node:path";
-import { createHash } from "node:crypto";
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { resolve, basename, dirname, isAbsolute, parse as parsePath, sep, relative, extname } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { ensureExtensionProject, resolveExtensionProject } from "./project-resolver.js";
 import { apiRequestHeaders } from "./api-auth.js";
 
@@ -69,6 +69,612 @@ function hashFile(filePath: string): string | null {
   }
 }
 
+// ── Repository-authoritative manifest v2 ────────────────────────────────────
+// These scanners are intentionally independent from the legacy bidirectional
+// resource scans below. Repository sync is a one-way, validated projection of
+// the local worktree; it never scans commands or either project/global config.
+
+const REPOSITORY_MAX_ITEMS = 512;
+const REPOSITORY_MAX_FILE_BYTES = 512 * 1024;
+const REPOSITORY_MAX_RESOURCE_BYTES = 256 * 1024;
+const REPOSITORY_MAX_DOC_BYTES = 1_500 * 1024;
+const REPOSITORY_MAX_RESOURCE_TOTAL_BYTES = 1_500 * 1024;
+const REPOSITORY_PLUGIN_EXTENSIONS = new Set([".ts", ".js", ".mjs", ".cjs"]);
+const REPOSITORY_PLUGIN_ROOTS = [".opencode/plugins/", "packages/"] as const;
+
+export class RepositorySyncScanError extends Error {
+  constructor(message = "Repository resource scan rejected an unsafe path or content") {
+    super(message);
+    this.name = "RepositorySyncScanError";
+  }
+}
+
+export interface RepositoryDocManifestEntry {
+  path: string;
+  sha256: string;
+  content: string;
+  fileType: "regular";
+  isSymlink: false;
+}
+
+export interface RepositorySkillManifestEntry {
+  identity: string;
+  path: string;
+  sha256: string;
+  name: string;
+  skillMd: string;
+  body: string;
+  description: string;
+  category?: string;
+  tags: string[];
+  alwaysApply: boolean;
+  metadata: Record<string, unknown>;
+  fileTree: Record<string, string>;
+}
+
+export interface RepositoryAgentManifestEntry {
+  identity: string;
+  path: string;
+  sha256: string;
+  name: string;
+  category: typeof AGENT_CATEGORIES[number];
+  frontmatter: string;
+  body: string;
+  description: string;
+  mode: string;
+  permissions: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  skills: string[];
+  mirrors: string[];
+  enabled: boolean;
+}
+
+export interface RepositoryPluginManifestEntry {
+  identity: string;
+  path: string;
+  sha256: string;
+  name: string;
+  source: string;
+  fileType: "regular";
+  isSymlink: false;
+  enabled: boolean;
+  order: number | null;
+  options: Record<string, unknown>;
+}
+
+export interface RepositoryManifestV2 {
+  version: 2;
+  docs: RepositoryDocManifestEntry[];
+  skills: RepositorySkillManifestEntry[];
+  agents: RepositoryAgentManifestEntry[];
+  plugins: RepositoryPluginManifestEntry[];
+}
+
+function normalizeRepositoryText(value: string): string {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function repositoryIsRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+/** Reject symlinked directory components, including `.opencode`, before path use. */
+function assertNoSymlinkedAncestors(filePath: string, includeTarget = false): void {
+  const absolutePath = resolve(filePath);
+  const parsed = parsePath(absolutePath);
+  const segments = relative(parsed.root, absolutePath).split(sep).filter(Boolean);
+  const count = includeTarget ? segments.length : Math.max(segments.length - 1, 0);
+  let current = parsed.root;
+
+  for (let index = 0; index < count; index += 1) {
+    current = resolve(current, segments[index]!);
+    let currentStat;
+    try {
+      currentStat = lstatSync(current);
+    } catch (error) {
+      if (isMissingPathError(error)) return;
+      throw new RepositorySyncScanError();
+    }
+    if (currentStat.isSymbolicLink() || !currentStat.isDirectory()) throw new RepositorySyncScanError();
+  }
+}
+
+function repositoryWorktreeRoot(worktree: string): string {
+  const root = resolve(worktree);
+  try {
+    assertNoSymlinkedAncestors(root, true);
+    const rootStat = lstatSync(root);
+    if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) throw new RepositorySyncScanError();
+    return realpathSync(root);
+  } catch (error) {
+    if (error instanceof RepositorySyncScanError) throw error;
+    throw new RepositorySyncScanError();
+  }
+}
+
+function assertRepositoryContainedPath(worktree: string, target: string): { root: string; absolutePath: string } {
+  const root = repositoryWorktreeRoot(worktree);
+  const absolutePath = resolve(target);
+  const relativePath = relative(root, absolutePath);
+  if (relativePath.startsWith("..") || relativePath === ".." || isAbsolute(relativePath)) throw new RepositorySyncScanError();
+  return { root, absolutePath };
+}
+
+/**
+ * Open a regular repository file by descriptor. O_NOFOLLOW protects the final
+ * component while fstat verifies the opened inode rather than a pre-open path.
+ */
+function readRepositoryRegularText(worktree: string, filePath: string): string {
+  const { absolutePath } = assertRepositoryContainedPath(worktree, filePath);
+  let descriptor: number | undefined;
+  try {
+    assertNoSymlinkedAncestors(absolutePath);
+    descriptor = openSync(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    if (!fstatSync(descriptor).isFile()) throw new RepositorySyncScanError();
+    return readFileSync(descriptor, "utf-8");
+  } catch (error) {
+    if (error instanceof RepositorySyncScanError) throw error;
+    throw new RepositorySyncScanError();
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function isSecretLikeRepositoryPath(value: string): boolean {
+  return value.split("/").some((segment) => {
+    const normalized = segment.toLowerCase();
+    return normalized === ".env"
+      || normalized.startsWith(".env.")
+      || /(?:^|[._-])(?:secret|secrets|credential|credentials|token|tokens|password|passphrase|api[_-]?key|private[_-]?key|key|keys)(?:$|[._-])/.test(normalized);
+  });
+}
+
+function isSecretLikePluginOptionKey(key: string): boolean {
+  const compact = key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  if (new Set([
+    "secret", "secrets", "credential", "credentials", "token", "tokens",
+    "password", "passwords", "passphrase", "passphrases", "key", "keys",
+    "apikey", "apikeys", "privatekey", "privatekeys", "accesstoken",
+    "refreshtoken", "authtoken", "clientsecret",
+  ]).has(compact)) return true;
+  return /(?:secret|credential|token|password|passphrase)$/.test(compact)
+    || /(?:^|[_-])key$/i.test(key)
+    || /Key$/.test(key);
+}
+
+function stripSecretLikePluginOptionKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripSecretLikePluginOptionKeys);
+  if (!repositoryIsRecord(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !isSecretLikePluginOptionKey(key))
+      .map(([key, child]) => [key, stripSecretLikePluginOptionKeys(child)]),
+  );
+}
+
+function isAllowedRepositoryPluginPath(filePath: string): boolean {
+  return REPOSITORY_PLUGIN_ROOTS.some((root) => filePath.startsWith(root))
+    && REPOSITORY_PLUGIN_EXTENSIONS.has(extname(filePath))
+    && !isSecretLikeRepositoryPath(filePath);
+}
+
+/** Stable JSON shared with the API validator; object insertion order is never semantic. */
+function stableRepositoryJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableRepositoryJson).join(",")}]`;
+  if (repositoryIsRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableRepositoryJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function repositoryHash(value: unknown): string {
+  return hashContent(stableRepositoryJson(value));
+}
+
+function repositoryRelativePath(worktree: string, target: string): string {
+  const root = repositoryWorktreeRoot(worktree);
+  const absolute = resolve(root, target);
+  const value = relative(root, absolute).split(sep).join("/");
+  if (!value || value.startsWith("../") || value === ".." || isAbsolute(value) || value.includes("\\") || value.includes("\u0000")) {
+    throw new RepositorySyncScanError();
+  }
+  return value;
+}
+
+function assertContainedDirectory(worktree: string, directory: string): string | null {
+  try {
+    const { root, absolutePath } = assertRepositoryContainedPath(worktree, directory);
+    // Validate parents before testing the target's existence. Otherwise a
+    // dangling child below a symlinked `.opencode` directory looks merely absent.
+    assertNoSymlinkedAncestors(absolutePath);
+    let directoryStat;
+    try {
+      directoryStat = lstatSync(absolutePath);
+    } catch (error) {
+      if (isMissingPathError(error)) return null;
+      throw error;
+    }
+    assertNoSymlinkedAncestors(absolutePath, true);
+    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) throw new RepositorySyncScanError();
+    const canonical = realpathSync(absolutePath);
+    if (!canonical.startsWith(root + sep) && canonical !== root) throw new RepositorySyncScanError();
+    return canonical;
+  } catch (error) {
+    if (error instanceof RepositorySyncScanError) throw error;
+    throw new RepositorySyncScanError();
+  }
+}
+
+interface RepositoryDiskFile {
+  path: string;
+  absolutePath: string;
+  content: string;
+}
+
+/** Walk only regular, contained files; a symlink anywhere invalidates the scan. */
+function walkRepositoryFiles(worktree: string, directory: string, maxFileBytes: number): RepositoryDiskFile[] {
+  const base = assertContainedDirectory(worktree, directory);
+  if (!base) return [];
+  const files: RepositoryDiskFile[] = [];
+  const walk = (current: string) => {
+    let entries: string[];
+    try { entries = readdirSync(current).sort((a, b) => a.localeCompare(b)); } catch { throw new RepositorySyncScanError(); }
+    for (const name of entries) {
+      const fullPath = resolve(current, name);
+      let stat;
+      try { stat = lstatSync(fullPath); } catch { throw new RepositorySyncScanError(); }
+      if (stat.isSymbolicLink()) throw new RepositorySyncScanError();
+      if (stat.isDirectory()) {
+        const canonical = assertContainedDirectory(worktree, fullPath);
+        if (!canonical || (!canonical.startsWith(base + sep) && canonical !== base)) throw new RepositorySyncScanError();
+        walk(canonical);
+        continue;
+      }
+      if (!stat.isFile()) throw new RepositorySyncScanError();
+      if (files.length >= REPOSITORY_MAX_ITEMS) throw new RepositorySyncScanError();
+      const relativePath = repositoryRelativePath(worktree, fullPath);
+      const content = normalizeRepositoryText(readRepositoryRegularText(worktree, fullPath));
+      if (Buffer.byteLength(content) > maxFileBytes) throw new RepositorySyncScanError();
+      files.push({ path: relativePath, absolutePath: fullPath, content });
+    }
+  };
+  walk(base);
+  return files;
+}
+
+function parseRepositoryFrontmatter(content: string): { raw: string; body: string; fields: Record<string, string> } {
+  const normalized = normalizeRepositoryText(content);
+  const match = normalized.match(/^---\n([\s\S]*?)\n---(?:\n)?/);
+  if (!match) throw new RepositorySyncScanError("Repository markdown requires frontmatter");
+  const fields: Record<string, string> = {};
+  for (const line of match[1]!.split("\n")) {
+    if (/^\s/.test(line)) continue;
+    const colon = line.indexOf(":");
+    if (colon < 1) continue;
+    const key = line.slice(0, colon).trim();
+    let value = line.slice(colon + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    fields[key] = value;
+  }
+  return { raw: match[1]!, body: normalized.slice(match[0].length), fields };
+}
+
+function safeRepositoryName(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 64
+    && value !== "." && value !== ".." && !/[\\/\u0000-\u001f\u007f]/.test(value);
+}
+
+function repositoryBaseline(manifest: SyncManifest): NonNullable<SyncManifest["resources"]["repository"]> {
+  manifest.resources.repository ??= { docs: {}, skills: {}, agents: {}, plugins: {} };
+  return manifest.resources.repository;
+}
+
+function resourceIdentity(
+  type: keyof NonNullable<SyncManifest["resources"]["repository"]>,
+  sourcePath: string,
+  fingerprint: string,
+  baseline: RepositoryBaseline,
+): string {
+  const records = Object.values(baseline);
+  const atPath = records.filter((record) => record.path === sourcePath);
+  if (atPath.length === 1) return atPath[0]!.identity;
+  const atFingerprint = records.filter((record) => record.fingerprint === fingerprint);
+  if (atFingerprint.length === 1) return atFingerprint[0]!.identity;
+  return `${type.slice(0, -1)}:${hashContent(sourcePath).slice(0, 24)}`;
+}
+
+function parseSkillMetadata(content: string | undefined): Record<string, unknown> {
+  if (content === undefined) return {};
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!repositoryIsRecord(parsed)) throw new Error("not an object");
+    return parsed;
+  } catch {
+    throw new RepositorySyncScanError("Invalid skill metadata");
+  }
+}
+
+function scanRepositoryDocs(worktree: string): RepositoryDocManifestEntry[] {
+  const docsDir = resolve(worktree, "docs");
+  const entries = walkRepositoryFiles(worktree, docsDir, REPOSITORY_MAX_FILE_BYTES)
+    .filter((file) => file.path.startsWith("docs/") && file.path.endsWith(".md"));
+  let total = 0;
+  return entries.map((file) => {
+    total += Buffer.byteLength(file.content);
+    if (total > REPOSITORY_MAX_DOC_BYTES) throw new RepositorySyncScanError();
+    return { path: file.path, sha256: hashContent(file.content), content: file.content, fileType: "regular", isSymlink: false };
+  });
+}
+
+function scanRepositorySkills(worktree: string, baseline: RepositoryBaseline): RepositorySkillManifestEntry[] {
+  const skillsRoot = assertContainedDirectory(worktree, resolve(worktree, ".opencode", "skills"));
+  if (!skillsRoot) return [];
+  const entries: RepositorySkillManifestEntry[] = [];
+  for (const name of readdirSync(skillsRoot).sort((a, b) => a.localeCompare(b))) {
+    if (!safeRepositoryName(name)) throw new RepositorySyncScanError();
+    const skillDir = resolve(skillsRoot, name);
+    // `.opencode/skills` also owns support artifacts such as the consolidation
+    // map and fallback learning logs. Only a real directory with a regular
+    // SKILL.md entry point is a repository-managed skill resource.
+    let skillDirectoryStat;
+    try {
+      skillDirectoryStat = lstatSync(skillDir);
+    } catch {
+      throw new RepositorySyncScanError();
+    }
+    if (skillDirectoryStat.isSymbolicLink() || !skillDirectoryStat.isDirectory()) continue;
+    if (existsSync(resolve(skillDir, MIGRATED_TO_MARKER))) continue;
+    const skillMdPath = resolve(skillDir, "SKILL.md");
+    let skillMdStat;
+    try {
+      skillMdStat = lstatSync(skillMdPath);
+    } catch (error) {
+      if (isMissingPathError(error)) continue;
+      throw new RepositorySyncScanError();
+    }
+    if (skillMdStat.isSymbolicLink() || !skillMdStat.isFile()) continue;
+    const allFiles = walkRepositoryFiles(worktree, skillDir, REPOSITORY_MAX_RESOURCE_BYTES);
+    const skillMd = allFiles.find((file) => file.absolutePath === skillMdPath);
+    if (!skillMd) throw new RepositorySyncScanError();
+    const metadataFile = allFiles.find((file) => file.path.endsWith(`/${name}/metadata.json`));
+    const parsed = parseRepositoryFrontmatter(skillMd.content);
+    if (parsed.fields.name !== name || !safeRepositoryName(parsed.fields.name)) throw new RepositorySyncScanError();
+    const metadata = parseSkillMetadata(metadataFile?.content);
+    const tags = Array.isArray(metadata.tags) && metadata.tags.every((tag) => typeof tag === "string") ? [...metadata.tags] as string[] : [];
+    const alwaysApply = metadata.alwaysApply === true;
+    const category = typeof metadata.category === "string" ? metadata.category : parsed.fields.category;
+    const fileTree = Object.fromEntries(allFiles
+      .filter((file) => file !== skillMd && file !== metadataFile)
+      .map((file) => [relative(skillDir, file.absolutePath).split(sep).join("/"), file.content]));
+    const semantic = { path: skillMd.path, name, skillMd: skillMd.content, body: parsed.body, description: parsed.fields.description ?? "", category, tags, alwaysApply, metadata, fileTree };
+    // The semantic SHA below includes every auxiliary path. This separate
+    // content fingerprint intentionally omits auxiliary paths so a uniquely
+    // identifiable nested reference-file move retains its stable resource ID.
+    const fingerprint = repositoryHash({ name, skillMd: skillMd.content, body: parsed.body, description: parsed.fields.description ?? "", category, tags, alwaysApply, metadata, fileContents: Object.values(fileTree).sort() });
+    entries.push({ identity: resourceIdentity("skills", skillMd.path, fingerprint, baseline), sha256: repositoryHash(semantic), ...semantic });
+  }
+  return entries;
+}
+
+function parseAgentSkills(frontmatter: string): string[] {
+  const lines = frontmatter.split("\n");
+  const start = lines.findIndex((line) => /^skills:\s*$/.test(line));
+  if (start < 0) return [];
+  const skills: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index]!;
+    if (!/^\s/.test(line)) break;
+    const match = line.match(/^\s+-\s+(.+?)\s*$/);
+    if (match) skills.push(match[1]!);
+  }
+  return skills;
+}
+
+interface AgentCandidate {
+  path: string;
+  name: string;
+  category: typeof AGENT_CATEGORIES[number] | null;
+  frontmatter: string;
+  body: string;
+  description: string;
+  mode: string;
+  permissions: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  skills: string[];
+  enabled: boolean;
+  fingerprint: string;
+}
+
+/** A managed profile is either categorized or a root-level compatibility mirror. */
+function isRepositoryAgentProfileLocation(agentsRoot: string, file: RepositoryDiskFile): boolean {
+  const segments = repositoryRelativePath(agentsRoot, file.absolutePath).split("/");
+  return (segments.length === 1 && file.path.endsWith(".md"))
+    || (segments.length === 2 && isAgentCategory(segments[0]) && file.path.endsWith(".md"));
+}
+
+/**
+ * Diagnostics can live beside compatibility mirrors. Treat only complete,
+ * self-identifying profiles as resources instead of rejecting unrelated notes.
+ */
+function parseRepositoryAgentCandidate(agentsRoot: string, file: RepositoryDiskFile): AgentCandidate | null {
+  if (!isRepositoryAgentProfileLocation(agentsRoot, file)) return null;
+
+  let parsed: ReturnType<typeof parseRepositoryFrontmatter>;
+  try {
+    parsed = parseRepositoryFrontmatter(file.content);
+  } catch {
+    return null;
+  }
+
+  const name = parsed.fields.name;
+  const description = parsed.fields.description;
+  const mode = parsed.fields.mode;
+  if (!safeRepositoryName(name)
+    || name !== basename(file.path, ".md")
+    || !description?.trim()
+    || !mode?.trim()
+    || !/^permission:\s*$/m.test(parsed.raw)) {
+    return null;
+  }
+
+  const relativePath = repositoryRelativePath(agentsRoot, file.absolutePath);
+  const segments = relativePath.split("/");
+  const category = segments.length === 2 ? segments[0]! as typeof AGENT_CATEGORIES[number] : null;
+  const permissions = parseAgentPermissionFrontmatter(file.content);
+  const metadata = parseAgentMetadata(parsed.fields);
+  const skills = parseAgentSkills(parsed.raw);
+  const semantic = {
+    name,
+    category: category ?? "execution",
+    frontmatter: parsed.raw,
+    body: parsed.body,
+    description,
+    mode,
+    permissions,
+    metadata,
+    skills,
+    enabled: true,
+  };
+  // A root compatibility mirror has no category directory. Category therefore
+  // cannot participate in mirror equivalence, but remains semantic for the
+  // canonical agent that is sent to the API.
+  const { category: _mirrorCategory, ...mirrorSemantic } = semantic;
+  return { path: file.path, ...semantic, fingerprint: repositoryHash(mirrorSemantic) };
+}
+
+function scanRepositoryAgents(worktree: string, baseline: RepositoryBaseline): RepositoryAgentManifestEntry[] {
+  const agentsRoot = assertContainedDirectory(worktree, resolve(worktree, ".opencode", "agents"));
+  if (!agentsRoot) return [];
+  const candidates = walkRepositoryFiles(worktree, agentsRoot, REPOSITORY_MAX_RESOURCE_BYTES)
+    .filter((file) => file.path.endsWith(".md"));
+  const byName = new Map<string, AgentCandidate[]>();
+  for (const file of candidates) {
+    const candidate = parseRepositoryAgentCandidate(agentsRoot, file);
+    if (!candidate || isReservedBroker(candidate.name)) continue;
+    const group = byName.get(candidate.name) ?? [];
+    group.push(candidate);
+    byName.set(candidate.name, group);
+  }
+
+  const entries: RepositoryAgentManifestEntry[] = [];
+  for (const [name, group] of [...byName.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const categorized = group.filter((candidate) => candidate.category !== null);
+    const canonical = [...categorized].sort((left, right) => left.path.localeCompare(right.path))[0] ?? group[0]!;
+    if (!canonical.category) canonical.category = "execution";
+    const mirrors = group.filter((candidate) => candidate !== canonical).map((candidate) => candidate.path).sort();
+    // A duplicate is allowed only as a byte-semantic compatibility mirror.
+    if (group.some((candidate) => candidate.fingerprint !== canonical.fingerprint)) throw new RepositorySyncScanError("Conflicting agent duplicates");
+    const semantic = {
+      path: canonical.path,
+      name,
+      category: canonical.category,
+      frontmatter: canonical.frontmatter,
+      body: canonical.body,
+      description: canonical.description,
+      mode: canonical.mode,
+      permissions: canonical.permissions,
+      metadata: canonical.metadata,
+      skills: canonical.skills,
+      mirrors,
+      enabled: canonical.enabled,
+    };
+    const { path: _agentPath, category: _agentCategory, mirrors: _agentMirrors, ...agentFingerprint } = semantic;
+    const fingerprint = repositoryHash(agentFingerprint);
+    entries.push({ identity: resourceIdentity("agents", canonical.path, fingerprint, baseline), sha256: repositoryHash(semantic), ...semantic });
+  }
+  return entries;
+}
+
+interface PluginConfigEntry {
+  path: string;
+  enabled: boolean;
+  order: number;
+  options: Record<string, unknown>;
+}
+
+function parseConfiguredPlugins(worktree: string): PluginConfigEntry[] {
+  const configPath = resolve(worktree, "opencode.json");
+  try {
+    lstatSync(configPath);
+  } catch (error) {
+    if (isMissingPathError(error)) return [];
+    throw new RepositorySyncScanError("Invalid opencode.json");
+  }
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(readRepositoryRegularText(worktree, configPath).replace(/^\s*\/\/.*$/gm, "")) as Record<string, unknown>;
+  } catch { throw new RepositorySyncScanError("Invalid opencode.json"); }
+  if (config.plugin === undefined) return [];
+  if (!Array.isArray(config.plugin)) throw new RepositorySyncScanError("Invalid plugin array");
+  return config.plugin.map((entry, order) => {
+    const configuredPath = typeof entry === "string"
+      ? entry
+      : repositoryIsRecord(entry) && typeof entry.path === "string"
+        ? entry.path
+        : undefined;
+    if (!configuredPath) throw new RepositorySyncScanError("Invalid plugin entry");
+    const normalizedPath = repositoryRelativePath(worktree, configuredPath);
+    if (!isAllowedRepositoryPluginPath(normalizedPath)) throw new RepositorySyncScanError("Plugin source is outside the allowed roots");
+    if (typeof entry === "string") return { path: normalizedPath, enabled: true, order, options: {} };
+    if (!repositoryIsRecord(entry) || typeof entry.path !== "string") throw new RepositorySyncScanError("Invalid plugin entry");
+    const rawOptions = repositoryIsRecord(entry.options) ? entry.options : Object.fromEntries(Object.entries(entry).filter(([key]) => !["path", "enabled", "options", "name"].includes(key)));
+    const options = stripSecretLikePluginOptionKeys(rawOptions);
+    return { path: normalizedPath, enabled: entry.enabled !== false, order, options: options as Record<string, unknown> };
+  });
+}
+
+function scanRepositoryPlugins(worktree: string, baseline: RepositoryBaseline): RepositoryPluginManifestEntry[] {
+  const configured = parseConfiguredPlugins(worktree);
+  const candidates = new Map<string, PluginConfigEntry>();
+  for (const entry of configured) {
+    candidates.set(entry.path, entry);
+  }
+  const pluginsRoot = resolve(worktree, ".opencode", "plugins");
+  for (const local of walkRepositoryFiles(worktree, pluginsRoot, REPOSITORY_MAX_RESOURCE_BYTES)) {
+    if (!isAllowedRepositoryPluginPath(local.path)) continue;
+    candidates.set(local.path, candidates.get(local.path) ?? { path: local.path, enabled: false, order: -1, options: {} });
+  }
+  const usedNames = new Set<string>();
+  const entries: RepositoryPluginManifestEntry[] = [];
+  for (const candidate of [...candidates.values()].sort((left, right) => left.path.localeCompare(right.path))) {
+    if (!isAllowedRepositoryPluginPath(candidate.path)) throw new RepositorySyncScanError("Plugin source is outside the allowed roots");
+    const fullPath = resolve(worktree, candidate.path);
+    let source: string;
+    try {
+      source = normalizeRepositoryText(readRepositoryRegularText(worktree, fullPath));
+    } catch {
+      throw new RepositorySyncScanError("Plugin source is missing or unsafe");
+    }
+    if (Buffer.byteLength(source) > REPOSITORY_MAX_RESOURCE_BYTES) throw new RepositorySyncScanError();
+    let name = basename(candidate.path, extname(candidate.path));
+    if (!safeRepositoryName(name)) throw new RepositorySyncScanError();
+    if (usedNames.has(name)) name = `${name}-${hashContent(candidate.path).slice(0, 8)}`;
+    usedNames.add(name);
+    const order = candidate.order >= 0 ? candidate.order : null;
+    const semantic = { path: candidate.path, name, source, fileType: "regular" as const, isSymlink: false as const, enabled: candidate.enabled, order, options: candidate.options };
+    const fingerprint = repositoryHash({ name, source, fileType: "regular", isSymlink: false, enabled: candidate.enabled, order, options: candidate.options });
+    entries.push({ identity: resourceIdentity("plugins", candidate.path, fingerprint, baseline), sha256: repositoryHash(semantic), ...semantic });
+  }
+  return entries;
+}
+
+/** Build the complete, local repository projection without network or disk writes. */
+export function buildRepositoryManifestV2(worktree: string, manifest?: SyncManifest): RepositoryManifestV2 {
+  const current = manifest ?? emptyManifest(resolveExtensionProject(worktree));
+  const repository = repositoryBaseline(current);
+  return {
+    version: 2,
+    docs: scanRepositoryDocs(worktree),
+    skills: scanRepositorySkills(worktree, repository.skills),
+    agents: scanRepositoryAgents(worktree, repository.agents),
+    plugins: scanRepositoryPlugins(worktree, repository.plugins),
+  };
+}
+
 /** Maps resource name to its SHA-256 hash for change detection. */
 export interface ResourceHashes {
   [name: string]: string; // name → sha256
@@ -82,7 +688,7 @@ export interface ResourceHashes {
  * the manifest is replaced entirely.
  */
 export interface SyncManifest {
-  version: 1;
+  version: 1 | 2;
   project: string;
   /** Immutable API project ID. A changed ID means the API database was recreated. */
   projectId?: string;
@@ -93,12 +699,29 @@ export interface SyncManifest {
     plugins: ResourceHashes;
     commands: ResourceHashes;
     config: { hash?: string };
+    /** V2 repository-authoritative baseline. Commands and global config are excluded. */
+    repository?: {
+      docs: RepositoryBaseline;
+      skills: RepositoryBaseline;
+      agents: RepositoryBaseline;
+      plugins: RepositoryBaseline;
+    };
   };
 }
 
+export interface RepositoryBaselineRecord {
+  identity: string;
+  path: string;
+  hash: string;
+  /** Content-only fingerprint lets a unique nested move retain its identity. */
+  fingerprint: string;
+}
+
+export type RepositoryBaseline = Record<string, RepositoryBaselineRecord>;
+
 function emptyManifest(project: string): SyncManifest {
   return {
-    version: 1,
+    version: 2,
     project,
     lastFullSync: new Date().toISOString(),
     resources: {
@@ -107,31 +730,106 @@ function emptyManifest(project: string): SyncManifest {
       plugins: {},
       commands: {},
       config: {},
+      repository: { docs: {}, skills: {}, agents: {}, plugins: {} },
     },
   };
 }
 
-export function loadManifest(worktree: string, project: string): SyncManifest {
-  const manifestPath = resolve(worktree, ".opencode", ".ingenium-sync-state.json");
+/** Return a canonical, non-symlinked `.opencode` directory for manifest I/O. */
+function verifiedManifestDirectory(worktree: string, create: boolean): string | null {
+  const root = repositoryWorktreeRoot(worktree);
+  const directory = resolve(root, ".opencode");
   try {
-    if (!existsSync(manifestPath)) return emptyManifest(project);
-    const raw = readFileSync(manifestPath, "utf-8");
+    let directoryStat;
+    try {
+      directoryStat = lstatSync(directory);
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error;
+      if (!create) return null;
+      assertNoSymlinkedAncestors(directory);
+      mkdirSync(directory);
+      directoryStat = lstatSync(directory);
+    }
+    assertNoSymlinkedAncestors(directory, true);
+    if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) throw new RepositorySyncScanError();
+    const canonical = realpathSync(directory);
+    if (!canonical.startsWith(root + sep)) throw new RepositorySyncScanError();
+    return canonical;
+  } catch (error) {
+    if (error instanceof RepositorySyncScanError) throw error;
+    throw new RepositorySyncScanError();
+  }
+}
+
+export function loadManifest(worktree: string, project: string): SyncManifest {
+  try {
+    const directory = verifiedManifestDirectory(worktree, false);
+    if (!directory) return emptyManifest(project);
+    const manifestPath = resolve(directory, ".ingenium-sync-state.json");
+    try {
+      lstatSync(manifestPath);
+    } catch (error) {
+      if (isMissingPathError(error)) return emptyManifest(project);
+      throw error;
+    }
+    const raw = readRepositoryRegularText(worktree, manifestPath);
     const parsed = JSON.parse(raw);
     // Validate structure
-    if (parsed.version !== 1 || !parsed.resources) return emptyManifest(project);
+    if ((parsed.version !== 1 && parsed.version !== 2) || !parsed.resources) return emptyManifest(project);
     // If project changed, start fresh
     if (parsed.project !== project) return emptyManifest(project);
-    return parsed as SyncManifest;
+    const manifest = parsed as SyncManifest;
+    manifest.version = 2;
+    manifest.resources.repository ??= { docs: {}, skills: {}, agents: {}, plugins: {} };
+    return manifest;
   } catch {
     return emptyManifest(project);
   }
 }
 
 export function saveManifest(worktree: string, manifest: SyncManifest): void {
-  const dir = resolve(worktree, ".opencode");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const manifestPath = resolve(dir, ".ingenium-sync-state.json");
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf-8");
+  const directory = verifiedManifestDirectory(worktree, true);
+  if (!directory) throw new RepositorySyncScanError();
+  const manifestPath = resolve(directory, ".ingenium-sync-state.json");
+  try {
+    const existing = lstatSync(manifestPath);
+    if (existing.isSymbolicLink() || !existing.isFile()) throw new RepositorySyncScanError();
+  } catch (error) {
+    if (!isMissingPathError(error)) {
+      if (error instanceof RepositorySyncScanError) throw error;
+      throw new RepositorySyncScanError();
+    }
+  }
+
+  const temporaryPath = resolve(directory, `.ingenium-sync-state.${process.pid}.${randomUUID()}.tmp`);
+  const content = Buffer.from(JSON.stringify(manifest, null, 2) + "\n", "utf-8");
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(
+      temporaryPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    if (!fstatSync(descriptor).isFile()) throw new RepositorySyncScanError();
+    for (let offset = 0; offset < content.length;) {
+      offset += writeSync(descriptor, content, offset, content.length - offset);
+    }
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+
+    // Re-validate immediately before rename so the atomic replacement remains
+    // bound to the same verified directory.
+    if (verifiedManifestDirectory(worktree, false) !== directory) throw new RepositorySyncScanError();
+    renameSync(temporaryPath, manifestPath);
+  } catch (error) {
+    if (descriptor !== undefined) closeSync(descriptor);
+    try {
+      if (verifiedManifestDirectory(worktree, false) === directory) unlinkSync(temporaryPath);
+    } catch { /* preserve an untrusted path rather than following it during cleanup */ }
+    if (error instanceof RepositorySyncScanError) throw error;
+    throw new RepositorySyncScanError();
+  }
 }
 
 /**
@@ -163,8 +861,9 @@ export interface SyncResult {
   errors: number;
 }
 
-/** Aggregate sync result across all five resource types. */
+/** Aggregate sync result. Legacy command/config fields remain empty for compatibility. */
 export interface FullSyncResult {
+  docs?: SyncResult;
   skills: SyncResult;
   agents: SyncResult;
   plugins: SyncResult;
@@ -1915,54 +2614,189 @@ export async function syncConfig(worktree: string, project: string, manifest: Sy
   return result;
 }
 
+export type RepositorySyncScope = "all" | "docs";
+
+export interface RepositorySyncResult {
+  project: string;
+  dryRun: boolean;
+  scope: RepositorySyncScope;
+  docs: SyncResult;
+  skills: SyncResult;
+  agents: SyncResult;
+  plugins: SyncResult;
+  /** An apply that changes plugin registration is intentionally restart-gated. */
+  restartRequired: boolean;
+}
+
+function resultFromRepositorySummary(summary: Record<string, number> | undefined): SyncResult {
+  return {
+    synced: (summary?.updated ?? 0) + (summary?.renamed ?? 0),
+    pushed: summary?.created ?? 0,
+    removed: (summary?.archived ?? 0) + (summary?.removed ?? 0),
+    conflicts: 0,
+    skipped: summary?.unchanged ?? 0,
+    errors: 0,
+  };
+}
+
+function baselineFromEntries<T extends { identity: string; path: string; sha256: string }>(
+  entries: T[],
+  fingerprint: (entry: T) => string,
+): RepositoryBaseline {
+  return Object.fromEntries(entries.map((entry) => [entry.identity, {
+    identity: entry.identity,
+    path: entry.path,
+    hash: entry.sha256,
+    fingerprint: fingerprint(entry),
+  }]));
+}
+
+function docsBaseline(entries: RepositoryDocManifestEntry[], previous: RepositoryBaseline): RepositoryBaseline {
+  const records = Object.values(previous);
+  return Object.fromEntries(entries.map((entry) => {
+    const atPath = records.filter((record) => record.path === entry.path);
+    const atHash = records.filter((record) => record.hash === entry.sha256);
+    const identity = atPath.length === 1 ? atPath[0]!.identity
+      : atHash.length === 1 ? atHash[0]!.identity
+        : `doc:${hashContent(entry.path).slice(0, 24)}`;
+    return [identity, { identity, path: entry.path, hash: entry.sha256, fingerprint: hashContent(entry.content) }];
+  }));
+}
+
+function skillFingerprint(entry: RepositorySkillManifestEntry): string {
+  const { identity: _identity, path: _path, sha256: _hash, fileTree, ...semantic } = entry;
+  return repositoryHash({ ...semantic, fileContents: Object.values(fileTree).sort() });
+}
+
+function agentFingerprint(entry: RepositoryAgentManifestEntry): string {
+  const { identity: _identity, path: _path, sha256: _hash, category: _category, mirrors: _mirrors, ...semantic } = entry;
+  return repositoryHash(semantic);
+}
+
+function pluginFingerprint(entry: RepositoryPluginManifestEntry): string {
+  const { identity: _identity, path: _path, sha256: _hash, ...semantic } = entry;
+  return repositoryHash(semantic);
+}
+
 /**
- * Full sync — triggered on session.created.
- * Performs all resource syncs and writes the manifest.
- *
- * restartRequired is true when plugins or config changed — only those two
- * resource types affect the OpenCode runtime and require a restart.
+ * Deterministic repository initialization/sync. `dryRun` resolves the project
+ * identity but never provisions a project, writes a manifest, or mutates local
+ * files. `apply` provisions the validated project then submits repository-owned
+ * resources only; commands and all config are intentionally excluded.
  */
-export async function fullSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean }> {
-  const project = await ensureExtensionProject(worktree, API_BASE);
+export async function repositorySync(
+  worktree: string,
+  options: { dryRun?: boolean; scope?: RepositorySyncScope; project?: string } = {},
+): Promise<RepositorySyncResult> {
+  const dryRun = options.dryRun === true;
+  const scope = options.scope ?? "all";
+  const project = dryRun
+    ? resolveExtensionProject(worktree, options.project)
+    : await ensureExtensionProject(worktree, API_BASE, options.project);
   _projectCache = project;
   _projectResolved = true;
-  const projectsResponse = await apiGet<{ data: Array<{ id: string; name: string }> }>(worktree, "/projects");
-  const projectId = projectsResponse?.data.find((candidate) => candidate.name === project)?.id;
-  const storedManifest = loadManifest(worktree, project);
-  const manifest = projectId && storedManifest.projectId !== projectId
-    ? emptyManifest(project)
-    : storedManifest;
-  if (projectId) manifest.projectId = projectId;
-  const isInitialSync = Object.keys(manifest.resources.skills).length === 0 &&
-    Object.keys(manifest.resources.agents).length === 0 &&
-    Object.keys(manifest.resources.plugins).length === 0 &&
-    Object.keys(manifest.resources.commands).length === 0 &&
-    !manifest.resources.config.hash;
+  const manifest = loadManifest(worktree, project);
+  const projection = buildRepositoryManifestV2(worktree, manifest);
+  const docsResult = emptyResult();
+  const skillsResult = emptyResult();
+  const agentsResult = emptyResult();
+  const pluginsResult = emptyResult();
+  let docsConfirmed = false;
+  let resourcesConfirmed = false;
 
-  const opts: SyncOptions = { isInitialSync };
+  try {
+    const response = await fetch(`${API_BASE}/docs/repository/sync?${encodeProject(project)}`, {
+      method: "POST",
+      headers: apiHeaders(worktree),
+      body: JSON.stringify({ manifest: { files: projection.docs }, dryRun }),
+    });
+    if (!response.ok) {
+      docsResult.errors = 1;
+      return { project, dryRun, scope, docs: docsResult, skills: skillsResult, agents: agentsResult, plugins: pluginsResult, restartRequired: false };
+    }
+    const payload = await response.json() as { data?: { summary?: Record<string, number> } };
+    Object.assign(docsResult, resultFromRepositorySummary(payload.data?.summary));
+    docsConfirmed = true;
+  } catch {
+    docsResult.errors = 1;
+    return { project, dryRun, scope, docs: docsResult, skills: skillsResult, agents: agentsResult, plugins: pluginsResult, restartRequired: false };
+  }
 
-  const [skillsResult, agentsResult, pluginsResult, commandsResult, configResult] = await Promise.all([
-    syncSkills(worktree, project, manifest, opts),
-    syncAgents(worktree, project, manifest, opts),
-    syncPlugins(worktree, project, manifest, opts),
-    syncCommands(worktree, project, manifest, opts),
-    syncConfig(worktree, project, manifest, opts),
-  ]);
+  if (scope === "all") {
+    try {
+      const response = await fetch(`${API_BASE}/repository/resources/sync?${encodeProject(project)}`, {
+        method: "POST",
+        headers: apiHeaders(worktree),
+        body: JSON.stringify({
+          manifest: { version: 2, skills: projection.skills, agents: projection.agents, plugins: projection.plugins },
+          dryRun,
+        }),
+      });
+      if (!response.ok) {
+        skillsResult.errors = 1;
+        agentsResult.errors = 1;
+        pluginsResult.errors = 1;
+      } else {
+        const payload = await response.json() as { data?: { summary?: Record<string, Record<string, number>> } };
+        Object.assign(skillsResult, resultFromRepositorySummary(payload.data?.summary?.skill));
+        Object.assign(agentsResult, resultFromRepositorySummary(payload.data?.summary?.agent));
+        Object.assign(pluginsResult, resultFromRepositorySummary(payload.data?.summary?.plugin));
+        resourcesConfirmed = true;
+      }
+    } catch {
+      skillsResult.errors = 1;
+      agentsResult.errors = 1;
+      pluginsResult.errors = 1;
+    }
+  }
 
-  manifest.lastFullSync = new Date().toISOString();
-  saveManifest(worktree, manifest);
+  // The baseline advances only after the owning API endpoint confirmed the
+  // apply. A partial failure can safely retain the confirmed docs baseline while
+  // keeping skills/agents/plugins eligible for a subsequent reconciliation.
+  if (!dryRun) {
+    const repository = repositoryBaseline(manifest);
+    if (docsConfirmed) {
+      repository.docs = docsBaseline(projection.docs, repository.docs);
+    }
+    if (resourcesConfirmed) {
+      repository.skills = baselineFromEntries(projection.skills, skillFingerprint);
+      repository.agents = baselineFromEntries(projection.agents, agentFingerprint);
+      repository.plugins = baselineFromEntries(projection.plugins, pluginFingerprint);
+    }
+    if (docsConfirmed || resourcesConfirmed) {
+      manifest.lastFullSync = new Date().toISOString();
+      saveManifest(worktree, manifest);
+    }
+  }
 
-  const full: FullSyncResult = {
+  return {
+    project,
+    dryRun,
+    scope,
+    docs: docsResult,
     skills: skillsResult,
     agents: agentsResult,
     plugins: pluginsResult,
-    commands: commandsResult,
-    config: configResult,
+    restartRequired: !dryRun && resourcesConfirmed && (pluginsResult.pushed + pluginsResult.synced + pluginsResult.removed > 0),
   };
+}
 
-  const restartRequired = pluginsResult.synced > 0 || pluginsResult.removed > 0 || configResult.synced > 0;
-
-  return { ...full, restartRequired };
+/**
+ * Session hooks use the same repository-authoritative implementation as
+ * `/init-project`. Legacy commands/config synchronization is deliberately not
+ * invoked from this path.
+ */
+export async function fullSync(worktree: string): Promise<FullSyncResult & { restartRequired: boolean }> {
+  const result = await repositorySync(worktree);
+  return {
+    docs: result.docs,
+    skills: result.skills,
+    agents: result.agents,
+    plugins: result.plugins,
+    commands: emptyResult(),
+    config: emptyResult(),
+    restartRequired: result.restartRequired,
+  };
 }
 
 // 60s throttle to avoid hammering the API on rapid session.idle bursts.
@@ -2017,11 +2851,10 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
         try {
           const result = await fullSync(worktree);
           const lines: string[] = [
+            resultSummary("docs", result.docs ?? emptyResult()),
             resultSummary("skills", result.skills),
             resultSummary("agents", result.agents),
             resultSummary("plugins", result.plugins),
-            resultSummary("commands", result.commands),
-            resultSummary("config", result.config),
           ];
           if (result.restartRequired) {
             lines.push("⚡ OpenCode restart required (plugin/config changes)");
@@ -2043,11 +2876,10 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
           const result = await incrementalSync(worktree);
           if (result) {
             const lines: string[] = [
+              resultSummary("docs", result.docs ?? emptyResult()),
               resultSummary("skills", result.skills),
               resultSummary("agents", result.agents),
               resultSummary("plugins", result.plugins),
-              resultSummary("commands", result.commands),
-              resultSummary("config", result.config),
             ];
             if (lines.some((l) => !l.endsWith("no changes"))) {
               if (result.restartRequired) {
@@ -2098,44 +2930,13 @@ export async function pushDiskToApi(worktree: string): Promise<{
   skills: { created: number; skipped: number; errors: number };
   servers: { created: number; skipped: number; errors: number };
 }> {
-  const project = await ensureExtensionProject(worktree, API_BASE);
-  const manifest = loadManifest(worktree, project);
-
-  const results = await Promise.all([
-    syncPlugins(worktree, project, manifest, { isInitialSync: true }),
-    (async () => {
-      const r = emptyResult();
-      const diskHash = scanDiskConfig(worktree);
-      if (diskHash) {
-        const configRes = await apiGet<{ data: { content: string } | null }>(worktree, `/config?${encodeProject(project)}&type=project`);
-        if (!configRes?.data) {
-          const ok = await pushConfigToApi(worktree, project);
-          if (ok) r.pushed++;
-          else r.errors++;
-        }
-      }
-      return r;
-    })(),
-    syncCommands(worktree, project, manifest, { isInitialSync: true }),
-    syncAgents(worktree, project, manifest, { isInitialSync: true }),
-    syncSkills(worktree, project, manifest, { isInitialSync: true }),
-    // Servers — delegate to the existing onboarding approach
-    (async () => {
-      // The server sync is complex (reads opencode.json mcp block). We leave this
-      // to the onboarding wrapper. Return empty result here.
-      return emptyResult();
-    })(),
-  ]);
-
-  manifest.lastFullSync = new Date().toISOString();
-  saveManifest(worktree, manifest);
-
+  const result = await repositorySync(worktree);
   return {
-    plugins: { created: results[0].pushed, skipped: results[0].skipped, errors: results[0].errors },
-    configs: { created: results[1].pushed, skipped: results[1].skipped, errors: results[1].errors },
-    commands: { created: results[2].pushed, skipped: results[2].skipped, errors: results[2].errors },
-    agents: { created: results[3].pushed, skipped: results[3].skipped, errors: results[3].errors },
-    skills: { created: results[4].pushed, skipped: results[4].skipped, errors: results[4].errors },
+    plugins: { created: result.plugins.pushed, skipped: result.plugins.skipped, errors: result.plugins.errors },
+    configs: { created: 0, skipped: 0, errors: 0 },
+    commands: { created: 0, skipped: 0, errors: 0 },
+    agents: { created: result.agents.pushed, skipped: result.agents.skipped, errors: result.agents.errors },
+    skills: { created: result.skills.pushed, skipped: result.skills.skipped, errors: result.skills.errors },
     servers: { created: 0, skipped: 0, errors: 0 },
   };
 }
