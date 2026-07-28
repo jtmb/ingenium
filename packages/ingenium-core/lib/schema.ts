@@ -328,6 +328,8 @@ const ContextIdempotencyKeySchema = z.string()
   .max(CONTEXT_IDEMPOTENCY_KEY_MAX_LENGTH)
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const ContextExpectedRevisionSchema = z.number().int().nonnegative();
+const ContextConfirmationTokenSchema = z.string().min(32).max(128)
+  .regex(/^[A-Za-z0-9_-]+$/);
 
 export const ContextMessageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
 export type ContextMessageRole = z.infer<typeof ContextMessageRoleSchema>;
@@ -363,11 +365,51 @@ export type CreateContextCheckpointInput = z.input<typeof CreateContextCheckpoin
 
 export const RestoreContextCheckpointInputSchema = z.object({
   expectedRevision: ContextExpectedRevisionSchema,
+  confirmationToken: ContextConfirmationTokenSchema,
   title: z.string().trim().min(1).max(CONTEXT_CONVERSATION_TITLE_MAX_LENGTH).optional(),
   metadata: ContextMetadataInputSchema.default({}),
   idempotencyKey: ContextIdempotencyKeySchema.optional(),
 }).strict();
 export type RestoreContextCheckpointInput = z.input<typeof RestoreContextCheckpointInputSchema>;
+
+export const ContextMaintenanceOperationSchema = z.enum([
+  "archive_conversation",
+  "unarchive_conversation",
+  "restore_checkpoint",
+]);
+export type ContextMaintenanceOperation = z.infer<typeof ContextMaintenanceOperationSchema>;
+
+export const PreviewContextMaintenanceInputSchema = z.object({
+  conversationIds: z.array(z.string().uuid()).max(100).optional(),
+  staleBefore: z.string().datetime().optional(),
+  includeConflicts: z.boolean().default(true),
+  includeInvalid: z.boolean().default(true),
+  includeArchived: z.boolean().default(false),
+  limit: z.number().int().min(1).max(100).default(20),
+}).strict();
+export type PreviewContextMaintenanceInput = z.input<typeof PreviewContextMaintenanceInputSchema>;
+
+export const AuthorizeContextMaintenanceInputSchema = z.object({
+  operation: ContextMaintenanceOperationSchema,
+  checkpointId: z.string().uuid().optional(),
+  expectedRevision: ContextExpectedRevisionSchema,
+}).strict().superRefine((value, context) => {
+  const hasCheckpoint = value.checkpointId !== undefined;
+  if ((value.operation === "restore_checkpoint") !== hasCheckpoint) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["checkpointId"],
+      message: "checkpointId is required only for checkpoint restoration",
+    });
+  }
+});
+export type AuthorizeContextMaintenanceInput = z.input<typeof AuthorizeContextMaintenanceInputSchema>;
+
+export const ContextConversationArchiveInputSchema = z.object({
+  expectedRevision: ContextExpectedRevisionSchema,
+  confirmationToken: ContextConfirmationTokenSchema,
+}).strict();
+export type ContextConversationArchiveInput = z.input<typeof ContextConversationArchiveInputSchema>;
 
 /** Immutable conversation metadata and its project ownership. */
 export const ContextConversationSchema = z.object({
@@ -410,6 +452,25 @@ export const ContextCheckpointSchema = z.object({
   created_at: z.string().datetime(),
 });
 export type ContextCheckpoint = z.infer<typeof ContextCheckpointSchema>;
+
+/** Append-only, content-free evidence for context maintenance operations. */
+export const ContextCheckpointAuditEventSchema = z.object({
+  id: z.string().uuid(),
+  project_id: z.string().uuid(),
+  event_type: z.enum([
+    "conversation_archived",
+    "conversation_unarchived",
+    "checkpoint_restored_as_new",
+  ]),
+  conversation_id: z.string().uuid(),
+  checkpoint_id: z.string().uuid().nullable(),
+  target_conversation_id: z.string().uuid().nullable(),
+  expected_revision: z.coerce.number().int().nonnegative(),
+  checkpoint_state_hash: ContextHashSchema.nullable(),
+  archive_sequence: z.coerce.number().int().nonnegative().nullable(),
+  created_at: z.string().datetime(),
+});
+export type ContextCheckpointAuditEvent = z.infer<typeof ContextCheckpointAuditEventSchema>;
 
 /** Immutable association between a checkpoint and a project-owned RAG source. */
 export const ContextCheckpointRagSourceSchema = z.object({

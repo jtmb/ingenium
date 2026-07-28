@@ -113,6 +113,17 @@ describe("immutable context conversation API", () => {
     expect(checkpointResponse.status).toBe(201);
     const checkpoint = (await json(checkpointResponse)).data;
     expect(checkpoint).toMatchObject({ revision: 2, checkpoint: { message_count: 2 } });
+    const staleAuthorizationResponse = await fetch(url(`/conversations/${conversation.id}/maintenance/authorize`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "restore_checkpoint",
+        checkpointId: checkpoint.checkpoint.id,
+        expectedRevision: 2,
+      }),
+    });
+    expect(staleAuthorizationResponse.status).toBe(201);
+    const staleAuthorization = (await json(staleAuthorizationResponse)).data;
 
     const listed = await fetch(url(`/conversations/${conversation.id}/messages?limit=1`));
     expect(listed.status).toBe(200);
@@ -155,15 +166,31 @@ describe("immutable context conversation API", () => {
     const staleRestore = await fetch(url(`/conversations/${conversation.id}/checkpoints/${checkpoint.checkpoint.id}/restore`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ expectedRevision: 2 }),
+      body: JSON.stringify({ expectedRevision: 2, confirmationToken: staleAuthorization.confirmationToken }),
     });
     expect(staleRestore.status).toBe(409);
     expect((await json(staleRestore)).error).toMatchObject({ code: "REVISION_CONFLICT", currentRevision: 3 });
 
+    const restoreAuthorizationResponse = await fetch(url(`/conversations/${conversation.id}/maintenance/authorize`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        operation: "restore_checkpoint",
+        checkpointId: checkpoint.checkpoint.id,
+        expectedRevision: 3,
+      }),
+    });
+    expect(restoreAuthorizationResponse.status).toBe(201);
+    const restoreAuthorization = (await json(restoreAuthorizationResponse)).data;
+
     const restoredResponse = await fetch(url(`/conversations/${conversation.id}/checkpoints/${checkpoint.checkpoint.id}/restore`), {
       method: "POST",
       headers: { "Content-Type": "application/json", "Idempotency-Key": "api-restore" },
-      body: JSON.stringify({ expectedRevision: 3, title: "Recovered context" }),
+      body: JSON.stringify({
+        expectedRevision: 3,
+        confirmationToken: restoreAuthorization.confirmationToken,
+        title: "Recovered context",
+      }),
     });
     expect(restoredResponse.status).toBe(201);
     const restored = (await json(restoredResponse)).data;
@@ -172,5 +199,74 @@ describe("immutable context conversation API", () => {
     expect((await json(originalMessages)).data.data).toHaveLength(3);
     const restoredMessages = await fetch(url(`/conversations/${restored.conversation.id}/messages`));
     expect((await json(restoredMessages)).data.data).toHaveLength(2);
+  });
+
+  it("uses preview, authorization, append-only archive events, and content-free audit records", async () => {
+    const create = await fetch(url("/conversations"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Maintenance candidate" }),
+    });
+    const conversation = (await json(create)).data;
+    const append = await fetch(url(`/conversations/${conversation.id}/messages`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        role: "user",
+        content: "never reflect this maintenance body",
+        expectedRevision: 0,
+      }),
+    });
+    expect(append.status).toBe(201);
+
+    const preview = await fetch(url("/conversations/maintenance/preview"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversationIds: [conversation.id],
+        staleBefore: new Date(Date.now() + 1_000).toISOString(),
+      }),
+    });
+    expect(preview.status).toBe(200);
+    const previewBody = await json(preview);
+    expect(previewBody.data).toMatchObject([{ conversationId: conversation.id, reasons: ["STALE"] }]);
+    expect(JSON.stringify(previewBody)).not.toContain("maintenance body");
+
+    const crossProjectPreview = await fetch(url("/conversations/maintenance/preview", secondProjectName), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversationIds: [conversation.id] }),
+    });
+    expect((await json(crossProjectPreview)).data).toEqual([]);
+
+    const authorization = await fetch(url(`/conversations/${conversation.id}/maintenance/authorize`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "archive_conversation", expectedRevision: 1 }),
+    });
+    expect(authorization.status).toBe(201);
+    const confirmation = (await json(authorization)).data.confirmationToken as string;
+    const archive = await fetch(url(`/conversations/${conversation.id}/archive`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ expectedRevision: 1, confirmationToken: confirmation }),
+    });
+    expect(archive.status).toBe(200);
+    expect((await json(archive)).data).toMatchObject({ archived: true, event: { event_type: "conversation_archived" } });
+
+    const audit = await fetch(url(`/conversations/${conversation.id}/maintenance/audit`));
+    expect(audit.status).toBe(200);
+    const auditBody = await json(audit);
+    expect(auditBody.data).toMatchObject([{ event_type: "conversation_archived", conversation_id: conversation.id }]);
+    expect(JSON.stringify(auditBody)).not.toContain("maintenance body");
+    expect(JSON.stringify(auditBody)).not.toContain(confirmation);
+
+    const appendArchived = await fetch(url(`/conversations/${conversation.id}/messages`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "assistant", content: "blocked", expectedRevision: 1 }),
+    });
+    expect(appendArchived.status).toBe(409);
+    expect((await json(appendArchived)).error.code).toBe("CONVERSATION_ARCHIVED");
   });
 });

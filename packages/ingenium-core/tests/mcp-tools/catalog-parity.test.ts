@@ -167,8 +167,8 @@ describe("MCP Tool Catalog Parity", () => {
 
   // 8. Verify catalog total count
   it("catalog has the expected number of tools", () => {
-    // 248 from mcp-server.ts + 2 extension tools = 250
-    expect(MCP_TOOL_CATALOG.length, "catalog should contain 248 server + 2 extension tools = 250 total").toBe(250);
+    // 265 from mcp-server.ts + 2 extension tools = 267
+    expect(MCP_TOOL_CATALOG.length, "catalog should contain 265 server + 2 extension tools = 267 total").toBe(267);
   });
 
   it("exposes the complete project tool shape", () => {

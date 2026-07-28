@@ -6,16 +6,22 @@ import { join } from "node:path";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import {
   appendContextMessage,
+  archiveContextConversation,
+  authorizeContextMaintenanceAction,
   ContextConversationError,
   createContextCheckpoint,
   createContextConversation,
   getContextMessage,
+  listContextCheckpointAuditEvents,
   listContextCheckpointRagSources,
   listContextCheckpoints,
+  listContextConversations,
   listContextMessages,
+  previewContextMaintenance,
   restoreContextCheckpoint,
   retrieveContextMessages,
   searchContextMessages,
+  unarchiveContextConversation,
 } from "../lib/tools/context-conversations.js";
 import { deleteProject, createProject } from "../lib/tools/projects.js";
 import { ingestCanonicalSource } from "../lib/tools/rag.js";
@@ -203,6 +209,14 @@ describe("immutable context conversations", () => {
     expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow(/Migration 063 is in a PARTIAL state/);
   });
 
+  it("fails closed if a migration-066 audit safeguard is missing", () => {
+    const { db } = setup();
+    db.prepare("DROP TRIGGER context_checkpoint_audit_events_immutable_delete").run();
+    resetDbForTest();
+
+    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow(/Migration 066 is in a PARTIAL state/);
+  });
+
   it("uses revisions, idempotency, bounded retrieval, and restore-as-new branches", () => {
     const { first } = setup();
     const conversation = createContextConversation(first.id, {
@@ -242,6 +256,11 @@ describe("immutable context conversations", () => {
       expectedRevision: 2,
       idempotencyKey: "checkpoint-one",
     });
+    const staleRestoreAuthorization = authorizeContextMaintenanceAction(first.id, conversation.id, {
+      operation: "restore_checkpoint",
+      checkpointId: checkpoint.checkpoint.id,
+      expectedRevision: 2,
+    });
     const thirdMessage = appendContextMessage(first.id, conversation.id, {
       role: "tool",
       content: "Later activity must remain on the source branch.",
@@ -265,9 +284,16 @@ describe("immutable context conversations", () => {
 
     expect(() => restoreContextCheckpoint(first.id, conversation.id, checkpoint.checkpoint.id, {
       expectedRevision: 2,
+      confirmationToken: staleRestoreAuthorization.confirmationToken,
     })).toThrow(expect.objectContaining({ code: "REVISION_CONFLICT", currentRevision: 3 }));
+    const restoreAuthorization = authorizeContextMaintenanceAction(first.id, conversation.id, {
+      operation: "restore_checkpoint",
+      checkpointId: checkpoint.checkpoint.id,
+      expectedRevision: 3,
+    });
     const restored = restoreContextCheckpoint(first.id, conversation.id, checkpoint.checkpoint.id, {
       expectedRevision: 3,
+      confirmationToken: restoreAuthorization.confirmationToken,
       idempotencyKey: "restore-one",
     });
     expect(restored).toMatchObject({
@@ -281,7 +307,91 @@ describe("immutable context conversations", () => {
       .toContain(thirdMessage.message.id);
     expect(restoreContextCheckpoint(first.id, conversation.id, checkpoint.checkpoint.id, {
       expectedRevision: 3,
+      confirmationToken: restoreAuthorization.confirmationToken,
       idempotencyKey: "restore-one",
     })).toMatchObject({ idempotent: true, conversation: { id: restored.conversation.id } });
+  });
+
+  it("previews content-free candidates, requires one-time authorization, and archives reversibly", () => {
+    const { db, first, second } = setup();
+    const conversation = createContextConversation(first.id, { title: "Private maintenance target" });
+    appendContextMessage(first.id, conversation.id, {
+      role: "user",
+      content: "do not expose this private checkpoint body",
+      expectedRevision: 0,
+    });
+    const checkpoint = createContextCheckpoint(first.id, conversation.id, { expectedRevision: 1 });
+
+    const preview = previewContextMaintenance(first.id, {
+      conversationIds: [conversation.id],
+      staleBefore: new Date(Date.now() + 1_000).toISOString(),
+    });
+    expect(preview).toMatchObject([{
+      conversationId: conversation.id,
+      currentRevision: 1,
+      archived: false,
+      reasons: expect.arrayContaining(["STALE"]),
+    }]);
+    expect(JSON.stringify(preview)).not.toContain("private checkpoint body");
+    expect(previewContextMaintenance(second.id, { conversationIds: [conversation.id] })).toEqual([]);
+
+    const archiveAuthorization = authorizeContextMaintenanceAction(first.id, conversation.id, {
+      operation: "archive_conversation",
+      expectedRevision: 1,
+    });
+    expect(() => archiveContextConversation(first.id, conversation.id, {
+      expectedRevision: 1,
+      confirmationToken: "x".repeat(43),
+    })).toThrow(expect.objectContaining({ code: "MAINTENANCE_AUTHORIZATION_INVALID" }));
+    const archived = archiveContextConversation(first.id, conversation.id, {
+      expectedRevision: 1,
+      confirmationToken: archiveAuthorization.confirmationToken,
+    });
+    expect(archived).toMatchObject({ archived: true, event: { event_type: "conversation_archived" } });
+    expect(() => appendContextMessage(first.id, conversation.id, {
+      role: "assistant",
+      content: "This write must be rejected while archived.",
+      expectedRevision: 1,
+    })).toThrow(expect.objectContaining({ code: "CONVERSATION_ARCHIVED" }));
+    expect(listContextConversations(first.id).data.map((item) => item.id)).not.toContain(conversation.id);
+
+    const audit = listContextCheckpointAuditEvents(first.id, { conversationId: conversation.id });
+    expect(audit).toMatchObject([{ event_type: "conversation_archived", conversation_id: conversation.id }]);
+    expect(JSON.stringify(audit)).not.toContain("private checkpoint body");
+    expect(JSON.stringify(audit)).not.toContain(archiveAuthorization.confirmationToken);
+    expect(() => db.prepare("DELETE FROM context_checkpoints WHERE id = ?").run(checkpoint.checkpoint.id)).toThrow(/immutable/);
+
+    const unarchiveAuthorization = authorizeContextMaintenanceAction(first.id, conversation.id, {
+      operation: "unarchive_conversation",
+      expectedRevision: 1,
+    });
+    expect(unarchiveContextConversation(first.id, conversation.id, {
+      expectedRevision: 1,
+      confirmationToken: unarchiveAuthorization.confirmationToken,
+    })).toMatchObject({ archived: false, event: { event_type: "conversation_unarchived" } });
+    expect(listContextConversations(first.id).data.map((item) => item.id)).toContain(conversation.id);
+
+    const firstRestoreAuthorization = authorizeContextMaintenanceAction(first.id, conversation.id, {
+      operation: "restore_checkpoint",
+      checkpointId: checkpoint.checkpoint.id,
+      expectedRevision: 1,
+    });
+    restoreContextCheckpoint(first.id, conversation.id, checkpoint.checkpoint.id, {
+      expectedRevision: 1,
+      confirmationToken: firstRestoreAuthorization.confirmationToken,
+    });
+    const secondRestoreAuthorization = authorizeContextMaintenanceAction(first.id, conversation.id, {
+      operation: "restore_checkpoint",
+      checkpointId: checkpoint.checkpoint.id,
+      expectedRevision: 1,
+    });
+    restoreContextCheckpoint(first.id, conversation.id, checkpoint.checkpoint.id, {
+      expectedRevision: 1,
+      confirmationToken: secondRestoreAuthorization.confirmationToken,
+    });
+    expect(previewContextMaintenance(first.id, {
+      conversationIds: [conversation.id],
+      includeInvalid: false,
+    })[0]?.reasons).toContain("MULTIPLE_ACTIVE_RESTORE_BRANCHES");
   });
 });

@@ -104,11 +104,66 @@ describe("immutable context MCP handlers", () => {
     );
 
     mockApi.post.mockResolvedValue(apiSuccess({ conversation: { id: "new" } }));
-    await contextTools.contextCheckpointRestore(project, conversationId, checkpointId, 3, "Recovered", { source: "fixture" }, "restore-key");
+    const confirmationToken = "a".repeat(43);
+    await contextTools.contextCheckpointRestore(project, conversationId, checkpointId, 3, confirmationToken, "Recovered", { source: "fixture" }, "restore-key");
     expect(mockApi.post).toHaveBeenLastCalledWith(
       `/context/conversations/${conversationId}/checkpoints/${checkpointId}/restore`,
-      { expectedRevision: 3, title: "Recovered", metadata: { source: "fixture" }, idempotencyKey: "restore-key" },
+      { expectedRevision: 3, confirmationToken, title: "Recovered", metadata: { source: "fixture" }, idempotencyKey: "restore-key" },
       { project },
+    );
+  });
+
+  it("routes content-free maintenance preview, authorization, reversible archive, and audit through the API", async () => {
+    mockApi.post.mockResolvedValue(apiSuccess({ data: [] }));
+    await contextTools.contextCheckpointMaintenancePreview(project, {
+      conversationIds: [conversationId],
+      staleBefore: "2026-07-27T00:00:00.000Z",
+      includeInvalid: true,
+      limit: 10,
+    });
+    expect(mockApi.post).toHaveBeenCalledWith(
+      "/context/conversations/maintenance/preview",
+      {
+        conversationIds: [conversationId],
+        staleBefore: "2026-07-27T00:00:00.000Z",
+        includeInvalid: true,
+        limit: 10,
+      },
+      { project },
+    );
+
+    await contextTools.contextCheckpointMaintenanceAuthorize(
+      project,
+      conversationId,
+      "restore_checkpoint",
+      3,
+      checkpointId,
+    );
+    expect(mockApi.post).toHaveBeenLastCalledWith(
+      `/context/conversations/${conversationId}/maintenance/authorize`,
+      { operation: "restore_checkpoint", expectedRevision: 3, checkpointId },
+      { project },
+    );
+
+    const confirmationToken = "b".repeat(43);
+    await contextTools.contextConversationArchive(project, conversationId, 3, confirmationToken);
+    expect(mockApi.post).toHaveBeenLastCalledWith(
+      `/context/conversations/${conversationId}/archive`,
+      { expectedRevision: 3, confirmationToken },
+      { project },
+    );
+    await contextTools.contextConversationUnarchive(project, conversationId, 3, confirmationToken);
+    expect(mockApi.post).toHaveBeenLastCalledWith(
+      `/context/conversations/${conversationId}/unarchive`,
+      { expectedRevision: 3, confirmationToken },
+      { project },
+    );
+
+    mockApi.get.mockResolvedValue(apiSuccess({ data: [] }));
+    await contextTools.contextCheckpointAuditList(project, conversationId, 25);
+    expect(mockApi.get).toHaveBeenLastCalledWith(
+      `/context/conversations/${conversationId}/maintenance/audit`,
+      { project, limit: "25" },
     );
   });
 });

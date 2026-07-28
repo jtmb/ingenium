@@ -135,6 +135,11 @@ const CONTEXT_CONVERSATION_ENDPOINTS = [
   "GET /api/v1/context/conversations/:conversationId/checkpoints",
   "GET /api/v1/context/conversations/:conversationId/checkpoints/:checkpointId",
   "POST /api/v1/context/conversations/:conversationId/checkpoints/:checkpointId/restore",
+  "POST /api/v1/context/conversations/maintenance/preview",
+  "POST /api/v1/context/conversations/:conversationId/maintenance/authorize",
+  "GET /api/v1/context/conversations/:conversationId/maintenance/audit",
+  "POST /api/v1/context/conversations/:conversationId/archive",
+  "POST /api/v1/context/conversations/:conversationId/unarchive",
 ];
 
 const PROJECTS_ENDPOINTS = [
@@ -1019,7 +1024,12 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   { name: "ingenium_context_checkpoint_create", category: "Context", description: "Create a hash-addressed immutable checkpoint.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
   { name: "ingenium_context_checkpoint_list", category: "Context", description: "Keyset-paginate immutable checkpoint history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
   { name: "ingenium_context_checkpoint_get", category: "Context", description: "Get a checkpoint and its RAG-source provenance identifiers.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
-  { name: "ingenium_context_checkpoint_restore", category: "Context", description: "Restore a checkpoint by creating a new immutable conversation.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_restore", category: "Context", description: "Restore a checkpoint as a new immutable conversation after one-time confirmation.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_maintenance_preview", category: "Context", description: "Preview bounded content-free context maintenance candidates.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_maintenance_authorize", category: "Context", description: "Issue a one-time confirmation token for context maintenance.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_archive", category: "Context", description: "Append a reversible archive event without deleting immutable history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_unarchive", category: "Context", description: "Append a reversible unarchive event without changing immutable history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_audit_list", category: "Context", description: "List bounded content-free archive and restore audit evidence.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
 
   // ── Projects (10) ────────────────────────────────────
   {

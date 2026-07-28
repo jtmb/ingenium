@@ -26,6 +26,10 @@ function sendConversationError(res: Response, error: unknown): void {
     REVISION_CONFLICT: 409,
     IDEMPOTENCY_KEY_REUSED: 409,
     CHECKPOINT_INTEGRITY_FAILED: 409,
+    CONVERSATION_ARCHIVED: 409,
+    CONVERSATION_ALREADY_ARCHIVED: 409,
+    CONVERSATION_NOT_ARCHIVED: 409,
+    MAINTENANCE_AUTHORIZATION_INVALID: 409,
   };
   const messageByCode: Record<contextConversations.ContextConversationErrorCode, string> = {
     INVALID_CONTEXT_INPUT: "Invalid immutable context request",
@@ -38,6 +42,10 @@ function sendConversationError(res: Response, error: unknown): void {
     REVISION_CONFLICT: "Conversation changed since the requested revision",
     IDEMPOTENCY_KEY_REUSED: "Idempotency key was already used with a different request",
     CHECKPOINT_INTEGRITY_FAILED: "Checkpoint integrity validation failed",
+    CONVERSATION_ARCHIVED: "Archived conversations cannot receive new messages or checkpoints",
+    CONVERSATION_ALREADY_ARCHIVED: "Context conversation is already archived",
+    CONVERSATION_NOT_ARCHIVED: "Context conversation is not archived",
+    MAINTENANCE_AUTHORIZATION_INVALID: "Maintenance confirmation is invalid, expired, or already used",
   };
   res.status(statusByCode[error.code]).json({
     error: {
@@ -385,6 +393,18 @@ contextRouter.post("/conversations", (req, res) => {
   }
 });
 
+// Preview is content-free and side-effect free. It never supplies an implicit
+// retention policy: stale candidates require the caller's explicit cutoff.
+contextRouter.post("/conversations/maintenance/preview", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    res.json({ data: contextConversations.previewContextMaintenance(projectId, req.body ?? {}) });
+  } catch (error) {
+    sendConversationError(res, error);
+  }
+});
+
 contextRouter.get("/conversations", (req, res) => {
   const projectId = requireProject(req, res);
   if (!projectId) return;
@@ -404,6 +424,57 @@ contextRouter.get("/conversations/:conversationId", (req, res) => {
     return;
   }
   res.json({ data: conversation });
+});
+
+// Authorization issues a short-lived, one-time confirmation capability. The
+// raw token is returned only here and is never written to audit history.
+contextRouter.post("/conversations/:conversationId/maintenance/authorize", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const authorization = contextConversations.authorizeContextMaintenanceAction(
+      projectId,
+      req.params.conversationId!,
+      req.body ?? {},
+    );
+    res.status(201).json({ data: authorization });
+  } catch (error) {
+    sendConversationError(res, error);
+  }
+});
+
+contextRouter.get("/conversations/:conversationId/maintenance/audit", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    const limit = req.query.limit === undefined ? undefined : Number(req.query.limit);
+    res.json({ data: contextConversations.listContextCheckpointAuditEvents(projectId, {
+      conversationId: req.params.conversationId!,
+      limit,
+    }) });
+  } catch (error) {
+    sendConversationError(res, error);
+  }
+});
+
+contextRouter.post("/conversations/:conversationId/archive", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    res.json({ data: contextConversations.archiveContextConversation(projectId, req.params.conversationId!, req.body ?? {}) });
+  } catch (error) {
+    sendConversationError(res, error);
+  }
+});
+
+contextRouter.post("/conversations/:conversationId/unarchive", (req, res) => {
+  const projectId = requireProject(req, res);
+  if (!projectId) return;
+  try {
+    res.json({ data: contextConversations.unarchiveContextConversation(projectId, req.params.conversationId!, req.body ?? {}) });
+  } catch (error) {
+    sendConversationError(res, error);
+  }
 });
 
 contextRouter.post("/conversations/:conversationId/messages", (req, res) => {

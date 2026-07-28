@@ -1,7 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { checkpointAfterWrite, execTransaction, getDb, sanitizeFts5Query } from "../db.js";
 import {
   AppendContextMessageInputSchema,
+  AuthorizeContextMaintenanceInputSchema,
+  ContextCheckpointAuditEventSchema,
+  ContextConversationArchiveInputSchema,
   CONTEXT_TAGS_MAX_BYTES,
   ContextCheckpointRagSourceSchema,
   ContextCheckpointSchema,
@@ -9,11 +12,14 @@ import {
   ContextMessageSchema,
   CreateContextCheckpointInputSchema,
   CreateContextConversationInputSchema,
+  PreviewContextMaintenanceInputSchema,
   RestoreContextCheckpointInputSchema,
   isBoundedContextMetadata,
+  type ContextCheckpointAuditEvent,
   type ContextCheckpoint,
   type ContextCheckpointRagSource,
   type ContextConversation,
+  type ContextMaintenanceOperation,
   type ContextMessage,
 } from "../schema.js";
 
@@ -27,7 +33,11 @@ export type ContextConversationErrorCode =
   | "RAG_SOURCE_NOT_FOUND"
   | "REVISION_CONFLICT"
   | "IDEMPOTENCY_KEY_REUSED"
-  | "CHECKPOINT_INTEGRITY_FAILED";
+  | "CHECKPOINT_INTEGRITY_FAILED"
+  | "CONVERSATION_ARCHIVED"
+  | "CONVERSATION_ALREADY_ARCHIVED"
+  | "CONVERSATION_NOT_ARCHIVED"
+  | "MAINTENANCE_AUTHORIZATION_INVALID";
 
 /** Stable, transport-safe failures. Error messages never include message content. */
 export class ContextConversationError extends Error {
@@ -86,6 +96,40 @@ export interface ContextCheckpointRestoreResult {
   revision: number;
   idempotent: boolean;
 }
+
+export type ContextMaintenanceCandidateReason =
+  | "STALE"
+  | "CHECKPOINT_DIVERGED"
+  | "CHECKPOINT_INTEGRITY_FAILED"
+  | "MULTIPLE_ACTIVE_RESTORE_BRANCHES";
+
+/** Content-free preview record. Candidates never expose titles, metadata, or messages. */
+export interface ContextMaintenanceCandidate {
+  conversationId: string;
+  currentRevision: number;
+  checkpointCount: number;
+  lastActivityAt: string;
+  archived: boolean;
+  reasons: ContextMaintenanceCandidateReason[];
+}
+
+/** A short-lived, one-time capability returned only by explicit authorization. */
+export interface ContextMaintenanceAuthorization {
+  operation: ContextMaintenanceOperation;
+  conversationId: string;
+  checkpointId: string | null;
+  expectedRevision: number;
+  checkpointStateHash: string | null;
+  confirmationToken: string;
+  expiresAt: string;
+}
+
+export interface ContextConversationArchiveResult {
+  archived: boolean;
+  event: ContextCheckpointAuditEvent;
+}
+
+const MAINTENANCE_AUTHORIZATION_TTL_MS = 15 * 60 * 1_000;
 
 type Db = ReturnType<typeof getDb>;
 
@@ -147,6 +191,29 @@ function parseRestoreInput(input: unknown) {
   return parsed.data;
 }
 
+function parseMaintenancePreviewInput(input: unknown) {
+  const parsed = PreviewContextMaintenanceInputSchema.safeParse(input);
+  if (!parsed.success) throw new ContextConversationError("INVALID_CONTEXT_INPUT");
+  return {
+    ...parsed.data,
+    conversationIds: parsed.data.conversationIds === undefined
+      ? undefined
+      : [...new Set(parsed.data.conversationIds)],
+  };
+}
+
+function parseMaintenanceAuthorizationInput(input: unknown) {
+  const parsed = AuthorizeContextMaintenanceInputSchema.safeParse(input);
+  if (!parsed.success) throw new ContextConversationError("INVALID_CONTEXT_INPUT");
+  return parsed.data;
+}
+
+function parseConversationArchiveInput(input: unknown) {
+  const parsed = ContextConversationArchiveInputSchema.safeParse(input);
+  if (!parsed.success) throw new ContextConversationError("INVALID_CONTEXT_INPUT");
+  return parsed.data;
+}
+
 function readConversation(row: unknown): ContextConversation {
   const parsed = ContextConversationSchema.safeParse(row);
   if (!parsed.success) throw new Error("Invalid persisted context conversation");
@@ -162,6 +229,12 @@ function readMessage(row: unknown): ContextMessage {
 function readCheckpoint(row: unknown): ContextCheckpoint {
   const parsed = ContextCheckpointSchema.safeParse(row);
   if (!parsed.success) throw new Error("Invalid persisted context checkpoint");
+  return parsed.data;
+}
+
+function readCheckpointAuditEvent(row: unknown): ContextCheckpointAuditEvent {
+  const parsed = ContextCheckpointAuditEventSchema.safeParse(row);
+  if (!parsed.success) throw new Error("Invalid persisted context checkpoint audit event");
   return parsed.data;
 }
 
@@ -224,6 +297,102 @@ function requireCheckpoint(
   return readCheckpoint(row);
 }
 
+function isConversationArchived(db: Db, projectId: string, conversationId: string): boolean {
+  const row = db.prepare(
+    `SELECT event_type FROM context_checkpoint_audit_events
+     WHERE project_id = ? AND conversation_id = ? AND archive_sequence IS NOT NULL
+     ORDER BY archive_sequence DESC LIMIT 1`,
+  ).get(projectId, conversationId) as { event_type?: string } | undefined;
+  return row?.event_type === "conversation_archived";
+}
+
+function requireActiveConversation(db: Db, projectId: string, conversationId: string): ContextConversation {
+  const conversation = requireConversation(db, projectId, conversationId);
+  if (isConversationArchived(db, projectId, conversationId)) {
+    throw new ContextConversationError("CONVERSATION_ARCHIVED");
+  }
+  return conversation;
+}
+
+function nextArchiveSequence(db: Db, projectId: string, conversationId: string): number {
+  const row = db.prepare(
+    `SELECT COALESCE(MAX(archive_sequence), -1) + 1 AS sequence
+     FROM context_checkpoint_audit_events
+     WHERE project_id = ? AND conversation_id = ?`,
+  ).get(projectId, conversationId) as { sequence: number };
+  return row.sequence;
+}
+
+function consumeMaintenanceAuthorization(
+  db: Db,
+  projectId: string,
+  operation: ContextMaintenanceOperation,
+  conversationId: string,
+  checkpointId: string | null,
+  expectedRevision: number,
+  confirmationToken: string,
+): string {
+  const consumedAt = now();
+  const checkpointClause = checkpointId === null ? "checkpoint_id IS NULL" : "checkpoint_id = ?";
+  const parameters = checkpointId === null
+    ? [consumedAt, projectId, sha256(confirmationToken), operation, conversationId, expectedRevision, consumedAt]
+    : [consumedAt, projectId, sha256(confirmationToken), operation, conversationId, checkpointId, expectedRevision, consumedAt];
+  const result = db.prepare(
+    `UPDATE context_checkpoint_maintenance_authorizations
+     SET consumed_at = ?
+     WHERE project_id = ?
+       AND confirmation_hash = ?
+       AND operation = ?
+       AND conversation_id = ?
+       AND ${checkpointClause}
+       AND expected_revision = ?
+       AND consumed_at IS NULL
+       AND expires_at > ?`,
+  ).run(...parameters);
+  if (result.changes !== 1) {
+    throw new ContextConversationError("MAINTENANCE_AUTHORIZATION_INVALID");
+  }
+  const authorization = db.prepare(
+    `SELECT id FROM context_checkpoint_maintenance_authorizations
+     WHERE project_id = ? AND confirmation_hash = ?`,
+  ).get(projectId, sha256(confirmationToken)) as { id: string } | undefined;
+  if (!authorization) throw new ContextConversationError("MAINTENANCE_AUTHORIZATION_INVALID");
+  return authorization.id;
+}
+
+function insertCheckpointAuditEvent(
+  db: Db,
+  input: {
+    projectId: string;
+    eventType: ContextCheckpointAuditEvent["event_type"];
+    conversationId: string;
+    checkpointId: string | null;
+    targetConversationId: string | null;
+    expectedRevision: number;
+    checkpointStateHash: string | null;
+    authorizationId: string;
+    archiveSequence: number | null;
+    createdAt: string;
+  },
+): ContextCheckpointAuditEvent {
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO context_checkpoint_audit_events
+     (id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+      expected_revision, checkpoint_state_hash, authorization_id, archive_sequence, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id, input.projectId, input.eventType, input.conversationId, input.checkpointId,
+    input.targetConversationId, input.expectedRevision, input.checkpointStateHash,
+    input.authorizationId, input.archiveSequence, input.createdAt,
+  );
+  return readCheckpointAuditEvent(db.prepare(
+    `SELECT id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+            expected_revision, checkpoint_state_hash, archive_sequence, created_at
+     FROM context_checkpoint_audit_events WHERE project_id = ? AND id = ?`,
+  ).get(input.projectId, id));
+}
+
 function currentRevision(db: Db, projectId: string, conversationId: string): number {
   const row = db.prepare(
     `SELECT COALESCE(MAX(sequence) + 1, 0) AS revision
@@ -237,7 +406,12 @@ function requireExpectedRevision(actual: number, expected: number): void {
   if (actual !== expected) throw new ContextConversationError("REVISION_CONFLICT", actual);
 }
 
-function checkpointStateHash(messages: ContextMessage[]): string {
+type ContextMessageState = Pick<
+  ContextMessage,
+  "sequence" | "role" | "content_hash" | "tags" | "priority" | "metadata"
+>;
+
+function checkpointStateHash(messages: ContextMessageState[]): string {
   return sha256(JSON.stringify(messages.map((message) => ({
     sequence: message.sequence,
     role: message.role,
@@ -246,6 +420,71 @@ function checkpointStateHash(messages: ContextMessage[]): string {
     priority: message.priority,
     metadata: message.metadata,
   }))));
+}
+
+function hasCheckpointIntegrityFailure(db: Db, projectId: string, conversationId: string): boolean {
+  const checkpoints = db.prepare(
+    `SELECT id, through_message_id, message_count, state_hash
+     FROM context_checkpoints
+     WHERE project_id = ? AND conversation_id = ?
+     ORDER BY sequence ASC`,
+  ).all(projectId, conversationId) as Array<{
+    id: string;
+    through_message_id: string;
+    message_count: number;
+    state_hash: string;
+  }>;
+  const messagesStatement = db.prepare(
+    `SELECT id, sequence, role, content_hash, tags, priority, metadata
+     FROM context_messages
+     WHERE project_id = ? AND conversation_id = ? AND sequence < ?
+     ORDER BY sequence ASC`,
+  );
+  for (const checkpoint of checkpoints) {
+    const messages = messagesStatement.all(projectId, conversationId, checkpoint.message_count) as Array<
+      ContextMessageState & { id: string }
+    >;
+    const tail = messages[messages.length - 1];
+    if (
+      messages.length !== checkpoint.message_count
+      || !tail
+      || tail.id !== checkpoint.through_message_id
+      || checkpointStateHash(messages) !== checkpoint.state_hash
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasCheckpointDivergence(db: Db, projectId: string, conversationId: string, revision: number): boolean {
+  return Boolean(db.prepare(
+    `SELECT 1 FROM context_checkpoints
+     WHERE project_id = ? AND conversation_id = ? AND message_count < ?
+     LIMIT 1`,
+  ).get(projectId, conversationId, revision));
+}
+
+function hasMultipleActiveRestoreBranches(db: Db, projectId: string, conversationId: string): boolean {
+  return Boolean(db.prepare(
+    `SELECT 1
+     FROM context_checkpoint_audit_events restored
+     WHERE restored.project_id = ?
+       AND restored.conversation_id = ?
+       AND restored.event_type = 'checkpoint_restored_as_new'
+       AND COALESCE((
+         SELECT archive_state.event_type
+         FROM context_checkpoint_audit_events archive_state
+         WHERE archive_state.project_id = restored.project_id
+           AND archive_state.conversation_id = restored.target_conversation_id
+           AND archive_state.archive_sequence IS NOT NULL
+         ORDER BY archive_state.archive_sequence DESC
+         LIMIT 1
+       ), 'conversation_unarchived') <> 'conversation_archived'
+     GROUP BY restored.checkpoint_id
+     HAVING count(*) > 1
+     LIMIT 1`,
+  ).get(projectId, conversationId));
 }
 
 function conversationSummaryRow(db: Db, projectId: string, conversationId: string): ContextConversationSummary | undefined {
@@ -461,6 +700,7 @@ export function appendContextMessage(
       return { message, revision: currentRevision(db, projectId, conversationId), idempotent: true, written: false };
     }
 
+    requireActiveConversation(db, projectId, conversationId);
     const revision = currentRevision(db, projectId, conversationId);
     requireExpectedRevision(revision, value.expectedRevision);
     const id = randomUUID();
@@ -512,6 +752,7 @@ export function createContextCheckpoint(
       return { checkpoint, revision: currentRevision(db, projectId, conversationId), idempotent: true, written: false };
     }
 
+    requireActiveConversation(db, projectId, conversationId);
     const revision = currentRevision(db, projectId, conversationId);
     requireExpectedRevision(revision, value.expectedRevision);
     if (revision === 0) throw new ContextConversationError("NO_MESSAGES");
@@ -572,6 +813,222 @@ export function createContextCheckpoint(
   return { checkpoint: result.checkpoint, revision: result.revision, idempotent: result.idempotent };
 }
 
+/**
+ * Return a bounded, content-free review set. There is deliberately no automatic
+ * retention rule: callers must supply a stale cutoff when requesting staleness.
+ */
+export function previewContextMaintenance(
+  projectId: string,
+  input: unknown,
+): ContextMaintenanceCandidate[] {
+  const value = parseMaintenancePreviewInput(input);
+  const db = getDb(dbPath());
+  const selectedIds = value.conversationIds?.slice(0, value.limit);
+  const selected = selectedIds !== undefined;
+  const placeholders = selectedIds?.map(() => "?").join(",");
+  const rows = selected
+    ? db.prepare(
+      `SELECT c.id,
+         (SELECT count(*) FROM context_messages m
+          WHERE m.project_id = c.project_id AND m.conversation_id = c.id) AS message_count,
+         (SELECT count(*) FROM context_checkpoints cp
+          WHERE cp.project_id = c.project_id AND cp.conversation_id = c.id) AS checkpoint_count,
+         COALESCE((SELECT created_at FROM context_messages m
+          WHERE m.project_id = c.project_id AND m.conversation_id = c.id
+          ORDER BY m.sequence DESC LIMIT 1), c.created_at) AS last_activity_at
+       FROM context_conversations c
+       WHERE c.project_id = ? AND c.id IN (${placeholders})`,
+    ).all(projectId, ...selectedIds!)
+    : db.prepare(
+      `SELECT c.id,
+         (SELECT count(*) FROM context_messages m
+          WHERE m.project_id = c.project_id AND m.conversation_id = c.id) AS message_count,
+         (SELECT count(*) FROM context_checkpoints cp
+          WHERE cp.project_id = c.project_id AND cp.conversation_id = c.id) AS checkpoint_count,
+         COALESCE((SELECT created_at FROM context_messages m
+          WHERE m.project_id = c.project_id AND m.conversation_id = c.id
+          ORDER BY m.sequence DESC LIMIT 1), c.created_at) AS last_activity_at
+       FROM context_conversations c
+       WHERE c.project_id = ?
+       ORDER BY c.created_at DESC, c.id DESC
+       LIMIT ?`,
+    ).all(projectId, value.limit);
+
+  const staleBefore = value.staleBefore === undefined ? undefined : Date.parse(value.staleBefore);
+  if (staleBefore !== undefined && Number.isNaN(staleBefore)) {
+    throw new ContextConversationError("INVALID_CONTEXT_INPUT");
+  }
+  const candidates = new Map<string, ContextMaintenanceCandidate>();
+  for (const row of rows as Array<{
+    id: string;
+    message_count: number;
+    checkpoint_count: number;
+    last_activity_at: string;
+  }>) {
+    const archived = isConversationArchived(db, projectId, row.id);
+    if (!value.includeArchived && archived) continue;
+    const reasons: ContextMaintenanceCandidateReason[] = [];
+    if (staleBefore !== undefined && Date.parse(row.last_activity_at) < staleBefore) reasons.push("STALE");
+    if (value.includeConflicts && hasCheckpointDivergence(db, projectId, row.id, row.message_count)) {
+      reasons.push("CHECKPOINT_DIVERGED");
+    }
+    if (value.includeConflicts && hasMultipleActiveRestoreBranches(db, projectId, row.id)) {
+      reasons.push("MULTIPLE_ACTIVE_RESTORE_BRANCHES");
+    }
+    if (value.includeInvalid && hasCheckpointIntegrityFailure(db, projectId, row.id)) {
+      reasons.push("CHECKPOINT_INTEGRITY_FAILED");
+    }
+    if (selected || reasons.length > 0) {
+      candidates.set(row.id, {
+        conversationId: row.id,
+        currentRevision: row.message_count,
+        checkpointCount: row.checkpoint_count,
+        lastActivityAt: row.last_activity_at,
+        archived,
+        reasons,
+      });
+    }
+  }
+  return selectedIds === undefined
+    ? [...candidates.values()]
+    : selectedIds.flatMap((id) => candidates.get(id) ? [candidates.get(id)!] : []);
+}
+
+/** Issue a one-time, short-lived confirmation token after checking ownership and revision. */
+export function authorizeContextMaintenanceAction(
+  projectId: string,
+  conversationId: string,
+  input: unknown,
+): ContextMaintenanceAuthorization {
+  const value = parseMaintenanceAuthorizationInput(input);
+  const confirmationToken = randomBytes(32).toString("base64url");
+  const createdAt = now();
+  const expiresAt = new Date(Date.now() + MAINTENANCE_AUTHORIZATION_TTL_MS).toISOString();
+  const result = execTransaction(() => {
+    const db = getDb(dbPath());
+    requireConversation(db, projectId, conversationId);
+    const revision = currentRevision(db, projectId, conversationId);
+    requireExpectedRevision(revision, value.expectedRevision);
+    const archived = isConversationArchived(db, projectId, conversationId);
+    if (value.operation === "archive_conversation" && archived) {
+      throw new ContextConversationError("CONVERSATION_ALREADY_ARCHIVED");
+    }
+    if (value.operation === "unarchive_conversation" && !archived) {
+      throw new ContextConversationError("CONVERSATION_NOT_ARCHIVED");
+    }
+    const checkpoint = value.checkpointId === undefined
+      ? undefined
+      : requireCheckpoint(db, projectId, conversationId, value.checkpointId);
+    const id = randomUUID();
+    db.prepare(
+      `INSERT INTO context_checkpoint_maintenance_authorizations
+       (id, project_id, operation, conversation_id, checkpoint_id, expected_revision,
+        confirmation_hash, expires_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id, projectId, value.operation, conversationId, value.checkpointId ?? null,
+      value.expectedRevision, sha256(confirmationToken), expiresAt, createdAt,
+    );
+    return {
+      operation: value.operation,
+      conversationId,
+      checkpointId: value.checkpointId ?? null,
+      expectedRevision: value.expectedRevision,
+      checkpointStateHash: checkpoint?.state_hash ?? null,
+      confirmationToken,
+      expiresAt,
+    };
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+function transitionConversationArchive(
+  projectId: string,
+  conversationId: string,
+  input: unknown,
+  operation: "archive_conversation" | "unarchive_conversation",
+): ContextConversationArchiveResult {
+  const value = parseConversationArchiveInput(input);
+  const result = execTransaction(() => {
+    const db = getDb(dbPath());
+    requireConversation(db, projectId, conversationId);
+    const revision = currentRevision(db, projectId, conversationId);
+    requireExpectedRevision(revision, value.expectedRevision);
+    const archived = isConversationArchived(db, projectId, conversationId);
+    if (operation === "archive_conversation" && archived) {
+      throw new ContextConversationError("CONVERSATION_ALREADY_ARCHIVED");
+    }
+    if (operation === "unarchive_conversation" && !archived) {
+      throw new ContextConversationError("CONVERSATION_NOT_ARCHIVED");
+    }
+    const authorizationId = consumeMaintenanceAuthorization(
+      db, projectId, operation, conversationId, null, value.expectedRevision, value.confirmationToken,
+    );
+    const event = insertCheckpointAuditEvent(db, {
+      projectId,
+      eventType: operation === "archive_conversation" ? "conversation_archived" : "conversation_unarchived",
+      conversationId,
+      checkpointId: null,
+      targetConversationId: null,
+      expectedRevision: value.expectedRevision,
+      checkpointStateHash: null,
+      authorizationId,
+      archiveSequence: nextArchiveSequence(db, projectId, conversationId),
+      createdAt: now(),
+    });
+    return { archived: operation === "archive_conversation", event };
+  });
+  checkpointAfterWrite();
+  return result;
+}
+
+/** Archive is an append-only visibility state; conversations and checkpoints remain intact. */
+export function archiveContextConversation(
+  projectId: string,
+  conversationId: string,
+  input: unknown,
+): ContextConversationArchiveResult {
+  return transitionConversationArchive(projectId, conversationId, input, "archive_conversation");
+}
+
+/** Reverses an archive by appending a new audit event; no historical row is changed. */
+export function unarchiveContextConversation(
+  projectId: string,
+  conversationId: string,
+  input: unknown,
+): ContextConversationArchiveResult {
+  return transitionConversationArchive(projectId, conversationId, input, "unarchive_conversation");
+}
+
+/** Bounded, content-free audit history. Confirmation tokens and metadata are never returned. */
+export function listContextCheckpointAuditEvents(
+  projectId: string,
+  options: { conversationId?: string; limit?: number } = {},
+): ContextCheckpointAuditEvent[] {
+  const limit = boundedLimit(options.limit);
+  const db = getDb(dbPath());
+  if (options.conversationId !== undefined) {
+    requireConversation(db, projectId, options.conversationId);
+  }
+  const rows = options.conversationId === undefined
+    ? db.prepare(
+      `SELECT id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+              expected_revision, checkpoint_state_hash, archive_sequence, created_at
+       FROM context_checkpoint_audit_events
+       WHERE project_id = ?
+       ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ).all(projectId, limit)
+    : db.prepare(
+      `SELECT id, project_id, event_type, conversation_id, checkpoint_id, target_conversation_id,
+              expected_revision, checkpoint_state_hash, archive_sequence, created_at
+       FROM context_checkpoint_audit_events
+       WHERE project_id = ? AND conversation_id = ?
+       ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ).all(projectId, options.conversationId, limit);
+  return rows.map(readCheckpointAuditEvent);
+}
+
 /** Get immutable metadata for one project-owned conversation. */
 export function getContextConversation(
   projectId: string,
@@ -595,7 +1052,14 @@ export function listContextConversations(
          (SELECT count(*) FROM context_checkpoints cp WHERE cp.project_id = c.project_id AND cp.conversation_id = c.id) AS checkpoint_count,
          (SELECT id FROM context_messages m WHERE m.project_id = c.project_id AND m.conversation_id = c.id ORDER BY m.sequence DESC LIMIT 1) AS latest_message_id
        FROM context_conversations c
-       WHERE c.project_id = ? AND (c.created_at < ? OR (c.created_at = ? AND c.id < ?))
+        WHERE c.project_id = ?
+          AND COALESCE((
+            SELECT event_type FROM context_checkpoint_audit_events audit
+            WHERE audit.project_id = c.project_id AND audit.conversation_id = c.id
+              AND audit.archive_sequence IS NOT NULL
+            ORDER BY audit.archive_sequence DESC LIMIT 1
+          ), 'conversation_unarchived') <> 'conversation_archived'
+          AND (c.created_at < ? OR (c.created_at = ? AND c.id < ?))
        ORDER BY c.created_at DESC, c.id DESC LIMIT ?`,
     ).all(projectId, cursor.createdAt, cursor.createdAt, cursor.id, limit + 1)
     : db.prepare(
@@ -604,7 +1068,13 @@ export function listContextConversations(
          (SELECT count(*) FROM context_checkpoints cp WHERE cp.project_id = c.project_id AND cp.conversation_id = c.id) AS checkpoint_count,
          (SELECT id FROM context_messages m WHERE m.project_id = c.project_id AND m.conversation_id = c.id ORDER BY m.sequence DESC LIMIT 1) AS latest_message_id
        FROM context_conversations c
-       WHERE c.project_id = ?
+        WHERE c.project_id = ?
+          AND COALESCE((
+            SELECT event_type FROM context_checkpoint_audit_events audit
+            WHERE audit.project_id = c.project_id AND audit.conversation_id = c.id
+              AND audit.archive_sequence IS NOT NULL
+            ORDER BY audit.archive_sequence DESC LIMIT 1
+          ), 'conversation_unarchived') <> 'conversation_archived'
        ORDER BY c.created_at DESC, c.id DESC LIMIT ?`,
     ).all(projectId, limit + 1);
   const data = rows.slice(0, limit).map(readConversationSummary).map((summary) => ({ ...summary, revision: summary.message_count }));
@@ -821,6 +1291,16 @@ export function restoreContextCheckpoint(
       throw new ContextConversationError("CHECKPOINT_INTEGRITY_FAILED");
     }
 
+    const authorizationId = consumeMaintenanceAuthorization(
+      db,
+      projectId,
+      "restore_checkpoint",
+      conversationId,
+      checkpointId,
+      value.expectedRevision,
+      value.confirmationToken,
+    );
+
     if (!isBoundedContextMetadata(value.metadata)) {
       throw new ContextConversationError("INVALID_CONTEXT_INPUT");
     }
@@ -892,6 +1372,18 @@ export function restoreContextCheckpoint(
     );
     const sourceRagSources = listContextCheckpointRagSources(projectId, checkpointId);
     insertCheckpointRagSources(db, projectId, restoredCheckpointId, sourceRagSources, createdAt);
+    insertCheckpointAuditEvent(db, {
+      projectId,
+      eventType: "checkpoint_restored_as_new",
+      conversationId,
+      checkpointId,
+      targetConversationId: restoredId,
+      expectedRevision: value.expectedRevision,
+      checkpointStateHash: sourceCheckpoint.state_hash,
+      authorizationId,
+      archiveSequence: null,
+      createdAt,
+    });
     return {
       conversation: conversationSummaryRow(db, projectId, restoredId)!,
       checkpoint: requireCheckpoint(db, projectId, restoredId, restoredCheckpointId),

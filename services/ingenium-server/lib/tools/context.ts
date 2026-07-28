@@ -155,14 +155,84 @@ export async function contextCheckpointRestore(
   conversationId: string,
   checkpointId: string,
   expectedRevision: number,
+  confirmationToken: string,
   title?: string,
   metadata?: Record<string, unknown>,
   idempotencyKey?: string,
 ) {
   const res = await api.post(
     `/context/conversations/${encodeURIComponent(conversationId)}/checkpoints/${encodeURIComponent(checkpointId)}/restore`,
-    { expectedRevision, title, metadata, idempotencyKey },
+    { expectedRevision, confirmationToken, title, metadata, idempotencyKey },
     { project },
+  );
+  return textResult(res.data);
+}
+
+/** Preview bounded, content-free maintenance candidates without changing state. */
+export async function contextCheckpointMaintenancePreview(
+  project: string,
+  options: {
+    conversationIds?: string[];
+    staleBefore?: string;
+    includeConflicts?: boolean;
+    includeInvalid?: boolean;
+    includeArchived?: boolean;
+    limit?: number;
+  },
+) {
+  const res = await api.post("/context/conversations/maintenance/preview", options, { project });
+  return textResult(res.data);
+}
+
+/** Issue a one-time confirmation token for an archive, unarchive, or restore action. */
+export async function contextCheckpointMaintenanceAuthorize(
+  project: string,
+  conversationId: string,
+  operation: "archive_conversation" | "unarchive_conversation" | "restore_checkpoint",
+  expectedRevision: number,
+  checkpointId?: string,
+) {
+  const res = await api.post(
+    `/context/conversations/${encodeURIComponent(conversationId)}/maintenance/authorize`,
+    { operation, expectedRevision, checkpointId },
+    { project },
+  );
+  return textResult(res.data);
+}
+
+export async function contextConversationArchive(
+  project: string,
+  conversationId: string,
+  expectedRevision: number,
+  confirmationToken: string,
+) {
+  const res = await api.post(
+    `/context/conversations/${encodeURIComponent(conversationId)}/archive`,
+    { expectedRevision, confirmationToken },
+    { project },
+  );
+  return textResult(res.data);
+}
+
+export async function contextConversationUnarchive(
+  project: string,
+  conversationId: string,
+  expectedRevision: number,
+  confirmationToken: string,
+) {
+  const res = await api.post(
+    `/context/conversations/${encodeURIComponent(conversationId)}/unarchive`,
+    { expectedRevision, confirmationToken },
+    { project },
+  );
+  return textResult(res.data);
+}
+
+/** Read bounded, content-free maintenance audit evidence for one conversation. */
+export async function contextCheckpointAuditList(project: string, conversationId: string, limit?: number) {
+  const res = await api.get(
+    `/context/conversations/${encodeURIComponent(conversationId)}/maintenance/audit`,
+    { project, ...(limit === undefined ? {} : { limit: String(limit) }) },
   );
   return textResult(res.data);
 }

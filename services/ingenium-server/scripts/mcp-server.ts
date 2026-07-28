@@ -897,6 +897,7 @@ const contextTagsParam = z.array(z.string().trim().min(1).max(64)).max(64);
 const contextIdempotencyKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const contextRevisionParam = z.number().int().nonnegative();
 const contextIdParam = z.string().uuid();
+const contextConfirmationTokenParam = z.string().min(32).max(128).regex(/^[A-Za-z0-9_-]+$/);
 
 server.registerTool(
   "context_conversation_create",
@@ -989,12 +990,84 @@ server.registerTool(
 server.registerTool(
   "context_checkpoint_restore",
   {
-    description: "Restore a checkpoint as a new immutable conversation; the source is never changed.",
-    inputSchema: { project: projectParam, conversationId: contextIdParam, checkpointId: contextIdParam, expectedRevision: contextRevisionParam, title: z.string().trim().min(1).max(256).optional(), metadata: contextMetadataParam.optional(), idempotencyKey: contextIdempotencyKeyParam.optional() },
+    description: "Restore a checkpoint as a new immutable conversation after one-time confirmation; the source is never changed.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, checkpointId: contextIdParam, expectedRevision: contextRevisionParam, confirmationToken: contextConfirmationTokenParam, title: z.string().trim().min(1).max(256).optional(), metadata: contextMetadataParam.optional(), idempotencyKey: contextIdempotencyKeyParam.optional() },
   },
   wrapHandler(C("context_checkpoint_restore"), async (args) => contextTools.contextCheckpointRestore(
     args.project, args.conversationId, args.checkpointId, args.expectedRevision,
-    args.title, args.metadata, args.idempotencyKey,
+    args.confirmationToken, args.title, args.metadata, args.idempotencyKey,
+  )),
+);
+server.registerTool(
+  "context_checkpoint_maintenance_preview",
+  {
+    description: "Preview up to 100 content-free stale, divergent, invalid, or branch-conflict context candidates without changing them.",
+    inputSchema: {
+      project: projectParam,
+      conversationIds: z.array(contextIdParam).max(100).optional(),
+      staleBefore: z.string().datetime().optional(),
+      includeConflicts: z.boolean().optional(),
+      includeInvalid: z.boolean().optional(),
+      includeArchived: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+    },
+  },
+  wrapHandler(C("context_checkpoint_maintenance_preview"), async (args) => contextTools.contextCheckpointMaintenancePreview(
+    args.project,
+    {
+      conversationIds: args.conversationIds,
+      staleBefore: args.staleBefore,
+      includeConflicts: args.includeConflicts,
+      includeInvalid: args.includeInvalid,
+      includeArchived: args.includeArchived,
+      limit: args.limit,
+    },
+  )),
+);
+server.registerTool(
+  "context_checkpoint_maintenance_authorize",
+  {
+    description: "Issue a short-lived one-time confirmation token for a project-owned context archive, unarchive, or restore-as-new action.",
+    inputSchema: {
+      project: projectParam,
+      conversationId: contextIdParam,
+      operation: z.enum(["archive_conversation", "unarchive_conversation", "restore_checkpoint"]),
+      checkpointId: contextIdParam.optional(),
+      expectedRevision: contextRevisionParam,
+    },
+  },
+  wrapHandler(C("context_checkpoint_maintenance_authorize"), async (args) => contextTools.contextCheckpointMaintenanceAuthorize(
+    args.project, args.conversationId, args.operation, args.expectedRevision, args.checkpointId,
+  )),
+);
+server.registerTool(
+  "context_conversation_archive",
+  {
+    description: "Append a reversible archive event after explicit confirmation; messages and checkpoints are never deleted.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, expectedRevision: contextRevisionParam, confirmationToken: contextConfirmationTokenParam },
+  },
+  wrapHandler(C("context_conversation_archive"), async ({ project, conversationId, expectedRevision, confirmationToken }) => contextTools.contextConversationArchive(
+    project, conversationId, expectedRevision, confirmationToken,
+  )),
+);
+server.registerTool(
+  "context_conversation_unarchive",
+  {
+    description: "Append a reversible unarchive event after explicit confirmation; immutable history remains unchanged.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, expectedRevision: contextRevisionParam, confirmationToken: contextConfirmationTokenParam },
+  },
+  wrapHandler(C("context_conversation_unarchive"), async ({ project, conversationId, expectedRevision, confirmationToken }) => contextTools.contextConversationUnarchive(
+    project, conversationId, expectedRevision, confirmationToken,
+  )),
+);
+server.registerTool(
+  "context_checkpoint_audit_list",
+  {
+    description: "List bounded, content-free archive and restore-as-new audit evidence for one project-owned conversation.",
+    inputSchema: { project: projectParam, conversationId: contextIdParam, limit: z.number().int().min(1).max(100).optional() },
+  },
+  wrapHandler(C("context_checkpoint_audit_list"), async ({ project, conversationId, limit }) => contextTools.contextCheckpointAuditList(
+    project, conversationId, limit,
   )),
 );
 

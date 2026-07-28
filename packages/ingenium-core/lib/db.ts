@@ -100,6 +100,12 @@ interface ContextConversationMigrationState {
   missing: string[];
 }
 
+interface ContextCheckpointGovernanceMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 function hasContextConversationColumns(
   db: Database.Database,
   table: string,
@@ -251,6 +257,75 @@ function inspectContextConversationMigration(db: Database.Database): ContextConv
   return { any, complete: missing.length === 0, missing };
 }
 
+/** Probe the CTX-004 authorization and append-only audit safeguards as a unit. */
+function inspectContextCheckpointGovernanceMigration(db: Database.Database): ContextCheckpointGovernanceMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    context_checkpoint_maintenance_authorizations: [
+      "id", "project_id", "operation", "conversation_id", "checkpoint_id", "expected_revision",
+      "confirmation_hash", "expires_at", "consumed_at", "created_at",
+    ],
+    context_checkpoint_audit_events: [
+      "id", "project_id", "event_type", "conversation_id", "checkpoint_id", "target_conversation_id",
+      "expected_revision", "checkpoint_state_hash", "authorization_id", "archive_sequence", "created_at",
+    ],
+  };
+  const requiredIndexes = [
+    "idx_context_checkpoint_maintenance_authorizations_target",
+    "idx_context_checkpoint_audit_events_project_created",
+    "idx_context_checkpoint_audit_events_restore_branches",
+  ];
+  const requiredTriggers = [
+    "context_checkpoint_audit_events_immutable_update",
+    "context_checkpoint_audit_events_immutable_delete",
+  ];
+  const missing: string[] = [];
+  let any = false;
+
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const tableExists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= tableExists;
+    if (!tableExists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) {
+      missing.push(`${table} required columns`);
+    }
+  }
+
+  for (const index of requiredIndexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of requiredTriggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+
+  const requiredForeignKeys: Array<[string, string, string[]]> = [
+    ["context_checkpoint_maintenance_authorizations", "context_conversations", ["project_id", "conversation_id"]],
+    ["context_checkpoint_maintenance_authorizations", "context_checkpoints", ["project_id", "checkpoint_id"]],
+    ["context_checkpoint_audit_events", "context_conversations", ["project_id", "conversation_id"]],
+    ["context_checkpoint_audit_events", "context_conversations", ["project_id", "target_conversation_id"]],
+    ["context_checkpoint_audit_events", "context_checkpoints", ["project_id", "checkpoint_id"]],
+    ["context_checkpoint_audit_events", "context_checkpoint_maintenance_authorizations", ["project_id", "authorization_id"]],
+  ];
+  for (const [table, referencedTable, fromColumns] of requiredForeignKeys) {
+    if (hasCompositeForeignKey(db, table, referencedTable, fromColumns)) continue;
+    missing.push(`${table} → ${referencedTable} composite foreign key`);
+  }
+
+  return { any, complete: missing.length === 0, missing };
+}
+
 /**
  * Returns the singleton SQLite database connection, creating it on first call.
  *
@@ -306,7 +381,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh database — apply every migration in dependency order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql", "054_agent_frontmatter_metadata.sql", "055_reserved_broker_delete_protection.sql", "056_reserved_broker_rename_protection.sql", "057_reserved_broker_immutable.sql", "058_reserved_broker_connection_independent.sql", "059_repository_docs_onboarding.sql", "060_repository_resource_sync.sql", "061_global_backup_ownership.sql", "062_child_mcp_definitions.sql", "063_immutable_context_conversations.sql", "064_child_mcp_tool_categories.sql", "065_context_rag_ingestion.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql", "054_agent_frontmatter_metadata.sql", "055_reserved_broker_delete_protection.sql", "056_reserved_broker_rename_protection.sql", "057_reserved_broker_immutable.sql", "058_reserved_broker_connection_independent.sql", "059_repository_docs_onboarding.sql", "060_repository_resource_sync.sql", "061_global_backup_ownership.sql", "062_child_mcp_definitions.sql", "063_immutable_context_conversations.sql", "064_child_mcp_tool_categories.sql", "065_context_rag_ingestion.sql", "066_context_checkpoint_governance.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -1095,6 +1170,22 @@ function runMigrations(db: Database.Database): void {
     if (contextRagUploadsCheck.count === 0) {
       db.exec(readFileSync(resolve(migrationsDir, "065_context_rag_ingestion.sql"), "utf-8"));
       logger.info("db", "Applied migration 065_context_rag_ingestion.sql");
+    }
+
+    // Migration 066: archive intent and restore authorization form one safety
+    // boundary. A partial schema could permit unaudited maintenance, so fail
+    // closed instead of attempting an incomplete repair.
+    const contextCheckpointGovernanceMigration = inspectContextCheckpointGovernanceMigration(db);
+    if (contextCheckpointGovernanceMigration.any && !contextCheckpointGovernanceMigration.complete) {
+      throw new Error(
+        "Migration 066 is in a PARTIAL state. Missing required components: "
+        + contextCheckpointGovernanceMigration.missing.join(", ")
+        + ". Restore the migration's complete schema before retrying.",
+      );
+    }
+    if (!contextCheckpointGovernanceMigration.complete) {
+      db.exec(readFileSync(resolve(migrationsDir, "066_context_checkpoint_governance.sql"), "utf-8"));
+      logger.info("db", "Applied migration 066_context_checkpoint_governance.sql");
     }
   }
 
