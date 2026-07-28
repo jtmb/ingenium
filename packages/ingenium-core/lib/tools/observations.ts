@@ -121,10 +121,12 @@ export function searchObservations(projectId: string, query: string, limit = 50)
   ).all(projectId, sanitized, limit) as Observation[];
 }
 
-/** Retrieve a single observation by its primary key ID. */
-export function getObservation(id: number): Observation | undefined {
+/** Retrieve a single observation by ID within its owning project. */
+export function getObservation(projectId: string, id: number): Observation | undefined {
   const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
-  return db.prepare("SELECT * FROM observations WHERE id = ?").get(id) as Observation | undefined;
+  return db.prepare(
+    "SELECT * FROM observations WHERE project_id = ? AND id = ?"
+  ).get(projectId, id) as Observation | undefined;
 }
 
 /**
@@ -147,6 +149,7 @@ export function getObservationsByIds(ids: number[]): Observation[] {
  * Returns null if the observation doesn't exist (changes === 0).
  */
 export function updateObservation(
+  projectId: string,
   id: number,
   data: Partial<Pick<Observation, "status" | "importance" | "content" | "context" | "observation_type">>,
 ): Observation | null {
@@ -162,14 +165,16 @@ export function updateObservation(
   if (data.context !== undefined) { sets.push("context = ?"); params.push(data.context); }
   if (data.observation_type !== undefined) { sets.push("observation_type = ?"); params.push(data.observation_type); }
 
-  params.push(id);
+  params.push(projectId, id);
 
   const transactionResult = execTransaction(() => {
     const result = db.prepare(
-      `UPDATE observations SET ${sets.join(", ")} WHERE id = ?`
+      `UPDATE observations SET ${sets.join(", ")} WHERE project_id = ? AND id = ?`
     ).run(...params);
     if (result.changes === 0) return null;
-    return db.prepare("SELECT * FROM observations WHERE id = ?").get(id) as Observation;
+    return db.prepare(
+      "SELECT * FROM observations WHERE project_id = ? AND id = ?"
+    ).get(projectId, id) as Observation;
   });
   if (transactionResult) {
     checkpointAfterWrite();

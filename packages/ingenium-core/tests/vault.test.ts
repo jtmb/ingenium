@@ -15,9 +15,11 @@ import {
   initVault,
   isSealed,
   listItems,
+  logAudit,
   sealVault,
   unsealVault,
   updateItem,
+  validateVaultPassphrase,
 } from "../lib/tools/vault.js";
 
 const passphrase = "correct horse battery staple";
@@ -111,6 +113,27 @@ describe("vault", () => {
     expect(events.some((event) => event.event_type === "secret_created")).toBe(true);
   });
 
+  it("stores no plaintext or user-controlled metadata in audit details", () => {
+    const secret = "core-audit-secret-value";
+    createItem(projectId, "name-with-sensitive-context", "note", secret);
+    logAudit(projectId, "access_denied", null, "system", { secret });
+    const details = getDb().prepare("SELECT details FROM vault_audit_log WHERE project_id = ? ORDER BY id DESC LIMIT 1").get(projectId) as { details: string };
+    expect(details.details).toBe("{}");
+    expect(details.details).not.toContain(secret);
+  });
+
+  it("shares the master-key configuration while keeping items project-isolated", () => {
+    const otherProjectId = createProject("vault-other-project").id;
+    const itemId = createItem(projectId, "project-one-only", "note", "project-one-secret");
+
+    expect(listItems(otherProjectId)).toEqual([]);
+    expect(getItemMetadata(otherProjectId, itemId)).toBeNull();
+
+    sealVault();
+    expect(unsealVault(otherProjectId, passphrase).ok).toBe(true);
+    expect(decryptItem(projectId, itemId)).toBe("project-one-secret");
+  });
+
   it("generates strong passwords", () => {
     const password = generatePassword();
     expect(password).toHaveLength(24);
@@ -164,6 +187,16 @@ describe("initializeVault", () => {
       ok: false,
       error: "Passphrase must be at least 12 characters",
     });
+  });
+
+  it("uses one passphrase policy for direct initialization", () => {
+    expect(validateVaultPassphrase("            ")).toEqual({ ok: false, error: "Passphrase must not be blank" });
+    expect(validateVaultPassphrase("too-short")).toEqual({
+      ok: false,
+      error: "Passphrase must be at least 12 characters",
+    });
+    expect(() => initVault(testProject, "too-short")).toThrow("Passphrase must be at least 12 characters");
+    expect(getDb(initializationDbPath).prepare("SELECT count(*) AS count FROM vault_config").get()).toEqual({ count: 0 });
   });
 
   it("rejects when already initialized", () => {

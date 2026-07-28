@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createProject } from "../lib/tools/projects.js";
-import { getDb, execTransaction } from "../lib/db.js";
+import { getDb, execTransaction, resetDbForTest } from "../lib/db.js";
 import { randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import {
@@ -15,10 +15,12 @@ import {
   startRestore,
   updateRestoreStatus,
   getRestoreStatus,
+  migrateLegacyBackupOwnership,
 } from "../lib/tools/backups.js";
 
 let tempDir: string;
 let projectId: string;
+let externalProjectId: string;
 let dbPath: string;
 let opencodeDbPath: string;
 
@@ -34,8 +36,9 @@ beforeAll(async () => {
   opencodeDb.exec("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY)");
   opencodeDb.close();
 
-  const project = createProject("test-project");
-  projectId = project.id;
+  const globalProject = createProject("global-default", true);
+  projectId = globalProject.id;
+  externalProjectId = createProject("test-project").id;
 });
 
 afterAll(() => {
@@ -48,6 +51,7 @@ afterAll(() => {
 function insertBackupRecord(
   backupId: string,
   backupType: string = "manual",
+  ownerId: string = projectId,
 ): void {
   execTransaction(() => {
     getDb(dbPath).prepare(`
@@ -55,7 +59,7 @@ function insertBackupRecord(
       VALUES (?, ?, ?, ?, ?, ?, ?, 'completed')
     `).run(
       backupId,
-      projectId,
+      ownerId,
       `${backupId}.db`,
       4096,
       "a" .repeat(64),
@@ -73,13 +77,14 @@ function insertRestoreJob(
   jobId: string,
   backupId: string,
   status: string = "validating",
+  ownerId: string = projectId,
 ): void {
   const now = new Date().toISOString();
   execTransaction(() => {
     getDb(dbPath).prepare(`
       INSERT INTO backup_restore_jobs (id, project_id, backup_id, status, components, started_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(jobId, projectId, backupId, status, "{}", now);
+    `).run(jobId, ownerId, backupId, status, "{}", now);
   });
 }
 
@@ -149,9 +154,10 @@ describe("backups — listBackups", () => {
     }
   });
 
-  it("returns empty list for a project with no backups", () => {
-    const empty = listBackups("nonexistent-project");
-    expect(empty).toEqual([]);
+  it("resolves the canonical global list regardless of caller project", () => {
+    const resolved = listBackups("nonexistent-project");
+    expect(resolved.length).toBeGreaterThanOrEqual(3);
+    expect(resolved.every((record) => record.project_id === projectId)).toBe(true);
   });
 });
 
@@ -171,9 +177,9 @@ describe("backups — getBackup", () => {
     expect(record!.sha256).toBeTruthy();
   });
 
-  it("returns null when the backup does not belong to the project", () => {
-    const record = getBackup("other-project", bid);
-    expect(record).toBeNull();
+  it("resolves the record from the canonical global project regardless of caller context", () => {
+    const record = getBackup(externalProjectId, bid);
+    expect(record).toMatchObject({ id: bid, project_id: projectId });
   });
 
   it("returns null for a non-existent backup id", () => {
@@ -197,6 +203,32 @@ describe("backups — deleteBackup", () => {
 
   it("is a no-op when the backup does not exist", () => {
     expect(() => deleteBackup(projectId, randomUUID())).not.toThrow();
+  });
+});
+
+describe("backups — legacy ownership migration", () => {
+  it("moves legacy backup records and restore jobs into the active global project", () => {
+    const backupId = randomUUID();
+    const jobId = randomUUID();
+    insertBackupRecord(backupId, "manual", externalProjectId);
+    insertRestoreJob(jobId, backupId, "validating", externalProjectId);
+
+    // Force the upgrade path to execute migration 061 against this populated
+    // legacy database, rather than only exercising the startup backfill.
+    getDb(dbPath).prepare("DROP TABLE backup_ownership_migrations").run();
+    resetDbForTest();
+    const migratedDb = getDb(dbPath);
+
+    expect(migratedDb.prepare("SELECT project_id FROM backup_records WHERE id = ?").get(backupId)).toEqual({
+      project_id: projectId,
+    });
+    expect(migratedDb.prepare("SELECT project_id FROM backup_restore_jobs WHERE id = ?").get(jobId)).toEqual({
+      project_id: projectId,
+    });
+    expect(migrateLegacyBackupOwnership(projectId)).toEqual({
+      backupRecords: 0,
+      restoreJobs: 0,
+    });
   });
 });
 
@@ -237,8 +269,8 @@ describe("backups — restore lifecycle", () => {
     expect(job!.project_id).toBe(projectId);
   });
 
-  it("startRestore throws when backup does not belong to the project", () => {
-    expect(() => startRestore("other-project", backupId)).toThrow("Backup not found for project");
+  it("resolves restore ownership from the canonical global project", () => {
+    expect(() => startRestore(externalProjectId, backupId)).not.toThrow();
   });
 
   it("updateRestoreStatus transitions to applying", () => {

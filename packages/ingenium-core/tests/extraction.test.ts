@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createProject } from "../lib/tools/projects.js";
-import { parseExtractionResponse, callLLMForExtraction } from "../lib/tools/extraction.js";
+import { parseExtractionResponse, callLLMForExtraction, runExtraction } from "../lib/tools/extraction.js";
+import { getObservations } from "../lib/tools/observations.js";
 import { setSetting } from "../lib/tools/settings.js";
 
 let tempDir: string;
@@ -15,6 +16,9 @@ let mockPort: number;
 let mockResponsePayload: any;
 let mockResponseStatus: number;
 let mockRequests: number;
+let mockMessages: Array<{ text: string; time_created: number; hash: string; messageId?: string; sessionId?: string }>;
+let requestedMessageProjects: string[];
+const originalApiPort = process.env.INGENIUM_API_PORT;
 
 function setMockResponse(payload: any, status = 200) {
   mockResponsePayload = payload;
@@ -40,8 +44,15 @@ beforeAll(async () => {
   projectId = project.id;
 
   await new Promise<void>((resolve) => {
-    mockServer = createServer((_req, res) => {
+    mockServer = createServer((req, res) => {
       mockRequests++;
+      const requestUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+      if (requestUrl.pathname === "/api/v1/opencode/messages") {
+        requestedMessageProjects.push(requestUrl.searchParams.get("project") ?? "");
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ data: { messages: mockMessages } }));
+        return;
+      }
       const body = typeof mockResponsePayload === "string"
         ? mockResponsePayload
         : JSON.stringify(mockResponsePayload);
@@ -58,10 +69,14 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => mockServer.close(() => resolve()));
   rmSync(tempDir, { recursive: true, force: true });
+  if (originalApiPort === undefined) delete process.env.INGENIUM_API_PORT;
+  else process.env.INGENIUM_API_PORT = originalApiPort;
 });
 
 beforeEach(() => {
   mockRequests = 0;
+  mockMessages = [];
+  requestedMessageProjects = [];
   setMockResponse(mockContent("{}"));
 });
 
@@ -243,5 +258,49 @@ describe("callLLMForExtraction", () => {
 
     expect(result.failed).toBe(false);
     expect(result.rules).toEqual([]);
+  });
+});
+
+describe("external project extraction", () => {
+  it("writes a fresh extracted observation only to the requested external project", async () => {
+    const globalProject = createProject("global-default", true);
+    const externalProject = createProject("external-worktree");
+    const startedAt = Date.now();
+
+    setSetting(globalProject.id, "synthesis_model", "test-model");
+    setSetting(globalProject.id, "synthesis_endpoint", endpoint());
+    setSetting(globalProject.id, "synthesis_allow_private_network", "true");
+    process.env.INGENIUM_API_PORT = String(mockPort);
+    mockMessages = [{
+      text: "I prefer external project review summaries to be concise and actionable.",
+      time_created: startedAt + 1,
+      hash: "external-message",
+      messageId: "message-external-1",
+      sessionId: "session-external-1",
+    }];
+    setMockResponse(mockContent(JSON.stringify({
+      rules: [{
+        content: "User prefers concise, actionable review summaries",
+        type: "preference",
+        importance: 8,
+      }],
+    })));
+
+    const result = await runExtraction(externalProject.id, externalProject.name, { limit: 10 });
+    const externalObservations = getObservations(externalProject.id);
+    const extracted = externalObservations.find(
+      (observation) => observation.content === "User prefers concise, actionable review summaries",
+    );
+
+    expect(result).toMatchObject({ scanned: 1, candidates: 1, created: 1, failedBatches: 0 });
+    expect(requestedMessageProjects).toEqual([externalProject.name]);
+    expect(extracted).toMatchObject({
+      project_id: externalProject.id,
+      source: "auto-observer",
+    });
+    expect(new Date(extracted!.created_at).getTime()).toBeGreaterThanOrEqual(startedAt);
+    expect(getObservations(globalProject.id).some(
+      (observation) => observation.content === extracted!.content,
+    )).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import { BackupRecord, BackupRestoreJob } from "../schema.js";
+import { getGlobalProject } from "./projects.js";
 
 const BACKUP_SCHEMA_VERSION = 47;
 const BACKUP_TYPES = new Set(["manual", "scheduled_hourly", "scheduled_daily", "pre_restore"]);
@@ -55,13 +56,21 @@ function componentPath(dbPath: string, filename: string): string | null {
   return dirname(path) === directory && basename(path) === filename ? path : null;
 }
 
+/** Resolve the owner for every backup operation from the active global project. */
+function canonicalBackupOwnerId(): string {
+  const global = getGlobalProject();
+  if (!global) throw new Error("No active global project is configured");
+  return global.id;
+}
+
 /** Create a consistent pair of Ingenium and OpenCode SQLite database snapshots. */
 export async function createSnapshot(
-  projectId: string,
+  _projectId: string,
   backupType: string,
   dbPath: string,
   opencodeDbPath: string,
 ): Promise<{ backupId: string; filename: string; sizeBytes: number; sha256: string }> {
+  const projectId = canonicalBackupOwnerId();
   if (!BACKUP_TYPES.has(backupType)) throw new Error(`Unsupported backup type: ${backupType}`);
   if (!existsSync(opencodeDbPath)) throw new Error(`OpenCode database does not exist: ${opencodeDbPath}`);
 
@@ -115,18 +124,20 @@ export async function createSnapshot(
   }
 }
 
-/** List completed and failed backup records for a project, newest first. */
-export function listBackups(projectId: string): BackupRecord[] {
+/** List completed and failed server-owned backup records, newest first. */
+export function listBackups(_projectId: string): BackupRecord[] {
+  const ownerId = canonicalBackupOwnerId();
   return getDb(coreDbPath()).prepare(
     "SELECT * FROM backup_records WHERE project_id = ? ORDER BY created_at DESC",
-  ).all(projectId) as BackupRecord[];
+  ).all(ownerId) as BackupRecord[];
 }
 
-/** Get one backup record scoped to its owning project. */
-export function getBackup(projectId: string, backupId: string): BackupRecord | null {
+/** Get one backup record from the canonical global owner. */
+export function getBackup(_projectId: string, backupId: string): BackupRecord | null {
+  const ownerId = canonicalBackupOwnerId();
   return getDb(coreDbPath()).prepare(
     "SELECT * FROM backup_records WHERE project_id = ? AND id = ?",
-  ).get(projectId, backupId) as BackupRecord | undefined ?? null;
+  ).get(ownerId, backupId) as BackupRecord | undefined ?? null;
 }
 
 /** Resolve a validated snapshot component path for streaming or restore. */
@@ -143,14 +154,15 @@ export function getBackupComponentPath(
 }
 
 /** Delete backup metadata and its local snapshot component files. */
-export function deleteBackup(projectId: string, backupId: string): void {
+export function deleteBackup(_projectId: string, backupId: string): void {
   const dbPath = coreDbPath();
-  const backup = getBackup(projectId, backupId);
+  const ownerId = canonicalBackupOwnerId();
+  const backup = getBackup(ownerId, backupId);
   if (!backup) return;
   const manifest = parseManifest(backup.components);
 
   execTransaction(() => {
-    getDb(dbPath).prepare("DELETE FROM backup_records WHERE project_id = ? AND id = ?").run(projectId, backupId);
+    getDb(dbPath).prepare("DELETE FROM backup_records WHERE project_id = ? AND id = ?").run(ownerId, backupId);
   });
   checkpointAfterWrite();
 
@@ -164,7 +176,10 @@ export function deleteBackup(projectId: string, backupId: string): void {
 /** Verify snapshot component hashes, SQLite integrity, and the required migration-047 schema. */
 export function validateRestorePreflight(backupId: string): { valid: boolean; errors: string[]; manifest: object } {
   const dbPath = coreDbPath();
-  const backup = getDb(dbPath).prepare("SELECT * FROM backup_records WHERE id = ?").get(backupId) as BackupRecord | undefined;
+  const ownerId = canonicalBackupOwnerId();
+  const backup = getDb(dbPath).prepare(
+    "SELECT * FROM backup_records WHERE project_id = ? AND id = ?",
+  ).get(ownerId, backupId) as BackupRecord | undefined;
   const errors: string[] = [];
   const manifest = backup ? parseManifest(backup.components) : null;
   if (!backup) return { valid: false, errors: ["Backup record not found"], manifest: {} };
@@ -203,20 +218,53 @@ export function validateRestorePreflight(backupId: string): { valid: boolean; er
   return { valid: errors.length === 0, errors, manifest };
 }
 
-/** Create a restore job after confirming that the backup belongs to the project. */
-export function startRestore(projectId: string, backupId: string): string {
-  const backup = getBackup(projectId, backupId);
-  if (!backup) throw new Error("Backup not found for project");
+/** Create a restore job after confirming that the backup belongs to the global owner. */
+export function startRestore(_projectId: string, backupId: string): string {
+  const ownerId = canonicalBackupOwnerId();
+  const backup = getBackup(ownerId, backupId);
+  if (!backup) throw new Error("Backup not found in the canonical global project");
   const jobId = randomUUID();
   const now = new Date().toISOString();
   execTransaction(() => {
     getDb(coreDbPath()).prepare(
       `INSERT INTO backup_restore_jobs (id, project_id, backup_id, status, components, started_at)
        VALUES (?, ?, ?, 'validating', ?, ?)`,
-    ).run(jobId, projectId, backupId, backup.components, now);
+    ).run(jobId, ownerId, backupId, backup.components, now);
   });
   checkpointAfterWrite();
   return jobId;
+}
+
+/**
+ * Move legacy per-project backup metadata into the active global namespace.
+ *
+ * Snapshot files are already stored in the shared backup directory, so this
+ * backfill only changes ownership metadata and restore-job ownership. It is
+ * idempotent and deliberately refuses to guess when the global project is
+ * missing or ambiguous.
+ */
+export function migrateLegacyBackupOwnership(globalProjectId: string): {
+  backupRecords: number;
+  restoreJobs: number;
+} {
+  const ownerId = canonicalBackupOwnerId();
+  if (ownerId !== globalProjectId) {
+    throw new Error("Backup ownership migration target is not the active global project");
+  }
+
+  const migrated = execTransaction(() => {
+    const db = getDb(coreDbPath());
+    const backupRecords = db.prepare(
+      "UPDATE backup_records SET project_id = ? WHERE project_id <> ?",
+    ).run(ownerId, ownerId).changes;
+    const restoreJobs = db.prepare(
+      "UPDATE backup_restore_jobs SET project_id = ? WHERE project_id <> ?",
+    ).run(ownerId, ownerId).changes;
+    return { backupRecords, restoreJobs };
+  });
+
+  if (migrated.backupRecords > 0 || migrated.restoreJobs > 0) checkpointAfterWrite();
+  return migrated;
 }
 
 /** Update a restore job state and record terminal completion timestamps. */

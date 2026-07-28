@@ -15,6 +15,9 @@ import { migrateLegacyOAuthClientSecretsForActiveGlobalProject } from "./protect
 const VERIFY_DATA = Buffer.from("ingenium-vault-v1");
 const DELETED_POLICY = '{"mode":"deleted"}';
 
+/** Minimum number of Unicode code points required when creating a vault. */
+export const VAULT_PASSPHRASE_MIN_LENGTH = 12;
+
 let masterKey: Buffer | null = null;
 
 type VaultItemMetadata = {
@@ -43,6 +46,22 @@ function vaultConfigExists(): boolean {
 function getMasterKey(): Buffer {
   if (!masterKey) throw new Error("Vault is sealed");
   return masterKey;
+}
+
+/**
+ * Validate a passphrase only when creating a new vault. Existing vaults are
+ * intentionally not revalidated during unseal so an upgrade cannot lock out a
+ * previously valid vault. This is the policy used by dashboard initialization,
+ * core initialization, and MCP's first-use initialization path.
+ */
+export function validateVaultPassphrase(passphrase: string): { ok: true } | { ok: false; error: string } {
+  if (passphrase.trim().length === 0) {
+    return { ok: false, error: "Passphrase must not be blank" };
+  }
+  if (Array.from(passphrase).length < VAULT_PASSPHRASE_MIN_LENGTH) {
+    return { ok: false, error: `Passphrase must be at least ${VAULT_PASSPHRASE_MIN_LENGTH} characters` };
+  }
+  return { ok: true };
 }
 
 function insertAudit(
@@ -76,8 +95,16 @@ function toMetadata(row: Record<string, unknown>): VaultItemMetadata {
   };
 }
 
-/** Create the singleton vault configuration if it does not already exist. */
+/**
+ * Create the singleton vault configuration if it does not already exist.
+ *
+ * The master-key configuration belongs to the service-wide vault. Vault items,
+ * folders, and audit records remain isolated by the supplied project ID.
+ */
 export function initVault(_projectId: string, passphrase: string): void {
+  const validation = validateVaultPassphrase(passphrase);
+  if (!validation.ok) throw new Error(validation.error);
+
   const salt = generateSalt();
   const key = deriveKey(passphrase, salt);
   const verifyTag = createHmac("sha256", key).update(VERIFY_DATA).digest();
@@ -98,7 +125,8 @@ export function initVault(_projectId: string, passphrase: string): void {
 export function initializeVault(projectId: string, passphrase: string, confirmation: string): { ok: boolean; error?: string } {
   if (vaultConfigExists()) return { ok: false, error: "Vault is already initialized" };
   if (passphrase !== confirmation) return { ok: false, error: "Passphrases do not match" };
-  if (passphrase.length < 12) return { ok: false, error: "Passphrase must be at least 12 characters" };
+  const validation = validateVaultPassphrase(passphrase);
+  if (!validation.ok) return validation;
 
   initVault(projectId, passphrase);
   const result = unsealVault(projectId, passphrase);
@@ -194,7 +222,9 @@ export function createItem(
        (id, project_id, folder_id, name, type, tags, urls, username, encrypted, wrapped_kek, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, projectId, folderId ?? null, name, type, JSON.stringify(tags ?? []), JSON.stringify(urls ?? []), username ?? null, encrypted, wrappedDek, now, now);
-    insertAudit(projectId, "secret_created", id, "system", { name, type });
+    // Audit events intentionally contain no user-controlled metadata or secret
+    // material. The item ID is sufficient to correlate an audited operation.
+    insertAudit(projectId, "secret_created", id, "system", {});
   });
   checkpointAfterWrite();
   return id;
@@ -342,9 +372,11 @@ export function logAudit(
   eventType: string,
   itemId: string | null,
   actor: string,
-  details: object,
+  _details: object,
 ): void {
-  execTransaction(() => insertAudit(projectId, eventType, itemId, actor, details));
+  // Keep the persistent audit trail metadata-only even if a future caller
+  // accidentally supplies sensitive detail data.
+  execTransaction(() => insertAudit(projectId, eventType, itemId, actor, {}));
   checkpointAfterWrite();
 }
 

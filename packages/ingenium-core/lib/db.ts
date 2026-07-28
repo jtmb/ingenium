@@ -94,6 +94,163 @@ function enforceReservedBrokerInvariant(db: Database.Database): void {
   db.exec(readFileSync(resolve(migrationsDir, "058_reserved_broker_connection_independent.sql"), "utf-8"));
 }
 
+interface ContextConversationMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
+function hasContextConversationColumns(
+  db: Database.Database,
+  table: string,
+  requiredColumns: string[],
+): boolean {
+  const columns = db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>;
+  return requiredColumns.every((column) => columns.some((candidate) => candidate.name === column));
+}
+
+function hasCompositeForeignKey(
+  db: Database.Database,
+  table: string,
+  referencedTable: string,
+  fromColumns: string[],
+): boolean {
+  const foreignKeys = db.prepare(`PRAGMA foreign_key_list('${table}')`).all() as Array<{
+    id: number;
+    seq: number;
+    table: string;
+    from: string;
+  }>;
+  const groups = new Map<number, Array<{ seq: number; table: string; from: string }>>();
+  for (const foreignKey of foreignKeys) {
+    const group = groups.get(foreignKey.id) ?? [];
+    group.push(foreignKey);
+    groups.set(foreignKey.id, group);
+  }
+  return [...groups.values()].some((group) => (
+    group.length === fromColumns.length
+    && group.every((foreignKey) => foreignKey.table === referencedTable
+      && fromColumns[foreignKey.seq] === foreignKey.from)
+  ));
+}
+
+/** Probe every invariant introduced by migration 063 before treating it as applied. */
+function inspectContextConversationMigration(db: Database.Database): ContextConversationMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    context_conversations: ["id", "project_id", "title", "request_hash", "idempotency_key", "tags", "priority", "metadata", "created_at"],
+    context_messages: ["id", "project_id", "conversation_id", "sequence", "role", "content", "content_hash", "request_hash", "idempotency_key", "tags", "priority", "metadata", "created_at"],
+    context_checkpoints: ["id", "project_id", "conversation_id", "sequence", "through_message_id", "message_count", "state_hash", "request_hash", "idempotency_key", "metadata", "created_at"],
+    context_checkpoint_rag_sources: ["project_id", "checkpoint_id", "rag_source_id", "ordinal", "metadata", "created_at"],
+  };
+  const requiredTableSqlFragments: Record<string, string[]> = {
+    context_conversations: [
+      "length(title) BETWEEN 1 AND 256",
+      "length(request_hash) = 64",
+      "json_type(tags) = 'array'",
+      "length(CAST(tags AS BLOB)) <= 4096",
+      "priority BETWEEN 0 AND 10",
+      "json_type(metadata) = 'object'",
+      "length(CAST(metadata AS BLOB)) <= 16384",
+      "FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE RESTRICT",
+    ],
+    context_messages: [
+      "CHECK(sequence >= 0)",
+      "role IN ('system', 'user', 'assistant', 'tool')",
+      "length(content) BETWEEN 1 AND 262144",
+      "length(content_hash) = 64",
+      "length(request_hash) = 64",
+      "UNIQUE(project_id, conversation_id, sequence)",
+    ],
+    context_checkpoints: [
+      "CHECK(sequence >= 0)",
+      "CHECK(message_count >= 1)",
+      "length(state_hash) = 64",
+      "length(request_hash) = 64",
+      "UNIQUE(project_id, conversation_id, sequence)",
+    ],
+    context_checkpoint_rag_sources: [
+      "CHECK(ordinal >= 0)",
+      "UNIQUE(project_id, checkpoint_id, ordinal)",
+    ],
+  };
+  const requiredIndexes = [
+    "idx_rag_sources_project_id",
+    "idx_context_conversations_project_created",
+    "idx_context_messages_conversation_sequence",
+    "idx_context_checkpoints_conversation_sequence",
+    "idx_context_checkpoint_rag_sources_source",
+  ];
+  const requiredTriggers = [
+    "context_conversations_immutable_update",
+    "context_conversations_immutable_delete",
+    "context_messages_immutable_update",
+    "context_messages_immutable_delete",
+    "context_messages_fts_insert",
+    "context_checkpoints_immutable_update",
+    "context_checkpoints_immutable_delete",
+    "context_checkpoint_rag_sources_immutable_update",
+    "context_checkpoint_rag_sources_immutable_delete",
+  ];
+  const missing: string[] = [];
+  let any = false;
+
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const tableExists = (db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= tableExists;
+    if (!tableExists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) {
+      missing.push(`${table} required columns`);
+    }
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql: string } | undefined;
+    if (!tableSql || !requiredTableSqlFragments[table]!.every((fragment) => tableSql.sql.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+  }
+
+  const contextMessagesFts = (db.prepare(
+    "SELECT count(*) as count FROM sqlite_master WHERE type = 'table' AND name = 'context_messages_fts'",
+  ).get() as { count: number }).count > 0;
+  any ||= contextMessagesFts;
+  if (!contextMessagesFts) missing.push("context_messages_fts table");
+
+  for (const index of requiredIndexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+
+  for (const trigger of requiredTriggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+
+  const requiredForeignKeys: Array<[string, string, string[]]> = [
+    ["context_messages", "context_conversations", ["project_id", "conversation_id"]],
+    ["context_checkpoints", "context_conversations", ["project_id", "conversation_id"]],
+    ["context_checkpoints", "context_messages", ["project_id", "conversation_id", "through_message_id"]],
+    ["context_checkpoint_rag_sources", "context_checkpoints", ["project_id", "checkpoint_id"]],
+    ["context_checkpoint_rag_sources", "rag_sources", ["project_id", "rag_source_id"]],
+  ];
+  for (const [table, referencedTable, fromColumns] of requiredForeignKeys) {
+    if (hasCompositeForeignKey(db, table, referencedTable, fromColumns)) continue;
+    missing.push(`${table} → ${referencedTable} composite foreign key`);
+  }
+
+  return { any, complete: missing.length === 0, missing };
+}
+
 /**
  * Returns the singleton SQLite database connection, creating it on first call.
  *
@@ -149,7 +306,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh database — apply every migration in dependency order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql", "054_agent_frontmatter_metadata.sql", "055_reserved_broker_delete_protection.sql", "056_reserved_broker_rename_protection.sql", "057_reserved_broker_immutable.sql", "058_reserved_broker_connection_independent.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql", "054_agent_frontmatter_metadata.sql", "055_reserved_broker_delete_protection.sql", "056_reserved_broker_rename_protection.sql", "057_reserved_broker_immutable.sql", "058_reserved_broker_connection_independent.sql", "059_repository_docs_onboarding.sql", "060_repository_resource_sync.sql", "061_global_backup_ownership.sql", "062_child_mcp_definitions.sql", "063_immutable_context_conversations.sql", "064_child_mcp_tool_categories.sql", "065_context_rag_ingestion.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -858,6 +1015,86 @@ function runMigrations(db: Database.Database): void {
     if (brokerConnectionIndependentTriggerCheck.count === 0) {
       db.exec(readFileSync(resolve(migrationsDir, "058_reserved_broker_connection_independent.sql"), "utf-8"));
       logger.info("db", "Applied migration 058_reserved_broker_connection_independent.sql");
+    }
+
+    // Migration 059: repository-authoritative docs manifest identity. The table
+    // retains an archived page's source path/hash after its RAG source is
+    // removed, so a later reappearance can restore the same Docs page.
+    const repositoryDocsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'table' AND name = 'docs_repository_pages'",
+    ).get() as { count: number };
+    if (repositoryDocsCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "059_repository_docs_onboarding.sql"), "utf-8"));
+      logger.info("db", "Applied migration 059_repository_docs_onboarding.sql");
+    }
+
+    const repositoryResourcesCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'table' AND name = 'repository_sync_resources'",
+    ).get() as { count: number };
+    if (repositoryResourcesCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "060_repository_resource_sync.sql"), "utf-8"));
+      logger.info("db", "Applied migration 060_repository_resource_sync.sql");
+    }
+
+    // Migration 061: move legacy per-project backup metadata to the active
+    // global project. Startup retries the same idempotent backfill after the
+    // global project is ensured, covering first-start databases with no global
+    // row at migration time.
+    const backupOwnershipMigrationCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'table' AND name = 'backup_ownership_migrations'",
+    ).get() as { count: number };
+    if (backupOwnershipMigrationCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "061_global_backup_ownership.sql"), "utf-8"));
+      logger.info("db", "Applied migration 061_global_backup_ownership.sql");
+    }
+
+    // Migration 062: persist shell-free child MCP definitions and their bounded
+    // discovery metadata. The legacy `servers` table remains untouched because
+    // it also records the built-in launcher projection.
+    const childMcpDefinitionsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'table' AND name = 'mcp_child_server_definitions'",
+    ).get() as { count: number };
+    if (childMcpDefinitionsCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "062_child_mcp_definitions.sql"), "utf-8"));
+      logger.info("db", "Applied migration 062_child_mcp_definitions.sql");
+    }
+
+    // Migration 063: immutable conversation/checkpoint/message records are
+    // intentionally separate from mutable context_entries. A partial schema is
+    // unsafe: missing immutable triggers or scoped foreign keys would allow an
+    // irreversible integrity breach, so fail loudly instead of guessing a repair.
+    const contextConversationMigration = inspectContextConversationMigration(db);
+    if (contextConversationMigration.any && !contextConversationMigration.complete) {
+      throw new Error(
+        "Migration 063 is in a PARTIAL state. Missing required components: "
+        + contextConversationMigration.missing.join(", ")
+        + ". Restore the migration's complete schema before retrying.",
+      );
+    }
+    if (!contextConversationMigration.complete) {
+      db.exec(readFileSync(resolve(migrationsDir, "063_immutable_context_conversations.sql"), "utf-8"));
+      logger.info("db", "Applied migration 063_immutable_context_conversations.sql");
+    }
+
+    // Migration 064 upgrades the generic child-tool category CHECK constraint.
+    // Existing discovery rows retain their owner and are projected to
+    // `Child MCP / <server>` atomically by the rebuilding migration.
+    const childMcpToolCategoryCheck = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'mcp_child_discovered_tools'",
+    ).get() as { sql?: string } | undefined;
+    if (!childMcpToolCategoryCheck?.sql?.includes("Child MCP /")) {
+      db.exec(readFileSync(resolve(migrationsDir, "064_child_mcp_tool_categories.sql"), "utf-8"));
+      logger.info("db", "Applied migration 064_child_mcp_tool_categories.sql");
+    }
+
+    // Migration 065: bounded context uploads are staged separately from the
+    // public RAG corpus and become immutable when checkpointed.
+    const contextRagUploadsCheck = db.prepare(
+      "SELECT count(*) as count FROM sqlite_master WHERE type = 'table' AND name = 'context_rag_uploads'",
+    ).get() as { count: number };
+    if (contextRagUploadsCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "065_context_rag_ingestion.sql"), "utf-8"));
+      logger.info("db", "Applied migration 065_context_rag_ingestion.sql");
     }
   }
 

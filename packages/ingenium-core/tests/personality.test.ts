@@ -18,12 +18,14 @@ import {
 
 let tempDir: string;
 let projectId: string;
+let otherProjectId: string;
 
 beforeAll(() => {
   tempDir = mkdtempSync(join(tmpdir(), "ingenium-test-personality-"));
   process.env.INGENIUM_CORE_DB_PATH = join(tempDir, "test.db");
   const project = createProject("test-project");
   projectId = project.id;
+  otherProjectId = createProject("other-project").id;
 });
 
 afterAll(() => {
@@ -102,9 +104,25 @@ describe("personality traits", () => {
   it("disables a trait", () => {
     const obs = storeObservation(projectId, "pattern", "User stopped using X pattern");
     const trait = upsertTrait(projectId, "workflow_pattern", "X-pattern", "Old X pattern", 0.3, obs.id);
-    disableTrait(trait.id);
+    disableTrait(projectId, trait.id);
     const afterDisable = getTraits(projectId, "workflow_pattern");
     expect(afterDisable.find((t) => t.id === trait.id)).toBeUndefined();
+  });
+
+  it("does not disable a trait owned by another project", () => {
+    const foreign = upsertTrait(
+      otherProjectId,
+      "code_preference",
+      "external-project-trait",
+      "External project trait",
+      0.6,
+    );
+
+    expect(disableTrait(projectId, foreign.id)).toBe(false);
+    expect(getTraits(otherProjectId).find((trait) => trait.id === foreign.id)).toMatchObject({
+      id: foreign.id,
+      is_active: 1,
+    });
   });
 
   it("updates confidence with delta", () => {
@@ -126,13 +144,29 @@ describe("personality traits", () => {
     const trait = upsertTrait(projectId, "code_preference", "camelCase-naming", "Prefers camelCase", 0.5, obs.id);
     expect(trait.is_active).toBe(1);
 
-    setActive(projectId, trait.id, false);
+    expect(setActive(projectId, trait.id, false)).toBe(true);
 
     // Verify via listTraits with includeInactive
     const allTraits = listTraits(projectId, true);
     const dismissed = allTraits.find(t => t.id === trait.id);
     expect(dismissed).toBeDefined();
     expect(dismissed!.is_active).toBe(0);
+  });
+
+  it("does not change a trait owned by another project when setting active state", () => {
+    const foreign = upsertTrait(
+      otherProjectId,
+      "code_preference",
+      "dismiss-foreign-project-trait",
+      "Foreign trait for dismissal test",
+      0.6,
+    );
+
+    expect(setActive(projectId, foreign.id, false)).toBe(false);
+    expect(listTraits(otherProjectId, true).find((trait) => trait.id === foreign.id)).toMatchObject({
+      id: foreign.id,
+      is_active: 1,
+    });
   });
 
   it("listTraits excludes inactive by default", () => {
@@ -203,7 +237,7 @@ describe("personality traits", () => {
     expect(deleted).toBe(true);
 
     // Verify observation is gone
-    const refetchedObs = getObservation(obs.id);
+    const refetchedObs = getObservation(projectId, obs.id);
     expect(refetchedObs).toBeUndefined();
 
     // Verify trait still exists but exemplar_observation_id is now NULL

@@ -101,7 +101,7 @@ describe("Phase 4C core database boundaries", () => {
 
   it("keeps the migration runner inventory aligned with all numbered SQL files", () => {
     const migrationDir = resolve(__dirname, "../data/migrations");
-    const expected = Array.from({ length: 58 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
+    const expected = Array.from({ length: 64 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
       .map((number) => {
         const files = readdirSync(migrationDir).filter((file) => file.startsWith(`${number}_`) && file.endsWith(".sql"));
         expect(files, `migration ${number} must have exactly one SQL file`).toHaveLength(1);
@@ -122,6 +122,12 @@ describe("Phase 4C core database boundaries", () => {
     expect(expected).toContain("056_reserved_broker_rename_protection.sql");
     expect(expected).toContain("057_reserved_broker_immutable.sql");
     expect(expected).toContain("058_reserved_broker_connection_independent.sql");
+    expect(expected).toContain("059_repository_docs_onboarding.sql");
+    expect(expected).toContain("060_repository_resource_sync.sql");
+    expect(expected).toContain("061_global_backup_ownership.sql");
+    expect(expected).toContain("062_child_mcp_definitions.sql");
+    expect(expected).toContain("063_immutable_context_conversations.sql");
+    expect(expected).toContain("064_child_mcp_tool_categories.sql");
 
     const dbSource = readFileSync(resolve(__dirname, "../lib/db.ts"), "utf8");
     for (const migration of expected) {

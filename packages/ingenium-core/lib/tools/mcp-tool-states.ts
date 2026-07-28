@@ -2,11 +2,12 @@ import { getDb, execTransaction, checkpointAfterWrite } from "../db.js";
 import { MCPToolState } from "../schema.js";
 import {
   MCP_TOOL_CATALOG,
-  getAllToolNames,
+  getAllToolNames as getStaticToolNames,
   getToolsByCategory,
-  getCatalogMap,
+  getCatalogMap as getStaticCatalogMap,
   getCategoryOrder,
 } from "./mcp-tool-catalog.js";
+import { listEffectiveChildMcpTools } from "./child-mcp-servers.js";
 
 /**
  * MCP tool state — per-project enable/disable persistence for individual tools.
@@ -19,12 +20,36 @@ import {
  * 🔴 All mutations use execTransaction() with checkpointAfterWrite() outside the txn.
  */
 
-export { getToolsByCategory, getAllToolNames };
+export { getToolsByCategory };
 export type { McpToolCatalogEntry } from "./mcp-tool-catalog.js";
 
-/** Returns the full catalog map (name → entry). */
-export function getAllTools() {
-  return getCatalogMap();
+/**
+ * Returns static catalog entries and, when a project is supplied, its eligible
+ * persisted child-discovery metadata. This is metadata only: no child tool is
+ * registered or forwarded by this function. Child entries remain present when
+ * their server is disabled so the project can toggle them back on.
+ */
+export function getAllTools(projectId?: string) {
+  const catalog = getStaticCatalogMap();
+  if (!projectId) return catalog;
+
+  for (const tool of listEffectiveChildMcpTools(projectId)) {
+    catalog.set(tool.canonical_name, {
+      name: tool.canonical_name,
+      category: tool.category,
+      description: tool.description,
+      projectScope: tool.scope === "global" ? "global" : "per-project",
+      defaultEnabled: true,
+      apiEndpoints: [],
+    });
+  }
+  return catalog;
+}
+
+/** Return static tool names, plus effective discovered child tool names when scoped to a project. */
+export function getAllToolNames(projectId?: string): string[] {
+  if (!projectId) return getStaticToolNames();
+  return Array.from(getAllTools(projectId).keys());
 }
 
 /**
@@ -49,7 +74,10 @@ export function setToolState(projectId: string, toolName: string, enabled: boole
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(project_id, tool_name) DO UPDATE SET enabled = ?, updated_at = ?
     `).run(projectId, toolName, enabled ? 1 : 0, now, now, enabled ? 1 : 0, now);
-    return db.prepare("SELECT * FROM mcp_tool_states WHERE project_id = ? AND tool_name = ?").get(projectId, toolName) as MCPToolState;
+    const row = db.prepare(
+      "SELECT * FROM mcp_tool_states WHERE project_id = ? AND tool_name = ?",
+    ).get(projectId, toolName) as Omit<MCPToolState, "enabled"> & { enabled: number };
+    return { ...row, enabled: row.enabled === 1 };
   });
   // 🔴 checkpointAfterWrite MUST be outside the transaction — calling it inside
   // the execTransaction callback causes SQLITE_LOCKED under concurrent access.
@@ -79,18 +107,24 @@ export const ALL_TOOLS: string[] = MCP_TOOL_CATALOG.map(e => e.name);
 export function listToolStatesWithDefaults(projectId: string): Array<{ tool_name: string; enabled: boolean }> {
   const states = listToolStates(projectId);
   const stateMap = new Map(states.map(s => [s.tool_name, s.enabled]));
-  return getAllToolNames().map(name => ({
+  return getAllToolNames(projectId).map(name => ({
     tool_name: name,
     enabled: stateMap.has(name) ? stateMap.get(name)! : true,
   }));
 }
 
 /** Derived from catalog: category name → set of tool names in that category. */
-export function getCategoryMap(): Map<string, string[]> {
+export function getCategoryMap(projectId?: string): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const entry of MCP_TOOL_CATALOG) {
     if (!map.has(entry.category)) map.set(entry.category, []);
     map.get(entry.category)!.push(entry.name);
+  }
+  if (projectId) {
+    for (const tool of listEffectiveChildMcpTools(projectId)) {
+      if (!map.has(tool.category)) map.set(tool.category, []);
+      map.get(tool.category)!.push(tool.canonical_name);
+    }
   }
   return map;
 }
@@ -122,8 +156,8 @@ export const CATEGORY_PREFIX: Record<string, string> = (() => {
  * then falls back to prefix-based lookup for any rogue tools not in the catalog.
  * Returns "Other" as a last resort.
  */
-export function getCategory(toolName: string): string {
-  const catalogMap = getCatalogMap();
+export function getCategory(toolName: string, projectId?: string): string {
+  const catalogMap = getAllTools(projectId);
   const entry = catalogMap.get(toolName);
   if (entry) return entry.category;
 
@@ -151,7 +185,7 @@ export function listCategorizedTools(projectId: string): Array<{
   tools: Array<{ tool_name: string; enabled: boolean }>;
 }> {
   const tools = listToolStatesWithDefaults(projectId);
-  const categorized = tools.map(t => ({ ...t, category: getCategory(t.tool_name) }));
+  const categorized = tools.map(t => ({ ...t, category: getCategory(t.tool_name, projectId) }));
 
   // Group by category
   const groups = new Map<string, Array<{ tool_name: string; enabled: boolean }>>();
@@ -185,7 +219,7 @@ export function listCategorizedTools(projectId: string): Array<{
  * per-tool logging and side effects. Returns the number of tools toggled.
  */
 export function setCategoryState(projectId: string, category: string, enabled: boolean): number {
-  const categoryMap = getCategoryMap();
+  const categoryMap = getCategoryMap(projectId);
   const matchingTools = categoryMap.get(category);
   if (!matchingTools || matchingTools.length === 0) return 0;
 

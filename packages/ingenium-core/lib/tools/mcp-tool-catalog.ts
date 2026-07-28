@@ -122,6 +122,20 @@ const PLANS_ENDPOINTS = [
   "GET /api/v1/context/search",
 ];
 const CONTEXT_ENDPOINTS = [...PLANS_ENDPOINTS, "GET /api/v1/context/:id", "PATCH /api/v1/context/:id", "DELETE /api/v1/context/:id", "POST /api/v1/context/batch"];
+const CONTEXT_CONVERSATION_ENDPOINTS = [
+  "POST /api/v1/context/conversations",
+  "GET /api/v1/context/conversations",
+  "GET /api/v1/context/conversations/:conversationId",
+  "POST /api/v1/context/conversations/:conversationId/messages",
+  "GET /api/v1/context/conversations/:conversationId/messages",
+  "GET /api/v1/context/conversations/:conversationId/messages/search",
+  "GET /api/v1/context/conversations/:conversationId/messages/:messageId",
+  "POST /api/v1/context/conversations/:conversationId/messages/batch",
+  "POST /api/v1/context/conversations/:conversationId/checkpoints",
+  "GET /api/v1/context/conversations/:conversationId/checkpoints",
+  "GET /api/v1/context/conversations/:conversationId/checkpoints/:checkpointId",
+  "POST /api/v1/context/conversations/:conversationId/checkpoints/:checkpointId/restore",
+];
 
 const PROJECTS_ENDPOINTS = [
   "GET /api/v1/projects",
@@ -994,6 +1008,18 @@ export const MCP_TOOL_CATALOG: McpToolCatalogEntry[] = [
   { name: "ingenium_context_update", category: "Context", description: "Update a canonical agent memory entry.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
   { name: "ingenium_context_delete", category: "Context", description: "Delete a canonical agent memory entry.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
   { name: "ingenium_context_batch_get", category: "Context", description: "Retrieve canonical agent memory entries by ID.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_ENDPOINTS },
+  { name: "ingenium_context_conversation_create", category: "Context", description: "Create an immutable project-scoped context conversation.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_get", category: "Context", description: "Get immutable conversation metadata and current revision.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_conversation_list", category: "Context", description: "Keyset-paginate immutable context conversations.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_append", category: "Context", description: "Append an immutable message using optimistic revision control.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_list", category: "Context", description: "Keyset-paginate message summaries without content.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_search", category: "Context", description: "Run bounded relevance search without returning message content.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_retrieve", category: "Context", description: "Explicitly retrieve one immutable context message with content.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_message_batch_retrieve", category: "Context", description: "Retrieve messages in requested-ID order and report missing IDs.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_create", category: "Context", description: "Create a hash-addressed immutable checkpoint.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_list", category: "Context", description: "Keyset-paginate immutable checkpoint history.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_get", category: "Context", description: "Get a checkpoint and its RAG-source provenance identifiers.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
+  { name: "ingenium_context_checkpoint_restore", category: "Context", description: "Restore a checkpoint by creating a new immutable conversation.", projectScope: "per-project", defaultEnabled: true, apiEndpoints: CONTEXT_CONVERSATION_ENDPOINTS },
 
   // ── Projects (10) ────────────────────────────────────
   {

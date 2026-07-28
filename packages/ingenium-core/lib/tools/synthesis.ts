@@ -229,11 +229,11 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
   for (const obs of batch) {
     try {
       if (involvedObsIds.has(obs.id)) {
-        observations.updateObservation(obs.id, { status: "processed" });
+        observations.updateObservation(projectId, obs.id, { status: "processed" });
         result.observations_processed++;
       } else {
         // Mark as processed — the LLM evaluated and chose to ignore them
-        observations.updateObservation(obs.id, { status: "processed" });
+        observations.updateObservation(projectId, obs.id, { status: "processed" });
         result.observations_skipped++;
       }
     } catch (err) {
@@ -243,7 +243,7 @@ export async function runSynthesis(projectId: string, sessionId?: string): Promi
       logger.error("synthesis", `Observation ${obs.id} processing failed: ${msg}`, { error: msg, name: errName, stack: stack?.split("\n").slice(0, 5).join("\n") });
       result.errors.push(`Observation ${obs.id}: ${msg}`);
       try {
-        observations.updateObservation(obs.id, { status: "failed" });
+        observations.updateObservation(projectId, obs.id, { status: "failed" });
       } catch {
         result.errors.push(`Observation ${obs.id}: also failed to mark as failed`);
       }

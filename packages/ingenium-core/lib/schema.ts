@@ -265,6 +265,163 @@ export const ContextSchema = z.object({
 });
 export type ContextEntry = z.infer<typeof ContextSchema>;
 
+/** Immutable conversation/checkpoint/message limits enforced by migration 063. */
+export const CONTEXT_CONVERSATION_TITLE_MAX_LENGTH = 256;
+export const CONTEXT_MESSAGE_CONTENT_MAX_LENGTH = 262_144;
+export const CONTEXT_TAGS_MAX_BYTES = 4_096;
+export const CONTEXT_METADATA_MAX_BYTES = 16_384;
+export const CONTEXT_MAX_TAG_COUNT = 64;
+export const CONTEXT_MAX_RAG_SOURCES_PER_CHECKPOINT = 64;
+export const CONTEXT_IDEMPOTENCY_KEY_MAX_LENGTH = 128;
+
+export type ContextMetadata = Record<string, unknown>;
+
+function isBoundedContextJson(value: unknown, maxBytes: number): boolean {
+  let nodes = 0;
+  const visit = (candidate: unknown, depth: number): boolean => {
+    nodes += 1;
+    if (nodes > 128 || depth > 8) return false;
+    if (candidate === null || typeof candidate === "boolean") return true;
+    if (typeof candidate === "number") return Number.isFinite(candidate);
+    if (typeof candidate === "string") return candidate.length <= 4_096;
+    if (Array.isArray(candidate)) return candidate.length <= 64 && candidate.every((entry) => visit(entry, depth + 1));
+    if (!candidate || typeof candidate !== "object") return false;
+    const prototype = Object.getPrototypeOf(candidate);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const entries = Object.entries(candidate as Record<string, unknown>);
+    return entries.length <= 64 && entries.every(([key, entry]) => (
+      key.length <= 128
+      && key !== "__proto__"
+      && key !== "prototype"
+      && key !== "constructor"
+      && visit(entry, depth + 1)
+    ));
+  };
+
+  if (!visit(value, 0)) return false;
+  try {
+    return Buffer.byteLength(JSON.stringify(value), "utf8") <= maxBytes;
+  } catch {
+    return false;
+  }
+}
+
+/** Bounded JSON object contract shared by immutable context metadata fields. */
+export function isBoundedContextMetadata(value: unknown): value is ContextMetadata {
+  return Boolean(value)
+    && !Array.isArray(value)
+    && typeof value === "object"
+    && isBoundedContextJson(value, CONTEXT_METADATA_MAX_BYTES);
+}
+
+const ContextTagsInputSchema = z.array(z.string().trim().min(1).max(64))
+  .max(CONTEXT_MAX_TAG_COUNT)
+  .default([]);
+const ContextMetadataInputSchema = z.unknown().superRefine((value, context) => {
+  if (!isBoundedContextMetadata(value)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid context metadata" });
+  }
+});
+const ContextHashSchema = z.string().regex(/^[0-9a-f]{64}$/);
+const ContextIdempotencyKeySchema = z.string()
+  .min(1)
+  .max(CONTEXT_IDEMPOTENCY_KEY_MAX_LENGTH)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const ContextExpectedRevisionSchema = z.number().int().nonnegative();
+
+export const ContextMessageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
+export type ContextMessageRole = z.infer<typeof ContextMessageRoleSchema>;
+
+export const CreateContextConversationInputSchema = z.object({
+  title: z.string().trim().min(1).max(CONTEXT_CONVERSATION_TITLE_MAX_LENGTH),
+  tags: ContextTagsInputSchema,
+  priority: z.number().int().min(0).max(10).default(5),
+  metadata: ContextMetadataInputSchema.default({}),
+  idempotencyKey: ContextIdempotencyKeySchema.optional(),
+}).strict();
+export type CreateContextConversationInput = z.input<typeof CreateContextConversationInputSchema>;
+
+export const AppendContextMessageInputSchema = z.object({
+  role: ContextMessageRoleSchema,
+  content: z.string().min(1).max(CONTEXT_MESSAGE_CONTENT_MAX_LENGTH)
+    .refine((value) => value.trim().length > 0, "Message content is required"),
+  tags: ContextTagsInputSchema,
+  priority: z.number().int().min(0).max(10).default(5),
+  metadata: ContextMetadataInputSchema.default({}),
+  expectedRevision: ContextExpectedRevisionSchema,
+  idempotencyKey: ContextIdempotencyKeySchema.optional(),
+}).strict();
+export type AppendContextMessageInput = z.input<typeof AppendContextMessageInputSchema>;
+
+export const CreateContextCheckpointInputSchema = z.object({
+  ragSourceIds: z.array(z.string().uuid()).max(CONTEXT_MAX_RAG_SOURCES_PER_CHECKPOINT).default([]),
+  metadata: ContextMetadataInputSchema.default({}),
+  expectedRevision: ContextExpectedRevisionSchema,
+  idempotencyKey: ContextIdempotencyKeySchema.optional(),
+}).strict();
+export type CreateContextCheckpointInput = z.input<typeof CreateContextCheckpointInputSchema>;
+
+export const RestoreContextCheckpointInputSchema = z.object({
+  expectedRevision: ContextExpectedRevisionSchema,
+  title: z.string().trim().min(1).max(CONTEXT_CONVERSATION_TITLE_MAX_LENGTH).optional(),
+  metadata: ContextMetadataInputSchema.default({}),
+  idempotencyKey: ContextIdempotencyKeySchema.optional(),
+}).strict();
+export type RestoreContextCheckpointInput = z.input<typeof RestoreContextCheckpointInputSchema>;
+
+/** Immutable conversation metadata and its project ownership. */
+export const ContextConversationSchema = z.object({
+  id: z.string().uuid(),
+  project_id: z.string().uuid(),
+  title: z.string().min(1).max(CONTEXT_CONVERSATION_TITLE_MAX_LENGTH),
+  tags: z.string().max(CONTEXT_TAGS_MAX_BYTES),
+  priority: z.coerce.number().int().min(0).max(10),
+  metadata: z.string().max(CONTEXT_METADATA_MAX_BYTES),
+  created_at: z.string().datetime(),
+});
+export type ContextConversation = z.infer<typeof ContextConversationSchema>;
+
+/** One ordered, immutable message in a project-scoped conversation. */
+export const ContextMessageSchema = z.object({
+  id: z.string().uuid(),
+  project_id: z.string().uuid(),
+  conversation_id: z.string().uuid(),
+  sequence: z.coerce.number().int().nonnegative(),
+  role: ContextMessageRoleSchema,
+  content: z.string().min(1).max(CONTEXT_MESSAGE_CONTENT_MAX_LENGTH),
+  content_hash: ContextHashSchema,
+  tags: z.string().max(CONTEXT_TAGS_MAX_BYTES),
+  priority: z.coerce.number().int().min(0).max(10),
+  metadata: z.string().max(CONTEXT_METADATA_MAX_BYTES),
+  created_at: z.string().datetime(),
+});
+export type ContextMessage = z.infer<typeof ContextMessageSchema>;
+
+/** Immutable snapshot of a conversation's messages through a specific message. */
+export const ContextCheckpointSchema = z.object({
+  id: z.string().uuid(),
+  project_id: z.string().uuid(),
+  conversation_id: z.string().uuid(),
+  sequence: z.coerce.number().int().nonnegative(),
+  through_message_id: z.string().uuid(),
+  message_count: z.coerce.number().int().positive(),
+  state_hash: ContextHashSchema,
+  metadata: z.string().max(CONTEXT_METADATA_MAX_BYTES),
+  created_at: z.string().datetime(),
+});
+export type ContextCheckpoint = z.infer<typeof ContextCheckpointSchema>;
+
+/** Immutable association between a checkpoint and a project-owned RAG source. */
+export const ContextCheckpointRagSourceSchema = z.object({
+  project_id: z.string().uuid(),
+  checkpoint_id: z.string().uuid(),
+  rag_source_id: z.string().uuid(),
+  ordinal: z.coerce.number().int().nonnegative(),
+  metadata: z.string().max(CONTEXT_METADATA_MAX_BYTES),
+  created_at: z.string().datetime(),
+});
+export type ContextCheckpointRagSource = z.infer<typeof ContextCheckpointRagSourceSchema>;
+
 /** A registered child MCP server with its command, arguments, environment, and origin source tracking. */
 export const ServerSchema = z.object({
   id: z.string(),
@@ -279,6 +436,165 @@ export const ServerSchema = z.object({
   created_at: z.string().datetime(),
 });
 export type Server = z.infer<typeof ServerSchema>;
+
+/**
+ * Canonical child MCP server identifiers are deliberately narrower than general
+ * project names because they become part of an externally visible tool name.
+ */
+export const MCP_CHILD_SERVER_NAME_MAX_LENGTH = 48;
+export const MCP_CHILD_TOOL_NAME_MAX_LENGTH = 64;
+export const MCP_CHILD_TOOL_DESCRIPTION_MAX_LENGTH = 1024;
+export const MCP_CHILD_TOOL_SCHEMA_MAX_BYTES = 16 * 1024;
+
+const ChildMcpServerNameSchema = z.string().superRefine((value, context) => {
+  if (!/^[a-z][a-z0-9]{0,47}$/.test(value)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid child MCP server name" });
+  }
+});
+
+const ChildMcpToolNameSchema = z.string().superRefine((value, context) => {
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(value) || value.startsWith("ingenium_")) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid child MCP tool name" });
+  }
+});
+
+const ChildMcpExecutableSchema = z.string().superRefine((value, context) => {
+  const segments = value.split("/");
+  const isSafeSegment = (segment: string) => /^[A-Za-z0-9_+@.:-]+$/.test(segment)
+    && segment !== "."
+    && segment !== "..";
+  const hasLeadingSlash = value.startsWith("/");
+  const pathSegments = hasLeadingSlash ? segments.slice(1) : segments;
+  if (
+    value.length === 0
+    || value.length > 1024
+    || /[\s\u0000-\u001f\u007f]/.test(value)
+    || pathSegments.length === 0
+    || pathSegments.some((segment) => !isSafeSegment(segment))
+  ) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Executable must be a shell-free executable path" });
+  }
+});
+
+const ChildMcpArgumentSchema = z.string().superRefine((value, context) => {
+  if (value.length > 2048 || /[\u0000-\u001f\u007f]/.test(value)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid child MCP argument" });
+  }
+});
+
+const ChildMcpEnvironmentKeySchema = z.string().regex(/^[A-Z_][A-Z0-9_]{0,63}$/);
+
+const ChildMcpVaultReferenceSchema = z.object({
+  vault_item_id: z.string().uuid(),
+}).strict();
+
+function isBoundedJsonSchema(value: unknown): boolean {
+  let nodeCount = 0;
+  const visit = (candidate: unknown, depth: number): boolean => {
+    nodeCount += 1;
+    if (nodeCount > 128 || depth > 8) return false;
+    if (candidate === null || typeof candidate === "boolean" || typeof candidate === "number") return true;
+    if (typeof candidate === "string") return candidate.length <= 2048;
+    if (Array.isArray(candidate)) return candidate.length <= 64 && candidate.every((entry) => visit(entry, depth + 1));
+    if (typeof candidate !== "object") return false;
+    const entries = Object.entries(candidate as Record<string, unknown>);
+    return entries.length <= 64 && entries.every(([key, entry]) => (
+      key.length <= 128
+      && key !== "__proto__"
+      && key !== "prototype"
+      && key !== "constructor"
+      && visit(entry, depth + 1)
+    ));
+  };
+
+  if (!visit(value, 0)) return false;
+  try {
+    return JSON.stringify(value).length <= MCP_CHILD_TOOL_SCHEMA_MAX_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+const ChildMcpInputSchema = z.unknown().superRefine((value, context) => {
+  if (!isBoundedJsonSchema(value)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Child MCP input schema is invalid" });
+  }
+});
+
+export const ChildMcpServerDefinitionInputSchema = z.object({
+  name: ChildMcpServerNameSchema,
+  executable: ChildMcpExecutableSchema,
+  args: z.array(ChildMcpArgumentSchema).max(32).default([]),
+  environment: z.record(ChildMcpEnvironmentKeySchema, ChildMcpVaultReferenceSchema)
+    .superRefine((value, context) => {
+      if (Object.keys(value).length > 16) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "Too many child MCP environment references" });
+      }
+    })
+    .default({}),
+  scope: z.enum(["project", "global"]).default("project"),
+}).strict();
+export type ChildMcpServerDefinitionInput = z.infer<typeof ChildMcpServerDefinitionInputSchema>;
+
+export const ChildMcpDiscoveredToolInputSchema = z.object({
+  name: ChildMcpToolNameSchema,
+  description: z.string().min(1).max(MCP_CHILD_TOOL_DESCRIPTION_MAX_LENGTH),
+  input_schema: ChildMcpInputSchema.default({ type: "object", properties: {} }),
+}).strict();
+export type ChildMcpDiscoveredToolInput = z.infer<typeof ChildMcpDiscoveredToolInputSchema>;
+
+export const ChildMcpDiscoveryReportInputSchema = z.object({
+  status: z.enum(["ready", "failed"]),
+  diagnostic: z.enum(["unavailable", "unauthorized", "invalid_response", "timeout"]).optional(),
+  tools: z.array(ChildMcpDiscoveredToolInputSchema).max(128).default([]),
+}).strict().superRefine((value, context) => {
+  if (value.status === "ready" && value.diagnostic !== undefined) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Ready discovery reports cannot include diagnostics" });
+  }
+  if (value.status === "failed" && value.tools.length > 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Failed discovery reports cannot include tools" });
+  }
+  const names = new Set<string>();
+  for (const tool of value.tools) {
+    if (names.has(tool.name)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Duplicate child MCP tool name" });
+      break;
+    }
+    names.add(tool.name);
+  }
+});
+export type ChildMcpDiscoveryReportInput = z.infer<typeof ChildMcpDiscoveryReportInputSchema>;
+
+/** Persisted child MCP definition. Environment values live in a normalized vault-reference table. */
+export const ChildMcpServerDefinitionSchema = z.object({
+  id: z.string().uuid(),
+  project_id: z.string().uuid(),
+  name: ChildMcpServerNameSchema,
+  executable: z.string(),
+  args: z.string(),
+  scope: z.enum(["project", "global"]),
+  enabled: z.coerce.boolean(),
+  discovery_status: z.enum(["pending", "ready", "failed"]),
+  discovery_diagnostic: z.enum(["unavailable", "unauthorized", "invalid_response", "timeout"]).nullable(),
+  last_discovered_at: z.string().datetime().nullable(),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+export type ChildMcpServerDefinition = z.infer<typeof ChildMcpServerDefinitionSchema>;
+
+export const ChildMcpDiscoveredToolSchema = z.object({
+  id: z.string().uuid(),
+  server_id: z.string().uuid(),
+  source_name: ChildMcpToolNameSchema,
+  canonical_name: z.string().regex(/^ingenium_[a-z][a-z0-9]*_[a-z][a-z0-9_]*$/),
+  // Child tools are grouped by their owning server so operators can distinguish
+  // two independently managed child catalogs without relying on a name prefix.
+  category: z.string().regex(/^Child MCP \/ [a-z][a-z0-9]{0,47}$/),
+  description: z.string().min(1).max(MCP_CHILD_TOOL_DESCRIPTION_MAX_LENGTH),
+  input_schema: z.string(),
+  discovered_at: z.string().datetime(),
+});
+export type ChildMcpDiscoveredTool = z.infer<typeof ChildMcpDiscoveredToolSchema>;
 
 /** An observation about user behavior — the raw input to the self-learning pipeline. */
 export const ObservationSchema = z.object({
@@ -466,7 +782,7 @@ export const VaultStatusSchema = z.object({
 });
 export type VaultStatus = z.infer<typeof VaultStatusSchema>;
 
-/** Metadata for a project-scoped Ingenium and OpenCode database snapshot. */
+/** Metadata for a server-owned Ingenium and OpenCode database snapshot. */
 export const BackupRecordSchema = z.object({
   id: z.string().uuid(),
   project_id: z.string(),

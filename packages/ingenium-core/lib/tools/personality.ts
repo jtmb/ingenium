@@ -167,16 +167,16 @@ export function getProfile(projectId: string, options?: { includeHidden?: boolea
 }
 
 /**
- * Soft-delete a trait by ID — sets is_active = 0.
+ * Soft-delete a trait by ID within its owning project — sets is_active = 0.
  * The trait remains in the DB for history but is excluded from getProfile().
  */
-export function disableTrait(id: number): boolean {
+export function disableTrait(projectId: string, id: number): boolean {
   const ok = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
     const now = new Date().toISOString();
     const result = db.prepare(
-      "UPDATE personality_traits SET is_active = 0, updated_at = ? WHERE id = ?"
-    ).run(now, id);
+      "UPDATE personality_traits SET is_active = 0, updated_at = ? WHERE project_id = ? AND id = ?"
+    ).run(now, projectId, id);
     return result.changes > 0;
   });
   checkpointAfterWrite();
@@ -185,15 +185,18 @@ export function disableTrait(id: number): boolean {
 
 /**
  * Enable or disable a specific trait by ID, scoped to a project.
+ * Returns false when the trait does not belong to the project or does not exist.
  * Used by the dashboard toggle and the personaility-trait-dismiss MCP tool.
  */
-export function setActive(projectId: string, traitId: number, active: boolean): void {
-  execTransaction(() => {
+export function setActive(projectId: string, traitId: number, active: boolean): boolean {
+  const updated = execTransaction(() => {
     const db = getDb(process.env.INGENIUM_CORE_DB_PATH ?? "./.ingenium/data.db");
-    db.prepare("UPDATE personality_traits SET is_active = ? WHERE project_id = ? AND id = ?")
+    const result = db.prepare("UPDATE personality_traits SET is_active = ? WHERE project_id = ? AND id = ?")
       .run(active ? 1 : 0, projectId, traitId);
+    return result.changes > 0;
   });
   checkpointAfterWrite();
+  return updated;
 }
 
 /**
