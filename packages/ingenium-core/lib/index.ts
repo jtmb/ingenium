@@ -28,6 +28,7 @@ export * as jobSuggestLlm from "./tools/job-suggest-llm.js";
 export * as mcpToolStates from "./tools/mcp-tool-states.js";
 export * as emailCache from "./tools/email-cache.js";
 export * as emailSuggestionQueue from "./tools/email-suggestion-queue.js";
+export * as usage from "./tools/usage.js";
 export * as docs from "./tools/docs.js";
 export * as repositoryDocs from "./tools/repository-docs.js";
 export * as repositoryResources from "./tools/repository-resources.js";

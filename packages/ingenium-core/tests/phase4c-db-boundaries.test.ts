@@ -101,7 +101,7 @@ describe("Phase 4C core database boundaries", () => {
 
   it("keeps the migration runner inventory aligned with all numbered SQL files", () => {
     const migrationDir = resolve(__dirname, "../data/migrations");
-    const expected = Array.from({ length: 66 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
+    const expected = Array.from({ length: 68 }, (_, index) => `${String(index + 1).padStart(3, "0")}`)
       .map((number) => {
         const files = readdirSync(migrationDir).filter((file) => file.startsWith(`${number}_`) && file.endsWith(".sql"));
         expect(files, `migration ${number} must have exactly one SQL file`).toHaveLength(1);
@@ -130,6 +130,8 @@ describe("Phase 4C core database boundaries", () => {
     expect(expected).toContain("064_child_mcp_tool_categories.sql");
     expect(expected).toContain("065_context_rag_ingestion.sql");
     expect(expected).toContain("066_context_checkpoint_governance.sql");
+    expect(expected).toContain("067_context_migration_repair.sql");
+    expect(expected).toContain("068_usage_telemetry.sql");
 
     const dbSource = readFileSync(resolve(__dirname, "../lib/db.ts"), "utf8");
     for (const migration of expected) {

@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { logger } from "./logger.js";
@@ -105,6 +106,72 @@ interface ContextCheckpointGovernanceMigrationState {
   complete: boolean;
   missing: string[];
 }
+
+type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
+
+interface RepairedContextConversation {
+  id: string;
+  project_id: string;
+  title: string;
+  request_hash: string;
+  idempotency_key: string | null;
+  tags: string;
+  priority: number;
+  metadata: string;
+  created_at: string;
+}
+
+interface RepairedContextMessage {
+  id: string;
+  project_id: string;
+  conversation_id: string;
+  sequence: number;
+  role: string;
+  content: string;
+  content_hash: string;
+  request_hash: string;
+  idempotency_key: string | null;
+  tags: string;
+  priority: number;
+  metadata: string;
+  created_at: string;
+}
+
+interface RepairedContextCheckpoint {
+  id: string;
+  project_id: string;
+  conversation_id: string;
+  sequence: number;
+  through_message_id: string;
+  message_count: number;
+  state_hash: string;
+  request_hash: string;
+  idempotency_key: string | null;
+  metadata: string;
+  created_at: string;
+  repair_request_hash?: string;
+}
+
+interface RepairedContextCheckpointRagSource {
+  project_id: string;
+  checkpoint_id: string;
+  rag_source_id: string;
+  ordinal: number;
+  metadata: string;
+  created_at: string;
+}
+
+interface ContextMigrationRepairData {
+  conversations: RepairedContextConversation[];
+  messages: RepairedContextMessage[];
+  checkpoints: RepairedContextCheckpoint[];
+  checkpointRagSources: RepairedContextCheckpointRagSource[];
+  sourceSchemaHash: string;
+}
+
+const CONTEXT_REPAIR_DEFAULT_CREATED_AT = "1970-01-01T00:00:00.000Z";
+const CONTEXT_HASH_PATTERN = /^[0-9a-f]{64}$/;
+const CONTEXT_IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
 function hasContextConversationColumns(
   db: Database.Database,
@@ -326,6 +393,813 @@ function inspectContextCheckpointGovernanceMigration(db: Database.Database): Con
   return { any, complete: missing.length === 0, missing };
 }
 
+function contextRepairError(message: string): Error {
+  return new Error(`Migration 067 context repair preflight refused: ${message}`);
+}
+
+function contextRepairHash(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function canonicalizeForContextRepair(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizeForContextRepair);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalizeForContextRepair(entry)]));
+  }
+  return value;
+}
+
+function requestHashForContextRepair(value: unknown): string {
+  return contextRepairHash(JSON.stringify(canonicalizeForContextRepair(value)));
+}
+
+function contextTableExists(db: Database.Database, table: string): boolean {
+  return (db.prepare(
+    "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+  ).get(table) as { count: number }).count > 0;
+}
+
+function contextTableColumns(db: Database.Database, table: string): Set<string> {
+  if (!contextTableExists(db, table)) return new Set();
+  return new Set((db.prepare(`PRAGMA table_info('${table}')`).all() as Array<{ name: string }>)
+    .map((column) => column.name));
+}
+
+function contextRepairRows(db: Database.Database, table: string): ContextRepairRow[] {
+  if (!contextTableExists(db, table)) return [];
+  try {
+    return db.prepare(`SELECT rowid AS __repair_rowid, * FROM ${table}`).all() as ContextRepairRow[];
+  } catch {
+    // A hand-created partial table can be WITHOUT ROWID. It remains repairable;
+    // the stable query order is only used when a missing sequence must be filled.
+    return db.prepare(`SELECT * FROM ${table}`).all().map((row, index) => ({
+      ...(row as Record<string, unknown>),
+      __repair_rowid: index,
+    }));
+  }
+}
+
+function contextColumnValue(row: ContextRepairRow, columns: Set<string>, column: string): unknown {
+  return columns.has(column) ? row[column] : undefined;
+}
+
+function requiredContextString(
+  value: unknown,
+  label: string,
+  fallback?: string,
+): string {
+  if (value === undefined || value === null) {
+    if (fallback !== undefined) return fallback;
+    throw contextRepairError(`${label} is required to preserve existing rows`);
+  }
+  if (typeof value !== "string" || value.length === 0) {
+    throw contextRepairError(`${label} must be a non-empty string`);
+  }
+  return value;
+}
+
+function nullableIdempotencyKey(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !CONTEXT_IDEMPOTENCY_KEY_PATTERN.test(value)) {
+    throw contextRepairError(`${label} must be null or a 1–128 character idempotency key`);
+  }
+  return value;
+}
+
+function boundedContextInteger(
+  value: unknown,
+  label: string,
+  minimum: number,
+  maximum: number,
+  fallback?: number,
+): number {
+  if (value === undefined || value === null) {
+    if (fallback !== undefined) return fallback;
+    throw contextRepairError(`${label} is required to preserve existing rows`);
+  }
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw contextRepairError(`${label} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return value;
+}
+
+function contextJsonValue(
+  value: unknown,
+  label: string,
+  expected: "array" | "object",
+  maxBytes: number,
+  fallback: string,
+): string {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > maxBytes) {
+    throw contextRepairError(`${label} must be bounded JSON`);
+  }
+  try {
+    const parsed = JSON.parse(value);
+    const valid = expected === "array"
+      ? Array.isArray(parsed)
+      : Boolean(parsed) && !Array.isArray(parsed) && typeof parsed === "object";
+    if (!valid) throw new Error("unexpected JSON type");
+  } catch {
+    throw contextRepairError(`${label} must be a JSON ${expected}`);
+  }
+  return value;
+}
+
+function contextCreatedAt(value: unknown, label: string): string {
+  if (value === undefined || value === null) return CONTEXT_REPAIR_DEFAULT_CREATED_AT;
+  if (typeof value !== "string" || value.length === 0) {
+    throw contextRepairError(`${label} must be a non-empty timestamp string`);
+  }
+  return value;
+}
+
+function contextHashValue(value: unknown, fallback: string, label: string): string {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "string" || !CONTEXT_HASH_PATTERN.test(value)) {
+    throw contextRepairError(`${label} must be a lowercase SHA-256 hash`);
+  }
+  return value;
+}
+
+function assertContextRepairDatabaseIntegrity(db: Database.Database, phase: "preflight" | "post-repair"): void {
+  const integrityRows = db.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
+  if (integrityRows.length !== 1 || integrityRows[0]?.integrity_check !== "ok") {
+    throw contextRepairError(`${phase} integrity_check failed: ${JSON.stringify(integrityRows)}`);
+  }
+  let foreignKeyRows: unknown[];
+  try {
+    foreignKeyRows = db.prepare("PRAGMA foreign_key_check").all();
+  } catch (error) {
+    // A deliberately partial 063 parent table can make an existing child FK a
+    // temporary "foreign key mismatch". The canonical rebuild validates every
+    // context relationship itself, then runs the full check once the target
+    // parent keys exist again. Any other preflight failure still refuses repair.
+    if (phase === "preflight" && error instanceof Error && /foreign key mismatch/i.test(error.message)) return;
+    throw error;
+  }
+  if (foreignKeyRows.length > 0) {
+    throw contextRepairError(`${phase} foreign_key_check found ${foreignKeyRows.length} violation(s)`);
+  }
+}
+
+function contextSourceSchemaHash(db: Database.Database): string {
+  const names = [
+    "context_conversations",
+    "context_messages",
+    "context_messages_fts",
+    "context_checkpoints",
+    "context_checkpoint_rag_sources",
+  ];
+  const placeholders = names.map(() => "?").join(",");
+  const rows = db.prepare(
+    `SELECT type, name, tbl_name, COALESCE(sql, '') AS sql
+     FROM sqlite_master WHERE name IN (${placeholders}) ORDER BY type, name`,
+  ).all(...names) as Array<{ type: string; name: string; tbl_name: string; sql: string }>;
+  return contextRepairHash(JSON.stringify(rows));
+}
+
+function assignMissingContextSequences<T extends { sequence?: number; created_at: string; rowid: number }>(
+  rows: T[],
+  label: string,
+): void {
+  const used = new Set<number>();
+  for (const row of rows) {
+    if (row.sequence === undefined) continue;
+    if (used.has(row.sequence)) throw contextRepairError(`${label} contains duplicate sequence values`);
+    used.add(row.sequence);
+  }
+  const missing = rows.filter((row) => row.sequence === undefined)
+    .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.rowid - right.rowid);
+  let candidate = 0;
+  for (const row of missing) {
+    while (used.has(candidate)) candidate += 1;
+    row.sequence = candidate;
+    used.add(candidate);
+    candidate += 1;
+  }
+}
+
+function assertUniqueContextValues(values: Array<string>, label: string): void {
+  if (new Set(values).size !== values.length) {
+    throw contextRepairError(`${label} contains duplicate values that the repaired schema forbids`);
+  }
+}
+
+/**
+ * Project legacy/partial 063 rows into the canonical schema without mutating the
+ * source tables. Any value that cannot be represented safely makes preflight
+ * refuse before the transactional rebuild starts.
+ */
+function buildContextMigrationRepairData(db: Database.Database): ContextMigrationRepairData {
+  const conversationColumns = contextTableColumns(db, "context_conversations");
+  const messageColumns = contextTableColumns(db, "context_messages");
+  const checkpointColumns = contextTableColumns(db, "context_checkpoints");
+  const checkpointRagSourceColumns = contextTableColumns(db, "context_checkpoint_rag_sources");
+  const conversationRows = contextRepairRows(db, "context_conversations");
+  const messageRows = contextRepairRows(db, "context_messages");
+  const checkpointRows = contextRepairRows(db, "context_checkpoints");
+  const checkpointRagSourceRows = contextRepairRows(db, "context_checkpoint_rag_sources");
+
+  if (conversationRows.length > 0 && !conversationColumns.has("project_id")) {
+    throw contextRepairError("context_conversations.project_id is absent on non-empty data; ownership cannot be inferred safely");
+  }
+  if (messageRows.length > 0 && !messageColumns.has("conversation_id")) {
+    throw contextRepairError("context_messages.conversation_id is absent on non-empty data; message ownership cannot be inferred safely");
+  }
+  if (checkpointRows.length > 0 && !checkpointColumns.has("conversation_id") && !checkpointColumns.has("through_message_id")) {
+    throw contextRepairError("context_checkpoints lacks both conversation_id and through_message_id on non-empty data");
+  }
+  if (checkpointRagSourceRows.length > 0 && !checkpointRagSourceColumns.has("checkpoint_id")) {
+    throw contextRepairError("context_checkpoint_rag_sources.checkpoint_id is absent on non-empty data");
+  }
+  assertContextRepairDatabaseIntegrity(db, "preflight");
+
+  const projectIds = new Set((db.prepare("SELECT id FROM projects").all() as Array<{ id: string }>).map((row) => row.id));
+  const conversations = conversationRows.map((row) => {
+    const id = requiredContextString(contextColumnValue(row, conversationColumns, "id"), "context_conversations.id");
+    const projectId = requiredContextString(
+      contextColumnValue(row, conversationColumns, "project_id"),
+      "context_conversations.project_id",
+    );
+    if (!projectIds.has(projectId)) {
+      throw contextRepairError(`context_conversations ${id} references missing project ${projectId}`);
+    }
+    const title = requiredContextString(
+      contextColumnValue(row, conversationColumns, "title"),
+      "context_conversations.title",
+      `Recovered context conversation ${id}`.slice(0, 256),
+    );
+    if (title.length > 256) throw contextRepairError(`context_conversations ${id} title exceeds 256 characters`);
+    const tags = contextJsonValue(
+      contextColumnValue(row, conversationColumns, "tags"),
+      `context_conversations ${id} tags`,
+      "array",
+      4096,
+      "[]",
+    );
+    const priority = boundedContextInteger(
+      contextColumnValue(row, conversationColumns, "priority"),
+      `context_conversations ${id} priority`,
+      0,
+      10,
+      5,
+    );
+    const metadata = contextJsonValue(
+      contextColumnValue(row, conversationColumns, "metadata"),
+      `context_conversations ${id} metadata`,
+      "object",
+      16384,
+      "{}",
+    );
+    return {
+      id,
+      project_id: projectId,
+      title,
+      request_hash: contextHashValue(
+        contextColumnValue(row, conversationColumns, "request_hash"),
+        requestHashForContextRepair({ title, tags: JSON.parse(tags), priority, metadata: JSON.parse(metadata) }),
+        `context_conversations ${id} request_hash`,
+      ),
+      idempotency_key: nullableIdempotencyKey(
+        contextColumnValue(row, conversationColumns, "idempotency_key"),
+        `context_conversations ${id} idempotency_key`,
+      ),
+      tags,
+      priority,
+      metadata,
+      created_at: contextCreatedAt(contextColumnValue(row, conversationColumns, "created_at"), `context_conversations ${id} created_at`),
+    };
+  });
+  assertUniqueContextValues(conversations.map((row) => row.id), "context_conversations.id");
+  assertUniqueContextValues(
+    conversations.filter((row) => row.idempotency_key !== null)
+      .map((row) => `${row.project_id}\u0000${row.idempotency_key}`),
+    "context_conversations project/idempotency keys",
+  );
+  const conversationById = new Map(conversations.map((row) => [row.id, row]));
+
+  const messageDrafts = messageRows.map((row) => {
+    const id = requiredContextString(contextColumnValue(row, messageColumns, "id"), "context_messages.id");
+    const conversationId = requiredContextString(
+      contextColumnValue(row, messageColumns, "conversation_id"),
+      `context_messages ${id} conversation_id`,
+    );
+    const conversation = conversationById.get(conversationId);
+    if (!conversation) throw contextRepairError(`context_messages ${id} references missing conversation ${conversationId}`);
+    const projectId = requiredContextString(
+      contextColumnValue(row, messageColumns, "project_id"),
+      `context_messages ${id} project_id`,
+      conversation.project_id,
+    );
+    if (projectId !== conversation.project_id) {
+      throw contextRepairError(`context_messages ${id} project_id does not match its conversation`);
+    }
+    const content = requiredContextString(contextColumnValue(row, messageColumns, "content"), `context_messages ${id} content`);
+    if (content.length > 262144) throw contextRepairError(`context_messages ${id} content exceeds 262144 characters`);
+    const role = requiredContextString(contextColumnValue(row, messageColumns, "role"), `context_messages ${id} role`);
+    if (!["system", "user", "assistant", "tool"].includes(role)) {
+      throw contextRepairError(`context_messages ${id} has an unsupported role`);
+    }
+    const tags = contextJsonValue(contextColumnValue(row, messageColumns, "tags"), `context_messages ${id} tags`, "array", 4096, "[]");
+    const priority = boundedContextInteger(contextColumnValue(row, messageColumns, "priority"), `context_messages ${id} priority`, 0, 10, 5);
+    const metadata = contextJsonValue(contextColumnValue(row, messageColumns, "metadata"), `context_messages ${id} metadata`, "object", 16384, "{}");
+    const sequenceValue = contextColumnValue(row, messageColumns, "sequence");
+    const sequence = sequenceValue === undefined || sequenceValue === null
+      ? undefined
+      : boundedContextInteger(sequenceValue, `context_messages ${id} sequence`, 0, Number.MAX_SAFE_INTEGER);
+    const createdAt = contextCreatedAt(contextColumnValue(row, messageColumns, "created_at"), `context_messages ${id} created_at`);
+    return {
+      id,
+      project_id: projectId,
+      conversation_id: conversationId,
+      sequence,
+      role,
+      content,
+      content_hash: contextHashValue(
+        contextColumnValue(row, messageColumns, "content_hash"),
+        contextRepairHash(content),
+        `context_messages ${id} content_hash`,
+      ),
+      request_hash: contextColumnValue(row, messageColumns, "request_hash"),
+      idempotency_key: nullableIdempotencyKey(contextColumnValue(row, messageColumns, "idempotency_key"), `context_messages ${id} idempotency_key`),
+      tags,
+      priority,
+      metadata,
+      created_at: createdAt,
+      rowid: typeof row.__repair_rowid === "number" ? row.__repair_rowid : 0,
+    };
+  });
+  assertUniqueContextValues(messageDrafts.map((row) => row.id), "context_messages.id");
+  const messageDraftsByConversation = new Map<string, typeof messageDrafts>();
+  for (const draft of messageDrafts) {
+    const entries = messageDraftsByConversation.get(draft.conversation_id) ?? [];
+    entries.push(draft);
+    messageDraftsByConversation.set(draft.conversation_id, entries);
+  }
+  for (const [conversationId, drafts] of messageDraftsByConversation) {
+    assignMissingContextSequences(drafts, `context_messages for conversation ${conversationId}`);
+  }
+  const messages = messageDrafts.map((draft) => {
+    const sequence = draft.sequence;
+    if (sequence === undefined) throw new Error("Context message repair sequence assignment failed");
+    const requestHash = contextHashValue(
+      draft.request_hash,
+      requestHashForContextRepair({
+        role: draft.role,
+        contentHash: draft.content_hash,
+        tags: JSON.parse(draft.tags),
+        priority: draft.priority,
+        metadata: JSON.parse(draft.metadata),
+        expectedRevision: sequence,
+      }),
+      `context_messages ${draft.id} request_hash`,
+    );
+    const { rowid: _rowid, ...message } = draft;
+    return { ...message, sequence, request_hash: requestHash };
+  });
+  assertUniqueContextValues(
+    messages.map((row) => `${row.project_id}\u0000${row.conversation_id}\u0000${row.sequence}`),
+    "context_messages conversation/sequence values",
+  );
+  assertUniqueContextValues(
+    messages.filter((row) => row.idempotency_key !== null)
+      .map((row) => `${row.project_id}\u0000${row.conversation_id}\u0000${row.idempotency_key}`),
+    "context_messages conversation/idempotency keys",
+  );
+  const messagesByConversation = new Map<string, RepairedContextMessage[]>();
+  for (const message of messages) {
+    const entries = messagesByConversation.get(message.conversation_id) ?? [];
+    entries.push(message);
+    messagesByConversation.set(message.conversation_id, entries);
+  }
+  for (const entries of messagesByConversation.values()) entries.sort((left, right) => left.sequence - right.sequence);
+  const messageById = new Map(messages.map((row) => [row.id, row]));
+
+  const checkpointDrafts = checkpointRows.map((row) => {
+    const id = requiredContextString(contextColumnValue(row, checkpointColumns, "id"), "context_checkpoints.id");
+    const throughMessageId = contextColumnValue(row, checkpointColumns, "through_message_id");
+    const derivedConversationId = typeof throughMessageId === "string" ? messageById.get(throughMessageId)?.conversation_id : undefined;
+    const conversationId = requiredContextString(
+      contextColumnValue(row, checkpointColumns, "conversation_id"),
+      `context_checkpoints ${id} conversation_id`,
+      derivedConversationId,
+    );
+    const conversation = conversationById.get(conversationId);
+    if (!conversation) throw contextRepairError(`context_checkpoints ${id} references missing conversation ${conversationId}`);
+    const projectId = requiredContextString(
+      contextColumnValue(row, checkpointColumns, "project_id"),
+      `context_checkpoints ${id} project_id`,
+      conversation.project_id,
+    );
+    if (projectId !== conversation.project_id) {
+      throw contextRepairError(`context_checkpoints ${id} project_id does not match its conversation`);
+    }
+    const sequenceValue = contextColumnValue(row, checkpointColumns, "sequence");
+    const sequence = sequenceValue === undefined || sequenceValue === null
+      ? undefined
+      : boundedContextInteger(sequenceValue, `context_checkpoints ${id} sequence`, 0, Number.MAX_SAFE_INTEGER);
+    const messageCountValue = contextColumnValue(row, checkpointColumns, "message_count");
+    const messageCount = messageCountValue === undefined || messageCountValue === null
+      ? undefined
+      : boundedContextInteger(messageCountValue, `context_checkpoints ${id} message_count`, 1, Number.MAX_SAFE_INTEGER);
+    return {
+      id,
+      project_id: projectId,
+      conversation_id: conversationId,
+      sequence,
+      through_message_id: throughMessageId,
+      message_count: messageCount,
+      state_hash: contextColumnValue(row, checkpointColumns, "state_hash"),
+      request_hash: contextColumnValue(row, checkpointColumns, "request_hash"),
+      idempotency_key: nullableIdempotencyKey(contextColumnValue(row, checkpointColumns, "idempotency_key"), `context_checkpoints ${id} idempotency_key`),
+      metadata: contextJsonValue(contextColumnValue(row, checkpointColumns, "metadata"), `context_checkpoints ${id} metadata`, "object", 16384, "{}"),
+      created_at: contextCreatedAt(contextColumnValue(row, checkpointColumns, "created_at"), `context_checkpoints ${id} created_at`),
+      rowid: typeof row.__repair_rowid === "number" ? row.__repair_rowid : 0,
+    };
+  });
+  assertUniqueContextValues(checkpointDrafts.map((row) => row.id), "context_checkpoints.id");
+  const checkpointDraftsByConversation = new Map<string, typeof checkpointDrafts>();
+  for (const draft of checkpointDrafts) {
+    const entries = checkpointDraftsByConversation.get(draft.conversation_id) ?? [];
+    entries.push(draft);
+    checkpointDraftsByConversation.set(draft.conversation_id, entries);
+  }
+  for (const [conversationId, drafts] of checkpointDraftsByConversation) {
+    assignMissingContextSequences(drafts, `context_checkpoints for conversation ${conversationId}`);
+  }
+  const checkpoints = checkpointDrafts.map((draft) => {
+    const conversationMessages = messagesByConversation.get(draft.conversation_id) ?? [];
+    const rawThroughMessageId = draft.through_message_id;
+    const throughMessageIndex = typeof rawThroughMessageId === "string"
+      ? conversationMessages.findIndex((message) => message.id === rawThroughMessageId)
+      : -1;
+    const messageCount = draft.message_count ?? (throughMessageIndex >= 0 ? throughMessageIndex + 1 : conversationMessages.length);
+    const checkpointMessages = conversationMessages.filter((message) => message.sequence < messageCount);
+    const checkpointTail = checkpointMessages[checkpointMessages.length - 1];
+    if (checkpointMessages.length !== messageCount || !checkpointTail) {
+      throw contextRepairError(`context_checkpoints ${draft.id} cannot be matched to a complete message prefix`);
+    }
+    const throughMessageId = requiredContextString(rawThroughMessageId, `context_checkpoints ${draft.id} through_message_id`, checkpointTail.id);
+    if (throughMessageId !== checkpointTail.id) {
+      throw contextRepairError(`context_checkpoints ${draft.id} through_message_id does not match its message prefix`);
+    }
+    const stateHash = contextHashValue(
+      draft.state_hash,
+      contextRepairHash(JSON.stringify(checkpointMessages.map((message) => ({
+        sequence: message.sequence,
+        role: message.role,
+        content_hash: message.content_hash,
+        tags: message.tags,
+        priority: message.priority,
+        metadata: message.metadata,
+      })))),
+      `context_checkpoints ${draft.id} state_hash`,
+    );
+    if (draft.sequence === undefined) throw new Error("Context checkpoint repair sequence assignment failed");
+    return {
+      id: draft.id,
+      project_id: draft.project_id,
+      conversation_id: draft.conversation_id,
+      sequence: draft.sequence,
+      through_message_id: throughMessageId,
+      message_count: messageCount,
+      state_hash: stateHash,
+      request_hash: "",
+      idempotency_key: draft.idempotency_key,
+      metadata: draft.metadata,
+      created_at: draft.created_at,
+      repair_request_hash: draft.request_hash === undefined || draft.request_hash === null
+        ? undefined
+        : contextHashValue(draft.request_hash, "", `context_checkpoints ${draft.id} request_hash`),
+    };
+  });
+  assertUniqueContextValues(
+    checkpoints.map((row) => `${row.project_id}\u0000${row.conversation_id}\u0000${row.sequence}`),
+    "context_checkpoints conversation/sequence values",
+  );
+  assertUniqueContextValues(
+    checkpoints.filter((row) => row.idempotency_key !== null)
+      .map((row) => `${row.project_id}\u0000${row.conversation_id}\u0000${row.idempotency_key}`),
+    "context_checkpoints conversation/idempotency keys",
+  );
+  const checkpointById = new Map(checkpoints.map((row) => [row.id, row]));
+
+  const ragSources = new Map((db.prepare("SELECT id, project_id FROM rag_sources").all() as Array<{ id: string; project_id: string }>)
+    .map((row) => [row.id, row.project_id]));
+  const checkpointRagSourceDrafts = checkpointRagSourceRows.map((row) => {
+    const checkpointId = requiredContextString(
+      contextColumnValue(row, checkpointRagSourceColumns, "checkpoint_id"),
+      "context_checkpoint_rag_sources.checkpoint_id",
+    );
+    const checkpoint = checkpointById.get(checkpointId);
+    if (!checkpoint) throw contextRepairError(`context_checkpoint_rag_sources references missing checkpoint ${checkpointId}`);
+    const projectId = requiredContextString(
+      contextColumnValue(row, checkpointRagSourceColumns, "project_id"),
+      `context_checkpoint_rag_sources ${checkpointId} project_id`,
+      checkpoint.project_id,
+    );
+    if (projectId !== checkpoint.project_id) {
+      throw contextRepairError(`context_checkpoint_rag_sources ${checkpointId} project_id does not match its checkpoint`);
+    }
+    const ragSourceId = requiredContextString(
+      contextColumnValue(row, checkpointRagSourceColumns, "rag_source_id"),
+      `context_checkpoint_rag_sources ${checkpointId} rag_source_id`,
+    );
+    if (ragSources.get(ragSourceId) !== projectId) {
+      throw contextRepairError(`context_checkpoint_rag_sources ${checkpointId} references a missing or cross-project RAG source`);
+    }
+    const ordinalValue = contextColumnValue(row, checkpointRagSourceColumns, "ordinal");
+    const ordinal = ordinalValue === undefined || ordinalValue === null
+      ? undefined
+      : boundedContextInteger(ordinalValue, `context_checkpoint_rag_sources ${checkpointId} ordinal`, 0, Number.MAX_SAFE_INTEGER);
+    return {
+      project_id: projectId,
+      checkpoint_id: checkpointId,
+      rag_source_id: ragSourceId,
+      sequence: ordinal,
+      metadata: contextJsonValue(contextColumnValue(row, checkpointRagSourceColumns, "metadata"), `context_checkpoint_rag_sources ${checkpointId} metadata`, "object", 16384, "{}"),
+      created_at: contextCreatedAt(
+        contextColumnValue(row, checkpointRagSourceColumns, "created_at"),
+        `context_checkpoint_rag_sources ${checkpointId} created_at`,
+      ),
+      rowid: typeof row.__repair_rowid === "number" ? row.__repair_rowid : 0,
+    };
+  });
+  const checkpointRagSourceDraftsByCheckpoint = new Map<string, typeof checkpointRagSourceDrafts>();
+  for (const draft of checkpointRagSourceDrafts) {
+    const entries = checkpointRagSourceDraftsByCheckpoint.get(draft.checkpoint_id) ?? [];
+    entries.push(draft);
+    checkpointRagSourceDraftsByCheckpoint.set(draft.checkpoint_id, entries);
+  }
+  for (const [checkpointId, drafts] of checkpointRagSourceDraftsByCheckpoint) {
+    assignMissingContextSequences(drafts, `context_checkpoint_rag_sources for checkpoint ${checkpointId}`);
+  }
+  const checkpointRagSources = checkpointRagSourceDrafts.map((draft) => {
+    if (draft.sequence === undefined) throw new Error("Context checkpoint RAG repair ordinal assignment failed");
+    const { rowid: _rowid, sequence, ...link } = draft;
+    return { ...link, ordinal: sequence };
+  });
+  assertUniqueContextValues(
+    checkpointRagSources.map((row) => `${row.project_id}\u0000${row.checkpoint_id}\u0000${row.rag_source_id}`),
+    "context_checkpoint_rag_sources checkpoint/source values",
+  );
+  assertUniqueContextValues(
+    checkpointRagSources.map((row) => `${row.project_id}\u0000${row.checkpoint_id}\u0000${row.ordinal}`),
+    "context_checkpoint_rag_sources checkpoint/ordinal values",
+  );
+
+  for (const checkpoint of checkpoints) {
+    const ragSourceIds = checkpointRagSources
+      .filter((link) => link.checkpoint_id === checkpoint.id)
+      .sort((left, right) => left.ordinal - right.ordinal)
+      .map((link) => link.rag_source_id);
+    checkpoint.request_hash = checkpoint.repair_request_hash ?? requestHashForContextRepair({
+      ragSourceIds,
+      metadata: JSON.parse(checkpoint.metadata),
+      expectedRevision: checkpoint.message_count,
+    });
+    delete checkpoint.repair_request_hash;
+  }
+
+  return {
+    conversations,
+    messages,
+    checkpoints,
+    checkpointRagSources,
+    sourceSchemaHash: contextSourceSchemaHash(db),
+  };
+}
+
+const CONTEXT_MIGRATION_REPAIR_STAGING_SQL = `
+CREATE TABLE context_conversations__g3 (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 256),
+  request_hash TEXT NOT NULL CHECK(length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'),
+  idempotency_key TEXT CHECK(idempotency_key IS NULL OR (length(idempotency_key) BETWEEN 1 AND 128 AND idempotency_key NOT GLOB '*[^A-Za-z0-9._:-]*')),
+  tags TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(tags) AND json_type(tags) = 'array' AND length(CAST(tags AS BLOB)) <= 4096),
+  priority INTEGER NOT NULL DEFAULT 5 CHECK(priority BETWEEN 0 AND 10),
+  metadata TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata) AND json_type(metadata) = 'object' AND length(CAST(metadata AS BLOB)) <= 16384),
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, id),
+  UNIQUE(project_id, idempotency_key),
+  FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE RESTRICT
+);
+CREATE TABLE context_messages__g3 (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  sequence INTEGER NOT NULL CHECK(sequence >= 0),
+  role TEXT NOT NULL CHECK(role IN ('system', 'user', 'assistant', 'tool')),
+  content TEXT NOT NULL CHECK(length(content) BETWEEN 1 AND 262144),
+  content_hash TEXT NOT NULL CHECK(length(content_hash) = 64 AND content_hash NOT GLOB '*[^0-9a-f]*'),
+  request_hash TEXT NOT NULL CHECK(length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'),
+  idempotency_key TEXT CHECK(idempotency_key IS NULL OR (length(idempotency_key) BETWEEN 1 AND 128 AND idempotency_key NOT GLOB '*[^A-Za-z0-9._:-]*')),
+  tags TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(tags) AND json_type(tags) = 'array' AND length(CAST(tags AS BLOB)) <= 4096),
+  priority INTEGER NOT NULL DEFAULT 5 CHECK(priority BETWEEN 0 AND 10),
+  metadata TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata) AND json_type(metadata) = 'object' AND length(CAST(metadata AS BLOB)) <= 16384),
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, id),
+  UNIQUE(project_id, conversation_id, id),
+  UNIQUE(project_id, conversation_id, sequence),
+  UNIQUE(project_id, conversation_id, idempotency_key),
+  FOREIGN KEY(project_id, conversation_id) REFERENCES context_conversations__g3(project_id, id) ON DELETE RESTRICT
+);
+CREATE TABLE context_checkpoints__g3 (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  sequence INTEGER NOT NULL CHECK(sequence >= 0),
+  through_message_id TEXT NOT NULL,
+  message_count INTEGER NOT NULL CHECK(message_count >= 1),
+  state_hash TEXT NOT NULL CHECK(length(state_hash) = 64 AND state_hash NOT GLOB '*[^0-9a-f]*'),
+  request_hash TEXT NOT NULL CHECK(length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'),
+  idempotency_key TEXT CHECK(idempotency_key IS NULL OR (length(idempotency_key) BETWEEN 1 AND 128 AND idempotency_key NOT GLOB '*[^A-Za-z0-9._:-]*')),
+  metadata TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata) AND json_type(metadata) = 'object' AND length(CAST(metadata AS BLOB)) <= 16384),
+  created_at TEXT NOT NULL,
+  UNIQUE(project_id, id),
+  UNIQUE(project_id, conversation_id, sequence),
+  UNIQUE(project_id, conversation_id, idempotency_key),
+  FOREIGN KEY(project_id, conversation_id) REFERENCES context_conversations__g3(project_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY(project_id, conversation_id, through_message_id) REFERENCES context_messages__g3(project_id, conversation_id, id) ON DELETE RESTRICT
+);
+CREATE TABLE context_checkpoint_rag_sources__g3 (
+  project_id TEXT NOT NULL,
+  checkpoint_id TEXT NOT NULL,
+  rag_source_id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  metadata TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata) AND json_type(metadata) = 'object' AND length(CAST(metadata AS BLOB)) <= 16384),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, checkpoint_id, rag_source_id),
+  UNIQUE(project_id, checkpoint_id, ordinal),
+  FOREIGN KEY(project_id, checkpoint_id) REFERENCES context_checkpoints__g3(project_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY(project_id, rag_source_id) REFERENCES rag_sources(project_id, id) ON DELETE RESTRICT
+);
+`;
+
+const CONTEXT_MIGRATION_REPAIR_FINALIZE_SQL = `
+DROP TRIGGER IF EXISTS context_conversations_immutable_update;
+DROP TRIGGER IF EXISTS context_conversations_immutable_delete;
+DROP TRIGGER IF EXISTS context_messages_immutable_update;
+DROP TRIGGER IF EXISTS context_messages_immutable_delete;
+DROP TRIGGER IF EXISTS context_messages_fts_insert;
+DROP TRIGGER IF EXISTS context_checkpoints_immutable_update;
+DROP TRIGGER IF EXISTS context_checkpoints_immutable_delete;
+DROP TRIGGER IF EXISTS context_checkpoint_rag_sources_immutable_update;
+DROP TRIGGER IF EXISTS context_checkpoint_rag_sources_immutable_delete;
+DROP TRIGGER IF EXISTS rag_sources_context_checkpoint_immutable_update;
+DROP TRIGGER IF EXISTS rag_sources_context_checkpoint_immutable_delete;
+DROP TRIGGER IF EXISTS rag_chunks_context_checkpoint_immutable_insert;
+DROP TRIGGER IF EXISTS rag_chunks_context_checkpoint_immutable_update;
+DROP TRIGGER IF EXISTS rag_chunks_context_checkpoint_immutable_delete;
+DROP TABLE IF EXISTS context_messages_fts;
+DROP TABLE IF EXISTS context_checkpoint_rag_sources;
+DROP TABLE IF EXISTS context_checkpoints;
+DROP TABLE IF EXISTS context_messages;
+DROP TABLE IF EXISTS context_conversations;
+ALTER TABLE context_conversations__g3 RENAME TO context_conversations;
+ALTER TABLE context_messages__g3 RENAME TO context_messages;
+ALTER TABLE context_checkpoints__g3 RENAME TO context_checkpoints;
+ALTER TABLE context_checkpoint_rag_sources__g3 RENAME TO context_checkpoint_rag_sources;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rag_sources_project_id ON rag_sources(project_id, id);
+CREATE INDEX idx_context_conversations_project_created ON context_conversations(project_id, created_at DESC, id DESC);
+CREATE INDEX idx_context_messages_conversation_sequence ON context_messages(project_id, conversation_id, sequence ASC);
+CREATE INDEX idx_context_checkpoints_conversation_sequence ON context_checkpoints(project_id, conversation_id, sequence DESC);
+CREATE INDEX idx_context_checkpoint_rag_sources_source ON context_checkpoint_rag_sources(project_id, rag_source_id);
+CREATE VIRTUAL TABLE context_messages_fts USING fts5(content, content='context_messages', content_rowid='rowid', tokenize='unicode61');
+CREATE TRIGGER context_conversations_immutable_update BEFORE UPDATE ON context_conversations BEGIN SELECT RAISE(ABORT, 'context_conversations rows are immutable — UPDATE rejected'); END;
+CREATE TRIGGER context_conversations_immutable_delete BEFORE DELETE ON context_conversations BEGIN SELECT RAISE(ABORT, 'context_conversations rows are immutable — DELETE rejected'); END;
+CREATE TRIGGER context_messages_immutable_update BEFORE UPDATE ON context_messages BEGIN SELECT RAISE(ABORT, 'context_messages rows are immutable — UPDATE rejected'); END;
+CREATE TRIGGER context_messages_immutable_delete BEFORE DELETE ON context_messages BEGIN SELECT RAISE(ABORT, 'context_messages rows are immutable — DELETE rejected'); END;
+CREATE TRIGGER context_messages_fts_insert AFTER INSERT ON context_messages BEGIN INSERT INTO context_messages_fts(rowid, content) VALUES (new.rowid, new.content); END;
+CREATE TRIGGER context_checkpoints_immutable_update BEFORE UPDATE ON context_checkpoints BEGIN SELECT RAISE(ABORT, 'context_checkpoints rows are immutable — UPDATE rejected'); END;
+CREATE TRIGGER context_checkpoints_immutable_delete BEFORE DELETE ON context_checkpoints BEGIN SELECT RAISE(ABORT, 'context_checkpoints rows are immutable — DELETE rejected'); END;
+CREATE TRIGGER context_checkpoint_rag_sources_immutable_update BEFORE UPDATE ON context_checkpoint_rag_sources BEGIN SELECT RAISE(ABORT, 'context_checkpoint_rag_sources rows are immutable — UPDATE rejected'); END;
+CREATE TRIGGER context_checkpoint_rag_sources_immutable_delete BEFORE DELETE ON context_checkpoint_rag_sources BEGIN SELECT RAISE(ABORT, 'context_checkpoint_rag_sources rows are immutable — DELETE rejected'); END;
+CREATE TRIGGER rag_sources_context_checkpoint_immutable_update BEFORE UPDATE ON rag_sources WHEN EXISTS (SELECT 1 FROM context_checkpoint_rag_sources link WHERE link.project_id = old.project_id AND link.rag_source_id = old.id) BEGIN SELECT RAISE(ABORT, 'checkpoint RAG sources are immutable — UPDATE rejected'); END;
+CREATE TRIGGER rag_sources_context_checkpoint_immutable_delete BEFORE DELETE ON rag_sources WHEN EXISTS (SELECT 1 FROM context_checkpoint_rag_sources link WHERE link.project_id = old.project_id AND link.rag_source_id = old.id) BEGIN SELECT RAISE(ABORT, 'checkpoint RAG sources are immutable — DELETE rejected'); END;
+CREATE TRIGGER rag_chunks_context_checkpoint_immutable_insert BEFORE INSERT ON rag_chunks WHEN EXISTS (SELECT 1 FROM context_checkpoint_rag_sources link JOIN rag_sources source ON source.id = link.rag_source_id WHERE source.id = new.source_id) BEGIN SELECT RAISE(ABORT, 'checkpoint RAG chunks are immutable — INSERT rejected'); END;
+CREATE TRIGGER rag_chunks_context_checkpoint_immutable_update BEFORE UPDATE ON rag_chunks WHEN EXISTS (SELECT 1 FROM context_checkpoint_rag_sources link JOIN rag_sources source ON source.id = link.rag_source_id WHERE source.id = old.source_id) BEGIN SELECT RAISE(ABORT, 'checkpoint RAG chunks are immutable — UPDATE rejected'); END;
+CREATE TRIGGER rag_chunks_context_checkpoint_immutable_delete BEFORE DELETE ON rag_chunks WHEN EXISTS (SELECT 1 FROM context_checkpoint_rag_sources link JOIN rag_sources source ON source.id = link.rag_source_id WHERE source.id = old.source_id) BEGIN SELECT RAISE(ABORT, 'checkpoint RAG chunks are immutable — DELETE rejected'); END;
+INSERT INTO context_messages_fts(context_messages_fts) VALUES ('rebuild');
+`;
+
+function contextRepairArtifactsExist(db: Database.Database): boolean {
+  const artifacts = [
+    "context_conversations__g3",
+    "context_messages__g3",
+    "context_checkpoints__g3",
+    "context_checkpoint_rag_sources__g3",
+  ];
+  return artifacts.some((artifact) => contextTableExists(db, artifact));
+}
+
+/**
+ * Repair a partially applied migration 063 in one SQLite transaction. The
+ * old tables are not altered in place: canonical staging tables receive an
+ * exact projection first, and source tables are replaced only after every row
+ * has been accepted by the target constraints.
+ */
+function repairContextConversationMigration(
+  db: Database.Database,
+  migrationsDir: string,
+): void {
+  if (contextRepairArtifactsExist(db)) {
+    throw contextRepairError("reserved G3 staging artifacts already exist; preserve the database and restore from a verified backup");
+  }
+  const repair = buildContextMigrationRepairData(db);
+  const migrationSql = readFileSync(resolve(migrationsDir, "067_context_migration_repair.sql"), "utf-8");
+  const foreignKeys = db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number };
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.transaction(() => {
+      db.exec(migrationSql);
+      db.exec(CONTEXT_MIGRATION_REPAIR_STAGING_SQL);
+
+      const insertConversation = db.prepare(
+        `INSERT INTO context_conversations__g3
+         (id, project_id, title, request_hash, idempotency_key, tags, priority, metadata, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const row of repair.conversations) {
+        insertConversation.run(
+          row.id, row.project_id, row.title, row.request_hash, row.idempotency_key,
+          row.tags, row.priority, row.metadata, row.created_at,
+        );
+      }
+
+      const insertMessage = db.prepare(
+        `INSERT INTO context_messages__g3
+         (id, project_id, conversation_id, sequence, role, content, content_hash, request_hash,
+          idempotency_key, tags, priority, metadata, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const row of repair.messages) {
+        insertMessage.run(
+          row.id, row.project_id, row.conversation_id, row.sequence, row.role, row.content,
+          row.content_hash, row.request_hash, row.idempotency_key, row.tags, row.priority,
+          row.metadata, row.created_at,
+        );
+      }
+
+      const insertCheckpoint = db.prepare(
+        `INSERT INTO context_checkpoints__g3
+         (id, project_id, conversation_id, sequence, through_message_id, message_count, state_hash,
+          request_hash, idempotency_key, metadata, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const row of repair.checkpoints) {
+        insertCheckpoint.run(
+          row.id, row.project_id, row.conversation_id, row.sequence, row.through_message_id,
+          row.message_count, row.state_hash, row.request_hash, row.idempotency_key,
+          row.metadata, row.created_at,
+        );
+      }
+
+      const insertCheckpointRagSource = db.prepare(
+        `INSERT INTO context_checkpoint_rag_sources__g3
+         (project_id, checkpoint_id, rag_source_id, ordinal, metadata, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      for (const row of repair.checkpointRagSources) {
+        insertCheckpointRagSource.run(
+          row.project_id, row.checkpoint_id, row.rag_source_id, row.ordinal, row.metadata, row.created_at,
+        );
+      }
+
+      db.exec(CONTEXT_MIGRATION_REPAIR_FINALIZE_SQL);
+      db.prepare(
+        `INSERT INTO context_migration_repairs (id, repaired_at, source_schema_hash, row_counts)
+         VALUES (1, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           repaired_at = excluded.repaired_at,
+           source_schema_hash = excluded.source_schema_hash,
+           row_counts = excluded.row_counts`,
+      ).run(
+        new Date().toISOString(),
+        repair.sourceSchemaHash,
+        JSON.stringify({
+          conversations: repair.conversations.length,
+          messages: repair.messages.length,
+          checkpoints: repair.checkpoints.length,
+          checkpointRagSources: repair.checkpointRagSources.length,
+        }),
+      );
+
+      const state = inspectContextConversationMigration(db);
+      if (!state.complete) {
+        throw contextRepairError(`post-repair schema probe is incomplete: ${state.missing.join(", ")}`);
+      }
+      assertContextRepairDatabaseIntegrity(db, "post-repair");
+    })();
+  } finally {
+    db.pragma(foreignKeys.foreign_keys === 1 ? "foreign_keys = ON" : "foreign_keys = OFF");
+  }
+}
+
 /**
  * Returns the singleton SQLite database connection, creating it on first call.
  *
@@ -381,7 +1255,7 @@ function runMigrations(db: Database.Database): void {
 
   if (tableCount.count === 0) {
     // Fresh database — apply every migration in dependency order
-        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql", "054_agent_frontmatter_metadata.sql", "055_reserved_broker_delete_protection.sql", "056_reserved_broker_rename_protection.sql", "057_reserved_broker_immutable.sql", "058_reserved_broker_connection_independent.sql", "059_repository_docs_onboarding.sql", "060_repository_resource_sync.sql", "061_global_backup_ownership.sql", "062_child_mcp_definitions.sql", "063_immutable_context_conversations.sql", "064_child_mcp_tool_categories.sql", "065_context_rag_ingestion.sql", "066_context_checkpoint_governance.sql"]) {
+        for (const file of ["001_init.sql", "002_archive.sql", "003_agents.sql", "004_learnings_status.sql", "005_skills_metadata.sql", "006_skill_file_tree.sql", "007_observations.sql", "008_personality_traits.sql", "009_pipeline_events.sql", "010_commands.sql", "011_server_source.sql", "012_project_is_global.sql", "013_fix_plugins_unique.sql", "014_configs.sql", "015_auto_observer_source.sql", "016_mcp_tool_states.sql", "017_fix_trait_fk.sql", "018_extraction_pipeline_events.sql", "019_trait_exemplar_fk_setnull.sql", "020_kanban_board.sql", "021_jobs.sql", "022_email_cache.sql", "023_fix_servers_unique.sql", "024_skills_unique_per_project.sql", "025_email_string_ids.sql", "026_email_suggestions.sql", "027_email_summaries.sql", "028_email_suggestion_queue.sql", "029_docs_spaces.sql", "030_docs_pages.sql", "031_docs_pages_fts.sql", "032_docs_drafts.sql", "033_docs_versions.sql", "034_docs_tags.sql", "035_docs_links.sql", "036_docs_comments.sql", "037_docs_project_links.sql", "038_docs_attachments.sql", "039_docs_templates.sql", "040_docs_integrity.sql", "041_skill_maintenance_locks.sql", "042_skill_versions.sql", "043_skill_lineage.sql", "044_skill_proposals.sql", "045_pipeline_event_types.sql", "046_vault.sql", "047_backups.sql", "048_docs_rag.sql", "049_workspace_project_migration.sql", "050_context_rag_phase3.sql", "051_thread_retirement.sql", "052_agent_category_integrity.sql", "053_global_project_integrity_and_protected_settings.sql", "054_agent_frontmatter_metadata.sql", "055_reserved_broker_delete_protection.sql", "056_reserved_broker_rename_protection.sql", "057_reserved_broker_immutable.sql", "058_reserved_broker_connection_independent.sql", "059_repository_docs_onboarding.sql", "060_repository_resource_sync.sql", "061_global_backup_ownership.sql", "062_child_mcp_definitions.sql", "063_immutable_context_conversations.sql", "064_child_mcp_tool_categories.sql", "065_context_rag_ingestion.sql", "066_context_checkpoint_governance.sql", "067_context_migration_repair.sql"]) {
       const sql = readFileSync(resolve(migrationsDir, file), "utf-8");
       db.exec(sql);
       logger.info("db", `Applied migration ${file}`);
@@ -1135,18 +2009,18 @@ function runMigrations(db: Database.Database): void {
     }
 
     // Migration 063: immutable conversation/checkpoint/message records are
-    // intentionally separate from mutable context_entries. A partial schema is
-    // unsafe: missing immutable triggers or scoped foreign keys would allow an
-    // irreversible integrity breach, so fail loudly instead of guessing a repair.
+    // intentionally separate from mutable context_entries. Migration 067 owns
+    // a forward-only transactional repair for historical partial 063 shapes,
+    // so it must run before 065/066 add dependent context tables.
     const contextConversationMigration = inspectContextConversationMigration(db);
     if (contextConversationMigration.any && !contextConversationMigration.complete) {
-      throw new Error(
-        "Migration 063 is in a PARTIAL state. Missing required components: "
-        + contextConversationMigration.missing.join(", ")
-        + ". Restore the migration's complete schema before retrying.",
-      );
+      repairContextConversationMigration(db, migrationsDir);
+      logger.info("db", "Applied migration 067_context_migration_repair.sql", {
+        repairedComponents: contextConversationMigration.missing,
+      });
     }
-    if (!contextConversationMigration.complete) {
+    const repairedContextConversationMigration = inspectContextConversationMigration(db);
+    if (!repairedContextConversationMigration.complete) {
       db.exec(readFileSync(resolve(migrationsDir, "063_immutable_context_conversations.sql"), "utf-8"));
       logger.info("db", "Applied migration 063_immutable_context_conversations.sql");
     }
@@ -1187,6 +2061,31 @@ function runMigrations(db: Database.Database): void {
       db.exec(readFileSync(resolve(migrationsDir, "066_context_checkpoint_governance.sql"), "utf-8"));
       logger.info("db", "Applied migration 066_context_checkpoint_governance.sql");
     }
+
+    // Migration 067 records repair provenance. The repair itself executes above
+    // before 065/066 when a partial 063 schema is detected; a complete database
+    // only receives this idempotent audit table.
+    const contextRepairAuditCheck = db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'context_migration_repairs'",
+    ).get() as { count: number };
+    if (contextRepairAuditCheck.count === 0) {
+      db.exec(readFileSync(resolve(migrationsDir, "067_context_migration_repair.sql"), "utf-8"));
+      logger.info("db", "Applied migration 067_context_migration_repair.sql");
+    }
+  }
+
+  // Migration 068: provider-neutral usage telemetry. The migration is
+  // intentionally metadata-only and applies after both fresh and upgrade paths
+  // without depending on a global-project fallback.
+  const usageMigrationTables = ["usage_project_mappings", "usage_events", "usage_sync_state"];
+  const usageMigrationMissing = usageMigrationTables.some((table) => (
+    (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count === 0
+  ));
+  if (usageMigrationMissing) {
+    db.exec(readFileSync(resolve(migrationsDir, "068_usage_telemetry.sql"), "utf-8"));
+    logger.info("db", "Applied migration 068_usage_telemetry.sql");
   }
 
   enforceReservedBrokerInvariant(db);

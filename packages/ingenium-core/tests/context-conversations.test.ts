@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import Database from "better-sqlite3";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import {
   appendContextMessage,
@@ -42,6 +43,87 @@ function setup() {
 
 function hash(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function replaceWithRecoverablePartial063Shape(db: ReturnType<typeof getDb>): void {
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      CREATE TABLE context_conversations_partial (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        idempotency_key TEXT,
+        tags TEXT,
+        priority INTEGER,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO context_conversations_partial (id, project_id, title, idempotency_key, tags, priority, created_at)
+      SELECT id, project_id, title, idempotency_key, tags, priority, created_at FROM context_conversations;
+
+      CREATE TABLE context_messages_partial (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        content_hash TEXT,
+        idempotency_key TEXT,
+        tags TEXT,
+        priority INTEGER,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO context_messages_partial (id, project_id, conversation_id, role, content, content_hash, idempotency_key, tags, priority, created_at)
+      SELECT id, project_id, conversation_id, role, content, content_hash, idempotency_key, tags, priority, created_at FROM context_messages;
+
+      CREATE TABLE context_checkpoints_partial (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        through_message_id TEXT NOT NULL,
+        message_count INTEGER NOT NULL,
+        state_hash TEXT,
+        idempotency_key TEXT,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO context_checkpoints_partial (id, project_id, conversation_id, through_message_id, message_count, state_hash, idempotency_key, created_at)
+      SELECT id, project_id, conversation_id, through_message_id, message_count, state_hash, idempotency_key, created_at FROM context_checkpoints;
+
+      CREATE TABLE context_checkpoint_rag_sources_partial (
+        checkpoint_id TEXT NOT NULL,
+        rag_source_id TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      INSERT INTO context_checkpoint_rag_sources_partial (checkpoint_id, rag_source_id, created_at)
+      SELECT checkpoint_id, rag_source_id, created_at FROM context_checkpoint_rag_sources;
+
+      DROP TRIGGER context_conversations_immutable_update;
+      DROP TRIGGER context_conversations_immutable_delete;
+      DROP TRIGGER context_messages_immutable_update;
+      DROP TRIGGER context_messages_immutable_delete;
+      DROP TRIGGER context_messages_fts_insert;
+      DROP TRIGGER context_checkpoints_immutable_update;
+      DROP TRIGGER context_checkpoints_immutable_delete;
+      DROP TRIGGER context_checkpoint_rag_sources_immutable_update;
+      DROP TRIGGER context_checkpoint_rag_sources_immutable_delete;
+      DROP TRIGGER rag_sources_context_checkpoint_immutable_update;
+      DROP TRIGGER rag_sources_context_checkpoint_immutable_delete;
+      DROP TRIGGER rag_chunks_context_checkpoint_immutable_insert;
+      DROP TRIGGER rag_chunks_context_checkpoint_immutable_update;
+      DROP TRIGGER rag_chunks_context_checkpoint_immutable_delete;
+      DROP TABLE context_messages_fts;
+      DROP TABLE context_checkpoint_rag_sources;
+      DROP TABLE context_checkpoints;
+      DROP TABLE context_messages;
+      DROP TABLE context_conversations;
+      ALTER TABLE context_conversations_partial RENAME TO context_conversations;
+      ALTER TABLE context_messages_partial RENAME TO context_messages;
+      ALTER TABLE context_checkpoints_partial RENAME TO context_checkpoints;
+      ALTER TABLE context_checkpoint_rag_sources_partial RENAME TO context_checkpoint_rag_sources;
+    `);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
 }
 
 afterEach(() => {
@@ -201,12 +283,172 @@ describe("immutable context conversations", () => {
     });
   });
 
-  it("fails loudly if a migration-063 immutable trigger is missing", () => {
-    const { db } = setup();
-    db.prepare("DROP TRIGGER context_messages_immutable_update").run();
+  it("repairs a recoverable partial 063 schema without losing conversations, messages, checkpoints, or RAG links", () => {
+    const { db, first } = setup();
+    const conversation = createContextConversation(first.id, {
+      title: "G3 repair fixture",
+      metadata: { fixture: "partial-063" },
+    });
+    const message = appendContextMessage(first.id, conversation.id, {
+      role: "user",
+      content: "Retain this message through the G3 repair.",
+      expectedRevision: 0,
+    });
+    const source = ingestCanonicalSource(first.id, "G3 source", "Retain this citation link.");
+    const checkpoint = createContextCheckpoint(first.id, conversation.id, {
+      ragSourceIds: [source.id],
+      expectedRevision: 1,
+    });
+    const snapshotsBefore = db.prepare(
+      "SELECT count(*) AS count FROM context_checkpoint_rag_source_snapshots",
+    ).get();
+
+    replaceWithRecoverablePartial063Shape(db);
     resetDbForTest();
 
-    expect(() => getDb(process.env.INGENIUM_CORE_DB_PATH)).toThrow(/Migration 063 is in a PARTIAL state/);
+    const repaired = getDb(process.env.INGENIUM_CORE_DB_PATH);
+    expect(repaired.prepare(
+      "SELECT id, project_id, title, metadata FROM context_conversations WHERE id = ?",
+    ).get(conversation.id)).toEqual({
+      id: conversation.id,
+      project_id: first.id,
+      title: "G3 repair fixture",
+      metadata: JSON.stringify({}),
+    });
+    expect(repaired.prepare(
+      "SELECT id, sequence, content, content_hash, metadata FROM context_messages WHERE id = ?",
+    ).get(message.message.id)).toEqual({
+      id: message.message.id,
+      sequence: 0,
+      content: "Retain this message through the G3 repair.",
+      content_hash: message.message.content_hash,
+      metadata: JSON.stringify({}),
+    });
+    expect(repaired.prepare(
+      "SELECT id, sequence, through_message_id, state_hash, metadata FROM context_checkpoints WHERE id = ?",
+    ).get(checkpoint.checkpoint.id)).toEqual({
+      id: checkpoint.checkpoint.id,
+      sequence: 0,
+      through_message_id: message.message.id,
+      state_hash: checkpoint.checkpoint.state_hash,
+      metadata: JSON.stringify({}),
+    });
+    expect(repaired.prepare(
+      "SELECT project_id, checkpoint_id, rag_source_id, ordinal, metadata FROM context_checkpoint_rag_sources WHERE checkpoint_id = ?",
+    ).get(checkpoint.checkpoint.id)).toEqual({
+      project_id: first.id,
+      checkpoint_id: checkpoint.checkpoint.id,
+      rag_source_id: source.id,
+      ordinal: 0,
+      metadata: JSON.stringify({}),
+    });
+    expect(repaired.prepare(
+      "SELECT count(*) AS count FROM context_checkpoint_rag_source_snapshots",
+    ).get()).toEqual(snapshotsBefore);
+    expect(searchContextMessages(first.id, conversation.id, "G3 repair", 10))
+      .toMatchObject([{ id: message.message.id }]);
+    expect(repaired.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(repaired.prepare("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
+    expect(repaired.prepare(
+      "SELECT source_schema_hash, row_counts FROM context_migration_repairs WHERE id = 1",
+    ).get()).toMatchObject({
+      source_schema_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      row_counts: JSON.stringify({ conversations: 1, messages: 1, checkpoints: 1, checkpointRagSources: 1 }),
+    });
+    expect(repaired.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('context_rag_uploads', 'context_checkpoint_maintenance_authorizations')",
+    ).get()).toEqual({ count: 2 });
+
+    const repairAudit = repaired.prepare("SELECT * FROM context_migration_repairs WHERE id = 1").get();
+    resetDbForTest();
+    expect(getDb(process.env.INGENIUM_CORE_DB_PATH).prepare(
+      "SELECT * FROM context_migration_repairs WHERE id = 1",
+    ).get()).toEqual(repairAudit);
+  });
+
+  it("refuses an unrecoverable partial 063 shape before changing its source data", () => {
+    const { db } = setup();
+    db.pragma("foreign_keys = OFF");
+    try {
+      db.exec(`
+        DROP TRIGGER context_conversations_immutable_update;
+        DROP TRIGGER context_conversations_immutable_delete;
+        DROP TABLE context_conversations;
+        CREATE TABLE context_conversations (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL);
+        INSERT INTO context_conversations (id, title, created_at)
+        VALUES ('recovery-fixture', 'Ownership cannot be inferred', '2026-01-01T00:00:00.000Z');
+      `);
+    } finally {
+      db.pragma("foreign_keys = ON");
+    }
+    const path = process.env.INGENIUM_CORE_DB_PATH!;
+    resetDbForTest();
+
+    expect(() => getDb(path)).toThrow(/Migration 067 context repair preflight refused/);
+    resetDbForTest();
+    const raw = new Database(path);
+    try {
+      expect(raw.prepare("SELECT id, title FROM context_conversations").all())
+        .toEqual([{ id: "recovery-fixture", title: "Ownership cannot be inferred" }]);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it("repairs partial 063 before applying its later 065 and 066 dependencies", () => {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-context-pre-065-"));
+    const path = join(directory, "legacy.db");
+    const legacy = new Database(path);
+    const migrations = resolve(__dirname, "../data/migrations");
+    try {
+      for (const migration of readdirSync(migrations)
+        .filter((file) => /^\d{3}_.*\.sql$/.test(file) && Number(file.slice(0, 3)) <= 62)
+        .sort()) {
+        legacy.exec(readFileSync(join(migrations, migration), "utf8"));
+      }
+      const projectId = randomUUID();
+      const conversationId = randomUUID();
+      const messageId = randomUUID();
+      const checkpointId = randomUUID();
+      const sourceId = randomUUID();
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      legacy.prepare(
+        "INSERT INTO projects (id, name, path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+      ).run(projectId, "pre-065-repair", "/pre-065-repair", createdAt, createdAt);
+      legacy.prepare(
+        `INSERT INTO rag_sources
+         (id, project_id, title, source_type, source_path, source_hash, mime_type, byte_size, chunk_count, metadata, created_at, updated_at)
+         VALUES (?, ?, ?, 'text', NULL, NULL, 'text/plain', 1, 0, '{}', ?, ?)`,
+      ).run(sourceId, projectId, "Pre-065 source", createdAt, createdAt);
+      legacy.exec(`
+        CREATE TABLE context_conversations (id TEXT PRIMARY KEY, project_id TEXT, title TEXT, created_at TEXT);
+        CREATE TABLE context_messages (id TEXT PRIMARY KEY, project_id TEXT, conversation_id TEXT, sequence INTEGER, role TEXT, content TEXT, tags TEXT, priority INTEGER, created_at TEXT);
+        CREATE TABLE context_checkpoints (id TEXT PRIMARY KEY, project_id TEXT, conversation_id TEXT, sequence INTEGER, through_message_id TEXT, message_count INTEGER, created_at TEXT);
+        CREATE TABLE context_checkpoint_rag_sources (checkpoint_id TEXT, rag_source_id TEXT, created_at TEXT);
+      `);
+      legacy.prepare("INSERT INTO context_conversations VALUES (?, ?, ?, ?)")
+        .run(conversationId, projectId, "Pre-065 partial", createdAt);
+      legacy.prepare("INSERT INTO context_messages VALUES (?, ?, ?, 0, 'user', 'Keep this', '[]', 5, ?)")
+        .run(messageId, projectId, conversationId, createdAt);
+      legacy.prepare("INSERT INTO context_checkpoints VALUES (?, ?, ?, 0, ?, 1, ?)")
+        .run(checkpointId, projectId, conversationId, messageId, createdAt);
+      legacy.prepare("INSERT INTO context_checkpoint_rag_sources VALUES (?, ?, ?)")
+        .run(checkpointId, sourceId, createdAt);
+    } finally {
+      legacy.close();
+    }
+    process.env.INGENIUM_CORE_DB_PATH = path;
+    process.env.INGENIUM_HOME = join(directory, "home");
+    resetDbForTest();
+
+    const repaired = getDb(path);
+    expect(repaired.prepare("SELECT title FROM context_conversations").get())
+      .toEqual({ title: "Pre-065 partial" });
+    expect(repaired.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('context_rag_uploads', 'context_checkpoint_maintenance_authorizations', 'context_migration_repairs')",
+    ).get()).toEqual({ count: 3 });
+    expect(repaired.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(repaired.prepare("PRAGMA integrity_check").all()).toEqual([{ integrity_check: "ok" }]);
   });
 
   it("fails closed if a migration-066 audit safeguard is missing", () => {

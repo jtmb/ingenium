@@ -896,3 +896,33 @@ export const RagSearchResultSchema = RagChunkSchema.extend({
   source_path: z.string().nullable(), source_type: z.string(), project_id: z.string(),
 });
 export type RagSearchResult = z.infer<typeof RagSearchResultSchema>;
+
+/**
+ * Provider-neutral usage metadata. Deliberately excludes prompts, message text,
+ * reasoning content, tool payloads, and credentials.
+ */
+export const UsageEventSchema = z.object({
+  id: z.string().uuid(),
+  project_id: z.string(),
+  source_instance: z.string().min(1).max(512),
+  source_part_id: z.string().min(1).max(512),
+  source_session_id: z.string().min(1).max(512),
+  source_message_id: z.string().min(1).max(512),
+  source_project_id: z.string().min(1).max(512),
+  provider_id: z.string().min(1).max(512).nullable(),
+  model_id: z.string().min(1).max(512).nullable(),
+  agent_id: z.string().min(1).max(512).nullable(),
+  status: z.enum(["success", "error", "partial", "unknown"]),
+  occurred_at: z.string().datetime(),
+  total_tokens: z.coerce.number().int().nonnegative().nullable(),
+  input_tokens: z.coerce.number().int().nonnegative().nullable(),
+  output_tokens: z.coerce.number().int().nonnegative().nullable(),
+  reasoning_tokens: z.coerce.number().int().nonnegative().nullable(),
+  cache_read_tokens: z.coerce.number().int().nonnegative().nullable(),
+  cache_write_tokens: z.coerce.number().int().nonnegative().nullable(),
+  cost_amount: z.coerce.number().nonnegative().nullable(),
+  cost_status: z.enum(["known", "partial", "unavailable"]),
+  created_at: z.string().datetime(),
+  updated_at: z.string().datetime(),
+});
+export type UsageEventRecord = z.infer<typeof UsageEventSchema>;
