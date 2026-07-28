@@ -36,6 +36,10 @@ export INGENIUM_EMAIL_ENCRYPTION_KEY='...'
 # export NEXT_PUBLIC_OPENCODE_WEB_URL='https://opencode.example.com/'
 # export NEXT_PUBLIC_OPENCODE_CLI_URL='https://cli.example.com/'
 
+# Record the exact checkout used for this image. Compose cannot evaluate Git
+# commands, so IMAGE_REVISION is required for every Compose invocation.
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+
 # Start all services (with build)
 docker compose up --build
 
@@ -51,6 +55,13 @@ docker compose logs -f
 # Execute commands inside container
 docker compose exec ingenium npm run test
 docker compose exec ingenium npm run check
+```
+
+After a detached deployment, verify the running image metadata without dumping
+its labels or reading deployment secrets:
+
+```bash
+./scripts/validate-image-provenance.mjs "$IMAGE_REVISION"
 ```
 
 For the in-container OpenCode MCP configuration, seed the ignored token file before starting OpenCode:
@@ -253,9 +264,26 @@ Use the embedded CLI mode; direct host attachment to port 4098 is intentionally 
 
 Web and CLI sessions share the same backend process state.
 
-### Build, restart, and rollback
+### Build, restart, rollback, and image provenance
 
 `NEXT_PUBLIC_*` values are inlined by Next.js during the image build. Changing them in a running container does nothing; set both values before `docker compose up --build -d`. `OPENCODE_SERVER_PASSWORD` and `INGENIUM_API_TOKEN` (or `INGENIUM_API_TOKEN_FILE`) are required to start the deployment. The API token is injected by the loopback boundary proxy and dashboard server; it is never a browser setting. After a secret-only change, recreate/restart the container so the entrypoint reseeds `/run/ingenium-secrets/api-token` and `/workspace/.opencode/.ingenium-api-token`, and every process reloads the token. A source, proxy, Dockerfile, or build-time-origin change requires `docker compose up --build -d`; an environment-only secret change does not. After a build or gateway change, restart and verify the dashboard plus both local OpenCode roots from the actual browser path. If verification fails, roll back the image and build-time configuration; never publish the private 4098/4099 listeners as a workaround.
+
+Every Compose command requires `IMAGE_REVISION`, a lowercase 40-character SHA
+from the checkout being deployed. Export it once per shell before running
+Compose, or prefix an individual command:
+
+```bash
+export IMAGE_REVISION="$(git rev-parse HEAD)"
+docker compose up --build -d
+./scripts/validate-image-provenance.mjs "$IMAGE_REVISION"
+```
+
+The runtime image carries `org.opencontainers.image.revision` and
+`org.opencontainers.image.source` OCI labels. The revision is passed only as a
+build argument; the source defaults to the public repository URL. Neither is a
+runtime environment variable or a credential. The verifier inspects only the
+running Compose image, checks the expected SHA and a credential-free HTTPS
+source URL, rejects secret-bearing label keys, and never prints raw labels.
 
 The API uses a clean source build on startup/image creation. Docker excludes
 generated `dist/` directories from the build context, compiles the current API
@@ -314,6 +342,7 @@ This queries `synthesis.getSynthesisStatus()` and `ingenium-email`'s `getEngineS
 
 ```bash
 # Build and start
+export IMAGE_REVISION="$(git rev-parse HEAD)"
 docker compose up --build
 
 # Start in background

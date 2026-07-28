@@ -10,6 +10,7 @@ entrypoint="${repo_root}/scripts/docker-entrypoint.sh"
 windows_helper="${repo_root}/scripts/windows-loopback-transport.ps1"
 env_example="${repo_root}/.env.example"
 supervisor_config="${repo_root}/supervisord.conf"
+image_provenance_validator="${repo_root}/scripts/validate-image-provenance.mjs"
 
 require_file() {
   path="$1"
@@ -37,12 +38,21 @@ reject_literal() {
   fi
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator"; do
   require_file "$path"
 done
 
 require_literal "$dockerfile" "ARG NEXT_PUBLIC_OPENCODE_WEB_URL=\"http://opencode.localhost:3000/\""
 require_literal "$dockerfile" "ARG NEXT_PUBLIC_OPENCODE_CLI_URL=\"http://cli.localhost:3000/\""
+require_literal "$dockerfile" "ARG IMAGE_REVISION"
+require_literal "$dockerfile" "ARG IMAGE_SOURCE=\"https://github.com/jtmb/ingenium\""
+require_literal "$dockerfile" "grep -Eq '^[0-9a-f]{40}\$'"
+require_literal "$dockerfile" 'case "$IMAGE_SOURCE" in https://*/*) ;; *) exit 1 ;; esac'
+require_literal "$dockerfile" 'case "$IMAGE_SOURCE" in *"@"*|*"?"*|*"#"*) exit 1 ;; esac'
+require_literal "$dockerfile" "org.opencontainers.image.revision=\"\${IMAGE_REVISION}\""
+require_literal "$dockerfile" "org.opencontainers.image.source=\"\${IMAGE_SOURCE}\""
+reject_literal "$dockerfile" "ENV IMAGE_REVISION"
+reject_literal "$dockerfile" "ENV IMAGE_SOURCE"
 require_literal "$dockerfile" "FROM node:22-slim AS builder"
 require_literal "$dockerfile" "FROM node:22-slim AS runtime"
 reject_literal "$dockerfile" "FROM node:22-alpine AS builder"
@@ -65,6 +75,8 @@ if [ "$web_arg_line" -ge "$build_line" ] || [ "$cli_arg_line" -ge "$build_line" 
 fi
 require_literal "$compose_file" "NEXT_PUBLIC_OPENCODE_WEB_URL: \"\${NEXT_PUBLIC_OPENCODE_WEB_URL:-http://opencode.localhost:3000/}\""
 require_literal "$compose_file" "NEXT_PUBLIC_OPENCODE_CLI_URL: \"\${NEXT_PUBLIC_OPENCODE_CLI_URL:-http://cli.localhost:3000/}\""
+require_literal "$compose_file" "IMAGE_REVISION: \"\${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}\""
+require_literal "$compose_file" "IMAGE_SOURCE: \"\${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}\""
 require_literal "$compose_file" '"3000:3000"'
 reject_literal "$compose_file" "127.0.0.1:3000:3000"
 require_literal "$compose_file" "127.0.0.1:4097:4097"
@@ -168,4 +180,5 @@ fi
 
 GATEWAY_VALIDATE_STATIC_ONLY=1 sh "${repo_root}/scripts/validate-gateway-config.sh" "${repo_root}/nginx/gateway.conf"
 sh "${repo_root}/scripts/validate-api-boundary.sh" "$repo_root"
+node --check "$image_provenance_validator"
 echo "Deployment static validation passed"

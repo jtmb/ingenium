@@ -7,6 +7,10 @@ services:
       args:
         NEXT_PUBLIC_OPENCODE_WEB_URL: "${NEXT_PUBLIC_OPENCODE_WEB_URL:-http://opencode.localhost:3000/}"
         NEXT_PUBLIC_OPENCODE_CLI_URL: "${NEXT_PUBLIC_OPENCODE_CLI_URL:-http://cli.localhost:3000/}"
+        # Compose cannot evaluate Git commands. The deployment command must
+        # supply the checkout SHA explicitly so the image remains traceable.
+        IMAGE_REVISION: "${IMAGE_REVISION:?IMAGE_REVISION must be set to the current Git commit SHA}"
+        IMAGE_SOURCE: "${IMAGE_SOURCE:-https://github.com/jtmb/ingenium}"
     restart: unless-stopped
     ports:
       # WSL must bind the gateway beyond its Linux-only loopback interface so

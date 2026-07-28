@@ -44,6 +44,17 @@ RUN npm prune --omit=dev
 # Stage 2: Runtime with supervisord + opencode
 FROM node:22-slim AS runtime
 
+# These public OCI metadata values are supplied by the deployment command.
+# Keep provenance as build arguments rather than deriving it from .git, which
+# is intentionally excluded from the Docker build context.
+ARG IMAGE_REVISION
+ARG IMAGE_SOURCE="https://github.com/jtmb/ingenium"
+RUN printf '%s' "$IMAGE_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
+    case "$IMAGE_SOURCE" in https://*/*) ;; *) exit 1 ;; esac && \
+    case "$IMAGE_SOURCE" in *"@"*|*"?"*|*"#"*) exit 1 ;; esac
+LABEL org.opencontainers.image.revision="${IMAGE_REVISION}" \
+      org.opencontainers.image.source="${IMAGE_SOURCE}"
+
 ARG OPENCODE_VERSION=1.18.3
 ARG OPENCODE_SHA256=60f27b2679f00a511b6539f97e02448afaf58d9c66e2448285ea0c517ca84583
 RUN apt-get update && apt-get install -y --no-install-recommends \
