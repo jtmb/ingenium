@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 
 const LONG_TOKEN = "responsive-route-regression-".repeat(24);
@@ -247,10 +247,16 @@ describe("responsive dashboard routes", () => {
   it("contains backups tables and exposes named schedule switches", async () => {
     render(<BackupsPage />);
 
-    const region = await screen.findByRole("region", { name: "Backups table" });
+    const mobileList = await screen.findByTestId("backup-mobile-list");
+    const region = screen.getByRole("region", { name: "Backups table" });
     expect(region.getAttribute("tabindex")).toBe("0");
     expect(region.className).toContain("overflow-x-auto");
     expect(region.querySelector("table")?.className).toContain("min-w-[720px]");
+    expect(region.className).toContain("sm:block");
+    expect(mobileList.className).toContain("sm:hidden");
+    const mobileCard = screen.getByTestId("backup-mobile-card-backup-1");
+    expect(within(mobileCard).getByRole("button", { name: "Download" }).className).toContain("flex-1");
+    expect(within(mobileCard).getByRole("button", { name: "Delete" }).className).toContain("flex-1");
     await waitFor(() => expect(screen.getByRole("switch", { name: "Enable hourly backups" })).toBeTruthy());
     expect(screen.getByRole("switch", { name: "Enable daily backups" })).toBeTruthy();
   });

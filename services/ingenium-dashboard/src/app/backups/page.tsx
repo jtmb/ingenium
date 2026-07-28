@@ -107,6 +107,48 @@ function StatusBadge({ status }: { status: Backup["status"] }) {
   );
 }
 
+/** Shared backup actions for the desktop table and mobile backup cards. */
+function BackupActions({
+  backup,
+  onDownload,
+  onDelete,
+  fullWidth = false,
+}: {
+  backup: Backup;
+  onDownload: (backup: Backup) => void;
+  onDelete: (backup: Backup) => void;
+  fullWidth?: boolean;
+}) {
+  const actionClassName = fullWidth
+    ? "flex flex-1 items-center justify-center gap-1 rounded border border-[var(--color-border)] px-3 py-2 text-xs"
+    : "flex items-center gap-1 text-xs";
+
+  return (
+    <div className={fullWidth ? "flex w-full gap-2" : "flex items-center gap-2"}>
+      <button
+        onClick={() => onDownload(backup)}
+        disabled={backup.status !== "completed"}
+        title={backup.status === "completed" ? "Download backup" : "Backup not ready"}
+        className={`${actionClassName} text-[var(--color-text-link)] hover:text-[var(--color-text-link-hover)] disabled:cursor-not-allowed disabled:text-[var(--color-text-muted)]`}
+      >
+        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Download
+      </button>
+      <button
+        onClick={() => onDelete(backup)}
+        className={`${actionClassName} text-[var(--color-error-text)] hover:text-red-800 dark:hover:text-red-300`}
+      >
+        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+        Delete
+      </button>
+    </div>
+  );
+}
+
 /** Schedule section card — shows hourly/daily toggle and next-run countdown. */
 function ScheduleCard() {
   const [schedule, setSchedule] = useState<BackupSchedule | null>(null);
@@ -374,68 +416,77 @@ export default function BackupsPage() {
             <p className="text-sm text-[var(--color-text-muted)] mt-1">Create your first backup.</p>
           </div>
         ) : (
-          <div role="region" aria-label="Backups table" tabIndex={0} className="max-w-full overflow-x-auto overscroll-x-contain">
-            <table className="w-full min-w-[720px] text-sm">
-              <thead>
-                <tr className="border-b border-[var(--color-border)] text-left text-xs text-[var(--color-text-muted)]">
-                  <th className="px-4 py-3 font-medium">Filename</th>
-                  <th className="px-4 py-3 font-medium">Type</th>
-                  <th className="px-4 py-3 font-medium">Size</th>
-                  <th className="px-4 py-3 font-medium">Created</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {backups.map((backup) => (
-                  <tr
-                    key={backup.id}
-                    className="border-b border-[var(--color-border-muted)] hover:bg-[var(--color-surface-hover)] transition-colors"
-                  >
-                    <td className="px-4 py-3 break-all font-mono text-xs text-[var(--color-text-primary)]">
-                      {backup.filename}
-                    </td>
-                    <td className="px-4 py-3">
-                      <TypeBadge type={backup.type} />
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-secondary)] whitespace-nowrap">
-                      {humanSize(backup.size)}
-                    </td>
-                    <td className="px-4 py-3 text-[var(--color-text-muted)] text-xs whitespace-nowrap">
-                      {fmtDate(backup.created_at)}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <StatusBadge status={backup.status} />
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleDownload(backup)}
-                          disabled={backup.status !== "completed"}
-                          title={backup.status === "completed" ? "Download backup" : "Backup not ready"}
-                          className="flex items-center gap-1 text-xs text-[var(--color-text-link)] hover:text-[var(--color-text-link-hover)] disabled:text-[var(--color-text-muted)] disabled:cursor-not-allowed"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                          </svg>
-                          Download
-                        </button>
-                        <button
-                          onClick={() => handleDelete(backup)}
-                          className="flex items-center gap-1 text-xs text-[var(--color-error-text)] hover:text-red-800 dark:hover:text-red-300"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          Delete
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div className="space-y-3 p-3 sm:hidden" data-testid="backup-mobile-list">
+              {backups.map((backup) => (
+                <article
+                  key={backup.id}
+                  className="min-w-0 rounded border border-[var(--color-border-muted)] p-3"
+                  data-testid={`backup-mobile-card-${backup.id}`}
+                >
+                  <p className="break-all font-mono text-xs text-[var(--color-text-primary)]">{backup.filename}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <TypeBadge type={backup.type} />
+                    <StatusBadge status={backup.status} />
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <dt className="text-[var(--color-text-muted)]">Size</dt>
+                      <dd className="mt-1 text-[var(--color-text-secondary)]">{humanSize(backup.size)}</dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-[var(--color-text-muted)]">Created</dt>
+                      <dd className="mt-1 break-words text-[var(--color-text-secondary)]">{fmtDate(backup.created_at)}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-4">
+                    <BackupActions backup={backup} onDownload={handleDownload} onDelete={handleDelete} fullWidth />
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div role="region" aria-label="Backups table" tabIndex={0} className="hidden max-w-full overflow-x-auto overscroll-x-contain sm:block">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--color-border)] text-left text-xs text-[var(--color-text-muted)]">
+                    <th className="px-4 py-3 font-medium">Filename</th>
+                    <th className="px-4 py-3 font-medium">Type</th>
+                    <th className="px-4 py-3 font-medium">Size</th>
+                    <th className="px-4 py-3 font-medium">Created</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="px-4 py-3 font-medium">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {backups.map((backup) => (
+                    <tr
+                      key={backup.id}
+                      className="border-b border-[var(--color-border-muted)] transition-colors hover:bg-[var(--color-surface-hover)]"
+                    >
+                      <td className="break-all px-4 py-3 font-mono text-xs text-[var(--color-text-primary)]">
+                        {backup.filename}
+                      </td>
+                      <td className="px-4 py-3">
+                        <TypeBadge type={backup.type} />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-[var(--color-text-secondary)]">
+                        {humanSize(backup.size)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-xs text-[var(--color-text-muted)]">
+                        {fmtDate(backup.created_at)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <StatusBadge status={backup.status} />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <BackupActions backup={backup} onDownload={handleDownload} onDelete={handleDelete} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
