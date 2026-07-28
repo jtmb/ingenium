@@ -55,7 +55,28 @@ describe("OpenCode session import MCP tool", () => {
     expect(JSON.parse(result.content[0].text)).toEqual({ upload: { provenance: "opencode_session" } });
   });
 
-  it("accepts only a launcher-bound project, safe session import inputs, and a bounded integer limit", () => {
+  it("omits an unspecified limit so the API applies its bounded default", async () => {
+    mockApi.post.mockResolvedValue(apiSuccess({ upload: { provenance: "opencode_session" } }));
+
+    await contextTools.contextOpenCodeSessionImport(
+      project,
+      sessionId,
+      directory,
+      "Imported OpenCode session",
+    );
+
+    expect(mockApi.post).toHaveBeenCalledWith(
+      "/context/imports/opencode-session",
+      {
+        sessionId,
+        directory,
+        title: "Imported OpenCode session",
+      },
+      { project },
+    );
+  });
+
+  it("accepts only a launcher-bound project, safe session import inputs, and an optional bounded integer limit", () => {
     const schema = contextTools.createOpenCodeSessionImportInputSchema(project);
     const valid = schema.safeParse({
       project,
@@ -66,6 +87,10 @@ describe("OpenCode session import MCP tool", () => {
     });
     expect(valid.success).toBe(true);
     if (valid.success) expect(valid.data.title).toBe("Imported OpenCode session");
+
+    const defaultLimit = schema.safeParse({ project, sessionId, directory });
+    expect(defaultLimit.success).toBe(true);
+    if (defaultLimit.success) expect(defaultLimit.data.limit).toBeUndefined();
 
     for (const unsafeDirectory of [
       "relative/context-import-project",

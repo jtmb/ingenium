@@ -57,7 +57,7 @@ export function createOpenCodeSessionImportInputSchema(authoritativeProject: str
       "A safe absolute OpenCode directory is required.",
     ),
     title: z.string().trim().min(1).max(256).optional(),
-    limit: z.number().int().min(1).max(100),
+    limit: z.number().int().min(1).max(100).optional(),
   });
 }
 
@@ -299,11 +299,16 @@ export async function contextOpenCodeSessionImport(
   sessionId: string,
   directory: string,
   title: string | undefined,
-  limit: number,
+  limit?: number,
 ) {
   const res = await api.post(
     "/context/imports/opencode-session",
-    { sessionId, directory, title, limit },
+    {
+      sessionId,
+      directory,
+      title,
+      ...(limit === undefined ? {} : { limit }),
+    },
     { project },
   );
   return textResult(res.data);
