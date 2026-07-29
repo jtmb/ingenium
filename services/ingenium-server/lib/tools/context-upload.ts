@@ -410,6 +410,89 @@ function parseJsonLines(text: string): RawEntry[] {
   return entries;
 }
 
+/**
+ * OpenCode can export an actively-streaming assistant message with an
+ * unterminated `reasoningEncryptedContent` value at EOF. That part is never
+ * importable, but rejecting the complete preceding snapshot would violate the
+ * file-import contract for an otherwise valid export. Recover only by dropping
+ * that one incomplete final message; all other malformed JSON remains invalid.
+ */
+function recoverTruncatedOpenCodeExport(text: string): Record<string, unknown> | null {
+  const containers: Array<"{" | "["> = [];
+  const messageStarts: number[] = [];
+  let messagesArrayDepth: number | null = null;
+  let awaitingMessagesArray = false;
+  let inString = false;
+  let escaped = false;
+  let stringStart = -1;
+  let lastPropertyName: string | null = null;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index]!;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (character === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (character !== "\"") continue;
+
+      const value = text.slice(stringStart + 1, index);
+      inString = false;
+      if (/^\s*:/.test(text.slice(index + 1))) {
+        lastPropertyName = value;
+        if (containers.length === 1 && value === "messages") awaitingMessagesArray = true;
+      }
+      continue;
+    }
+
+    if (character === "\"") {
+      inString = true;
+      stringStart = index;
+      continue;
+    }
+    if (character === "[") {
+      containers.push("[");
+      if (awaitingMessagesArray) {
+        messagesArrayDepth = containers.length;
+        awaitingMessagesArray = false;
+      }
+      continue;
+    }
+    if (character === "{") {
+      if (messagesArrayDepth !== null
+        && containers.length === messagesArrayDepth
+        && containers.at(-1) === "[") {
+        messageStarts.push(index);
+      }
+      containers.push("{");
+      continue;
+    }
+    if (character === "]" || character === "}") containers.pop();
+  }
+
+  if (!inString
+    || lastPropertyName !== "reasoningEncryptedContent"
+    || messagesArrayDepth === null
+    || messageStarts.length === 0) {
+    return null;
+  }
+
+  const prefix = text.slice(0, messageStarts[messageStarts.length - 1]).replace(/,\s*$/, "");
+  try {
+    const recovered = JSON.parse(`${prefix}]}`) as unknown;
+    const record = asRecord(recovered);
+    if (!record || !isRecord(record.info) || !Array.isArray(record.messages)) return null;
+    if (record.messages.length !== messageStarts.length - 1) return null;
+    return record;
+  } catch {
+    return null;
+  }
+}
+
 function decodeUtf8(bytes: Uint8Array): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -429,7 +512,8 @@ function parseSourceFile(filePath: string, bytes: Uint8Array): { format: UploadF
     try {
       parsed = JSON.parse(text);
     } catch {
-      throw new ContextUploadFileError("CONTEXT_UPLOAD_PARSE_FAILED");
+      parsed = recoverTruncatedOpenCodeExport(text);
+      if (!parsed) throw new ContextUploadFileError("CONTEXT_UPLOAD_PARSE_FAILED");
     }
     const record = asRecord(parsed);
     if (record && isRecord(record.info) && Array.isArray(record.messages)) {
