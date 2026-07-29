@@ -31,7 +31,7 @@ vault and are never returned by the browser/API projection.
 ## Tool Manager
 
 The Tools tab shows the current project-scoped total. The built-in catalog
-contains 269 tools in 28 baseline categories (266 server registrations plus 3
+contains 267 tools in 28 baseline categories (265 server registrations plus 2
 extension tools); discovered child tools are added dynamically and may increase
 both the total and the category list for that project.
 
@@ -48,30 +48,6 @@ both the total and the category list for that project.
 - Use the **Search** field to find tools by name
 - Use the **Category filter** dropdown to narrow by category
 - Results update in real-time as you type or filter
-
-## Thread external context bridge
-
-Thread is the canonical fast external-context path. It is registered as the
-project-scoped child MCP server **`threadbridge`**, not as a built-in Ingenium
-tool or the retired `thread` namespace. Register it through the canonical
-child-server API/dashboard with shell-free executable `node` and the guarded
-launcher `/app/scripts/run-thread-bridge.mjs` (or the repository-equivalent
-path outside the container). For Docker OpenCode, use the `global-default`
-project; that project must exist before registration.
-
-The launcher is only a local stdio MCP child. Its only network target is
-`http://thread-guard:8081/v1/call`. The guard is authoritative: it runs
-non-root, is read-only, has no host port, and is the only service on both
-internal `thread-backend` and `thread-frontend` networks. The raw,
-auth-disabled Thread sidecar has no host port and is reachable only from the
-guard on `thread-backend`; Ingenium has no raw Thread route or client. Thread
-is fetched and asserted at pinned commit
-`a3d2d4246e2a0222242d1a848abd3f0bd79a690b`.
-
-After registration, connect and refresh discovery. The resulting tools are
-dynamic under `Child MCP / threadbridge`; they are not included in the static
-built-in tool count. Discovery is project-scoped and the runtime requires the
-explicit matching project identity on every call.
 
 ## MCP Tools
 

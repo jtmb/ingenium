@@ -296,21 +296,7 @@ Input validation: `content` required, `priority` must be integer 0–10 (default
 
 #### Context RAG uploads and retrieval
 
-These routes are also project-scoped under `/api/v1/context`. The OpenCode
-session-import route is exposed through the
-`ingenium_context_opencode_session_import` server MCP proxy; it is not a
-Dashboard UI route. The extension-native
-`ingenium_context_import_current_session` tool uses the trusted OpenCode
-plugin context and immutable conversation endpoints instead of this upload
-route. Its optional native arguments are `title` and `maxSourceEnvelopes`
-(1–12,800), not `limit`. When the envelope bound is omitted, the native
-importer completes cursor pagination within finite caps (128 pages of 100
-source envelopes, 16,384 output entries, and 64 MiB of UTF-8 text), orders
-source envelopes chronologically, and retains only ordinary user and completed
-assistant text parts that are not synthetic or ignored. Its v2 deterministic
-replay uses stable content-based idempotency keys. The server MCP
-`ingenium_context_opencode_session_import` remains separate: its API-owned RAG
-import still requires `limit` in the range 1–100.
+These routes are project-scoped under `/api/v1/context`.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
@@ -321,7 +307,6 @@ import still requires `limit` in the range 1–100.
 | GET | `/uploads` | List context-upload source metadata and provenance without returning document bodies. |
 | GET | `/rag/search?q=` | Search only the current project's context-upload corpus and return provenance citations/snippets; no global fallback. |
 | POST | `/rag/ask` | Ask against only the current project's context-upload corpus. Returns an answer plus source-hash/provenance citations. |
-| POST | `/imports/opencode-session` | Opt-in OpenCode text-message import used by `ingenium_context_opencode_session_import`. Requires a safely project-bound `sessionId` and absolute `directory`; unavailable or mismatched sessions fail closed. Validated text is stored with the existing project-local SHA-256 content-hash deduplication semantics. |
 | GET | `/learning/current` | Retrieve bounded project-local observations/traits with latest input and trait timestamps. |
 | POST | `/learning/ingest` | Explicitly snapshot current learning into a RAG source, or return `{ noOp: true, reason: "NO_CURRENT_LEARNING" }`. |
 | GET | `/conversations/:conversationId/checkpoints/:checkpointId/rag/search?q=` | Search only the immutable RAG source set cited by that checkpoint and return historical citations. |

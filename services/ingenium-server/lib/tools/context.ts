@@ -4,62 +4,6 @@
  * Supports saving context entries with tags/priority and full-text search.
  */
 import { api } from "../client.js";
-import { z } from "zod";
-
-const OPEN_CODE_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
-
-/**
- * OpenCode session IDs are opaque API-owned identifiers. Restrict the transport
- * boundary to the API's safe identifier grammar before forwarding a request.
- */
-export function isSafeOpenCodeSessionImportSessionId(value: unknown): value is string {
-  return typeof value === "string" && OPEN_CODE_SESSION_ID_PATTERN.test(value);
-}
-
-/**
- * Accept only explicit absolute paths without control characters or dot-segment
- * aliases. The API performs its own project-basename ownership verification.
- */
-export function isSafeOpenCodeSessionImportDirectory(value: unknown): value is string {
-  if (typeof value !== "string" || value.length === 0 || value.length > 1_024
-    || CONTROL_CHARACTER_PATTERN.test(value)) return false;
-
-  const normalized = value.replace(/\\/g, "/");
-  if (!normalized.startsWith("/") && !/^[A-Za-z]:\//.test(normalized)) return false;
-  return !normalized.split("/").some((segment) => segment === "." || segment === "..");
-}
-
-/** The import tool is available only to the OpenCode session launched for this project. */
-export function isAuthoritativeOpenCodeSessionImportProject(
-  requestedProject: unknown,
-  authoritativeProject: string | null,
-): requestedProject is string {
-  return authoritativeProject !== null && requestedProject === authoritativeProject;
-}
-
-/**
- * The transport schema intentionally binds the import to the launcher project.
- * This prevents one MCP session from importing another project's OpenCode data.
- */
-export function createOpenCodeSessionImportInputSchema(authoritativeProject: string | null) {
-  return z.object({
-    project: z.string().min(1).max(64).refine(
-      (value) => isAuthoritativeOpenCodeSessionImportProject(value, authoritativeProject),
-      "The requested project is not authorized for this session import.",
-    ),
-    sessionId: z.string().refine(
-      isSafeOpenCodeSessionImportSessionId,
-      "A safe OpenCode session ID is required.",
-    ),
-    directory: z.string().refine(
-      isSafeOpenCodeSessionImportDirectory,
-      "A safe absolute OpenCode directory is required.",
-    ),
-    title: z.string().trim().min(1).max(256).optional(),
-    limit: z.number().int().min(1).max(100).optional(),
-  });
-}
 
 /** Save a context entry with optional tags and priority. */
 export async function planSave(project: string, content: string, tags?: string, priority?: number) {
@@ -289,27 +233,6 @@ export async function contextCheckpointAuditList(project: string, conversationId
   const res = await api.get(
     `/context/conversations/${encodeURIComponent(conversationId)}/maintenance/audit`,
     { project, ...(limit === undefined ? {} : { limit: String(limit) }) },
-  );
-  return textResult(res.data);
-}
-
-/** Import a bounded, project-owned OpenCode session through the authenticated API boundary. */
-export async function contextOpenCodeSessionImport(
-  project: string,
-  sessionId: string,
-  directory: string,
-  title: string | undefined,
-  limit?: number,
-) {
-  const res = await api.post(
-    "/context/imports/opencode-session",
-    {
-      sessionId,
-      directory,
-      title,
-      ...(limit === undefined ? {} : { limit }),
-    },
-    { project },
   );
   return textResult(res.data);
 }

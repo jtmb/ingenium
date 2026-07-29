@@ -162,7 +162,7 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **266 built-in registered tools** across **28 baseline categories**. Three extension-registered tools bring the built-in catalog to **269**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **265 built-in registered tools** across **28 baseline categories**. Two extension-registered tools bring the built-in catalog to **267**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
 
 ## Usage Telemetry
@@ -708,28 +708,6 @@ Agent (MCP tool) ──▶ ingenium_context_get / ingenium_context_update
 
 The `plan_*` tools remain supported for backward compatibility. The `context_*` tools provide the canonical CRUD surface. Both read/write the same `context_entries` table.
 
-Session import has two separate execution paths. The server MCP tool
-`ingenium_context_opencode_session_import` is an API proxy: because an external
-MCP caller does not provide a trusted OpenCode `ToolContext`, it requires an
-explicit project-bound session ID and absolute directory and retains the
-API-owned Context RAG upload, validation, and content-hash deduplication
-semantics. The extension-native
-`ingenium_context_import_current_session` instead receives the current session
-ID, directory, worktree, and abort signal from trusted `ToolContext` plus the
-OpenCode plugin client. It writes ordered user/completed-assistant text into
-immutable Context conversations, filters to text-only non-synthetic/non-ignored
-parts, and uses v2 stable content-based idempotency keys for deterministic
-replay. Its optional native arguments are `title` and `maxSourceEnvelopes`
-(1–12,800); omitting the envelope bound imports the complete cursor-paginated
-source snapshot within finite caps (128 pages × 100 source envelopes, 16,384
-output entries, and 64 MiB of UTF-8 text). The separate server MCP proxy
-`ingenium_context_opencode_session_import` remains API-owned RAG import and
-continues to accept `limit` 1–100.
-Neither path can use the server MCP tool to infer an external caller's session.
-The native tool requires a rebuilt extension and an OpenCode restart after its
-plugin registration changes; the server proxy requires the MCP transport to be
-restarted after its server build changes.
-
 ### WAL Safety
 
 All context operations follow the HARD RULE `checkpointAfterWrite()` must be called OUTSIDE `execTransaction()`. Calling checkpoint inside a transaction causes `SQLITE_LOCKED`.
@@ -739,59 +717,14 @@ All context operations follow the HARD RULE `checkpointAfterWrite()` must be cal
 Context documents are a separate, project-scoped RAG corpus. They never inherit
 the generic RAG route's optional global-project fallback.
 
-### Thread external context bridge
-
-Thread is a separate, fast external FTS store used through a project-registered
-dynamic child MCP server named `threadbridge`. It is not part of the built-in
-catalog count and is not a second `/context` implementation. Thread is pinned
-to commit `a3d2d4246e2a0222242d1a848abd3f0bd79a690b`.
-
-```text
-OpenCode / Ingenium child stdio
-  └─ run-thread-bridge.mjs
-       └─ thread-guard:8081/v1/call (authoritative guard)
-            └─ official pinned Python bridge
-                 └─ thread:5000 (raw Thread, backend network only)
-```
-
-The `thread` sidecar has no host port and is attached only to internal
-`thread-backend`. `thread-guard` is non-root, read-only, has no host port, and
-alone spans `thread-backend` and internal `thread-frontend`. Ingenium reaches
-only the guard; it never receives a raw Thread client, route, or host access to
-Thread. The guard forces every operation into fixed session `ingenium`,
-validates receipt-backed uploads, and uses bounded 30-second request
-timeouts. It removes its private temporary upload after each upstream attempt.
-
-The local `ingenium-thread-export` adapter makes one explicit
-`opencode export <session-id>` call, writes receipt-verified private JSONL, and
-does not call the Ingenium API per message. After a successful upload, the
-caller must explicitly run the CLI cleanup form; cleanup is refused unless
-`--upload-succeeded` is present and the receipt/artifact still verify.
-
-Thread search/read tools are dynamic names under
-`ingenium_threadbridge_thread_*`. They query Thread's external FTS/session
-store and are distinct from:
-
-- **Immutable `/context` conversations** — append-only project-scoped messages,
-  revisions, checkpoints, and explicit content retrieval.
-- **Context RAG** — project-scoped RAG sources and chunks used by RAG search/ask.
-
-Thread uploads are not immutable Context conversations, are not automatically
-copied into Context RAG, and do not appear in the Context UI. Project
-registration and the guarded `threadbridge` path are required before dynamic
-Thread tools become available.
-
 | Input | Route | Bound and lifecycle |
 |-------|-------|---------------------|
 | Direct text / Markdown / JSON / JSONL | `POST /api/v1/context/uploads` | ≤1 MiB UTF-8; SHA-256 deduplicated per project; source, chunks, embeddings, and provenance commit together. |
 | Chunked document | `POST /api/v1/context/uploads/chunked`, then `.../:id/chunks` and `.../:id/complete` | ≤2 MiB total, ≤32 chunks, ≤64 KiB each; staged chunks are not searchable until ordered byte-size and SHA-256 verification succeeds in the final transaction. |
-| OpenCode session (server MCP proxy) | `POST /api/v1/context/imports/opencode-session` | Opt-in only. `ingenium_context_opencode_session_import` supplies a safe session ID and absolute directory whose basename equals the requested project; OpenCode must report that exact directory before text parts are read. The API retains project-local SHA-256 content-hash deduplication. Reasoning, tool, synthetic, ignored, and other non-text parts are excluded. |
-| Current OpenCode session (extension-native) | Immutable Context conversations | `ingenium_context_import_current_session` receives trusted `ToolContext` identity and the plugin client, so it imports the current session without caller-selected session/directory/project inputs. It preserves user/completed-assistant order and uses idempotent message appends. |
 | Current learning | `POST /api/v1/context/learning/ingest` | Explicit snapshot of current project observations and active traits; returns an explainable no-op when neither exists. |
 
 The durable `context_rag_uploads` rows retain a source hash, provenance
-(`direct_upload`, `chunked_upload`, `opencode_session`, or
-`learning_snapshot`), and optional opaque source reference. Upload list routes
+(`direct_upload`, `chunked_upload`, or `learning_snapshot`), and optional opaque source reference. Upload list routes
 return metadata only, never document bodies. The dedicated search and ask routes
 return project-local citations with provenance; `POST /context/rag/ask` passes
 only its local result set to the broker.
@@ -868,9 +801,6 @@ restorePage() ──▶ indexPublishedDoc(page)    ──▶ source creation
 **Path 4 — Context documents (project-local):**
 - `POST /context/uploads` and the chunked-upload lifecycle create durable RAG
   sources only after all validation and indexing work commits.
-- `POST /context/imports/opencode-session` imports only safely project-bound
-  text messages; it does not read arbitrary sessions or store reasoning/tool
-  parts.
 - `POST /context/learning/ingest` is an explicit snapshot of durable learning
   records rather than an automatic raw-observation export.
 
@@ -997,8 +927,8 @@ Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` em
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **269 tools** across **28 baseline
-categories** (**266 server + 3 extension**). Project-scoped child discovery can increase the effective total
+The built-in system catalog exposes **267 tools** across **28 baseline
+categories** (**265 server + 2 extension**). Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
@@ -1028,9 +958,8 @@ and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-t
 | Dashboard | 1 | dashboard_summary |
 | Documentation | 48 | list_spaces, get_space, create_space, update_space, delete_space, list_pages, get_page_tree, get_page, create_page, update_page, delete_page, restore_page, move_page, search, get_draft, save_draft, delete_draft, list_versions, get_version, restore_version, list_comments, create_comment, resolve_comment, delete_comment, list_tags, get_page_tags, add_tag, remove_tag, get_backlinks, list_attachments, delete_attachment, list_templates, get_template, create_template, update_template, delete_template, link_project, unlink_project, get_projects, toggle_favorite, get_favorites, import_pages, export_space, get_stats, publish_page, trash_list, trash_purge, attachment_download |
 
-The category table counts server registrations; the three extension tools are
-`synthesize_observations`, `auto_observe_now`, and
-`ingenium_context_import_current_session`.
+The category table counts server registrations; the two extension tools are
+`synthesize_observations` and `auto_observe_now`.
 
 ---
 

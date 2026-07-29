@@ -146,7 +146,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     expect(callableNamedExport).not.toHaveBeenCalled();
   });
 
-  it("registers existing lifecycle hooks and the current-session tool exactly once through ResourceSync", async () => {
+  it("registers existing lifecycle hooks through the V1 wrappers", async () => {
     process.env.INGENIUM_PROJECT = "plugin-loader-v1-test";
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => {
       const path = new URL(String(url)).pathname;
@@ -180,7 +180,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     };
     const resourceSyncHooks = await applyOpenCode1189V1Server(resourceWrapper, wrapperSpecs[2], input) as {
       event: unknown;
-      tool: Record<string, unknown>;
+      tool?: Record<string, unknown>;
     };
 
     expect(typeof autoHooks.event).toBe("function");
@@ -188,12 +188,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     expect(typeof resourceSyncHooks.event).toBe("function");
     expect(Object.keys(autoHooks.tool)).toEqual(["auto_observe_now"]);
     expect(Object.keys(observerHooks.tool)).toEqual(["synthesize_observations"]);
-    expect(Object.keys(resourceSyncHooks.tool)).toEqual(["ingenium_context_import_current_session"]);
-    expect([
-      ...Object.keys(autoHooks.tool),
-      ...Object.keys(observerHooks.tool),
-      ...Object.keys(resourceSyncHooks.tool),
-    ].filter((key) => key === "ingenium_context_import_current_session")).toHaveLength(1);
+    expect(resourceSyncHooks.tool).toBeUndefined();
   });
 
   it("publishes the V1 wrapper artifacts through package exports", () => {

@@ -11,8 +11,8 @@ import { ALL_TOOLS, getCategoryMap } from "../../lib/tools/mcp-tool-states.js";
  * Extracts transport-registered tool names from mcp-server.ts by parsing the source.
  * Tool names are now UNPREFIXED in transport registration (e.g., "skill_list").
  * The catalog maps these to canonical names with the "ingenium_" prefix.
- * Also handles extension-registered tools (synthesize_observations,
- * auto_observe_now, ingenium_context_import_current_session).
+ * Also handles extension-registered tools (synthesize_observations and
+ * auto_observe_now).
  */
 function extractServerToolNames(): string[] {
   // Relative from packages/ingenium-core/tests/mcp-tools/ to services/ingenium-server/scripts/mcp-server.ts
@@ -34,14 +34,6 @@ function extractServerToolNames(): string[] {
 const EXTENSION_TOOLS = [
   "synthesize_observations",  // observer.ts
   "auto_observe_now",         // auto-observer.ts
-  "ingenium_context_import_current_session",
-];
-
-const CONTEXT_SESSION_IMPORT_ENDPOINT = "POST /api/v1/context/imports/opencode-session";
-const CONTEXT_CURRENT_SESSION_IMPORT_ENDPOINTS = [
-  "POST /api/v1/context/conversations",
-  "GET /api/v1/context/conversations/:conversationId/messages",
-  "POST /api/v1/context/conversations/:conversationId/messages",
 ];
 
 // ── Tests ─────────────────────────────────────────────
@@ -79,32 +71,6 @@ describe("MCP Tool Catalog Parity", () => {
       }
     }
     expect(missing, "extension tools must be in the catalog").toEqual([]);
-  });
-
-  it("catalogues the exact server and extension-native OpenCode session import contracts", () => {
-    const catalogMap = getCatalogMap();
-    const expected = [
-      {
-        name: "ingenium_context_opencode_session_import",
-        description: "Import one explicitly selected, project-owned OpenCode session's user and assistant text into API-owned Context RAG.",
-        apiEndpoints: [CONTEXT_SESSION_IMPORT_ENDPOINT],
-      },
-      {
-        name: "ingenium_context_import_current_session",
-        description: "Import the current OpenCode session's completed user and assistant text into an immutable Ingenium Context conversation.",
-        apiEndpoints: CONTEXT_CURRENT_SESSION_IMPORT_ENDPOINTS,
-      },
-    ];
-    for (const contract of expected) {
-      expect(catalogMap.get(contract.name)).toEqual({
-        name: contract.name,
-        category: "Context",
-        description: contract.description,
-        projectScope: "per-project",
-        defaultEnabled: true,
-        apiEndpoints: contract.apiEndpoints,
-      });
-    }
   });
 
   // 3. Every ALL_TOOLS entry exists in the catalog
@@ -202,8 +168,8 @@ describe("MCP Tool Catalog Parity", () => {
 
   // 8. Verify catalog total count
   it("catalog has the expected number of tools", () => {
-    // 266 from mcp-server.ts + 3 extension tools = 269.
-    expect(MCP_TOOL_CATALOG.length, "catalog should contain 266 server + 3 extension tools = 269 total").toBe(269);
+    // 265 from mcp-server.ts + 2 extension tools = 267.
+    expect(MCP_TOOL_CATALOG.length, "catalog should contain 265 server + 2 extension tools = 267 total").toBe(267);
   });
 
   it("exposes the complete project tool shape", () => {
@@ -275,11 +241,10 @@ describe("MCP Tool Catalog Parity", () => {
     expect(orphaned, "no catalog entry should lack a transport registration").toEqual([]);
   });
 
-  it("reconciles the 266 server and 3 extension tool inventory", () => {
+  it("reconciles the 265 server and 2 extension tool inventory", () => {
     const serverToolNames = extractServerToolNames();
-    expect(serverToolNames).toHaveLength(266);
-    expect(serverToolNames).toContain("context_opencode_session_import");
-    expect(EXTENSION_TOOLS).toHaveLength(3);
+    expect(serverToolNames).toHaveLength(265);
+    expect(EXTENSION_TOOLS).toHaveLength(2);
     expect(MCP_TOOL_CATALOG.length).toBe(serverToolNames.length + EXTENSION_TOOLS.length);
   });
 

@@ -1,12 +1,12 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 269-tool built-in Ingenium MCP catalog across 28 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 267-tool built-in Ingenium MCP catalog across 28 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **269 tools** across **28 baseline categories**:
-266 tools registered by the server and 3 extension tools. A project-scoped
+The built-in catalog contains **267 tools** across **28 baseline categories**:
+265 tools registered by the server and 2 extension tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** name (except where noted).
@@ -157,40 +157,6 @@ Immutable conversation tools are project-scoped and use optimistic `expectedRevi
 | `ingenium_context_conversation_archive` / `ingenium_context_conversation_unarchive` | Append reversible archive-state events after explicit confirmation; immutable conversations/checkpoints are never deleted |
 | `ingenium_context_checkpoint_audit_list` | Read bounded, content-free archive and restore-as-new audit evidence |
 | `ingenium_context_checkpoint_restore` | Restore a checkpoint by branching to a new immutable conversation after a matching one-time confirmation; the source is unchanged |
-| `ingenium_context_opencode_session_import` | Server MCP proxy for the API-owned OpenCode session import. The caller explicitly supplies a project-bound session ID and absolute directory; validated user/assistant text is ingested into Context RAG with the existing upload/content-hash deduplication semantics. |
-
-The two session-import tools deliberately have different trust boundaries:
-
-- `ingenium_context_import_current_session` is an extension-native tool. Its
-  trusted `ToolContext` and plugin client identify the current OpenCode session;
-  callers cannot select a session, directory, worktree, or Ingenium project.
-  Its optional native arguments are `title` and `maxSourceEnvelopes` (1–12,800);
-  it does not accept the server proxy's `limit` argument. Without
-  `maxSourceEnvelopes`, it follows cursor pagination to import the complete
-  source snapshot, subject to finite caps of 128 pages × 100 source envelopes,
-  16,384 output entries, and 64 MiB of UTF-8 text. It sorts source envelopes
-  chronologically, keeps only ordinary user text and completed-assistant text,
-  and filters non-text, synthetic, and ignored parts. The v2 importer uses
-  stable content-based idempotency keys, so deterministic replays skip entries
-  already imported while changed or newly completed assistant text can append.
-- `ingenium_context_opencode_session_import` is the server MCP proxy. MCP
-  cannot infer the external caller's OpenCode session, so `project`,
-  `sessionId`, `directory`, `title`, and `limit` are explicit inputs; this
-  separate API-owned RAG import accepts `limit` from 1–100. The
-  launcher project must match; the session ID and absolute directory are
-  validated, the directory basename must match the project, and the API must
-  report the same session and directory before message bodies are read. The
-  API accepts at most 100 messages and only validated text parts, enforcing
-  chronological/session ownership and the 1 MiB content, 256-part, and 64 KiB
-  per-part limits. No-text imports are a no-op. Successful retries use the
-  existing project-local SHA-256 content-hash semantics and return a
-  deduplicated result rather than creating another source.
-
-The extension-native tool is loaded by the extension plugin, not discovered by
-an already-running OpenCode process. Rebuild `@ingenium/extension` after
-changing the launcher/plugin and restart OpenCode to load the tool; restart the
-MCP transport after changing the server proxy.
-
 There is no checkpoint-delete MCP tool. Confirmation tokens are capabilities:
 keep them out of transcripts and logs, use each once before it expires, and do
 not expect them in audit responses.
@@ -276,53 +242,6 @@ the `/api/v1/mcp-servers` API and use shell-free executables plus vault
 environment references. Discovered child tools use exactly one lowercase
 `ingenium_<server>_<tool>` namespace.
 
-### Thread bridge (dynamic, external FTS)
-
-The Docker deployment's Thread integration is discovered from the
-project-registered `threadbridge` child server. These tools are dynamic; do
-not add them to the **269 built-in tools / 28 baseline categories** count:
-
-| Dynamic tool | Purpose |
-|---|---|
-| `ingenium_threadbridge_thread_upload_file` | Upload one receipt-verified export to Thread's fixed `ingenium` session |
-| `ingenium_threadbridge_thread_search` | Search Thread's external FTS index (`query`, optional `limit` 1–100 and `use_cache`) |
-| `ingenium_threadbridge_thread_read_entries` | Read entries (`limit` 1–200, optional `after` and `sort`) |
-| `ingenium_threadbridge_thread_read_entries_batch` | Read selected entries (`ids`, 1–100 positive integers) |
-| `ingenium_threadbridge_thread_get_tags` | List Thread tags |
-| `ingenium_threadbridge_thread_get_stats` | Get bounded Thread statistics |
-
-The upload call accepts only the private export artifact and matching receipt,
-plus optional tags and priority:
-
-```json
-{
-  "name": "ingenium_threadbridge_thread_upload_file",
-  "arguments": {
-    "project": "global-default",
-    "arguments": {
-      "file_path": "/workspace/ingenium/.ingenium/thread-exports/thread-export-<uuid>.jsonl",
-      "receipt_path": "/workspace/ingenium/.ingenium/thread-exports/thread-export-<uuid>.jsonl.receipt.json",
-      "tags": "optional,comma-separated,tags",
-      "priority": 5
-    }
-  }
-}
-```
-
-The guard verifies mode `0600`, ownership, canonical paths, receipt keys,
-byte length, SHA-256, and one source-session fingerprint. It ignores any
-caller-supplied session and forces `session: "ingenium"` for upload, search,
-read, batch, tags, and stats. It accepts no write/delete/admin Thread tools.
-The child request and guard request each have a bounded 30-second budget.
-Private temporary upload files are deleted after the upstream call, whether it
-succeeds or fails.
-
-Thread is external FTS, not immutable `/context` conversation storage and not
-Context RAG. Thread uploads are not Context conversations, are not
-automatically ingested into Context RAG, and do not appear in the Context UI.
-Use `ingenium_context_conversation_*` and `ingenium_context_message_*` for
-append-only history, or the Context RAG tools for project-scoped RAG sources.
-
 ## AGENTS — AI sub-personalities
 
 `ingenium_agent_list`, `ingenium_agent_get`, `ingenium_agent_create`, `ingenium_agent_update`, `ingenium_agent_delete`, `ingenium_agent_enable`, `ingenium_agent_disable`, `ingenium_agent_sync`.
@@ -347,6 +266,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 269 tools across 28 categories (266 server + 3 extension).** Project-scoped child
+**Built-in baseline: 267 tools across 28 categories (265 server + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

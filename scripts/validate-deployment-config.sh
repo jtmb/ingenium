@@ -12,10 +12,6 @@ env_example="${repo_root}/.env.example"
 supervisor_config="${repo_root}/supervisord.conf"
 image_provenance_validator="${repo_root}/scripts/validate-image-provenance.mjs"
 opencode_global_projector="${repo_root}/scripts/project-opencode-global-config.mjs"
-thread_bridge_launcher="${repo_root}/scripts/run-thread-bridge.mjs"
-thread_bridge_guard="${repo_root}/scripts/thread-bridge-guard.mjs"
-thread_guard_service="${repo_root}/scripts/thread-guard-service.mjs"
-thread_revision="a3d2d4246e2a0222242d1a848abd3f0bd79a690b"
 
 require_file() {
   path="$1"
@@ -55,25 +51,7 @@ reject_literal() {
   fi
 }
 
-service_block() {
-  service_name="$1"
-  awk -v service_name="$service_name" '
-    $0 == "  " service_name ":" { capture = 1 }
-    capture && $0 ~ /^  [[:alnum:]_-]+:$/ && $0 != "  " service_name ":" { exit }
-    capture { print }
-  ' "$compose_file"
-}
-
-docker_stage_block() {
-  stage_name="$1"
-  awk -v stage_name="$stage_name" '
-    $0 ~ "^FROM .* AS " stage_name "$" { capture = 1; next }
-    capture && $0 ~ /^FROM / { exit }
-    capture { print }
-  ' "$dockerfile"
-}
-
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$thread_bridge_launcher" "$thread_bridge_guard" "$thread_guard_service"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector"; do
   require_file "$path"
 done
 
@@ -94,19 +72,6 @@ reject_literal "$dockerfile" "FROM node:22-alpine AS builder"
 require_literal "$dockerfile" "RUN node -e 'require(\"better-sqlite3\")'"
 require_literal "$dockerfile" "RUN npm run build"
 require_literal "$dockerfile" "RUN sh scripts/validate-deployment-config.sh"
-require_literal "$dockerfile" "ARG THREAD_REVISION=${thread_revision}"
-require_literal "$dockerfile" "test \"\$THREAD_REVISION\" = \"${thread_revision}\""
-require_literal "$dockerfile" 'git fetch --depth=1 origin "$THREAD_REVISION"'
-require_literal "$dockerfile" 'git checkout --detach FETCH_HEAD'
-require_literal "$dockerfile" 'test "$(git rev-parse HEAD)" = "$THREAD_REVISION"'
-require_literal "$dockerfile" "-r thread_server/requirements.txt"
-require_literal "$dockerfile" "-r thread_bridge/requirements.txt"
-require_literal "$dockerfile" "FROM node:22-slim AS thread-runtime"
-require_literal "$dockerfile" "COPY --from=thread-builder --chown=appuser:appuser /opt/thread /opt/thread"
-require_literal "$dockerfile" 'ENTRYPOINT ["/usr/bin/tini", "--"]'
-require_literal "$dockerfile" 'CMD ["/opt/thread/venv/bin/python", "-m", "thread_server.server"]'
-reject_literal "$dockerfile" "git clone"
-reject_literal "$dockerfile" "checkout main"
 # OpenCode loads the configured TypeScript plugins from source paths. Keep the
 # small local dependency closure required by those entrypoints, but do not
 # restore a broad extension-workspace copy to the production image.
@@ -144,90 +109,6 @@ reject_literal "$dockerfile" "seccomp=unconfined"
 reject_literal "$supervisor_config" "seccomp=unconfined"
 reject_literal "$dockerfile" "NOPASSWD:ALL"
 reject_literal "$dockerfile" "sudo"
-
-# Thread is deliberately isolated from host and provider networks. Only the
-# guard spans the backend and frontend networks; Ingenium has no raw Thread
-# route even when a user directly registers the upstream bridge executable.
-require_literal "$compose_file" "target: thread-runtime"
-require_literal "$compose_file" "target: thread-guard-runtime"
-require_literal "$compose_file" "- THREAD_AUTH_ENABLED=false"
-require_literal "$compose_file" "- THREAD_HOST=0.0.0.0"
-require_literal "$compose_file" "- THREAD_PORT=5000"
-require_literal "$compose_file" "- THREAD_DB_PATH=/app/data/thread.db"
-require_literal "$compose_file" "- THREAD_GIT_BASE=/app/data/git"
-require_literal "$compose_file" "- thread_data:/app/data"
-require_literal "$compose_file" "thread_data:"
-require_literal "$compose_file" "thread-backend:"
-require_literal "$compose_file" "thread-frontend:"
-require_literal "$compose_file" "internal: true"
-require_literal "$compose_file" "condition: service_healthy"
-
-ingenium_service="$(service_block ingenium)"
-thread_service="$(service_block thread)"
-thread_guard_service_block="$(service_block thread-guard)"
-if [ -z "$ingenium_service" ] || [ -z "$thread_service" ] || [ -z "$thread_guard_service_block" ]; then
-  echo "ERROR: Ingenium, Thread, and thread-guard services must all be present"
-  exit 1
-fi
-if ! printf '%s\n' "$ingenium_service" | grep -F -q -- "- default" || \
-   ! printf '%s\n' "$ingenium_service" | grep -F -q -- "- thread-frontend" || \
-   printf '%s\n' "$ingenium_service" | grep -F -q -- "- thread-backend"; then
-  echo "ERROR: Ingenium must retain only provider and Thread frontend networks"
-  exit 1
-fi
-if ! printf '%s\n' "$thread_service" | grep -F -q -- "- thread-backend" || \
-   printf '%s\n' "$thread_service" | grep -E -q '^[[:space:]]*ports:' || \
-   printf '%s\n' "$thread_service" | grep -F -q -- "- default" || \
-   printf '%s\n' "$thread_service" | grep -F -q -- "- thread-frontend"; then
-  echo "ERROR: Thread must have no host ports and only the Thread backend network"
-  exit 1
-fi
-if ! printf '%s\n' "$thread_guard_service_block" | grep -F -q -- "- thread-backend" || \
-   ! printf '%s\n' "$thread_guard_service_block" | grep -F -q -- "- thread-frontend" || \
-   ! printf '%s\n' "$thread_guard_service_block" | grep -F -q -- 'user: "1000:1000"' || \
-   ! printf '%s\n' "$thread_guard_service_block" | grep -F -q -- "read_only: true" || \
-   printf '%s\n' "$thread_guard_service_block" | grep -E -q '^[[:space:]]*ports:' || \
-   printf '%s\n' "$thread_guard_service_block" | grep -F -q -- "- default"; then
-  echo "ERROR: thread-guard must be non-root, have no host ports, and bridge only Thread networks"
-  exit 1
-fi
-
-# The local child never includes a raw Thread client or route. The guard service
-# owns the pinned bridge and forces every session at the backend boundary.
-require_literal "$thread_bridge_launcher" 'guardUrl: "http://thread-guard:8081/v1/call"'
-require_literal "$thread_bridge_guard" 'THREAD_BRIDGE_SESSION = "ingenium"'
-require_literal "$thread_bridge_guard" 'THREAD_BRIDGE_EXPORT_DIRECTORY = "/workspace/ingenium/.ingenium/thread-exports"'
-require_literal "$thread_bridge_guard" 'thread_upload_file'
-require_literal "$thread_bridge_guard" 'thread_search'
-require_literal "$thread_bridge_guard" 'thread_read_entries'
-require_literal "$thread_bridge_guard" 'constants.O_NOFOLLOW'
-require_literal "$thread_bridge_guard" 'fstatSync'
-require_literal "$thread_bridge_guard" 'readThreadUploadArtifact'
-require_literal "$thread_guard_service" 'THREAD_SERVER_URL: "http://thread:5000"'
-require_literal "$thread_guard_service" '"-m", "thread_bridge.bridge"'
-require_literal "$thread_guard_service" 'THREAD_GUARD_SESSION = "ingenium"'
-require_literal "$thread_guard_service" 'thread_read_entries_batch'
-require_literal "$thread_guard_service" 'thread_get_tags'
-require_literal "$thread_guard_service" 'thread_get_stats'
-require_literal "$thread_guard_service" 'constants.O_EXCL'
-require_literal "$thread_guard_service" 'detached: process.platform !== "win32"'
-reject_literal "$thread_bridge_launcher" "thread:5000"
-reject_literal "$thread_bridge_launcher" "thread_bridge.bridge"
-reject_literal "$thread_bridge_launcher" "THREAD_DEFAULT_SESSION"
-reject_literal "$thread_bridge_launcher" "THREAD_API_TOKEN"
-reject_literal "$thread_bridge_launcher" "THREAD_AUTH_PASSWORD"
-require_literal "$dockerfile" "scripts/run-thread-bridge.mjs"
-require_literal "$dockerfile" "scripts/thread-bridge-guard.mjs"
-require_literal "$dockerfile" "scripts/thread-guard-service.mjs"
-require_literal "$dockerfile" "--chmod=0555 scripts/run-thread-bridge.mjs"
-runtime_stage="$(docker_stage_block runtime)"
-thread_guard_stage="$(docker_stage_block thread-guard-runtime)"
-if printf '%s\n' "$runtime_stage" | grep -F -q -- "/opt/thread" || \
-   printf '%s\n' "$runtime_stage" | grep -F -q -- "thread-guard-service.mjs" || \
-   ! printf '%s\n' "$thread_guard_stage" | grep -F -q -- "COPY --from=thread-builder --chown=appuser:appuser /opt/thread /opt/thread"; then
-  echo "ERROR: only thread-guard may receive the official Thread bridge runtime"
-  exit 1
-fi
 
 reject_literal "$compose_file" "INGENIUM_GATEWAY_PASSWORD"
 reject_literal "$compose_file" "INGENIUM_GATEWAY_BCRYPT_COST"
@@ -347,7 +228,4 @@ GATEWAY_VALIDATE_STATIC_ONLY=1 sh "${repo_root}/scripts/validate-gateway-config.
 sh "${repo_root}/scripts/validate-api-boundary.sh" "$repo_root"
 node --check "$image_provenance_validator"
 node --check "$opencode_global_projector"
-node --check "$thread_bridge_launcher"
-node --check "$thread_bridge_guard"
-node --check "$thread_guard_service"
 echo "Deployment static validation passed"

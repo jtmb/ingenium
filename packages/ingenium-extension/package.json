@@ -45,15 +45,13 @@
   },
   "bin": {
     "@ingenium/extension": "./dist/scripts/mcp-server.js",
-    "ingenium-init-project": "./dist/scripts/init-project.js",
-    "ingenium-thread-export": "./dist/scripts/thread-export.js"
+    "ingenium-init-project": "./dist/scripts/init-project.js"
   },
   "files": ["dist/", "README.md"],
   "scripts": {
-    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp ../../services/ingenium-server/dist/scripts/mcp-server.js dist/scripts/mcp-transport.js && test -f dist/config/index.js && test -f dist/scripts/mcp-server.js && test -f dist/scripts/mcp-transport.js && test -f dist/scripts/init-project.js && test -f dist/scripts/thread-export.js && test -f dist/plugins/auto-observer.js && test -f dist/plugins/observer.js && test -f dist/plugins/resource-sync.js && chmod 0555 dist/scripts/mcp-server.js dist/scripts/init-project.js dist/scripts/thread-export.js && node scripts/verify-mcp-transport-parity.mjs",
+    "build": "npm run build --workspace=ingenium-server && rm -rf dist && tsc && cp -r ../../services/ingenium-server/dist/config dist/config && cp -r ../../services/ingenium-server/dist/lib dist/lib && cp ../../services/ingenium-server/dist/scripts/mcp-server.js dist/scripts/mcp-transport.js && test -f dist/config/index.js && test -f dist/scripts/mcp-server.js && test -f dist/scripts/mcp-transport.js && test -f dist/scripts/init-project.js && test -f dist/plugins/auto-observer.js && test -f dist/plugins/observer.js && test -f dist/plugins/resource-sync.js && chmod 0555 dist/scripts/mcp-server.js dist/scripts/init-project.js && node scripts/verify-mcp-transport-parity.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "thread-export": "node ./dist/scripts/thread-export.js"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

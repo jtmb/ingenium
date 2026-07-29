@@ -9,17 +9,10 @@ import { join } from "node:path";
 
 const mocks = vi.hoisted(() => ({
   executeSynthesisBroker: vi.fn(),
-  getSession: vi.fn(),
-  getMessages: vi.fn(),
 }));
 
 vi.mock("../lib/opencode-client.js", () => ({
   executeSynthesisBroker: mocks.executeSynthesisBroker,
-  isOpenCodeError: (result: unknown) => Boolean(result && typeof result === "object" && "error" in result),
-  opencodeClient: {
-    getSession: mocks.getSession,
-    getMessages: mocks.getMessages,
-  },
 }));
 
 import { observations, projects, resetDbForTest } from "ingenium-core";
@@ -36,39 +29,12 @@ function url(path: string, project = projectName): string {
   return `${baseUrl}/api/v1/context${path}${path.includes("?") ? "&" : "?"}project=${project}`;
 }
 
-function textMessage(
-  sessionId: string,
-  messageId: string,
-  role: "user" | "assistant",
-  created: number,
-  text: string,
-) {
-  return {
-    info: { id: messageId, sessionID: sessionId, role, time: { created } },
-    parts: [{ id: `${messageId}-text`, sessionID: sessionId, messageID: messageId, type: "text", text }],
-  };
-}
-
-async function uploadTotal(): Promise<number> {
-  const response = await fetch(url("/uploads"));
-  expect(response.status).toBe(200);
-  return (await response.json()).total as number;
-}
-
-async function importOpenCodeSession(body: Record<string, unknown>) {
-  return fetch(url("/imports/opencode-session"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
 beforeAll(async () => {
   process.env.INGENIUM_CORE_DB_PATH = databasePath;
   resetDbForTest();
   projects.createProject(projectName);
   projects.createProject(secondProjectName);
-  mocks.executeSynthesisBroker.mockResolvedValue({ ok: true, content: "The imported source requires an immutable handoff. [1]" });
+  mocks.executeSynthesisBroker.mockResolvedValue({ ok: true, content: "The current source requires an immutable handoff. [1]" });
 
   const app = express();
   app.use(express.json({ limit: "2mb" }));
@@ -187,150 +153,6 @@ describe("context RAG API", () => {
     const completed = await fetch(url(`/uploads/${uploadId}/complete`), { method: "POST" });
     expect(completed.status).toBe(200);
     expect((await completed.json()).data).toMatchObject({ upload: { provenance: "chunked_upload" } });
-  });
-
-  it("imports a safely project-bound OpenCode session without logging or exposing raw text in list responses", async () => {
-    const sessionId = "session-ctx-003";
-    const directory = "/workspaces/context-rag-api";
-    mocks.getSession.mockResolvedValue({ id: sessionId, directory, title: "Imported session" });
-    mocks.getMessages.mockResolvedValue([
-      textMessage(sessionId, "msg-user", "user", 1_700_000_000_000, "The bronze observatory needs durable context."),
-      textMessage(sessionId, "msg-assistant", "assistant", 1_700_000_010_000, "I will retain a source citation."),
-    ]);
-    const imported = await importOpenCodeSession({ sessionId, directory, title: "Imported OpenCode session" });
-    expect(imported.status).toBe(201);
-    const importedBody = await imported.json();
-    expect(importedBody.data).toMatchObject({
-      upload: { provenance: "opencode_session", sourceReference: `opencode-session:${sessionId}` },
-      importedMessages: 2,
-    });
-    expect(JSON.stringify(importedBody)).not.toContain("bronze observatory");
-    expect(mocks.getMessages).toHaveBeenCalledWith(sessionId, 100, undefined, directory);
-
-    const listed = await fetch(url("/uploads"));
-    const listedBody = await listed.json();
-    expect(JSON.stringify(listedBody)).not.toContain("bronze observatory");
-
-    const unsafe = await importOpenCodeSession({ sessionId, directory: "/workspaces/not-this-project" });
-    expect(unsafe.status).toBe(422);
-  });
-
-  it("rejects hostile session imports before RAG writes and never reflects untrusted data", async () => {
-    const directory = "/workspaces/context-rag-api";
-    const before = await uploadTotal();
-
-    mocks.getSession.mockClear();
-    const dotAlias = await importOpenCodeSession({ sessionId: "session-dot-alias", directory: "/workspaces/context-rag-api/./" });
-    expect(dotAlias.status).toBe(422);
-    expect(mocks.getSession).not.toHaveBeenCalled();
-
-    const ownershipId = "session-ownership-mismatch";
-    mocks.getSession.mockResolvedValue({ id: ownershipId, directory: "/workspaces/not-context-rag-api" });
-    mocks.getMessages.mockClear();
-    const ownership = await importOpenCodeSession({ sessionId: ownershipId, directory });
-    expect(ownership.status).toBe(409);
-    expect(mocks.getMessages).not.toHaveBeenCalled();
-
-    const hostileCases: Array<{ label: string; messages: unknown[] }> = [
-      {
-        label: "cross-session envelope",
-        messages: [{ ...textMessage("other-session", "msg-other-session", "user", 1_700_000_000_000, "must not persist"), info: { ...textMessage("other-session", "msg-other-session", "user", 1_700_000_000_000, "must not persist").info, sessionID: "other-session" } }],
-      },
-      {
-        label: "cross-message part",
-        messages: [{ ...textMessage("session-placeholder", "msg-cross-message", "user", 1_700_000_000_000, "must not persist"), parts: [{ ...textMessage("session-placeholder", "msg-cross-message", "user", 1_700_000_000_000, "must not persist").parts[0], messageID: "different-message" }] }],
-      },
-      {
-        label: "synthetic text",
-        messages: [{ ...textMessage("session-placeholder", "msg-synthetic", "user", 1_700_000_000_000, "must not persist"), parts: [{ ...textMessage("session-placeholder", "msg-synthetic", "user", 1_700_000_000_000, "must not persist").parts[0], synthetic: true }] }],
-      },
-      {
-        label: "ignored text",
-        messages: [{ ...textMessage("session-placeholder", "msg-ignored", "user", 1_700_000_000_000, "must not persist"), parts: [{ ...textMessage("session-placeholder", "msg-ignored", "user", 1_700_000_000_000, "must not persist").parts[0], ignored: true }] }],
-      },
-      {
-        label: "non-finite timestamp",
-        messages: [textMessage("session-placeholder", "msg-nonfinite", "user", Number.POSITIVE_INFINITY, "must not persist")],
-      },
-      {
-        label: "out-of-order timestamp",
-        messages: [
-          textMessage("session-placeholder", "msg-later", "user", 1_700_000_000_001, "must not persist"),
-          textMessage("session-placeholder", "msg-earlier", "assistant", 1_700_000_000_000, "must not persist"),
-        ],
-      },
-      {
-        label: "oversized text part",
-        messages: [textMessage("session-placeholder", "msg-oversized", "user", 1_700_000_000_000, "x".repeat(65_537))],
-      },
-      {
-        label: "too many parts",
-        messages: [{
-          ...textMessage("session-placeholder", "msg-many-parts", "user", 1_700_000_000_000, "must not persist"),
-          parts: Array.from({ length: 257 }, (_, index) => ({
-            id: `part-${index}`,
-            sessionID: "session-placeholder",
-            messageID: "msg-many-parts",
-            type: "text",
-            text: "x",
-          })),
-        }],
-      },
-      {
-        label: "aggregate text limit",
-        messages: [{
-          ...textMessage("session-placeholder", "msg-aggregate", "user", 1_700_000_000_000, "must not persist"),
-          parts: Array.from({ length: 17 }, (_, index) => ({
-            id: `aggregate-part-${index}`,
-            sessionID: "session-placeholder",
-            messageID: "msg-aggregate",
-            type: "text",
-            text: "x".repeat(65_536),
-          })),
-        }],
-      },
-    ];
-    for (const type of ["reasoning", "tool", "file", "step-start", "step-finish"]) {
-      hostileCases.push({
-        label: `${type} part`,
-        messages: [{
-          ...textMessage("session-placeholder", `msg-${type}`, "user", 1_700_000_000_000, "must not persist"),
-          parts: [{ id: `part-${type}`, sessionID: "session-placeholder", messageID: `msg-${type}`, type, text: "must not persist" }],
-        }],
-      });
-    }
-
-    for (const [index, hostile] of hostileCases.entries()) {
-      const sessionId = `session-hostile-${index}`;
-      mocks.getSession.mockResolvedValue({ id: sessionId, directory });
-      mocks.getMessages.mockResolvedValue(hostile.messages.map((message) => JSON.parse(JSON.stringify(message).replaceAll("session-placeholder", sessionId))));
-      const response = await importOpenCodeSession({ sessionId, directory });
-      expect(response.status, hostile.label).toBe(422);
-      expect(JSON.stringify(await response.json()), hostile.label).not.toContain("must not persist");
-    }
-    expect(await uploadTotal()).toBe(before);
-  });
-
-  it("deduplicates validated OpenCode session replays by content hash", async () => {
-    const sessionId = "session-replay-safe";
-    const directory = "/workspaces/context-rag-api";
-    mocks.getSession.mockResolvedValue({ id: sessionId, directory });
-    mocks.getMessages.mockResolvedValue([
-      textMessage(sessionId, "msg-replay-user", "user", 1_700_100_000_000, "The replay-safe source has stable text."),
-      textMessage(sessionId, "msg-replay-assistant", "assistant", 1_700_100_001_000, "It should retain one canonical RAG upload."),
-    ]);
-    const before = await uploadTotal();
-    const first = await importOpenCodeSession({ sessionId, directory, title: "First replay title" });
-    expect(first.status).toBe(201);
-    const firstBody = await first.json();
-    const replay = await importOpenCodeSession({ sessionId, directory, title: "Second replay title" });
-    expect(replay.status).toBe(200);
-    expect((await replay.json()).data).toMatchObject({
-      deduplicated: true,
-      source: { id: firstBody.data.source.id },
-      upload: { contentHash: firstBody.data.upload.contentHash },
-    });
-    expect(await uploadTotal()).toBe(before + 1);
   });
 
   it("reports timestamped current learning and creates a project-scoped explicit learning snapshot", async () => {

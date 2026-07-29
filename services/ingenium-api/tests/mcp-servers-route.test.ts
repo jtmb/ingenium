@@ -352,56 +352,6 @@ describe("canonical child MCP server API", () => {
     });
   });
 
-  it("publishes the canonical Thread bridge upload discovery and rejects the retired thread namespace", async () => {
-    directory = mkdtempSync(join(tmpdir(), "ingenium-threadbridge-route-"));
-    process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");
-    process.env.INGENIUM_HOME = join(directory, "home");
-    projects.createProject("threadbridge-project");
-    const baseUrl = await startRouter();
-
-    const created = await fetch(`${baseUrl}/mcp-servers?project=threadbridge-project`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "threadbridge", executable: "node" }),
-    });
-    expect(created.status).toBe(201);
-
-    const discovered = await fetch(`${baseUrl}/mcp-servers/threadbridge/discovery?project=threadbridge-project`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        status: "ready",
-        tools: [{
-          name: "thread_upload_file",
-          description: "Upload one generated JSONL file to Thread.",
-          input_schema: {
-            type: "object",
-            required: ["file_path"],
-            properties: { file_path: { type: "string" } },
-          },
-        }],
-      }),
-    });
-    expect(discovered.status).toBe(200);
-    const visible = await (await fetch(`${baseUrl}/mcp-servers/tools?project=threadbridge-project`)).json();
-    expect(visible.data).toContainEqual(expect.objectContaining({
-      canonical_name: "ingenium_threadbridge_thread_upload_file",
-      category: "Child MCP / threadbridge",
-    }));
-    const upload = visible.data.find((tool: { canonical_name: string }) => tool.canonical_name === "ingenium_threadbridge_thread_upload_file");
-    expect(JSON.stringify(upload)).not.toContain("session");
-
-    const retired = await fetch(`${baseUrl}/mcp-servers?project=threadbridge-project`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "thread", executable: "node" }),
-    });
-    expect(retired.status).toBe(422);
-    await expect(retired.json()).resolves.toEqual({
-      error: { code: "INVALID_CHILD_MCP_SERVER", message: "Child MCP server definition is invalid." },
-    });
-  });
-
   it("keeps built-in and category tool state isolated per project", async () => {
     directory = mkdtempSync(join(tmpdir(), "ingenium-mcp-tool-state-isolation-"));
     process.env.INGENIUM_CORE_DB_PATH = join(directory, "data.db");

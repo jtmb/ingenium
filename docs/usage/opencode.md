@@ -69,56 +69,6 @@ tokens, or transport diagnostics.
 
 Web and CLI sessions share the same backend process state.
 
-## Thread external context workflow
-
-Thread is the fast external FTS path for bounded session exports. It is not a
-per-message Ingenium API: export is one local `opencode export` subprocess,
-followed by one explicit guarded upload. Register the `threadbridge` child
-server for the target project (the container uses `global-default`) and
-refresh discovery before using its dynamic tools:
-
-```text
-OpenCode session → ingenium-thread-export → private JSONL + receipt
-  → ingenium_threadbridge_thread_upload_file
-  → thread-guard:8081 → pinned official Thread bridge → Thread:5000
-```
-
-The raw Thread sidecar and port 5000 are internal-only. Thread has no host
-port, Ingenium has no raw Thread route, and `thread-guard` is the authoritative
-non-root guard between the local child and Thread. Thread is pinned to commit
-`a3d2d4246e2a0222242d1a848abd3f0bd79a690b`.
-
-### Export, upload, and cleanup
-
-The packaged CLI accepts exactly these forms:
-
-```bash
-ingenium-thread-export --session <safe-session-id> --worktree <canonical-worktree> [--timeout-ms <milliseconds>]
-ingenium-thread-export --cleanup <export-file> --receipt <export-receipt> --sha256 <sha256> --worktree <canonical-worktree> --upload-succeeded
-```
-
-It runs `opencode export <session-id>` with `shell: false`, keeps only visible
-user text and completed assistant text, and writes private `0600` artifacts
-under `.ingenium/thread-exports/`. Its sole stdout line is a JSON receipt:
-
-```json
-{"path":"<...>.jsonl","receiptPath":"<...>.jsonl.receipt.json","sha256":"<64 lowercase hex>","byteLength":1234,"messageCount":2,"metadata":{"source":"opencode-export","schemaVersion":1,"sourceSessionSha256":"<64 lowercase hex>"}}
-```
-
-The default export timeout is 30 seconds and the maximum is 60 seconds. The
-raw OpenCode envelope is bounded to 64 MiB, while the filtered upload JSONL is
-independently bounded to 16 MiB; large ignored reasoning or tool parts do not
-consume the JSONL limit. Pass the receipt paths and returned SHA-256 to
-`ingenium_threadbridge_thread_upload_file` using the [MCP Tools
-Reference](../reference/mcp-tools.md), then run cleanup **only after upload
-succeeds**. Cleanup verifies both artifacts again before deleting them;
-failed or unconfirmed uploads are retained.
-
-Thread search/read tools query the external Thread FTS/session store. They do
-not read immutable `/context` conversations or Context RAG, and Thread uploads
-do not appear in the Context UI. Use immutable context tools or Context RAG
-ingestion explicitly when those stores are required.
-
 ## Gateway boundaries
 
 - **Rate limits are separate**: dashboard traffic uses its own `30r/s` bucket
@@ -149,4 +99,4 @@ ingestion explicitly when those stores are required.
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 - The `appuser` has passwordless `sudo` access inside the container for package installation.
-- Use the OpenCode interface to interact with the built-in 269-tool Ingenium MCP catalog across 28 baseline categories (266 server registrations plus 3 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the built-in 267-tool Ingenium MCP catalog across 28 baseline categories (265 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.

@@ -75,19 +75,13 @@ async function checkToolEnabled(
  * enable/disable toggle and explicit project identity are enforced here, not
  * in individual tool handlers.
  */
-interface WrapHandlerOptions {
-  /** Restrict a sensitive tool to the authoritative project of this MCP launcher. */
-  requiredProject?: string | null;
-}
-
 function wrapHandler(
   toolName: string,
   handler: (args: any) => Promise<any>,
-  options: WrapHandlerOptions = {},
 ) {
   return async (args: any) => {
     const project = resolveChildMcpProjectIdentity(args?.project);
-    if (!project || (options.requiredProject !== undefined && project !== options.requiredProject)) {
+    if (!project) {
       return {
         content: [{ type: "text" as const, text: JSON.stringify({
           error: { code: "PROJECT_IDENTITY_REQUIRED", message: "A valid explicit project identity is required." }
@@ -147,7 +141,6 @@ const projectParam = z.string().min(1).max(64).refine(
   "A valid project identity is required",
 );
 const launcherProject = resolveChildMcpProjectIdentity(process.env.INGENIUM_PROJECT);
-const openCodeSessionImportInputSchema = contextTools.createOpenCodeSessionImportInputSchema(launcherProject);
 
 const server = new McpServer(
   { name: config.mcpName, version: config.mcpVersion },
@@ -935,20 +928,6 @@ server.registerTool("context_get", { description: "Get a canonical context entry
 server.registerTool("context_update", { description: "Update a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive(), fields: z.record(z.unknown()) } }, wrapHandler(C("context_update"), async ({ project, id, fields }) => contextTools.contextUpdate(project, id, fields)));
 server.registerTool("context_delete", { description: "Delete a canonical context entry.", inputSchema: { project: projectParam, id: z.number().int().positive() } }, wrapHandler(C("context_delete"), async ({ project, id }) => contextTools.contextDelete(project, id)));
 server.registerTool("context_batch_get", { description: "Retrieve a batch of canonical context entries.", inputSchema: { project: projectParam, ids: z.array(z.number().int().positive()).max(100) } }, wrapHandler(C("context_batch_get"), async ({ project, ids }) => contextTools.contextBatch(project, ids)));
-server.registerTool(
-  "context_opencode_session_import",
-  {
-    description: "Import up to 100 text messages from an API-owned OpenCode session into this launcher's project context.",
-    inputSchema: openCodeSessionImportInputSchema.shape,
-  },
-  wrapHandler(
-    C("context_opencode_session_import"),
-    async ({ project, sessionId, directory, title, limit }) => contextTools.contextOpenCodeSessionImport(
-      project, sessionId, directory, title, limit,
-    ),
-    { requiredProject: launcherProject },
-  ),
-);
 
 // Immutable conversation context. List/search tools return summaries only;
 // content is exposed only by the deliberate message-retrieve operations.

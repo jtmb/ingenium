@@ -70,7 +70,7 @@ function parseDiscoveryReport(input: unknown): ChildMcpDiscoveryReportInput {
 }
 
 function assertSafeServerName(name: string): void {
-  if (!/^[a-z][a-z0-9]{0,47}$/.test(name) || name === "thread") invalid();
+  if (!/^[a-z][a-z0-9]{0,47}$/.test(name)) invalid();
 }
 
 function readDefinition(row: unknown): ChildMcpServerDefinition {

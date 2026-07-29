@@ -12,8 +12,6 @@ credentials.json
 .agents/skills/*/SKILL.md.bak
 .agents.old/
 .ingenium/
-# Run-owned local OpenCode exports awaiting a separate Thread upload.
-/.ingenium/thread-exports/
 
 # ── Dependencies ──────────────────────────────────────────
 node_modules/

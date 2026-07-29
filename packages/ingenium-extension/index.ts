@@ -12,14 +12,3 @@ export { OnboardingSyncPlugin } from "./onboarding-sync.js";
 
 /** Unified bidirectional sync engine for skills, agents, plugins, commands, and config between API and disk. */
 export { ResourceSyncPlugin } from "./resource-sync.js";
-
-/** Imports completed text from the current ToolContext session into immutable Context storage. */
-export { ContextImportPlugin } from "./context-import.js";
-
-/** Exports an explicit local OpenCode session as private Thread-compatible JSONL without API calls. */
-export {
-  cleanupThreadExport,
-  exportOpenCodeSessionToThread,
-  type ThreadExportReceipt,
-  type ThreadExportOptions,
-} from "./thread-export.js";

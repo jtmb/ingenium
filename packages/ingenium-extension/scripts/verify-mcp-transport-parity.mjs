@@ -4,14 +4,6 @@ import { fileURLToPath } from "node:url";
 
 const TRANSPORT_REGISTRATION_PATTERN = /server\.registerTool\(\s*"([^"]+)"\s*,/g;
 const CATALOG_NAME_PATTERN = /\bname:\s*"([^"]+)"/g;
-const SESSION_IMPORT_TRANSPORT_NAME = "context_opencode_session_import";
-const SESSION_IMPORT_CATALOG_NAME = `ingenium_${SESSION_IMPORT_TRANSPORT_NAME}`;
-const CURRENT_SESSION_IMPORT_NAME = "ingenium_context_import_current_session";
-const OPTIONAL_LIMIT_SCHEMA_PATTERN = /limit:\s*z\.number\(\)\.int\(\)\.min\(1\)\.max\(100\)\.optional\(\)/;
-const CURRENT_SESSION_SCHEMA_PATTERNS = [
-  /title:\s*tool\.schema\.string\(\)\.trim\(\)\.min\(1\)\.max\(CONTEXT_IMPORT_TITLE_MAX_CHARS\)\.optional\(\)/,
-  /maxSourceEnvelopes:\s*tool\.schema\.number\(\)\.int\(\)\.min\(1\)\.max\(CONTEXT_IMPORT_MAX_SOURCE_ENVELOPES\)\.optional\(\)/,
-];
 
 function readRequiredFile(path) {
   if (!existsSync(path)) {
@@ -40,20 +32,12 @@ function describeDifference(expected, actual) {
   ].join("; ");
 }
 
-function assertMatches(pattern, source, label) {
-  if (!pattern.test(source)) throw new Error(`Expected ${label} was not found`);
-}
-
 export function getMcpTransportParityPaths(repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..")) {
   const extensionRoot = join(repositoryRoot, "packages", "ingenium-extension");
   const serverRoot = join(repositoryRoot, "services", "ingenium-server");
   return {
     catalogSource: join(repositoryRoot, "packages", "ingenium-core", "lib", "tools", "mcp-tool-catalog.ts"),
-    currentSessionImportArtifact: join(extensionRoot, "dist", "context-import.js"),
-    currentSessionImportSource: join(extensionRoot, "context-import.ts"),
-    packagedContextTool: join(extensionRoot, "dist", "lib", "tools", "context.js"),
     packagedTransport: join(extensionRoot, "dist", "scripts", "mcp-transport.js"),
-    serverContextTool: join(serverRoot, "lib", "tools", "context.ts"),
     serverTransport: join(serverRoot, "scripts", "mcp-server.ts"),
   };
 }
@@ -68,10 +52,6 @@ export function assertMcpTransportParity(repositoryRoot) {
   const serverTransport = readRequiredFile(paths.serverTransport);
   const packagedTransport = readRequiredFile(paths.packagedTransport);
   const catalogSource = readRequiredFile(paths.catalogSource);
-  const serverContextTool = readRequiredFile(paths.serverContextTool);
-  const packagedContextTool = readRequiredFile(paths.packagedContextTool);
-  const currentSessionImportSource = readRequiredFile(paths.currentSessionImportSource);
-  const currentSessionImportArtifact = readRequiredFile(paths.currentSessionImportArtifact);
 
   const serverToolNames = extractNames(serverTransport, TRANSPORT_REGISTRATION_PATTERN, "server transport registrations");
   const packagedToolNames = extractNames(packagedTransport, TRANSPORT_REGISTRATION_PATTERN, "packaged transport registrations");
@@ -88,39 +68,16 @@ export function assertMcpTransportParity(repositoryRoot) {
     throw new Error(`Server transport registrations are absent from the catalog: ${missingCatalogNames.join(", ")}`);
   }
 
-  if (!serverToolNames.includes(SESSION_IMPORT_TRANSPORT_NAME)
-    || !packagedToolNames.includes(SESSION_IMPORT_TRANSPORT_NAME)
-    || !catalogNames.has(SESSION_IMPORT_CATALOG_NAME)) {
-    throw new Error(`Required session-import registration is absent: ${SESSION_IMPORT_CATALOG_NAME}`);
-  }
-  assertMatches(OPTIONAL_LIMIT_SCHEMA_PATTERN, serverContextTool, "optional bounded session-import limit in server source");
-  assertMatches(OPTIONAL_LIMIT_SCHEMA_PATTERN, packagedContextTool, "optional bounded session-import limit in packaged artifact");
-
-  for (const source of [currentSessionImportSource, currentSessionImportArtifact]) {
-    if (!source.includes(CURRENT_SESSION_IMPORT_NAME)) {
-      throw new Error(`Required extension-native tool is absent: ${CURRENT_SESSION_IMPORT_NAME}`);
-    }
-    for (const pattern of CURRENT_SESSION_SCHEMA_PATTERNS) {
-      assertMatches(pattern, source, `expected ${CURRENT_SESSION_IMPORT_NAME} schema`);
-    }
-  }
-  if (!catalogNames.has(CURRENT_SESSION_IMPORT_NAME)) {
-    throw new Error(`Required extension-native catalog registration is absent: ${CURRENT_SESSION_IMPORT_NAME}`);
-  }
-
   return {
     serverToolCount: serverToolNames.length,
     packagedToolCount: packagedToolNames.length,
-    sessionImportTransportName: SESSION_IMPORT_TRANSPORT_NAME,
-    sessionImportCatalogName: SESSION_IMPORT_CATALOG_NAME,
-    currentSessionImportName: CURRENT_SESSION_IMPORT_NAME,
   };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = assertMcpTransportParity();
-    console.log(`MCP transport parity verified: ${result.packagedToolCount} registrations, ${result.sessionImportCatalogName}, ${result.currentSessionImportName}`);
+    console.log(`MCP transport parity verified: ${result.packagedToolCount} registrations`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : "MCP transport parity verification failed");
     process.exitCode = 1;

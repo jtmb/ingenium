@@ -14,7 +14,6 @@
 import { closeSync, constants, existsSync, fchmodSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { resolve, basename, dirname, isAbsolute, parse as parsePath, sep, relative, extname } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import type { ToolDefinition } from "@opencode-ai/plugin";
 import {
   classifyExtensionProjectFailure,
   ensureExtensionProject,
@@ -2903,14 +2902,7 @@ function resultSummary(label: string, r: SyncResult): string {
  *   session.created → Full comparison of all resources
  *   session.idle    → Incremental sync (throttled 1/60s)
  */
-export interface ResourceSyncPluginHooks {
-  event: (input: { event: any }) => Promise<void>;
-  tool: {
-    ingenium_context_import_current_session: ToolDefinition;
-  };
-}
-
-export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }): Promise<ResourceSyncPluginHooks> => {
+export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any }) => {
   const worktree = ctx.worktree;
   let startupProvisioningFailure: ExtensionProjectFailureKind | null = null;
 
@@ -2942,10 +2934,6 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
     startupProvisioningFailure = classifyExtensionProjectFailure(error);
     reportStartupDiagnostic("extension_project_init_failed", startupProvisioningFailure);
   }
-
-  // Keep non-plugin extension entry points package-independent. The native
-  // OpenCode tool is loaded only when OpenCode instantiates this plugin.
-  const { createContextImportTool } = await import("./context-import.js");
 
   return {
     event: async ({ event }: { event: any }) => {
@@ -3002,9 +2990,6 @@ export const ResourceSyncPlugin = async (ctx: { worktree: string; client: any })
           /* non-fatal */
         }
       }
-    },
-    tool: {
-      ingenium_context_import_current_session: createContextImportTool(ctx.client),
     },
   };
 };

@@ -10,7 +10,7 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 - **Package Manager**: npm workspaces (monorepo)
 - **API**: Express.js on private container port 4096 behind the authenticated host-loopback boundary on 4097, JSON body limit 2MB (`express.json({ limit: "2mb" })`), helmet + CORS middleware
 - **Database**: SQLite via better-sqlite3 with WAL mode + FTS5 full-text search
-- **MCP**: @modelcontextprotocol/sdk for stdio transport (269 built-in catalog tools across 28 baseline categories; 266 registered by the server and 3 by the extension, with project-scoped child tools added dynamically)
+- **MCP**: @modelcontextprotocol/sdk for stdio transport (267 built-in catalog tools across 28 baseline categories; 265 registered by the server and 2 by the extension, with project-scoped child tools added dynamically)
 - **Frontend**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Syntax Highlighting**: highlight.js (`github.css` + custom `hljs-dark.css`) — Preview and Source modes in skill detail overlay
 - **State / Persistence**: Docs RAG system for cross-session context

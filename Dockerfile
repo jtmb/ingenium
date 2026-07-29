@@ -1,76 +1,3 @@
-# Thread is fetched as source rather than consumed as a mutable published image.
-# The direct commit fetch avoids checking out an unpinned branch; the assertion
-# makes a changed remote ref or an accidental build-arg override fail the build.
-FROM node:22-slim AS thread-source
-ARG THREAD_REVISION=a3d2d4246e2a0222242d1a848abd3f0bd79a690b
-WORKDIR /opt/thread/src
-RUN test "$THREAD_REVISION" = "a3d2d4246e2a0222242d1a848abd3f0bd79a690b" && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git python3 python3-venv && \
-    rm -rf /var/lib/apt/lists/* && \
-    git init . && \
-    git remote add origin https://github.com/jtmb/thread.git && \
-    git fetch --depth=1 origin "$THREAD_REVISION" && \
-    git checkout --detach FETCH_HEAD && \
-    test "$(git rev-parse HEAD)" = "$THREAD_REVISION"
-
-# Install the exact revision's server and bridge requirements together. The
-# bridge is copied only into the guard image; Ingenium never receives a raw
-# Thread client or a route to the auth-disabled Thread server.
-FROM thread-source AS thread-builder
-RUN python3 -m venv /opt/thread/venv && \
-    /opt/thread/venv/bin/pip install --no-cache-dir \
-      -r thread_server/requirements.txt \
-      -r thread_bridge/requirements.txt && \
-    /opt/thread/venv/bin/python -c "import flask, requests, waitress, thread_bridge, thread_server"
-
-# A separate, non-root sidecar runtime. It shares the glibc-based Node base
-# used by Ingenium so the Python bridge environment is built and run on the
-# same platform family without relying on a third-party Thread image.
-FROM node:22-slim AS thread-runtime
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git python3 python3-venv tini && \
-    rm -rf /var/lib/apt/lists/* && \
-    userdel -r node && \
-    adduser --uid 1000 --disabled-password --comment "" appuser
-WORKDIR /opt/thread/src
-COPY --from=thread-builder --chown=appuser:appuser /opt/thread /opt/thread
-RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
-USER appuser
-ENV PYTHONUNBUFFERED=1 \
-    THREAD_HOST=0.0.0.0 \
-    THREAD_PORT=5000 \
-    THREAD_DB_PATH=/app/data/thread.db \
-    THREAD_GIT_BASE=/app/data/git
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
-  CMD ["/opt/thread/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/v1/health', timeout=3)"]
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/opt/thread/venv/bin/python", "-m", "thread_server.server"]
-
-# The guard is the only service that receives the official Thread bridge. It
-# publishes a deliberately narrow internal protocol on thread-frontend while
-# retaining the raw Thread route exclusively on thread-backend.
-FROM node:22-slim AS thread-guard-runtime
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates python3 python3-venv tini && \
-    rm -rf /var/lib/apt/lists/* && \
-    userdel -r node && \
-    adduser --uid 1000 --disabled-password --comment "" appuser
-WORKDIR /app
-COPY --from=thread-builder --chown=appuser:appuser /opt/thread /opt/thread
-COPY --chown=appuser:appuser --chmod=0555 scripts/thread-guard-service.mjs ./scripts/thread-guard-service.mjs
-RUN install -d -o appuser -g appuser -m 0700 /run/thread-guard
-USER appuser
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    THREAD_GUARD_HOST=0.0.0.0 \
-    THREAD_GUARD_PORT=8081 \
-    THREAD_GUARD_TEMP_DIRECTORY=/run/thread-guard
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:8081/health', { signal: AbortSignal.timeout(3000) }).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "/app/scripts/thread-guard-service.mjs"]
-
 # Stage 1: Build all monorepo workspaces. Keep this glibc-based image aligned
 # with runtime: native Node modules compiled or selected here are copied there.
 FROM node:22-slim AS builder
@@ -131,7 +58,7 @@ LABEL org.opencontainers.image.revision="${IMAGE_REVISION}" \
 ARG OPENCODE_VERSION=1.18.3
 ARG OPENCODE_SHA256=60f27b2679f00a511b6539f97e02448afaf58d9c66e2448285ea0c517ca84583
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    supervisor nginx curl ca-certificates tzdata git python3 python3-venv && \
+    supervisor nginx curl ca-certificates tzdata git && \
     rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64.tar.gz" && \
     echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
@@ -180,7 +107,6 @@ COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/obs
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/plugins/observer.ts ./packages/ingenium-extension/plugins/observer.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/resource-sync.ts ./packages/ingenium-extension/resource-sync.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/plugins/resource-sync.ts ./packages/ingenium-extension/plugins/resource-sync.ts
-COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/context-import.ts ./packages/ingenium-extension/context-import.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/skill-sync.ts ./packages/ingenium-extension/skill-sync.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer-core.ts ./packages/ingenium-extension/observer-core.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/project-resolver.ts ./packages/ingenium-extension/project-resolver.ts
@@ -199,7 +125,6 @@ RUN chmod 0555 /app/packages/ingenium-extension/dist/scripts/init-project.js && 
 COPY --chown=appuser:appuser supervisord.conf ./supervisord.conf
 COPY --chown=appuser:appuser scripts/docker-entrypoint.sh ./entrypoint.sh
 COPY --chown=appuser:appuser scripts/api-boundary-proxy.mjs scripts/probe-api.mjs scripts/project-opencode-global-config.mjs scripts/run-api.sh scripts/run-api-boundary-proxy.sh scripts/run-dashboard.mjs scripts/run-dashboard.sh scripts/run-gateway.sh scripts/start-opencode-web.sh scripts/wait-for-opencode.sh scripts/start-ttyd.sh scripts/healthcheck.sh scripts/validate-gateway-config.sh scripts/validate-api-boundary.sh ./scripts/
-COPY --chown=appuser:appuser --chmod=0555 scripts/run-thread-bridge.mjs scripts/thread-bridge-guard.mjs ./scripts/
 COPY --chown=appuser:appuser nginx/gateway.conf nginx/proxy-common.conf nginx/proxy-dashboard.conf nginx/proxy-opencode.conf nginx/proxy-oauth-callback.conf ./nginx/
 # Validate the rendered Nginx configuration as its production user. Runtime
 # startup recreates these ephemeral directories before Nginx starts.

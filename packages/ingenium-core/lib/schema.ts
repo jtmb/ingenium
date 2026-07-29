@@ -508,10 +508,7 @@ export const MCP_CHILD_TOOL_DESCRIPTION_MAX_LENGTH = 1024;
 export const MCP_CHILD_TOOL_SCHEMA_MAX_BYTES = 16 * 1024;
 
 const ChildMcpServerNameSchema = z.string().superRefine((value, context) => {
-  // `thread` was the retired direct integration namespace. Thread now runs as
-  // the explicitly namespaced `threadbridge` child MCP so it cannot shadow or
-  // resurrect the former transport surface.
-  if (!/^[a-z][a-z0-9]{0,47}$/.test(value) || value === "thread") {
+  if (!/^[a-z][a-z0-9]{0,47}$/.test(value)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid child MCP server name" });
   }
 });

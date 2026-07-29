@@ -117,24 +117,6 @@ cover a built-in tool being removed from `tools/list`, direct execution failing
 closed, and visibility/execution returning after re-enable. The dashboard MCP
 control spec covers the real `/mcp-servers` toggle path.
 
-### Thread bridge focused checks
-
-The Thread bridge deployment and guard contract is covered by the child MCP
-gateway tests and deployment static validator:
-
-```bash
-npm run test --workspace=services/ingenium-server -- child-mcp-gateway.test.ts
-sh scripts/validate-deployment-config.sh
-```
-
-These checks verify the pinned Thread revision, internal-only sidecar and
-authoritative guard topology, absence of host ports/raw Thread access, fixed
-`ingenium` session scoping, dynamic `threadbridge` discovery and naming,
-receipt/SHA-256/path/file-mode upload guards, explicit cleanup behavior, and
-the bounded 30-second child request budget. They also verify that dynamic
-Thread tools do not alter the static built-in catalog count. The fixture does
-not require a live Thread service or provider credentials.
-
 ## Explicit opt-in suites
 
 Each external suite fails during preflight unless its opt-in variable is set
