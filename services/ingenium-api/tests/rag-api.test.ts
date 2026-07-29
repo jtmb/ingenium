@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createHash } from "node:crypto";
 import express from "express";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -89,68 +88,5 @@ describe("RAG source CRUD", () => {
 
     const deleted = await fetch(url(`/sources/${sourceId}`), { method: "DELETE" });
     expect(deleted.status).toBe(204);
-  });
-
-  it("imports canonical JSONL idempotently without dropping legacy entry fields", async () => {
-    const text = [
-      JSON.stringify({ kind: "legacy_thread_manifest", marker: "legacy-thread-session-42", entryCount: 1 }),
-      JSON.stringify({
-        kind: "legacy_thread_entry",
-        entry: {
-          id: 99,
-          session_id: 42,
-          content: "The copper observatory preserves this entry.",
-          priority: 8,
-          tags: "archive,test",
-          created_at: "2024-01-02T03:04:05Z",
-          updated_at: "2024-02-03T04:05:06Z",
-        },
-      }),
-    ].join("\n") + "\n";
-    const expectedHash = createHash("sha256").update(text).digest("hex");
-    const body = {
-      title: "Thread: canonical test",
-      text,
-      sourcePath: "import:legacy-thread/session/42",
-      expectedHash,
-      mimeType: "application/x-ndjson",
-      priority: 7,
-      tags: ["legacy-thread", "thread-session-42"],
-      metadata: { kind: "legacy_thread_session", entryCount: 1 },
-    };
-
-    const imported = await fetch(url("/sources/canonical"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    expect(imported.status).toBe(200);
-    const first = (await imported.json()).data;
-    expect(first.source_hash).toBe(expectedHash);
-    expect(first.mime_type).toBe("application/x-ndjson");
-    expect(first.chunk_count).toBe(2);
-
-    const repeated = await fetch(url("/sources/canonical"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    expect(repeated.status).toBe(200);
-    expect((await repeated.json()).data.id).toBe(first.id);
-
-    const searched = await fetch(url("/search?q=copper observatory"));
-    expect(searched.status).toBe(200);
-    const chunk = (await searched.json()).data.find((result: { source_id: string }) => result.source_id === first.id);
-    expect(chunk.content).toContain('"id":99');
-    expect(chunk.content).toContain('"priority":8');
-    expect(chunk.content).toContain('"created_at":"2024-01-02T03:04:05Z"');
-
-    const mismatch = await fetch(url("/sources/canonical"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, expectedHash: "0".repeat(64) }),
-    });
-    expect(mismatch.status).toBe(422);
-    expect((await mismatch.json()).error.code).toBe("HASH_MISMATCH");
   });
 });

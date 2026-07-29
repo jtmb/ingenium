@@ -14,7 +14,7 @@
  */
 
 import { Router } from "express";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { getDb, execTransaction, checkpointAfterWrite, logger, projects, rag } from "ingenium-core";
 import { executeSynthesisBroker } from "../opencode-client.js";
 import { requireProject } from "../helpers.js";
@@ -112,60 +112,6 @@ ragRouter.post("/sources", (req, res) => {
       created_at: row.created_at,
     },
   });
-});
-
-// ---------------------------------------------------------------------------
-// POST /sources/canonical — Idempotent, hash-verified logical source import
-// ---------------------------------------------------------------------------
-
-ragRouter.post("/sources/canonical", (req, res) => {
-  const projectId = requireProject(req, res);
-  if (!projectId) return;
-
-  const { title, text, sourcePath, expectedHash, mimeType, metadata, priority, tags } = req.body ?? {};
-  if (typeof title !== "string" || !title.trim() || typeof text !== "string" || !text.trim()) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "title and text are required" } });
-    return;
-  }
-  if (typeof sourcePath !== "string" || sourcePath.length > 512 || !/^import:[A-Za-z0-9._:/-]+$/.test(sourcePath) || sourcePath.includes("..")) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "sourcePath must be a safe import: logical path" } });
-    return;
-  }
-  if (typeof expectedHash !== "string" || !/^[a-f0-9]{64}$/.test(expectedHash)) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "expectedHash must be a lowercase SHA-256 hash" } });
-    return;
-  }
-  if (mimeType !== undefined && (typeof mimeType !== "string" || mimeType.length > 128 || !/^[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+$/.test(mimeType))) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "mimeType must be a valid media type" } });
-    return;
-  }
-  const actualHash = createHash("sha256").update(text).digest("hex");
-  if (actualHash !== expectedHash) {
-    res.status(422).json({ error: { code: "HASH_MISMATCH", message: "Imported content does not match expectedHash" } });
-    return;
-  }
-  if (metadata !== undefined && (!metadata || typeof metadata !== "object" || Array.isArray(metadata))) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "metadata must be an object" } });
-    return;
-  }
-  if (tags !== undefined && (!Array.isArray(tags) || tags.some((tag) => typeof tag !== "string" || tag.length > 64))) {
-    res.status(422).json({ error: { code: "VALIDATION_ERROR", message: "tags must contain strings up to 64 characters" } });
-    return;
-  }
-
-  try {
-    const source = rag.ingestCanonicalSource(projectId, title.trim(), text, {
-      sourceType: "text",
-      sourcePath,
-      mimeType,
-      metadata: metadata ?? {},
-      priority,
-      tags,
-    });
-    res.json({ data: source });
-  } catch (error) {
-    res.status(422).json({ error: { code: "IMPORT_FAILED", message: error instanceof Error ? error.message : "Canonical import failed" } });
-  }
 });
 
 // ---------------------------------------------------------------------------
