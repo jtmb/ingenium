@@ -63,8 +63,37 @@ services:
       timeout: 10s
       retries: 5
       start_period: 90s
+    depends_on:
+      thread:
+        condition: service_healthy
+    networks:
+      - default
+      - thread-internal
+
+  thread:
+    build:
+      context: .
+      target: thread-runtime
+    restart: unless-stopped
+    # Authentication is disabled only because this service has no host port and
+    # is attached solely to the internal Thread network below.
+    environment:
+      - THREAD_AUTH_ENABLED=false
+      - THREAD_HOST=0.0.0.0
+      - THREAD_PORT=5000
+      - THREAD_DB_PATH=/app/data/thread.db
+      - THREAD_GIT_BASE=/app/data/git
+    volumes:
+      - thread_data:/app/data
+    networks:
+      - thread-internal
 
 volumes:
   ingenium-data:
   opencode-config:
   opencode-data:
+  thread_data:
+
+networks:
+  thread-internal:
+    internal: true

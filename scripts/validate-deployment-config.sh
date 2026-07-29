@@ -12,6 +12,8 @@ env_example="${repo_root}/.env.example"
 supervisor_config="${repo_root}/supervisord.conf"
 image_provenance_validator="${repo_root}/scripts/validate-image-provenance.mjs"
 opencode_global_projector="${repo_root}/scripts/project-opencode-global-config.mjs"
+thread_bridge_launcher="${repo_root}/scripts/run-thread-bridge.mjs"
+thread_revision="a3d2d4246e2a0222242d1a848abd3f0bd79a690b"
 
 require_file() {
   path="$1"
@@ -51,7 +53,16 @@ reject_literal() {
   fi
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector"; do
+service_block() {
+  service_name="$1"
+  awk -v service_name="$service_name" '
+    $0 == "  " service_name ":" { capture = 1 }
+    capture && $0 ~ /^  [[:alnum:]_-]+:$/ && $0 != "  " service_name ":" { exit }
+    capture { print }
+  ' "$compose_file"
+}
+
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$thread_bridge_launcher"; do
   require_file "$path"
 done
 
@@ -72,6 +83,19 @@ reject_literal "$dockerfile" "FROM node:22-alpine AS builder"
 require_literal "$dockerfile" "RUN node -e 'require(\"better-sqlite3\")'"
 require_literal "$dockerfile" "RUN npm run build"
 require_literal "$dockerfile" "RUN sh scripts/validate-deployment-config.sh"
+require_literal "$dockerfile" "ARG THREAD_REVISION=${thread_revision}"
+require_literal "$dockerfile" "test \"\$THREAD_REVISION\" = \"${thread_revision}\""
+require_literal "$dockerfile" 'git fetch --depth=1 origin "$THREAD_REVISION"'
+require_literal "$dockerfile" 'git checkout --detach FETCH_HEAD'
+require_literal "$dockerfile" 'test "$(git rev-parse HEAD)" = "$THREAD_REVISION"'
+require_literal "$dockerfile" "-r thread_server/requirements.txt"
+require_literal "$dockerfile" "-r thread_bridge/requirements.txt"
+require_literal "$dockerfile" "FROM node:22-slim AS thread-runtime"
+require_literal "$dockerfile" "COPY --from=thread-builder --chown=appuser:appuser /opt/thread /opt/thread"
+require_literal "$dockerfile" 'ENTRYPOINT ["/usr/bin/tini", "--"]'
+require_literal "$dockerfile" 'CMD ["/opt/thread/venv/bin/python", "-m", "thread_server.server"]'
+reject_literal "$dockerfile" "git clone"
+reject_literal "$dockerfile" "checkout main"
 # OpenCode loads the configured TypeScript plugins from source paths. Keep the
 # small local dependency closure required by those entrypoints, but do not
 # restore a broad extension-workspace copy to the production image.
@@ -109,6 +133,50 @@ reject_literal "$dockerfile" "seccomp=unconfined"
 reject_literal "$supervisor_config" "seccomp=unconfined"
 reject_literal "$dockerfile" "NOPASSWD:ALL"
 reject_literal "$dockerfile" "sudo"
+
+# Thread is deliberately isolated from host and provider networks. Ingenium
+# retains the implicit default network for providers and joins the dedicated
+# internal network only to reach the sidecar by its Compose service name.
+require_literal "$compose_file" "target: thread-runtime"
+require_literal "$compose_file" "- THREAD_AUTH_ENABLED=false"
+require_literal "$compose_file" "- THREAD_HOST=0.0.0.0"
+require_literal "$compose_file" "- THREAD_PORT=5000"
+require_literal "$compose_file" "- THREAD_DB_PATH=/app/data/thread.db"
+require_literal "$compose_file" "- THREAD_GIT_BASE=/app/data/git"
+require_literal "$compose_file" "- thread_data:/app/data"
+require_literal "$compose_file" "thread_data:"
+require_literal "$compose_file" "thread-internal:"
+require_literal "$compose_file" "internal: true"
+require_literal "$compose_file" "condition: service_healthy"
+
+ingenium_service="$(service_block ingenium)"
+thread_service="$(service_block thread)"
+if [ -z "$ingenium_service" ] || [ -z "$thread_service" ]; then
+  echo "ERROR: Ingenium and Thread services must both be present"
+  exit 1
+fi
+if ! printf '%s\n' "$ingenium_service" | grep -F -q -- "- default" || \
+   ! printf '%s\n' "$ingenium_service" | grep -F -q -- "- thread-internal"; then
+  echo "ERROR: Ingenium must retain the provider network and join thread-internal"
+  exit 1
+fi
+if ! printf '%s\n' "$thread_service" | grep -F -q -- "- thread-internal" || \
+   printf '%s\n' "$thread_service" | grep -E -q '^[[:space:]]*ports:' || \
+   printf '%s\n' "$thread_service" | grep -F -q -- "- default"; then
+  echo "ERROR: Thread must have no host ports and only the internal Thread network"
+  exit 1
+fi
+
+# The launcher deliberately supplies only the fixed, non-secret server URL.
+# Callers must pass session=ingenium explicitly rather than trusting a default.
+require_literal "$thread_bridge_launcher" 'THREAD_SERVER_URL: "http://thread:5000"'
+require_literal "$thread_bridge_launcher" '"-m", "thread_bridge.bridge"'
+require_literal "$thread_bridge_launcher" "shell: false"
+reject_literal "$thread_bridge_launcher" "THREAD_DEFAULT_SESSION"
+reject_literal "$thread_bridge_launcher" "THREAD_API_TOKEN"
+reject_literal "$thread_bridge_launcher" "THREAD_AUTH_PASSWORD"
+require_literal "$dockerfile" "scripts/run-thread-bridge.mjs"
+require_literal "$dockerfile" "--chmod=0555 scripts/run-thread-bridge.mjs"
 
 reject_literal "$compose_file" "INGENIUM_GATEWAY_PASSWORD"
 reject_literal "$compose_file" "INGENIUM_GATEWAY_BCRYPT_COST"
@@ -228,4 +296,5 @@ GATEWAY_VALIDATE_STATIC_ONLY=1 sh "${repo_root}/scripts/validate-gateway-config.
 sh "${repo_root}/scripts/validate-api-boundary.sh" "$repo_root"
 node --check "$image_provenance_validator"
 node --check "$opencode_global_projector"
+node --check "$thread_bridge_launcher"
 echo "Deployment static validation passed"
