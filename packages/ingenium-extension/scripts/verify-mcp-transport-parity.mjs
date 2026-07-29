@@ -4,6 +4,10 @@ import { fileURLToPath } from "node:url";
 
 const TRANSPORT_REGISTRATION_PATTERN = /server\.registerTool\(\s*"([^"]+)"\s*,/g;
 const CATALOG_NAME_PATTERN = /\bname:\s*"([^"]+)"/g;
+const EXPECTED_TRANSPORT_REGISTRATION_COUNT = 266;
+const CONTEXT_UPLOAD_TRANSPORT_NAME = "context_upload_file";
+const CONTEXT_UPLOAD_CATALOG_NAME = `ingenium_${CONTEXT_UPLOAD_TRANSPORT_NAME}`;
+const CONTEXT_UPLOAD_SCHEMA_MARKER = "contextUploadFilePathParam";
 
 function readRequiredFile(path) {
   if (!existsSync(path)) {
@@ -55,6 +59,16 @@ export function assertMcpTransportParity(repositoryRoot) {
 
   const serverToolNames = extractNames(serverTransport, TRANSPORT_REGISTRATION_PATTERN, "server transport registrations");
   const packagedToolNames = extractNames(packagedTransport, TRANSPORT_REGISTRATION_PATTERN, "packaged transport registrations");
+  for (const [label, names] of [
+    ["server", serverToolNames],
+    ["packaged", packagedToolNames],
+  ]) {
+    if (names.length !== EXPECTED_TRANSPORT_REGISTRATION_COUNT) {
+      throw new Error(
+        `Expected ${EXPECTED_TRANSPORT_REGISTRATION_COUNT} ${label} transport registrations, found ${names.length}`,
+      );
+    }
+  }
   const transportDifference = describeDifference(serverToolNames, packagedToolNames);
   if (transportDifference) {
     throw new Error(`Packaged MCP transport registrations differ from server source (${transportDifference})`);
@@ -68,16 +82,36 @@ export function assertMcpTransportParity(repositoryRoot) {
     throw new Error(`Server transport registrations are absent from the catalog: ${missingCatalogNames.join(", ")}`);
   }
 
+  if (!serverToolNames.includes(CONTEXT_UPLOAD_TRANSPORT_NAME)
+    || !packagedToolNames.includes(CONTEXT_UPLOAD_TRANSPORT_NAME)
+    || !catalogNames.has(CONTEXT_UPLOAD_CATALOG_NAME)) {
+    throw new Error(`Required context upload registration is absent: ${CONTEXT_UPLOAD_CATALOG_NAME}`);
+  }
+  for (const [label, source] of [
+    ["server source", serverTransport],
+    ["packaged transport", packagedTransport],
+  ]) {
+    if (!source.includes(CONTEXT_UPLOAD_SCHEMA_MARKER)) {
+      throw new Error(`Required context upload schema marker is absent from ${label}: ${CONTEXT_UPLOAD_SCHEMA_MARKER}`);
+    }
+  }
+
   return {
     serverToolCount: serverToolNames.length,
     packagedToolCount: packagedToolNames.length,
+    contextUploadTransportName: CONTEXT_UPLOAD_TRANSPORT_NAME,
+    contextUploadCatalogName: CONTEXT_UPLOAD_CATALOG_NAME,
+    contextUploadSchemaMarker: CONTEXT_UPLOAD_SCHEMA_MARKER,
   };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = assertMcpTransportParity();
-    console.log(`MCP transport parity verified: ${result.packagedToolCount} registrations`);
+    console.log(
+      `MCP transport parity verified: ${result.packagedToolCount} registrations, `
+      + `${result.contextUploadCatalogName}, schema ${result.contextUploadSchemaMarker}`,
+    );
   } catch (error) {
     console.error(error instanceof Error ? error.message : "MCP transport parity verification failed");
     process.exitCode = 1;

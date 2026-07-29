@@ -19,7 +19,9 @@ describe("packaged MCP transport parity", () => {
     expect(result.error, `${result.stdout}\n${result.stderr}`).toBeUndefined();
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     expect(result.stdout).toContain("MCP transport parity verified");
-    expect(result.stdout).toContain("265 registrations");
+    expect(result.stdout).toContain("266 registrations");
+    expect(result.stdout).toContain("ingenium_context_upload_file");
+    expect(result.stdout).toContain("schema contextUploadFilePathParam");
   });
 
   it("ships the packaged transport artifact used by the parity verifier", () => {
