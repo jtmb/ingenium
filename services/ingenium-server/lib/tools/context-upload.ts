@@ -411,11 +411,11 @@ function parseJsonLines(text: string): RawEntry[] {
 }
 
 /**
- * OpenCode can export an actively-streaming assistant message with an
- * unterminated `reasoningEncryptedContent` value at EOF. That part is never
- * importable, but rejecting the complete preceding snapshot would violate the
- * file-import contract for an otherwise valid export. Recover only by dropping
- * that one incomplete final message; all other malformed JSON remains invalid.
+ * OpenCode can truncate a final assistant envelope at EOF while serializing
+ * active-session diagnostic fields. That incomplete envelope is not importable,
+ * but rejecting the complete preceding snapshot would violate the file-import
+ * contract for an otherwise valid export. Recover only by dropping that one
+ * incomplete final assistant message; all other malformed JSON remains invalid.
  */
 function recoverTruncatedOpenCodeExport(text: string): Record<string, unknown> | null {
   const containers: Array<"{" | "["> = [];
@@ -425,7 +425,6 @@ function recoverTruncatedOpenCodeExport(text: string): Record<string, unknown> |
   let inString = false;
   let escaped = false;
   let stringStart = -1;
-  let lastPropertyName: string | null = null;
 
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index]!;
@@ -440,11 +439,10 @@ function recoverTruncatedOpenCodeExport(text: string): Record<string, unknown> |
       }
       if (character !== "\"") continue;
 
-      const value = text.slice(stringStart + 1, index);
       inString = false;
-      if (/^\s*:/.test(text.slice(index + 1))) {
-        lastPropertyName = value;
-        if (containers.length === 1 && value === "messages") awaitingMessagesArray = true;
+      const value = text.slice(stringStart + 1, index);
+      if (/^\s*:/.test(text.slice(index + 1)) && containers.length === 1 && value === "messages") {
+        awaitingMessagesArray = true;
       }
       continue;
     }
@@ -474,14 +472,16 @@ function recoverTruncatedOpenCodeExport(text: string): Record<string, unknown> |
     if (character === "]" || character === "}") containers.pop();
   }
 
-  if (!inString
-    || lastPropertyName !== "reasoningEncryptedContent"
-    || messagesArrayDepth === null
+  const finalMessageStart = messageStarts.at(-1);
+  if (messagesArrayDepth === null
+    || finalMessageStart === undefined
+    || containers.length <= messagesArrayDepth
+    || !/"role"\s*:\s*"assistant"/.test(text.slice(finalMessageStart))
     || messageStarts.length === 0) {
     return null;
   }
 
-  const prefix = text.slice(0, messageStarts[messageStarts.length - 1]).replace(/,\s*$/, "");
+  const prefix = text.slice(0, finalMessageStart).replace(/,\s*$/, "");
   try {
     const recovered = JSON.parse(`${prefix}]}`) as unknown;
     const record = asRecord(recovered);

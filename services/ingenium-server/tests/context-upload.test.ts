@@ -289,6 +289,34 @@ describe("context file upload", () => {
     ]);
   });
 
+  it("recovers a valid OpenCode prefix when a final assistant envelope is truncated outside reasoning", () => {
+    const input = writeUpload("truncated-opencode-assistant-envelope.json", [
+      '{"info":{"id":"session"},"messages":[',
+      '{"info":{"id":"user","role":"user"},"parts":[{"type":"text","text":"visible user"}]},',
+      '{"info":{"id":"assistant","role":"assistant","finish":"stop"},"parts":[{"type":"text","text":"completed assistant"}]},',
+      '{"info":{"id":"incomplete","role":"assistant","sessionID"',
+    ].join(""));
+
+    const snapshot = prepareContextUploadSnapshot(project, session, input);
+    const body = snapshotBody(snapshot.bytes);
+
+    expect(snapshot.format).toBe("opencode");
+    expect(body.entries).toMatchObject([
+      { role: "user", content: "visible user" },
+      { role: "assistant", content: "completed assistant" },
+    ]);
+  });
+
+  it("rejects a truncated final user envelope", () => {
+    const input = writeUpload("truncated-opencode-user-envelope.json", [
+      '{"info":{"id":"session"},"messages":[',
+      '{"info":{"id":"user","role":"user"},"parts":[{"type":"text","text":"visible user"}]},',
+      '{"info":{"id":"incomplete","role":"user","sessionID"',
+    ].join(""));
+
+    expect(() => prepareContextUploadSnapshot(project, session, input)).toThrow(ContextUploadFileError);
+  });
+
   it.each([
     ["malformed.json", "{not json", "CONTEXT_UPLOAD_PARSE_FAILED"],
     ["empty.jsonl", "\n\n", "CONTEXT_UPLOAD_PARSE_FAILED"],
