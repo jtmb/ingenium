@@ -64,11 +64,11 @@ services:
       retries: 5
       start_period: 90s
     depends_on:
-      thread:
+      thread-guard:
         condition: service_healthy
     networks:
       - default
-      - thread-internal
+      - thread-frontend
 
   thread:
     build:
@@ -86,7 +86,31 @@ services:
     volumes:
       - thread_data:/app/data
     networks:
-      - thread-internal
+      - thread-backend
+
+  thread-guard:
+    build:
+      context: .
+      target: thread-guard-runtime
+    restart: unless-stopped
+    # The image also selects appuser, but make the non-root deployment contract
+    # explicit at Compose level so a later image change cannot silently widen it.
+    user: "1000:1000"
+    read_only: true
+    environment:
+      - THREAD_GUARD_HOST=0.0.0.0
+      - THREAD_GUARD_PORT=8081
+      - THREAD_GUARD_TEMP_DIRECTORY=/run/thread-guard
+    tmpfs:
+      - /run/thread-guard:uid=1000,gid=1000,mode=0700
+    expose:
+      - "8081"
+    depends_on:
+      thread:
+        condition: service_healthy
+    networks:
+      - thread-backend
+      - thread-frontend
 
 volumes:
   ingenium-data:
@@ -95,5 +119,7 @@ volumes:
   thread_data:
 
 networks:
-  thread-internal:
+  thread-backend:
+    internal: true
+  thread-frontend:
     internal: true

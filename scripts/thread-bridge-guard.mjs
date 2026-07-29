@@ -1,44 +1,99 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+} from "node:fs";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 export const THREAD_BRIDGE_SESSION = "ingenium";
 export const THREAD_BRIDGE_EXPORT_DIRECTORY = "/workspace/ingenium/.ingenium/thread-exports";
+export const THREAD_GUARD_URL = "http://thread-guard:8081/v1/call";
 
 const MAX_STDIO_MESSAGE_BYTES = 1_048_576;
+const MAX_GUARD_RESPONSE_BYTES = 1_048_576;
 const MAX_EXPORT_BYTES = 16 * 1024 * 1024;
+const MAX_RECEIPT_BYTES = 4 * 1024;
+const MAX_GUARD_REQUEST_BYTES = 24 * 1024 * 1024;
+const GUARD_REQUEST_TIMEOUT_MS = 30_000;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const EXPORT_FILE_PATTERN = /^thread-export-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
 const RECEIPT_FILE_PATTERN = /^thread-export-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl\.receipt\.json$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
-const ALLOWED_TOOLS = new Set(["thread_upload_file", "thread_search", "thread_read"]);
-const RELAY_METHODS = new Set([
-  "initialize",
-  "ping",
-  "notifications/initialized",
-  "notifications/cancelled",
-  "notifications/progress",
-]);
+const RELAY_METHODS = new Set(["notifications/initialized", "notifications/cancelled", "notifications/progress"]);
+
+const PUBLIC_TOOLS = [
+  {
+    name: "thread_upload_file",
+    description: "Upload one receipt-verified Thread export to the fixed Ingenium session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file_path: { type: "string", description: "Private Thread export file path." },
+        receipt_path: { type: "string", description: "Matching private Thread export receipt path." },
+        tags: { type: "string", description: "Optional comma-separated tags." },
+        priority: { type: "integer", minimum: 0, maximum: 10 },
+      },
+      required: ["file_path"],
+    },
+  },
+  {
+    name: "thread_search",
+    description: "Search the fixed Ingenium Thread session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        use_cache: { type: "boolean" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "thread_read_entries",
+    description: "Read entries from the fixed Ingenium Thread session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 200 },
+        after: { type: "integer", minimum: 0 },
+        sort: { type: "string", enum: ["asc", "desc"] },
+      },
+    },
+  },
+  {
+    name: "thread_read_entries_batch",
+    description: "Read selected entries from the fixed Ingenium Thread session.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ids: { type: "array", items: { type: "integer", minimum: 1 }, maxItems: 100 },
+      },
+      required: ["ids"],
+    },
+  },
+  {
+    name: "thread_get_tags",
+    description: "Get tags from the fixed Ingenium Thread session.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "thread_get_stats",
+    description: "Get bounded Thread service statistics.",
+    inputSchema: { type: "object", properties: {} },
+  },
+];
+
+const PUBLIC_TOOL_NAMES = new Set(PUBLIC_TOOLS.map((tool) => tool.name));
 
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function sha256(value) {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-function safeRequestId(message) {
-  if (!Object.hasOwn(message, "id")) return null;
-  const { id } = message;
-  if (typeof id !== "string" && typeof id !== "number" && id !== null) return null;
-  return id;
-}
-
-function requestKey(id) {
-  return `${typeof id}:${String(id)}`;
 }
 
 function currentUid() {
@@ -49,18 +104,24 @@ function hasControlCharacters(value) {
   return /[\u0000-\u001f\u007f]/.test(value);
 }
 
-function sameFile(first, second) {
-  return first.dev === second.dev
-    && first.ino === second.ino
-    && first.size === second.size
-    && first.mode === second.mode
-    && first.uid === second.uid
-    && first.nlink === second.nlink;
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
-/** Reject symlinks and lexical aliases all the way from the filesystem root. */
+function safeRequestId(message) {
+  if (!Object.hasOwn(message, "id")) return null;
+  const { id } = message;
+  return typeof id === "string" || typeof id === "number" || id === null ? id : null;
+}
+
+function encode(message) {
+  return `${JSON.stringify(message)}\n`;
+}
+
 function assertCanonicalDirectory(path) {
-  if (!isAbsolute(path) || resolve(path) !== path || hasControlCharacters(path)) throw new Error("invalid directory");
+  if (typeof path !== "string" || !isAbsolute(path) || resolve(path) !== path || hasControlCharacters(path)) {
+    throw new Error("invalid directory");
+  }
   const segments = path === sep ? [] : path.slice(1).split(sep);
   if (segments.some((segment) => segment.length === 0 || segment === "." || segment === ".." || hasControlCharacters(segment))) {
     throw new Error("invalid directory");
@@ -92,15 +153,12 @@ function assertExportPath(path, exportDirectory) {
   if (
     relativePath.length === 0
     || relativePath === "."
+    || relativePath === ".."
     || isAbsolute(relativePath)
     || relativePath.startsWith(`..${sep}`)
-    || relativePath === ".."
   ) throw new Error("invalid export path");
   const segments = relativePath.split(sep);
-  if (segments.length !== 1 || segments.some((segment) => segment.length === 0 || segment === "." || segment === ".." || hasControlCharacters(segment))) {
-    throw new Error("invalid export path");
-  }
-  if (!EXPORT_FILE_PATTERN.test(segments[0])) throw new Error("invalid export path");
+  if (segments.length !== 1 || !EXPORT_FILE_PATTERN.test(segments[0])) throw new Error("invalid export path");
 }
 
 function assertReceiptPath(path, exportPath, exportDirectory) {
@@ -112,28 +170,53 @@ function assertReceiptPath(path, exportPath, exportDirectory) {
   }
 }
 
-function assertPrivateFile(path, maximumBytes) {
-  const first = lstatSync(path);
+function assertPrivateFileDescriptor(entry, maximumBytes) {
   const uid = currentUid();
   if (
-    !first.isFile()
-    || first.isSymbolicLink()
-    || first.nlink !== 1
-    || (first.mode & 0o777) !== PRIVATE_FILE_MODE
-    || first.size < 0
-    || first.size > maximumBytes
-    || (uid !== null && first.uid !== uid)
+    !entry.isFile()
+    || entry.nlink !== 1
+    || (entry.mode & 0o777) !== PRIVATE_FILE_MODE
+    || entry.size < 0
+    || entry.size > maximumBytes
+    || (uid !== null && entry.uid !== uid)
   ) throw new Error("invalid artifact");
-  const bytes = readFileSync(path);
-  const second = lstatSync(path);
-  if (!sameFile(first, second) || bytes.length !== second.size) throw new Error("invalid artifact");
+}
+
+function readDescriptorBytes(descriptor, size) {
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < size) {
+    const read = readSync(descriptor, bytes, offset, size - offset, offset);
+    if (read <= 0) throw new Error("invalid artifact");
+    offset += read;
+  }
   return bytes;
 }
 
-function parseReceipt(bytes, exportPath, exportBytes) {
+/**
+ * Read only through an already-open O_NOFOLLOW descriptor. The optional hook is
+ * test-only: it proves that replacing the pathname after open cannot change the
+ * bytes sent to thread-guard.
+ */
+function readPrivateArtifact(path, maximumBytes, afterOpen) {
+  let descriptor;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const entry = fstatSync(descriptor);
+    assertPrivateFileDescriptor(entry, maximumBytes);
+    afterOpen?.();
+    const bytes = readDescriptorBytes(descriptor, entry.size);
+    if (fstatSync(descriptor).size !== entry.size) throw new Error("invalid artifact");
+    return bytes;
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function parseReceipt(receiptBytes, exportPath, exportBytes) {
   let receipt;
   try {
-    receipt = JSON.parse(bytes.toString("utf8"));
+    receipt = JSON.parse(receiptBytes.toString("utf8"));
   } catch {
     throw new Error("invalid receipt");
   }
@@ -151,9 +234,10 @@ function parseReceipt(bytes, exportPath, exportBytes) {
     || typeof receipt.sha256 !== "string"
     || receipt.sha256 !== sha256(exportBytes)
   ) throw new Error("invalid receipt");
+  return receipt;
 }
 
-function assertExportFingerprint(exportBytes, receiptBytes) {
+function assertExportFingerprint(exportBytes, receipt) {
   if (exportBytes.length === 0) return;
   const lines = exportBytes.toString("utf8").split("\n");
   if (lines.at(-1) === "") lines.pop();
@@ -172,267 +256,247 @@ function assertExportFingerprint(exportBytes, receiptBytes) {
     if (sourceSessionSha256 === undefined) sourceSessionSha256 = entry.metadata.sourceSessionSha256;
     if (entry.metadata.sourceSessionSha256 !== sourceSessionSha256) throw new Error("invalid export");
   }
-  let receipt;
-  try {
-    receipt = JSON.parse(receiptBytes.toString("utf8"));
-  } catch {
-    throw new Error("invalid receipt");
-  }
-  if (!isRecord(receipt) || receipt.sourceSessionSha256 !== sourceSessionSha256) throw new Error("invalid receipt");
+  if (receipt.sourceSessionSha256 !== sourceSessionSha256) throw new Error("invalid receipt");
 }
 
 /**
- * Validate the owned JSONL and its atomically-published receipt twice. The
- * second complete read/stat/hash immediately precedes the upstream forward.
+ * Verify receipt semantics and return immutable bytes from descriptors, never a
+ * caller path. Callers can retain their receipt for the existing explicit
+ * cleanup flow after an accepted upload.
  */
-function validateUploadArtifact(filePath, suppliedReceiptPath, exportDirectory) {
+export function readThreadUploadArtifact({ filePath, receiptPath, exportDirectory = THREAD_BRIDGE_EXPORT_DIRECTORY, onFileOpened }) {
+  assertPrivateDirectory(dirname(exportDirectory));
+  assertPrivateDirectory(exportDirectory);
+  assertExportPath(filePath, exportDirectory);
+  const resolvedReceiptPath = receiptPath === undefined ? `${filePath}.receipt.json` : receiptPath;
+  assertReceiptPath(resolvedReceiptPath, filePath, exportDirectory);
+  const exportBytes = readPrivateArtifact(filePath, MAX_EXPORT_BYTES, onFileOpened);
+  const receiptBytes = readPrivateArtifact(resolvedReceiptPath, MAX_RECEIPT_BYTES);
+  const receipt = parseReceipt(receiptBytes, filePath, exportBytes);
+  assertExportFingerprint(exportBytes, receipt);
+  return { bytes: exportBytes, filename: basename(filePath) };
+}
+
+function optionalTags(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.length > 1_024 || hasControlCharacters(value)) throw new Error("invalid arguments");
+  return value;
+}
+
+function optionalPriority(value) {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value < 0 || value > 10) throw new Error("invalid arguments");
+  return value;
+}
+
+function assertArgumentKeys(arguments_, allowed) {
+  for (const key of Object.keys(arguments_)) {
+    if (key !== "session" && !allowed.has(key)) throw new Error("invalid arguments");
+  }
+}
+
+function normalizeArguments(toolName, arguments_, exportDirectory) {
+  if (!isRecord(arguments_) || Object.keys(arguments_).some((key) => key === "__proto__" || key === "constructor" || key === "prototype")) {
+    throw new Error("invalid arguments");
+  }
+  if (toolName === "thread_upload_file") {
+    assertArgumentKeys(arguments_, new Set(["file_path", "receipt_path", "tags", "priority"]));
+    if (typeof arguments_.file_path !== "string" || (arguments_.receipt_path !== undefined && typeof arguments_.receipt_path !== "string")) {
+      throw new Error("invalid arguments");
+    }
+    const artifact = readThreadUploadArtifact({
+      filePath: arguments_.file_path,
+      receiptPath: arguments_.receipt_path,
+      exportDirectory,
+    });
+    const result = { filename: artifact.filename, contentBase64: artifact.bytes.toString("base64") };
+    const tags = optionalTags(arguments_.tags);
+    const priority = optionalPriority(arguments_.priority);
+    if (tags !== undefined) result.tags = tags;
+    if (priority !== undefined) result.priority = priority;
+    return { operation: "upload", arguments: result };
+  }
+
+  const output = Object.create(null);
+  if (toolName === "thread_search") {
+    assertArgumentKeys(arguments_, new Set(["query", "limit", "use_cache"]));
+    if (typeof arguments_.query !== "string" || arguments_.query.length === 0 || arguments_.query.length > 4_096 || hasControlCharacters(arguments_.query)) {
+      throw new Error("invalid arguments");
+    }
+    output.query = arguments_.query;
+    if (arguments_.limit !== undefined) {
+      if (!Number.isSafeInteger(arguments_.limit) || arguments_.limit < 1 || arguments_.limit > 100) throw new Error("invalid arguments");
+      output.limit = arguments_.limit;
+    }
+    if (arguments_.use_cache !== undefined) {
+      if (typeof arguments_.use_cache !== "boolean") throw new Error("invalid arguments");
+      output.use_cache = arguments_.use_cache;
+    }
+    return { operation: "search", arguments: output };
+  }
+  if (toolName === "thread_read_entries") {
+    assertArgumentKeys(arguments_, new Set(["limit", "after", "sort"]));
+    if (arguments_.limit !== undefined) {
+      if (!Number.isSafeInteger(arguments_.limit) || arguments_.limit < 1 || arguments_.limit > 200) throw new Error("invalid arguments");
+      output.limit = arguments_.limit;
+    }
+    if (arguments_.after !== undefined) {
+      if (!Number.isSafeInteger(arguments_.after) || arguments_.after < 0) throw new Error("invalid arguments");
+      output.after = arguments_.after;
+    }
+    if (arguments_.sort !== undefined) {
+      if (arguments_.sort !== "asc" && arguments_.sort !== "desc") throw new Error("invalid arguments");
+      output.sort = arguments_.sort;
+    }
+    return { operation: "read", arguments: output };
+  }
+  if (toolName === "thread_read_entries_batch") {
+    assertArgumentKeys(arguments_, new Set(["ids"]));
+    if (!Array.isArray(arguments_.ids) || arguments_.ids.length === 0 || arguments_.ids.length > 100 || !arguments_.ids.every((id) => Number.isSafeInteger(id) && id > 0)) {
+      throw new Error("invalid arguments");
+    }
+    return { operation: "batch", arguments: { ids: [...arguments_.ids] } };
+  }
+  if (toolName === "thread_get_tags") {
+    assertArgumentKeys(arguments_, new Set());
+    return { operation: "tags", arguments: output };
+  }
+  if (toolName === "thread_get_stats") {
+    assertArgumentKeys(arguments_, new Set());
+    return { operation: "stats", arguments: output };
+  }
+  throw new Error("invalid arguments");
+}
+
+async function readBoundedResponse(response) {
+  const headerLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(headerLength) && headerLength > MAX_GUARD_RESPONSE_BYTES) throw new Error("guard unavailable");
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("guard unavailable");
+  const chunks = [];
+  let total = 0;
   try {
-    assertPrivateDirectory(dirname(exportDirectory));
-    assertPrivateDirectory(exportDirectory);
-    assertExportPath(filePath, exportDirectory);
-    const receiptPath = suppliedReceiptPath === undefined ? `${filePath}.receipt.json` : suppliedReceiptPath;
-    assertReceiptPath(receiptPath, filePath, exportDirectory);
-
-    for (let pass = 0; pass < 2; pass += 1) {
-      const exportBytes = assertPrivateFile(filePath, MAX_EXPORT_BYTES);
-      const receiptBytes = assertPrivateFile(receiptPath, 4 * 1024);
-      parseReceipt(receiptBytes, filePath, exportBytes);
-      assertExportFingerprint(exportBytes, receiptBytes);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_GUARD_RESPONSE_BYTES) throw new Error("guard unavailable");
+      chunks.push(Buffer.from(value));
     }
-    return true;
+  } finally {
+    reader.releaseLock();
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+async function callGuard(guardUrl, payload) {
+  const body = Buffer.from(JSON.stringify(payload), "utf8");
+  if (body.length > MAX_GUARD_REQUEST_BYTES) throw new Error("guard request too large");
+  let response;
+  try {
+    response = await fetch(guardUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(GUARD_REQUEST_TIMEOUT_MS),
+    });
   } catch {
-    return false;
+    throw new Error("guard connection failed");
   }
-}
-
-function publicTool(tool) {
-  if (!isRecord(tool) || typeof tool.name !== "string" || !ALLOWED_TOOLS.has(tool.name)) return null;
-  const result = { ...tool };
-  if (isRecord(tool.inputSchema)) {
-    const schema = { ...tool.inputSchema };
-    if (isRecord(tool.inputSchema.properties)) {
-      const properties = { ...tool.inputSchema.properties };
-      delete properties.session;
-      schema.properties = properties;
-    }
-    if (Array.isArray(tool.inputSchema.required)) schema.required = tool.inputSchema.required.filter((entry) => entry !== "session");
-    result.inputSchema = schema;
+  if (!response.ok) throw new Error(`guard rejected request (${response.status})`);
+  let decoded;
+  try {
+    decoded = await readBoundedResponse(response);
+  } catch {
+    throw new Error("guard response invalid");
   }
-  return result;
+  if (!isRecord(decoded) || decoded.ok !== true || !Object.hasOwn(decoded, "result")) throw new Error("guard response invalid");
+  return decoded.result;
 }
 
-function filteredToolsResponse(message) {
-  if (!isRecord(message.result) || !Array.isArray(message.result.tools)) return message;
-  const tools = message.result.tools.map(publicTool).filter((tool) => tool !== null);
-  return { ...message, result: { tools } };
-}
-
-function filteredInitializeResponse(message) {
-  if (!isRecord(message.result)) return message;
-  const capabilities = isRecord(message.result.capabilities) && isRecord(message.result.capabilities.tools)
-    ? { tools: message.result.capabilities.tools }
-    : { tools: {} };
-  return { ...message, result: { ...message.result, capabilities } };
-}
-
-function filteredUploadResponse(message) {
-  if (isRecord(message.error)) {
-    return {
-      jsonrpc: "2.0",
-      id: message.id,
-      error: { code: -32000, message: "Thread bridge upload failed." },
-    };
-  }
-  const failed = isRecord(message.result) && message.result.isError === true;
+function safeResult(toolName, result) {
+  if (toolName !== "thread_upload_file") return result;
+  const failed = isRecord(result) && result.isError === true;
   return {
-    ...message,
-    result: {
-      content: [{ type: "text", text: JSON.stringify({ accepted: !failed }) }],
-      ...(failed ? { isError: true } : {}),
-    },
+    content: [{ type: "text", text: JSON.stringify({ accepted: !failed }) }],
+    ...(failed ? { isError: true } : {}),
   };
 }
 
-function rewriteToolCall(message, exportDirectory) {
-  if (!isRecord(message.params) || typeof message.params.name !== "string" || !ALLOWED_TOOLS.has(message.params.name)) return null;
-  const rawArguments = message.params.arguments === undefined ? {} : message.params.arguments;
-  if (!isRecord(rawArguments)) return null;
-
-  const arguments_ = Object.create(null);
-  for (const [key, value] of Object.entries(rawArguments)) {
-    if (key === "session" || key === "receipt_path") continue;
-    arguments_[key] = value;
-  }
-  if (message.params.name === "thread_upload_file") {
-    if (typeof rawArguments.file_path !== "string") return null;
-    if (rawArguments.receipt_path !== undefined && typeof rawArguments.receipt_path !== "string") return null;
-    if (!validateUploadArtifact(rawArguments.file_path, rawArguments.receipt_path, exportDirectory)) return null;
-  }
-  arguments_.session = THREAD_BRIDGE_SESSION;
-  return {
-    ...message,
-    params: {
-      ...message.params,
-      arguments: arguments_,
-    },
-  };
-}
-
-function encode(message) {
-  return `${JSON.stringify(message)}\n`;
-}
-
-/**
- * Run a transparent MCP stdio relay whose only public Thread surface is upload,
- * search, and read against the fixed Ingenium Thread session. Options are an
- * import-only seam for the child-runtime fixture; the production launcher passes
- * the pinned Python bridge explicitly and never reads a caller-controlled env.
- */
-export function runThreadBridge({ command, args, cwd, env, exportDirectory = THREAD_BRIDGE_EXPORT_DIRECTORY }) {
-  const upstream = spawn(command, args, {
-    cwd,
-    env,
-    shell: false,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  const pendingToolsLists = new Set();
-  const pendingInitializations = new Set();
-  const pendingUploads = new Set();
+/** Run the safe local stdio MCP boundary. No caller path crosses the network. */
+export function runThreadBridge({ guardUrl = THREAD_GUARD_URL, exportDirectory = THREAD_BRIDGE_EXPORT_DIRECTORY } = {}) {
   let inputBuffer = Buffer.alloc(0);
-  let upstreamBuffer = Buffer.alloc(0);
   let stopped = false;
 
-  const respond = (id, code, message) => {
-    if (id === null) return;
+  const respond = (id, error, result) => {
+    if (id === null || stopped) return;
     try {
-      process.stdout.write(encode({ jsonrpc: "2.0", id, error: { code, message } }));
+      process.stdout.write(encode(error
+        ? { jsonrpc: "2.0", id, error }
+        : { jsonrpc: "2.0", id, result }));
     } catch {
       stopped = true;
     }
   };
-  const forward = (message) => {
-    if (stopped || !upstream.stdin || upstream.stdin.destroyed) return false;
-    try {
-      upstream.stdin.write(encode(message));
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  const handleClientMessage = (message) => {
+
+  const handle = async (message) => {
     if (!isRecord(message) || typeof message.method !== "string") return;
     const id = safeRequestId(message);
     if (message.method === "initialize") {
-      if (id === null) return;
-      pendingInitializations.add(requestKey(id));
-      if (!forward(message)) {
-        pendingInitializations.delete(requestKey(id));
-        respond(id, -32000, "Thread bridge unavailable.");
-      }
+      respond(id, null, {
+        protocolVersion: "2024-11-05",
+        serverInfo: { name: "ingenium-thread-guard", version: "1.0.0" },
+        capabilities: { tools: {} },
+      });
+      return;
+    }
+    if (message.method === "ping") {
+      respond(id, null, {});
       return;
     }
     if (message.method === "tools/list") {
-      if (isRecord(message.params) && Object.hasOwn(message.params, "cursor")) {
-        respond(id, -32602, "Thread bridge request rejected.");
+      if (id === null || (isRecord(message.params) && Object.hasOwn(message.params, "cursor"))) {
+        respond(id, { code: -32602, message: "Thread bridge request rejected." });
         return;
       }
-      if (id === null) return;
-      pendingToolsLists.add(requestKey(id));
-      if (!forward(message)) {
-        pendingToolsLists.delete(requestKey(id));
-        respond(id, -32000, "Thread bridge unavailable.");
-      }
+      respond(id, null, { tools: PUBLIC_TOOLS });
       return;
     }
     if (message.method === "tools/call") {
-      if (id === null) return;
-      const rewritten = rewriteToolCall(message, exportDirectory);
-      if (!rewritten) {
-        respond(id, -32602, "Thread bridge request rejected.");
+      if (id === null || !isRecord(message.params) || typeof message.params.name !== "string" || !PUBLIC_TOOL_NAMES.has(message.params.name)) {
+        respond(id, { code: -32602, message: "Thread bridge request rejected." });
         return;
       }
-      if (message.params.name === "thread_upload_file") pendingUploads.add(requestKey(id));
-      if (!forward(rewritten)) {
-        pendingUploads.delete(requestKey(id));
-        respond(id, -32000, "Thread bridge unavailable.");
-      }
-      return;
-    }
-    if (!RELAY_METHODS.has(message.method)) {
-      respond(id, -32601, "Thread bridge request rejected.");
-      return;
-    }
-    if (!forward(message)) respond(id, -32000, "Thread bridge unavailable.");
-  };
-  const handleUpstreamMessage = (message) => {
-    if (!isRecord(message)) return;
-    const id = safeRequestId(message);
-    const key = id === null ? null : requestKey(id);
-    const output = key !== null && pendingUploads.delete(key)
-      ? filteredUploadResponse(message)
-      : key !== null && pendingInitializations.delete(key)
-        ? filteredInitializeResponse(message)
-        : key !== null && pendingToolsLists.delete(key)
-          ? filteredToolsResponse(message)
-          : message;
-    try {
-      process.stdout.write(encode(output));
-    } catch {
-      stopped = true;
-    }
-  };
-  const processLines = (chunk, state, handle) => {
-    state.buffer = Buffer.concat([state.buffer, chunk]);
-    if (state.buffer.length > MAX_STDIO_MESSAGE_BYTES) {
-      stopped = true;
-      upstream.kill("SIGTERM");
-      return;
-    }
-    while (true) {
-      const newline = state.buffer.indexOf("\n");
-      if (newline === -1) return;
-      const line = state.buffer.toString("utf8", 0, newline).replace(/\r$/, "");
-      state.buffer = state.buffer.subarray(newline + 1);
-      if (line.length === 0) continue;
       try {
-        handle(JSON.parse(line));
+        const payload = normalizeArguments(message.params.name, message.params.arguments ?? {}, exportDirectory);
+        const result = await callGuard(guardUrl, payload);
+        respond(id, null, safeResult(message.params.name, result));
       } catch {
-        // Protocol failures deliberately reveal no request payload.
+        respond(id, { code: -32000, message: "Thread bridge request rejected." });
       }
+      return;
     }
+    if (!RELAY_METHODS.has(message.method)) respond(id, { code: -32601, message: "Thread bridge request rejected." });
   };
 
   process.stdin.on("data", (chunk) => {
-    const state = { buffer: inputBuffer };
-    processLines(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk), state, handleClientMessage);
-    inputBuffer = state.buffer;
-  });
-  upstream.stdout?.on("data", (chunk) => {
-    const state = { buffer: upstreamBuffer };
-    processLines(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk), state, handleUpstreamMessage);
-    upstreamBuffer = state.buffer;
-  });
-  upstream.stdin?.on("error", () => { stopped = true; });
-  upstream.stdout?.on("error", () => { stopped = true; });
-  // Upstream diagnostics can contain request data. Drain rather than forward or log them.
-  upstream.stderr?.resume();
-  upstream.once("error", () => {
-    if (!stopped) process.stderr.write("Thread bridge unavailable\n");
-  });
-  upstream.once("close", (code) => {
-    stopped = true;
-    process.exit(code ?? 1);
-  });
-
-  for (const signal of ["SIGINT", "SIGTERM"]) {
-    process.once(signal, () => {
+    if (stopped) return;
+    inputBuffer = Buffer.concat([inputBuffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+    if (inputBuffer.length > MAX_STDIO_MESSAGE_BYTES) {
       stopped = true;
+      return;
+    }
+    while (true) {
+      const newline = inputBuffer.indexOf("\n");
+      if (newline === -1) return;
+      const line = inputBuffer.toString("utf8", 0, newline).replace(/\r$/, "");
+      inputBuffer = inputBuffer.subarray(newline + 1);
+      if (line.length === 0) continue;
       try {
-        upstream.kill(signal);
+        void handle(JSON.parse(line));
       } catch {
-        // The parent child-runtime manager owns bounded process-group reaping.
+        // Never reflect malformed request bytes or paths.
       }
-    });
-  }
-  return upstream;
+    }
+  });
 }

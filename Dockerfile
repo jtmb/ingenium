@@ -14,8 +14,9 @@ RUN test "$THREAD_REVISION" = "a3d2d4246e2a0222242d1a848abd3f0bd79a690b" && \
     git checkout --detach FETCH_HEAD && \
     test "$(git rev-parse HEAD)" = "$THREAD_REVISION"
 
-# Install the exact revision's server and bridge requirements together so both
-# the Thread sidecar and Ingenium's stdio launcher use one source build.
+# Install the exact revision's server and bridge requirements together. The
+# bridge is copied only into the guard image; Ingenium never receives a raw
+# Thread client or a route to the auth-disabled Thread server.
 FROM thread-source AS thread-builder
 RUN python3 -m venv /opt/thread/venv && \
     /opt/thread/venv/bin/pip install --no-cache-dir \
@@ -45,6 +46,30 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
   CMD ["/opt/thread/venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/api/v1/health', timeout=3)"]
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/opt/thread/venv/bin/python", "-m", "thread_server.server"]
+
+# The guard is the only service that receives the official Thread bridge. It
+# publishes a deliberately narrow internal protocol on thread-frontend while
+# retaining the raw Thread route exclusively on thread-backend.
+FROM node:22-slim AS thread-guard-runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates python3 python3-venv tini && \
+    rm -rf /var/lib/apt/lists/* && \
+    userdel -r node && \
+    adduser --uid 1000 --disabled-password --comment "" appuser
+WORKDIR /app
+COPY --from=thread-builder --chown=appuser:appuser /opt/thread /opt/thread
+COPY --chown=appuser:appuser --chmod=0555 scripts/thread-guard-service.mjs ./scripts/thread-guard-service.mjs
+RUN install -d -o appuser -g appuser -m 0700 /run/thread-guard
+USER appuser
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    THREAD_GUARD_HOST=0.0.0.0 \
+    THREAD_GUARD_PORT=8081 \
+    THREAD_GUARD_TEMP_DIRECTORY=/run/thread-guard
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:8081/health', { signal: AbortSignal.timeout(3000) }).then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "/app/scripts/thread-guard-service.mjs"]
 
 # Stage 1: Build all monorepo workspaces. Keep this glibc-based image aligned
 # with runtime: native Node modules compiled or selected here are copied there.
@@ -128,11 +153,6 @@ COPY --from=builder --chown=appuser:appuser /app/node_modules ./node_modules
 # Fail the image build if the copied native binding cannot load on the runtime
 # libc. This protects the API from a delayed better-sqlite3 startup failure.
 RUN node -e 'require("better-sqlite3")'
-# The bridge is built from the same verified Thread source and dependency layer
-# as the sidecar. Python is installed from this glibc runtime's distribution so
-# its copied virtual environment has matching interpreter paths at execution.
-COPY --from=thread-builder --chown=appuser:appuser /opt/thread /opt/thread
-
 # Copy built artifacts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-core/dist ./packages/ingenium-core/dist
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-core/package.json ./packages/ingenium-core/
