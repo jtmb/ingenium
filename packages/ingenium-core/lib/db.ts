@@ -107,6 +107,12 @@ interface ContextCheckpointGovernanceMigrationState {
   missing: string[];
 }
 
+interface ContextSnapshotImportMigrationState {
+  any: boolean;
+  complete: boolean;
+  missing: string[];
+}
+
 type ContextRepairRow = Record<string, unknown> & { __repair_rowid?: number };
 
 interface RepairedContextConversation {
@@ -390,6 +396,93 @@ function inspectContextCheckpointGovernanceMigration(db: Database.Database): Con
     missing.push(`${table} → ${referencedTable} composite foreign key`);
   }
 
+  return { any, complete: missing.length === 0, missing };
+}
+
+/** Probe CTX-005 as a unit so a partial source mapping never accepts imports. */
+function inspectContextSnapshotImportMigration(db: Database.Database): ContextSnapshotImportMigrationState {
+  const requiredTables: Record<string, string[]> = {
+    context_conversation_sources: [
+      "id", "project_id", "source_key", "source_session_id", "conversation_id", "snapshot_hash",
+      "entry_count", "created_at", "updated_at",
+    ],
+    context_conversation_source_messages: [
+      "project_id", "source_id", "conversation_id", "message_id", "sequence", "role", "content_hash",
+      "source_fingerprint", "created_at",
+    ],
+  };
+  const requiredIndexes = [
+    "idx_context_conversation_sources_project_updated",
+    "idx_context_conversation_source_messages_message",
+  ];
+  const requiredTableSqlFragments: Record<string, string[]> = {
+    context_conversation_sources: [
+      "length(source_key) BETWEEN 1 AND 256",
+      "instr(source_key, '/') = 0",
+      "instr(source_key, char(92)) = 0",
+      "length(snapshot_hash) = 64",
+      "CHECK(entry_count >= 1)",
+      "UNIQUE(project_id, source_key)",
+      "UNIQUE(project_id, conversation_id)",
+    ],
+    context_conversation_source_messages: [
+      "CHECK(sequence >= 0)",
+      "role IN ('user', 'assistant')",
+      "length(content_hash) = 64",
+      "length(source_fingerprint) = 64",
+      "UNIQUE(project_id, source_id, source_fingerprint)",
+    ],
+  };
+  const requiredTriggers = [
+    "context_conversation_source_messages_immutable_update",
+    "context_conversation_source_messages_immutable_delete",
+  ];
+  const missing: string[] = [];
+  let any = false;
+
+  for (const [table, columns] of Object.entries(requiredTables)) {
+    const tableExists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { count: number }).count > 0;
+    any ||= tableExists;
+    if (!tableExists) {
+      missing.push(`${table} table`);
+      continue;
+    }
+    if (!hasContextConversationColumns(db, table, columns)) {
+      missing.push(`${table} required columns`);
+    }
+    const tableSql = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(table) as { sql?: string } | undefined;
+    if (!tableSql?.sql || !requiredTableSqlFragments[table]!.every((fragment) => tableSql.sql!.includes(fragment))) {
+      missing.push(`${table} constraints`);
+    }
+  }
+  for (const index of requiredIndexes) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND name = ?",
+    ).get(index) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${index} index`);
+  }
+  for (const trigger of requiredTriggers) {
+    const exists = (db.prepare(
+      "SELECT count(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?",
+    ).get(trigger) as { count: number }).count > 0;
+    any ||= exists;
+    if (!exists) missing.push(`${trigger} trigger`);
+  }
+  const requiredForeignKeys: Array<[string, string, string[]]> = [
+    ["context_conversation_sources", "context_conversations", ["project_id", "conversation_id"]],
+    ["context_conversation_source_messages", "context_conversation_sources", ["project_id", "source_id"]],
+    ["context_conversation_source_messages", "context_conversations", ["project_id", "conversation_id"]],
+    ["context_conversation_source_messages", "context_messages", ["project_id", "conversation_id", "message_id"]],
+  ];
+  for (const [table, referencedTable, fromColumns] of requiredForeignKeys) {
+    if (hasCompositeForeignKey(db, table, referencedTable, fromColumns)) continue;
+    missing.push(`${table} → ${referencedTable} composite foreign key`);
+  }
   return { any, complete: missing.length === 0, missing };
 }
 
@@ -2086,6 +2179,22 @@ function runMigrations(db: Database.Database): void {
   if (usageMigrationMissing) {
     db.exec(readFileSync(resolve(migrationsDir, "068_usage_telemetry.sql"), "utf-8"));
     logger.info("db", "Applied migration 068_usage_telemetry.sql");
+  }
+
+  // Migration 069: a source mapping and its immutable hash-only entry evidence
+  // must arrive together. A partial shape could accept an unverified prefix,
+  // so fail closed rather than attempting a lossy table repair.
+  const contextSnapshotImportMigration = inspectContextSnapshotImportMigration(db);
+  if (contextSnapshotImportMigration.any && !contextSnapshotImportMigration.complete) {
+    throw new Error(
+      "Migration 069 is in a PARTIAL state. Missing required components: "
+      + contextSnapshotImportMigration.missing.join(", ")
+      + ". Restore the migration's complete schema before retrying.",
+    );
+  }
+  if (!contextSnapshotImportMigration.complete) {
+    db.exec(readFileSync(resolve(migrationsDir, "069_context_conversation_snapshot_imports.sql"), "utf-8"));
+    logger.info("db", "Applied migration 069_context_conversation_snapshot_imports.sql");
   }
 
   enforceReservedBrokerInvariant(db);

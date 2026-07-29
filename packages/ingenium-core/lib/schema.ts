@@ -273,6 +273,12 @@ export const CONTEXT_METADATA_MAX_BYTES = 16_384;
 export const CONTEXT_MAX_TAG_COUNT = 64;
 export const CONTEXT_MAX_RAG_SOURCES_PER_CHECKPOINT = 64;
 export const CONTEXT_IDEMPOTENCY_KEY_MAX_LENGTH = 128;
+/** File-snapshot imports support long histories while retaining a hard request bound. */
+export const CONTEXT_SNAPSHOT_MAX_ENTRIES = 10_000;
+export const CONTEXT_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
+export const CONTEXT_SNAPSHOT_SOURCE_KEY_MAX_LENGTH = 256;
+export const CONTEXT_SNAPSHOT_SOURCE_SESSION_MAX_LENGTH = 512;
+export const CONTEXT_SNAPSHOT_INPUT_METADATA_MAX_BYTES = 12_288;
 
 export type ContextMetadata = Record<string, unknown>;
 
@@ -330,6 +336,79 @@ const ContextIdempotencyKeySchema = z.string()
 const ContextExpectedRevisionSchema = z.number().int().nonnegative();
 const ContextConfirmationTokenSchema = z.string().min(32).max(128)
   .regex(/^[A-Za-z0-9_-]+$/);
+
+const ContextSnapshotSourceIdentifierSchema = z.string()
+  .min(1)
+  .max(CONTEXT_SNAPSHOT_SOURCE_SESSION_MAX_LENGTH)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const ContextSnapshotSourceKeySchema = ContextSnapshotSourceIdentifierSchema
+  .max(CONTEXT_SNAPSHOT_SOURCE_KEY_MAX_LENGTH);
+const ContextSnapshotSourceMessageIdSchema = z.string().min(1).max(512)
+  .refine((value) => !/[\u0000-\u001f\u007f]/.test(value), "Invalid source message identifier");
+const ContextSnapshotMetadataInputSchema = z.unknown().superRefine((value, context) => {
+  if (!isBoundedContextMetadata(value)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid context snapshot metadata" });
+    return;
+  }
+  if (Buffer.byteLength(JSON.stringify(value), "utf8") > CONTEXT_SNAPSHOT_INPUT_METADATA_MAX_BYTES) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Context snapshot metadata exceeds its import budget" });
+  }
+});
+
+/** A file-snapshot entry may retain an opaque source ID or provide its own hash, never both. */
+export const ContextConversationSnapshotEntryInputSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().min(1).max(CONTEXT_MESSAGE_CONTENT_MAX_LENGTH)
+    .refine((value) => value.trim().length > 0, "Message content is required"),
+  sourceMessageId: ContextSnapshotSourceMessageIdSchema.optional(),
+  fingerprint: ContextHashSchema.optional(),
+  createdAt: z.string().datetime().optional(),
+  metadata: ContextSnapshotMetadataInputSchema.default({}),
+}).strict().superRefine((value, context) => {
+  if ((value.sourceMessageId === undefined) === (value.fingerprint === undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["sourceMessageId"],
+      message: "Exactly one of sourceMessageId or fingerprint is required",
+    });
+  }
+});
+export type ContextConversationSnapshotEntryInput = z.input<typeof ContextConversationSnapshotEntryInputSchema>;
+
+const ContextConversationSnapshotBaseInputSchema = z.object({
+  sourceKey: ContextSnapshotSourceKeySchema,
+  sourceSessionId: ContextSnapshotSourceIdentifierSchema.optional(),
+  title: z.string().trim().min(1).max(CONTEXT_CONVERSATION_TITLE_MAX_LENGTH),
+  existingConversationId: z.string().uuid().optional(),
+  entries: z.array(ContextConversationSnapshotEntryInputSchema).min(1).max(CONTEXT_SNAPSHOT_MAX_ENTRIES),
+  tags: ContextTagsInputSchema,
+  priority: z.number().int().min(0).max(10).default(5),
+  metadata: ContextSnapshotMetadataInputSchema.default({}),
+}).strict();
+
+function refineContextConversationSnapshotBudget(
+  value: z.infer<typeof ContextConversationSnapshotBaseInputSchema>,
+  context: z.RefinementCtx,
+): void {
+  try {
+    if (Buffer.byteLength(JSON.stringify(value), "utf8") > CONTEXT_SNAPSHOT_MAX_BYTES) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Context snapshot exceeds its import budget" });
+    }
+  } catch {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Context snapshot is not serializable" });
+  }
+}
+
+/** Input used to calculate the caller-supplied deterministic snapshot hash. */
+export const ContextConversationSnapshotUnsignedInputSchema = ContextConversationSnapshotBaseInputSchema
+  .superRefine(refineContextConversationSnapshotBudget);
+export type ContextConversationSnapshotUnsignedInput = z.input<typeof ContextConversationSnapshotUnsignedInputSchema>;
+
+/** Transactional import contract for Context-native conversation file snapshots. */
+export const ImportContextConversationSnapshotInputSchema = ContextConversationSnapshotBaseInputSchema.extend({
+  snapshotHash: ContextHashSchema,
+}).superRefine(refineContextConversationSnapshotBudget);
+export type ImportContextConversationSnapshotInput = z.input<typeof ImportContextConversationSnapshotInputSchema>;
 
 export const ContextMessageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
 export type ContextMessageRole = z.infer<typeof ContextMessageRoleSchema>;

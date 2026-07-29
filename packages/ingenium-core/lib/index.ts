@@ -6,6 +6,7 @@ export * as tasks from "./tools/tasks.js";
 export * as context from "./tools/context.js";
 export * as contextConversations from "./tools/context-conversations.js";
 export * as contextRag from "./tools/context-rag.js";
+export * as contextSnapshotImport from "./tools/context-snapshot-import.js";
 export * as projects from "./tools/projects.js";
 export * as plugins from "./tools/plugins.js";
 export * as servers from "./tools/servers.js";
