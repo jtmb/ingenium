@@ -171,6 +171,24 @@ describe("context file upload", () => {
     expect(body.snapshotHash).toBe(snapshot.snapshotHash);
   });
 
+  it("recovers a valid OpenCode prefix when a streaming reasoning field is truncated at EOF", () => {
+    const input = writeUpload("truncated-opencode-export.json", [
+      '{"info":{"id":"session"},"messages":[',
+      '{"info":{"id":"user","role":"user"},"parts":[{"type":"text","text":"visible user"}]},',
+      '{"info":{"id":"assistant","role":"assistant","finish":"stop"},"parts":[{"type":"text","text":"completed assistant"}]},',
+      '{"info":{"id":"incomplete","role":"assistant"},"parts":[{"type":"reasoning","reasoningEncryptedContent":"unterminated',
+    ].join(""));
+
+    const snapshot = prepareContextUploadSnapshot(project, session, input);
+    const body = snapshotBody(snapshot.bytes);
+
+    expect(snapshot.format).toBe("opencode");
+    expect(body.entries).toMatchObject([
+      { role: "user", content: "visible user" },
+      { role: "assistant", content: "completed assistant" },
+    ]);
+  });
+
   it.each([
     ["malformed.json", "{not json", "CONTEXT_UPLOAD_PARSE_FAILED"],
     ["empty.jsonl", "\n\n", "CONTEXT_UPLOAD_PARSE_FAILED"],
