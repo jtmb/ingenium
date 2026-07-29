@@ -7,6 +7,7 @@
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { apiRequestHeaders, config } from "../config/index.js";
 import { api } from "../lib/client.js";
@@ -99,6 +100,25 @@ function wrapHandler(
       };
     }
     return handler(args);
+  };
+}
+
+/** A filesystem-backed import may only act in the launcher-bound project. */
+function wrapLauncherBoundHandler(
+  toolName: string,
+  launcherProject: string | null,
+  handler: (args: any) => Promise<any>,
+) {
+  const stateChecked = wrapHandler(toolName, handler);
+  return async (args: any) => {
+    if (!launcherProject || args?.project !== launcherProject) {
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          error: { code: "PROJECT_IDENTITY_REQUIRED", message: "The requested project does not match the launcher binding." },
+        }) }],
+      };
+    }
+    return stateChecked(args);
   };
 }
 
@@ -937,7 +957,35 @@ const contextIdempotencyKeyParam = z.string().min(1).max(128).regex(/^[A-Za-z0-9
 const contextRevisionParam = z.number().int().nonnegative();
 const contextIdParam = z.string().uuid();
 const contextConfirmationTokenParam = z.string().min(32).max(128).regex(/^[A-Za-z0-9_-]+$/);
+const contextUploadSessionParam = z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const contextUploadFilePathParam = z.string().min(1).max(4_096).refine(
+  (value) => isAbsolute(value)
+    && !/[\u0000-\u001f\u007f]/.test(value)
+    && !value.includes("\\"),
+  "An absolute safe file path is required",
+);
 
+server.registerTool(
+  "context_upload_file",
+  {
+    description: "Import one protected local file as a bounded immutable Context snapshot.",
+    inputSchema: {
+      project: projectParam,
+      session: contextUploadSessionParam,
+      file_path: contextUploadFilePathParam,
+      conversation_id: contextIdParam.optional(),
+      tags: contextTagsParam.optional(),
+      priority: z.number().int().min(0).max(10).optional(),
+    },
+  },
+  wrapLauncherBoundHandler(C("context_upload_file"), launcherProject, async (args) => contextTools.contextUploadFile(
+    args.project,
+    args.session,
+    args.file_path,
+    { conversationId: args.conversation_id, tags: args.tags, priority: args.priority },
+    launcherProject,
+  )),
+);
 server.registerTool(
   "context_conversation_create",
   {

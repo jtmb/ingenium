@@ -33,6 +33,28 @@ describe("Ingenium API client authentication", () => {
     expect(requestHeaders.get("Content-Type")).toBe("application/json");
   });
 
+  it("sends a binary Context snapshot once with the protected bearer and octet-stream content type", async () => {
+    process.env.INGENIUM_API_TOKEN = "test-server-token";
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({ error: { code: "UNAVAILABLE" } }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { api } = await import("../lib/client.js");
+    await api.postOctetStream("/context/conversations/import", Buffer.from("{}"), { project: "context-server-test" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "http://localhost:4097/api/v1/context/conversations/import?project=context-server-test",
+    );
+    const requestHeaders = new Headers(fetchMock.mock.calls[0]?.[1].headers);
+    expect(requestHeaders.get("Authorization")).toBe("Bearer test-server-token");
+    expect(requestHeaders.get("Content-Type")).toBe("application/octet-stream");
+    expect(fetchMock.mock.calls[0]?.[1].body).toEqual(Buffer.from("{}"));
+  });
+
   it("uses the dedicated server-only child-MCP runtime handoff outside the dashboard API namespace", async () => {
     process.env.INGENIUM_API_TOKEN = "test-server-token";
     const fetchMock = vi.fn().mockResolvedValue({

@@ -81,6 +81,41 @@ describe("McpToolVisibilityController", () => {
     await controller.stop();
   });
 
+  it("hides a disabled context upload and rejects a direct retained call", async () => {
+    const state = new Map<string, boolean>([["ingenium_context_upload_file", false]]);
+    const server = new McpServer(
+      { name: "context-upload-visibility", version: "1.0.0" },
+      { capabilities: { tools: { listChanged: true } } },
+    );
+    servers.push(server);
+    const controller = new McpToolVisibilityController(
+      server,
+      "context-upload-project",
+      { listToolStates: async () => state },
+    );
+    const registration = server.registerTool(
+      "context_upload_file",
+      { description: "Context upload fixture", inputSchema: { project: z.string() } },
+      async () => ({ content: [{ type: "text" as const, text: "must-not-import" }] }),
+    );
+    controller.track("ingenium_context_upload_file", registration);
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "context-upload-visibility-client", version: "1.0.0" });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    await controller.start();
+
+    expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain("context_upload_file");
+    await expect(client.callTool({
+      name: "context_upload_file",
+      arguments: { project: "context-upload-project" },
+    })).resolves.toMatchObject({ isError: true });
+
+    await controller.stop();
+    await client.close();
+  });
+
   it("completes an overlapping refresh against the latest API state", async () => {
     const state = new Map<string, boolean>([["ingenium_fixture_probe", true]]);
     let firstRequest = true;

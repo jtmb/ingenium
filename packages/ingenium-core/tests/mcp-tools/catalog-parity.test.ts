@@ -168,8 +168,8 @@ describe("MCP Tool Catalog Parity", () => {
 
   // 8. Verify catalog total count
   it("catalog has the expected number of tools", () => {
-    // 265 from mcp-server.ts + 2 extension tools = 267.
-    expect(MCP_TOOL_CATALOG.length, "catalog should contain 265 server + 2 extension tools = 267 total").toBe(267);
+    // 266 from mcp-server.ts + 2 extension tools = 268.
+    expect(MCP_TOOL_CATALOG.length, "catalog should contain 266 server + 2 extension tools = 268 total").toBe(268);
   });
 
   it("exposes the complete project tool shape", () => {
@@ -241,11 +241,21 @@ describe("MCP Tool Catalog Parity", () => {
     expect(orphaned, "no catalog entry should lack a transport registration").toEqual([]);
   });
 
-  it("reconciles the 265 server and 2 extension tool inventory", () => {
+  it("reconciles the 266 server and 2 extension tool inventory", () => {
     const serverToolNames = extractServerToolNames();
-    expect(serverToolNames).toHaveLength(265);
+    expect(serverToolNames).toHaveLength(266);
     expect(EXTENSION_TOOLS).toHaveLength(2);
     expect(MCP_TOOL_CATALOG.length).toBe(serverToolNames.length + EXTENSION_TOOLS.length);
+  });
+
+  it("catalogs the protected Context upload transport and API contract", () => {
+    const entry = getCatalogMap().get("ingenium_context_upload_file");
+    expect(entry).toMatchObject({
+      category: "Context",
+      projectScope: "per-project",
+      defaultEnabled: true,
+    });
+    expect(entry?.apiEndpoints).toContain("POST /api/v1/context/conversations/import");
   });
 
   // 10. Category, description, and projectScope are populated for all entries

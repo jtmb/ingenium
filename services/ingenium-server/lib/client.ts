@@ -37,6 +37,8 @@ const CHILD_MCP_RUNTIME_HANDOFF_VALUE = "1";
 interface RequestOptions {
   method: string;
   body?: unknown;
+  octetBody?: Uint8Array;
+  contentType?: string;
   params?: Record<string, string>;
   /** Use only for the fixed child-MCP server-to-server secret handoff. */
   trustedChildMcpRuntime?: boolean;
@@ -75,7 +77,7 @@ async function request(path: string, opts: RequestOptions, retries = MAX_RETRIES
     const init: RequestInit = {
       method: opts.method,
       signal: controller.signal,
-      headers: apiRequestHeaders({ "Content-Type": "application/json" }),
+      headers: apiRequestHeaders({ "Content-Type": opts.contentType ?? "application/json" }),
     };
     if (opts.trustedChildMcpRuntime) {
       (init.headers as Headers).set(
@@ -83,7 +85,8 @@ async function request(path: string, opts: RequestOptions, retries = MAX_RETRIES
         CHILD_MCP_RUNTIME_HANDOFF_VALUE,
       );
     }
-    if (opts.body) init.body = JSON.stringify(opts.body);
+    if (opts.octetBody !== undefined) init.body = opts.octetBody as unknown as BodyInit;
+    else if (opts.body !== undefined) init.body = JSON.stringify(opts.body);
 
     const response = await fetch(url.toString(), init);
 
@@ -137,6 +140,21 @@ export const api = {
   },
   post: async (path: string, body?: unknown, params?: Record<string, string>) => {
     const res = await request(path, { method: "POST", body, params });
+    const json = await res.json();
+    return { ok: res.ok, status: res.status, data: json.data ?? json };
+  },
+  /**
+   * Submit one bounded binary snapshot. Unlike JSON calls this never retries:
+   * replay safety belongs to the snapshot hash at the API boundary and callers
+   * must not accidentally turn one import into multiple transport attempts.
+   */
+  postOctetStream: async (path: string, body: Uint8Array, params?: Record<string, string>) => {
+    const res = await request(path, {
+      method: "POST",
+      octetBody: body,
+      contentType: "application/octet-stream",
+      params,
+    }, 0);
     const json = await res.json();
     return { ok: res.ok, status: res.status, data: json.data ?? json };
   },
