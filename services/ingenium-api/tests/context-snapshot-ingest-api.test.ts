@@ -8,6 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getDb, logger, resetDbForTest } from "ingenium-core";
+import {
+  CONTEXT_SNAPSHOT_TIMING_MAX_MS,
+  ContextSnapshotImportTimingSchema,
+  ContextSnapshotIngestTimingSchema,
+} from "ingenium-core/lib/schema";
 import { appendContextMessage, createContextConversation } from "ingenium-core/lib/tools/context-conversations";
 import { calculateContextConversationSnapshotHash } from "ingenium-core/lib/tools/context-snapshot-import";
 import { projects } from "ingenium-core";
@@ -116,6 +121,29 @@ async function postWithoutContentLength(): Promise<{ status: number; body: strin
   });
 }
 
+function expectIngestTiming(data: Record<string, unknown>): void {
+  const parsed = ContextSnapshotIngestTimingSchema.safeParse(data.timing);
+  expect(parsed.success).toBe(true);
+  if (!parsed.success) return;
+  for (const duration of Object.values(parsed.data)) {
+    expect(Number.isInteger(duration)).toBe(true);
+    expect(duration).toBeGreaterThanOrEqual(0);
+    expect(duration).toBeLessThanOrEqual(CONTEXT_SNAPSHOT_TIMING_MAX_MS);
+  }
+}
+
+function expectCoreTiming(data: Record<string, unknown>, checkpointNotRun = false): void {
+  const parsed = ContextSnapshotImportTimingSchema.safeParse(data.coreTiming);
+  expect(parsed.success).toBe(true);
+  if (!parsed.success) return;
+  for (const duration of Object.values(parsed.data)) {
+    expect(Number.isInteger(duration)).toBe(true);
+    expect(duration).toBeGreaterThanOrEqual(0);
+    expect(duration).toBeLessThanOrEqual(CONTEXT_SNAPSHOT_TIMING_MAX_MS);
+  }
+  if (checkpointNotRun) expect(parsed.data.checkpointMs).toBe(0);
+}
+
 beforeEach(async () => {
   originalDbPath = process.env.INGENIUM_CORE_DB_PATH;
   originalToken = process.env.INGENIUM_API_TOKEN;
@@ -163,8 +191,9 @@ afterEach(async () => {
 describe("protected context snapshot ingest API", () => {
   it("imports 1,001 messages in one request, replays idempotently, and appends a verified suffix", async () => {
     const initial = snapshot(makeEntries(1_001));
-    const firstResponse = await postSnapshot(initial, {
+    const firstResponse = await postSnapshot(gzipSync(Buffer.from(JSON.stringify(initial))), {
       authorization: `Bearer ${API_TOKEN}`,
+      contentEncoding: "gzip",
     });
     expect(firstResponse.status).toBe(201);
     const first = (await firstResponse.json() as { data: Record<string, unknown> }).data;
@@ -178,6 +207,8 @@ describe("protected context snapshot ingest API", () => {
       conversation: { id: expect.any(String), revision: 1_001, message_count: 1_001 },
     });
     expect(first.id).toBe(first.conversation && (first.conversation as { id: string }).id);
+    expectIngestTiming(first);
+    expectCoreTiming(first);
     expect(JSON.stringify(first)).not.toContain(initial.entries[0]!.content);
     expect(JSON.stringify(first)).not.toContain(initial.title);
 
@@ -190,20 +221,24 @@ describe("protected context snapshot ingest API", () => {
       authorization: `Bearer ${API_TOKEN}`,
     });
     expect(replayResponse.status).toBe(200);
-    expect((await replayResponse.json()).data).toMatchObject({
+    const replay = (await replayResponse.json() as { data: Record<string, unknown> }).data;
+    expect(replay).toMatchObject({
       id: first.id,
       total: 1_001,
       appended: 0,
       skipped: 1_001,
       idempotent: true,
     });
+    expectIngestTiming(replay);
+    expectCoreTiming(replay, true);
 
     const suffix = snapshot([...initial.entries, ...makeEntries(2, initial.entries.length)]);
     const suffixResponse = await postSnapshot(suffix, {
       authorization: `Bearer ${API_TOKEN}`,
     });
     expect(suffixResponse.status).toBe(200);
-    expect((await suffixResponse.json()).data).toMatchObject({
+    const suffixBody = (await suffixResponse.json() as { data: Record<string, unknown> }).data;
+    expect(suffixBody).toMatchObject({
       id: first.id,
       revision: 1_003,
       total: 1_003,
@@ -212,6 +247,8 @@ describe("protected context snapshot ingest API", () => {
       snapshotHash: suffix.snapshotHash,
       idempotent: false,
     });
+    expectIngestTiming(suffixBody);
+    expectCoreTiming(suffixBody);
     expect(db.prepare("SELECT count(*) AS count FROM context_messages WHERE project_id = ?").get(primary.id))
       .toEqual({ count: 1_003 });
   });
@@ -376,6 +413,8 @@ describe("protected context snapshot ingest API", () => {
       expect(failedBody).toEqual({
         error: { code: "SNAPSHOT_INGEST_FAILED", message: "Snapshot ingest failed." },
       });
+      expect(failedBody).not.toHaveProperty("timing");
+      expect(failedBody).not.toHaveProperty("coreTiming");
       expect(JSON.stringify(failedBody)).not.toContain(privateMarker);
       expect(JSON.stringify(logger.getLogs({ limit: 2_000 }).slice(logCount))).not.toContain(privateMarker);
       expect(errorSpy.mock.calls.flat().join(" ")).not.toContain(privateMarker);

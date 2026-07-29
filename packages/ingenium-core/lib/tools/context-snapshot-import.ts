@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { checkpointAfterWrite, execTransaction, getDb } from "../db.js";
 import {
   ContextConversationSchema,
@@ -7,8 +8,10 @@ import {
   ImportContextConversationSnapshotInputSchema,
   CONTEXT_TAGS_MAX_BYTES,
   isBoundedContextMetadata,
+  toBoundedContextSnapshotTimingMs,
   type ContextMetadata,
   type ContextMessage,
+  type ContextSnapshotImportTiming,
 } from "../schema.js";
 import type { ContextConversationSummary } from "./context-conversations.js";
 
@@ -39,6 +42,7 @@ export interface ContextConversationSnapshotImportResult {
   created: boolean;
   adopted: boolean;
   idempotent: boolean;
+  timing: ContextSnapshotImportTiming;
 }
 
 interface SnapshotEntry {
@@ -545,9 +549,17 @@ export function importContextConversationSnapshot(
   projectId: string,
   input: unknown,
 ): ContextConversationSnapshotImportResult {
+  const validationStartedAt = performance.now();
   const snapshot = parseSnapshot(input);
+  const validationMs = toBoundedContextSnapshotTimingMs(performance.now() - validationStartedAt);
+  let prefixQueryMs = 0;
+  const transactionStartedAt = performance.now();
   const result = execTransaction(() => {
     const db = getDb(dbPath());
+    const prefixQueryStartedAt = performance.now();
+    const finishPrefixQueryTiming = (): void => {
+      prefixQueryMs = toBoundedContextSnapshotTimingMs(performance.now() - prefixQueryStartedAt);
+    };
     requireProject(db, projectId);
     const existingMappingRow = db.prepare(
       `SELECT * FROM context_conversation_sources
@@ -568,6 +580,7 @@ export function importContextConversationSnapshot(
         if (mapping.snapshot_hash !== snapshot.snapshotHash) {
           throw new ContextSnapshotImportError("SNAPSHOT_HASH_MISMATCH");
         }
+        finishPrefixQueryTiming();
         return {
           conversation: conversationSummary(db, projectId, mapping.conversation_id),
           snapshotHash: snapshot.snapshotHash,
@@ -581,6 +594,7 @@ export function importContextConversationSnapshot(
       }
 
       requireActiveConversation(db, projectId, mapping.conversation_id);
+      finishPrefixQueryTiming();
       appendSnapshotEntries(
         db,
         projectId,
@@ -619,6 +633,10 @@ export function importContextConversationSnapshot(
     } else {
       conversationId = randomUUID();
       created = true;
+    }
+
+    finishPrefixQueryTiming();
+    if (created) {
       const metadata = conversationMetadata(snapshot);
       db.prepare(
         `INSERT INTO context_conversations
@@ -692,7 +710,13 @@ export function importContextConversationSnapshot(
       written: true,
     };
   });
-  if (result.written) checkpointAfterWrite();
+  const transactionMs = toBoundedContextSnapshotTimingMs(performance.now() - transactionStartedAt);
+  let checkpointMs = 0;
+  if (result.written) {
+    const checkpointStartedAt = performance.now();
+    checkpointAfterWrite();
+    checkpointMs = toBoundedContextSnapshotTimingMs(performance.now() - checkpointStartedAt);
+  }
   return {
     conversation: result.conversation,
     snapshotHash: result.snapshotHash,
@@ -701,5 +725,11 @@ export function importContextConversationSnapshot(
     created: result.created,
     adopted: result.adopted,
     idempotent: result.idempotent,
+    timing: {
+      validationMs,
+      prefixQueryMs,
+      transactionMs,
+      checkpointMs,
+    },
   };
 }

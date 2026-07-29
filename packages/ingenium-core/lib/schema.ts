@@ -279,6 +279,20 @@ export const CONTEXT_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
 export const CONTEXT_SNAPSHOT_SOURCE_KEY_MAX_LENGTH = 256;
 export const CONTEXT_SNAPSHOT_SOURCE_SESSION_MAX_LENGTH = 512;
 export const CONTEXT_SNAPSHOT_INPUT_METADATA_MAX_BYTES = 12_288;
+/** Response-only timing metadata is coarse and bounded by this maximum. */
+export const CONTEXT_SNAPSHOT_TIMING_MAX_MS = 60_000;
+
+/**
+ * Convert a monotonic elapsed duration into bounded whole-millisecond metadata.
+ * This prevents timing fields from becoming an unbounded precision channel.
+ */
+export function toBoundedContextSnapshotTimingMs(elapsedMs: number): number {
+  if (!Number.isFinite(elapsedMs)) return 0;
+  return Math.min(
+    CONTEXT_SNAPSHOT_TIMING_MAX_MS,
+    Math.max(0, Math.round(elapsedMs)),
+  );
+}
 
 export type ContextMetadata = Record<string, unknown>;
 
@@ -409,6 +423,25 @@ export const ImportContextConversationSnapshotInputSchema = ContextConversationS
   snapshotHash: ContextHashSchema,
 }).superRefine(refineContextConversationSnapshotBudget);
 export type ImportContextConversationSnapshotInput = z.input<typeof ImportContextConversationSnapshotInputSchema>;
+
+/** Coarse timing metadata exposed by the transactional core snapshot importer. */
+export const ContextSnapshotImportTimingSchema = z.object({
+  validationMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+  prefixQueryMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+  transactionMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+  checkpointMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+}).strict();
+export type ContextSnapshotImportTiming = z.infer<typeof ContextSnapshotImportTimingSchema>;
+
+/** Coarse transport timing metadata exposed only for successful API imports. */
+export const ContextSnapshotIngestTimingSchema = z.object({
+  bodyReadMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+  decompressionMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+  jsonValidationMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+  coreImportMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+  totalMs: z.number().int().min(0).max(CONTEXT_SNAPSHOT_TIMING_MAX_MS),
+}).strict();
+export type ContextSnapshotIngestTiming = z.infer<typeof ContextSnapshotIngestTimingSchema>;
 
 export const ContextMessageRoleSchema = z.enum(["system", "user", "assistant", "tool"]);
 export type ContextMessageRole = z.infer<typeof ContextMessageRoleSchema>;

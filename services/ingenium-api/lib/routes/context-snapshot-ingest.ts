@@ -1,7 +1,10 @@
 import express, { Router, type NextFunction, type Request, type Response } from "express";
+import { performance } from "node:perf_hooks";
 import {
   CONTEXT_SNAPSHOT_MAX_BYTES,
   ImportContextConversationSnapshotInputSchema,
+  toBoundedContextSnapshotTimingMs,
+  type ContextSnapshotIngestTiming,
 } from "ingenium-core/lib/schema";
 import {
   ContextSnapshotImportError,
@@ -24,12 +27,72 @@ const ALLOWED_CONTENT_ENCODINGS = new Set(["identity", "gzip", "deflate", "br"])
 
 export const contextSnapshotIngestRouter = Router();
 
+interface SnapshotRequestTiming {
+  startedAt: number;
+  wireBodyEndedAt: number | null;
+  bodyReadyAt: number | null;
+}
+
+const snapshotRequestTimings = new WeakMap<object, SnapshotRequestTiming>();
+
 interface SnapshotBodyParserError {
   type?: unknown;
 }
 
 function sendSnapshotError(res: Response, status: number, code: string, message: string): void {
   res.status(status).json({ error: { code, message } });
+}
+
+/** Capture body-parser boundaries without retaining request content or identifiers. */
+function startSnapshotTiming(req: Request, _res: Response, next: NextFunction): void {
+  const timing: SnapshotRequestTiming = {
+    startedAt: performance.now(),
+    wireBodyEndedAt: null,
+    bodyReadyAt: null,
+  };
+  snapshotRequestTimings.set(req, timing);
+  req.once("end", () => {
+    if (timing.wireBodyEndedAt === null) timing.wireBodyEndedAt = performance.now();
+  });
+  next();
+}
+
+function markSnapshotBodyReady(req: object): void {
+  const timing = snapshotRequestTimings.get(req);
+  if (!timing) return;
+  timing.bodyReadyAt = performance.now();
+  if (timing.wireBodyEndedAt === null) timing.wireBodyEndedAt = timing.bodyReadyAt;
+}
+
+function snapshotIngestTiming(
+  req: Request,
+  jsonValidationMs: number,
+  coreImportMs: number,
+): ContextSnapshotIngestTiming {
+  const completedAt = performance.now();
+  const timing = snapshotRequestTimings.get(req);
+  if (!timing) {
+    return {
+      bodyReadMs: 0,
+      decompressionMs: 0,
+      jsonValidationMs,
+      coreImportMs,
+      totalMs: 0,
+    };
+  }
+
+  const bodyReadyAt = timing.bodyReadyAt ?? completedAt;
+  const wireBodyEndedAt = timing.wireBodyEndedAt ?? bodyReadyAt;
+  const contentEncoding = req.get("Content-Encoding")?.toLowerCase();
+  return {
+    bodyReadMs: toBoundedContextSnapshotTimingMs(wireBodyEndedAt - timing.startedAt),
+    decompressionMs: contentEncoding === undefined || contentEncoding === "identity"
+      ? 0
+      : toBoundedContextSnapshotTimingMs(bodyReadyAt - wireBodyEndedAt),
+    jsonValidationMs,
+    coreImportMs,
+    totalMs: toBoundedContextSnapshotTimingMs(completedAt - timing.startedAt),
+  };
 }
 
 function isSnapshotContentType(req: Request): boolean {
@@ -174,7 +237,10 @@ function sendImportError(res: Response, error: ContextSnapshotImportError): void
   sendSnapshotError(res, response.status, response.code, response.message);
 }
 
-function snapshotResponse(result: ContextConversationSnapshotImportResult) {
+function snapshotResponse(
+  result: ContextConversationSnapshotImportResult,
+  timing: ContextSnapshotIngestTiming,
+) {
   const total = result.revision;
   return {
     conversation: {
@@ -193,6 +259,8 @@ function snapshotResponse(result: ContextConversationSnapshotImportResult) {
     created: result.created,
     adopted: result.adopted,
     idempotent: result.idempotent,
+    timing,
+    coreTiming: result.timing,
   };
 }
 
@@ -201,12 +269,19 @@ contextSnapshotIngestRouter.post(
   rejectDashboardSnapshotTransport,
   requireBoundedContentLength,
   enforceSnapshotRequestTimeout,
+  startSnapshotTiming,
   // This raw parser is the sole body parser for snapshot octet-streams.
-  express.raw({ type: () => true, limit: CONTEXT_SNAPSHOT_MAX_BYTES, inflate: true }),
+  express.raw({
+    type: () => true,
+    limit: CONTEXT_SNAPSHOT_MAX_BYTES,
+    inflate: true,
+    verify: (req) => markSnapshotBodyReady(req),
+  }),
   (req, res) => {
     const projectId = resolveSnapshotProject(req, res);
     if (!projectId) return;
 
+    const jsonValidationStartedAt = performance.now();
     const body = parseSnapshotBody(req.body);
     if (body === null) {
       sendSnapshotError(res, 400, "MALFORMED_SNAPSHOT", "Snapshot ingest body must be valid UTF-8 JSON.");
@@ -218,12 +293,17 @@ contextSnapshotIngestRouter.post(
       sendSnapshotError(res, 422, "INVALID_CONTEXT_SNAPSHOT", "Snapshot ingest payload is invalid.");
       return;
     }
+    const jsonValidationMs = toBoundedContextSnapshotTimingMs(performance.now() - jsonValidationStartedAt);
 
     try {
       // This is intentionally one transactional core invocation per complete
       // snapshot; API code never iterates or appends individual messages.
+      const coreImportStartedAt = performance.now();
       const result = importContextConversationSnapshot(projectId, parsed.data);
-      res.status(result.created ? 201 : 200).json({ data: snapshotResponse(result) });
+      const coreImportMs = toBoundedContextSnapshotTimingMs(performance.now() - coreImportStartedAt);
+      res.status(result.created ? 201 : 200).json({
+        data: snapshotResponse(result, snapshotIngestTiming(req, jsonValidationMs, coreImportMs)),
+      });
     } catch (error) {
       if (error instanceof ContextSnapshotImportError) {
         sendImportError(res, error);

@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { getDb, resetDbForTest } from "../lib/db.js";
 import {
+  CONTEXT_SNAPSHOT_TIMING_MAX_MS,
+  ContextSnapshotImportTimingSchema,
+  type ContextSnapshotImportTiming,
+} from "../lib/schema.js";
+import {
   appendContextMessage,
   archiveContextConversation,
   authorizeContextMaintenanceAction,
@@ -87,6 +92,16 @@ function expectErrorCode(run: () => unknown, code: string): void {
   }
 }
 
+function expectImportTiming(timing: ContextSnapshotImportTiming, checkpointNotRun = false): void {
+  expect(ContextSnapshotImportTimingSchema.safeParse(timing).success).toBe(true);
+  for (const duration of Object.values(timing)) {
+    expect(Number.isInteger(duration)).toBe(true);
+    expect(duration).toBeGreaterThanOrEqual(0);
+    expect(duration).toBeLessThanOrEqual(CONTEXT_SNAPSHOT_TIMING_MAX_MS);
+  }
+  if (checkpointNotRun) expect(timing.checkpointMs).toBe(0);
+}
+
 describe("Context-native snapshot import", () => {
   it("imports more than 1,000 entries atomically, replays idempotently, and appends a verified suffix", () => {
     const { db, first } = setup();
@@ -102,17 +117,20 @@ describe("Context-native snapshot import", () => {
       idempotent: false,
       conversation: { message_count: 1_001 },
     });
+    expectImportTiming(imported.timing);
     expect(db.prepare(
       "SELECT count(*) AS count FROM context_conversation_source_messages WHERE project_id = ?",
     ).get(first.id)).toEqual({ count: 1_001 });
     const checkpoint = createContextCheckpoint(first.id, imported.conversation.id, { expectedRevision: 1_001 });
 
-    expect(importContextConversationSnapshot(first.id, initialSnapshot)).toMatchObject({
+    const replay = importContextConversationSnapshot(first.id, initialSnapshot);
+    expect(replay).toMatchObject({
       conversation: { id: imported.conversation.id },
       appended: 0,
       revision: 1_001,
       idempotent: true,
     });
+    expectImportTiming(replay.timing, true);
 
     const refreshedEntries = [...initialEntries, ...makeEntries(2, initialEntries.length)];
     const refreshed = importContextConversationSnapshot(first.id, snapshot(refreshedEntries));
@@ -122,6 +140,7 @@ describe("Context-native snapshot import", () => {
       revision: 1_003,
       idempotent: false,
     });
+    expectImportTiming(refreshed.timing);
     expect(listContextCheckpoints(first.id, imported.conversation.id).data).toMatchObject([
       { id: checkpoint.checkpoint.id, message_count: 1_001, state_hash: checkpoint.checkpoint.state_hash },
     ]);
