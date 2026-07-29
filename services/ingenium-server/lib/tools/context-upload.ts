@@ -21,6 +21,8 @@ import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path
 import { api } from "../client.js";
 
 export const CONTEXT_UPLOAD_MAX_FILE_BYTES = 8 * 1024 * 1024;
+/** OpenCode CLI exports include non-visible diagnostic payloads before filtering. */
+export const CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES = 64 * 1024 * 1024;
 export const CONTEXT_UPLOAD_MAX_ENTRIES = 10_000;
 export const CONTEXT_UPLOAD_MAX_MESSAGE_CHARS = 262_144;
 export const CONTEXT_UPLOAD_SNAPSHOT_PATH = "/context/conversations/import";
@@ -174,6 +176,17 @@ function safeInputPath(filePath: string): string {
   return filePath;
 }
 
+/**
+ * A JSON file is the only source that can be an OpenCode CLI export. Its exact
+ * format is verified after bounded JSON parsing; all non-OpenCode formats keep
+ * the ordinary 8 MiB source limit.
+ */
+function maxRawSourceBytes(filePath: string): number {
+  return extname(filePath).toLowerCase() === ".json"
+    ? CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES
+    : CONTEXT_UPLOAD_MAX_FILE_BYTES;
+}
+
 function verifiedWorktree(path: string, project: string): string | null {
   if (!isAbsolute(path) || path !== resolve(path) || basename(path) !== project) return null;
   try {
@@ -255,7 +268,7 @@ function verifyFileParents(root: string, filePath: string): void {
 }
 
 /** Read the regular file through one O_NOFOLLOW descriptor after pre/post checks. */
-function readProtectedUploadFile(project: string, inputPath: string): Uint8Array {
+function readProtectedUploadFile(project: string, inputPath: string, maxBytes: number): Uint8Array {
   const filePath = safeInputPath(inputPath);
   const root = resolveVerifiedUploadRoot(project, filePath);
   verifyFileParents(root, filePath);
@@ -267,7 +280,7 @@ function readProtectedUploadFile(project: string, inputPath: string): Uint8Array
     throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
   }
   if (!isPrivateRegularFile(before)) throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
-  if (before.size > CONTEXT_UPLOAD_MAX_FILE_BYTES) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
+  if (before.size > maxBytes) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
 
   let descriptor: number | undefined;
   try {
@@ -276,13 +289,13 @@ function readProtectedUploadFile(project: string, inputPath: string): Uint8Array
     if (!isPrivateRegularFile(opened) || !equalFileIdentity(before, opened)) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
-    if (opened.size > CONTEXT_UPLOAD_MAX_FILE_BYTES) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
+    if (opened.size > maxBytes) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
     const bytes = readFileSync(descriptor);
     const afterRead = fstatSync(descriptor);
     if (!isPrivateRegularFile(afterRead) || !equalFileIdentity(opened, afterRead)) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
-    if (bytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES || bytes.byteLength !== opened.size) {
+    if (bytes.byteLength > maxBytes || bytes.byteLength !== opened.size) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
     }
     return bytes;
@@ -397,89 +410,6 @@ function parseJsonLines(text: string): RawEntry[] {
   return entries;
 }
 
-/**
- * OpenCode can export an actively-streaming assistant message with an
- * unterminated `reasoningEncryptedContent` value at EOF. That part is never
- * importable, but rejecting the complete preceding snapshot would violate the
- * file-import contract for an otherwise valid export. Recover only by dropping
- * that one incomplete final message; all other malformed JSON remains invalid.
- */
-function recoverTruncatedOpenCodeExport(text: string): Record<string, unknown> | null {
-  const containers: Array<"{" | "["> = [];
-  const messageStarts: number[] = [];
-  let messagesArrayDepth: number | null = null;
-  let awaitingMessagesArray = false;
-  let inString = false;
-  let escaped = false;
-  let stringStart = -1;
-  let lastPropertyName: string | null = null;
-
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index]!;
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (character === "\\") {
-        escaped = true;
-        continue;
-      }
-      if (character !== "\"") continue;
-
-      const value = text.slice(stringStart + 1, index);
-      inString = false;
-      if (/^\s*:/.test(text.slice(index + 1))) {
-        lastPropertyName = value;
-        if (containers.length === 1 && value === "messages") awaitingMessagesArray = true;
-      }
-      continue;
-    }
-
-    if (character === "\"") {
-      inString = true;
-      stringStart = index;
-      continue;
-    }
-    if (character === "[") {
-      containers.push("[");
-      if (awaitingMessagesArray) {
-        messagesArrayDepth = containers.length;
-        awaitingMessagesArray = false;
-      }
-      continue;
-    }
-    if (character === "{") {
-      if (messagesArrayDepth !== null
-        && containers.length === messagesArrayDepth
-        && containers.at(-1) === "[") {
-        messageStarts.push(index);
-      }
-      containers.push("{");
-      continue;
-    }
-    if (character === "]" || character === "}") containers.pop();
-  }
-
-  if (!inString
-    || lastPropertyName !== "reasoningEncryptedContent"
-    || messagesArrayDepth === null
-    || messageStarts.length === 0) {
-    return null;
-  }
-
-  const prefix = text.slice(0, messageStarts[messageStarts.length - 1]).replace(/,\s*$/, "");
-  try {
-    const recovered = JSON.parse(`${prefix}]}`) as unknown;
-    const record = asRecord(recovered);
-    if (!record || !isRecord(record.info) || !Array.isArray(record.messages)) return null;
-    if (record.messages.length !== messageStarts.length - 1) return null;
-    return record;
-  } catch {
-    return null;
-  }
-}
-
 function decodeUtf8(bytes: Uint8Array): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -499,12 +429,14 @@ function parseSourceFile(filePath: string, bytes: Uint8Array): { format: UploadF
     try {
       parsed = JSON.parse(text);
     } catch {
-      parsed = recoverTruncatedOpenCodeExport(text);
-      if (!parsed) throw new ContextUploadFileError("CONTEXT_UPLOAD_PARSE_FAILED");
+      throw new ContextUploadFileError("CONTEXT_UPLOAD_PARSE_FAILED");
     }
     const record = asRecord(parsed);
     if (record && isRecord(record.info) && Array.isArray(record.messages)) {
       return { format: "opencode", entries: parseOpenCodeMessages(record.messages) };
+    }
+    if (bytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES) {
+      throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
     }
     return { format: "json", entries: parseSimpleJson(parsed) };
   }
@@ -644,8 +576,12 @@ export function prepareContextUploadSnapshot(
   const safeSourceSession = safeSession(session);
   const safePath = safeInputPath(filePath);
   validateConversationId(options.conversationId);
-  const sourceBytes = readProtectedUploadFile(safeProject, safePath);
+  const sourceBytes = readProtectedUploadFile(safeProject, safePath, maxRawSourceBytes(safePath));
+  const sourceFileHash = sha256(sourceBytes);
   const parsed = parseSourceFile(safePath, sourceBytes);
+  if (parsed.format !== "opencode" && sourceBytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES) {
+    throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
+  }
   const entries = snapshotEntries(safeSourceSession, parsed.entries);
   if (entries.length === 0) throw new ContextUploadFileError("CONTEXT_UPLOAD_EMPTY");
   const sourceKey = `${SOURCE_KEY_PREFIX}${safeSourceSession}`;
@@ -670,7 +606,7 @@ export function prepareContextUploadSnapshot(
   }
   return {
     format: parsed.format,
-    sourceFileHash: sha256(sourceBytes),
+    sourceFileHash,
     sourceKey,
     sourceSessionId: safeSourceSession,
     snapshotHash: hash,

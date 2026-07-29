@@ -1,7 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { performance } from "node:perf_hooks";
 
 const mockApi = {
   postOctetStream: vi.fn(),
@@ -11,6 +25,7 @@ vi.mock("../lib/client.js", () => ({ api: mockApi }));
 
 const {
   CONTEXT_UPLOAD_MAX_FILE_BYTES,
+  CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES,
   ContextUploadFileError,
   prepareContextUploadSnapshot,
   uploadContextFile,
@@ -33,6 +48,63 @@ function writeUpload(name: string, content: string | Uint8Array, mode = 0o600): 
   const path = fixturePath(name);
   writeFileSync(path, content, { mode });
   chmodSync(path, mode);
+  return path;
+}
+
+function writeOversizedUpload(name: string, limit: number): string {
+  const path = writeUpload(name, "x");
+  truncateSync(path, limit + 1);
+  return path;
+}
+
+function writeGeneratedLargeOpenCodeExport(name: string): string {
+  const path = fixturePath(name);
+  const descriptor = openSync(path, "w", 0o600);
+  const ignoredPayload = "large non-visible payload ".padEnd(36 * 1024, "x");
+  let first = true;
+  const writeMessage = (message: unknown) => {
+    writeSync(descriptor, `${first ? "" : ","}${JSON.stringify(message)}`);
+    first = false;
+  };
+
+  try {
+    writeSync(descriptor, '{"info":{"id":"large-export"},"messages":[');
+    for (let index = 0; index < 500; index += 1) {
+      writeMessage({
+        info: { id: `large-user-${index}`, role: "user" },
+        parts: [
+          { type: "text", text: `visible user ${index}` },
+          { type: "file", content: `file payload ${index}` },
+        ],
+      });
+      writeMessage({
+        info: { id: `large-assistant-${index}`, role: "assistant", time: { completed: index + 1 } },
+        parts: [
+          { type: "text", text: `visible assistant ${index}` },
+          { type: "reasoning", text: ignoredPayload },
+          { type: "tool", input: ignoredPayload },
+          { type: "patch", patch: ignoredPayload },
+          { type: "step-start", name: "step" },
+          { type: "step-finish", status: "completed" },
+          { type: "compaction", content: "compaction state" },
+          { type: "agent", name: "subagent" },
+        ],
+      });
+    }
+    for (let index = 0; index < 2; index += 1) {
+      writeMessage({
+        info: { id: `large-incomplete-${index}`, role: "assistant" },
+        parts: [
+          { type: "text", text: `must not import incomplete assistant ${index}` },
+          { type: "reasoning", reasoningEncryptedContent: ignoredPayload },
+        ],
+      });
+    }
+    writeSync(descriptor, "]}");
+  } finally {
+    closeSync(descriptor);
+  }
+  chmodSync(path, 0o600);
   return path;
 }
 
@@ -142,6 +214,34 @@ describe("context file upload", () => {
     expect(JSON.stringify(resultData)).not.toContain(input);
   });
 
+  it("imports a generated 50+ MiB OpenCode export as one bounded visible snapshot", async () => {
+    const input = writeGeneratedLargeOpenCodeExport("large-opencode-export.json");
+    const rawBytes = statSync(input).size;
+    const heapBeforeImport = process.memoryUsage().heapUsed;
+    const startedAt = performance.now();
+
+    const result = await uploadContextFile(project, session, input, {}, project);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(rawBytes).toBeGreaterThan(50 * 1024 * 1024);
+    expect(rawBytes).toBeLessThanOrEqual(CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES);
+    expect(elapsedMs).toBeLessThan(20_000);
+    expect(process.memoryUsage().heapUsed - heapBeforeImport)
+      .toBeLessThan(CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES * 8);
+    expect(mockApi.postOctetStream).toHaveBeenCalledTimes(1);
+
+    const body = snapshotBody(mockApi.postOctetStream.mock.calls[0]?.[1] as Uint8Array);
+    const entries = body.entries as Array<{ role: string; content: string }>;
+    const snapshot = JSON.stringify(body);
+    expect(entries).toHaveLength(1_000);
+    expect(entries[0]).toMatchObject({ role: "user", content: "visible user 0" });
+    expect(entries[1]).toMatchObject({ role: "assistant", content: "visible assistant 0" });
+    expect(snapshot).not.toContain("large non-visible payload");
+    expect(snapshot).not.toContain("must not import incomplete assistant");
+    expect(Buffer.byteLength(snapshot)).toBeLessThanOrEqual(CONTEXT_UPLOAD_MAX_FILE_BYTES);
+    expect(resultBody(result)).toMatchObject({ entryCount: 1_000, format: "opencode" });
+  }, 30_000);
+
   it("accepts Thread-like JSONL entries and uses deterministic Context snapshot fields", () => {
     const input = writeUpload("thread.jsonl", [
       JSON.stringify({ id: "thread-user", role: "user", content: "A Thread user message" }),
@@ -171,7 +271,7 @@ describe("context file upload", () => {
     expect(body.snapshotHash).toBe(snapshot.snapshotHash);
   });
 
-  it("recovers a valid OpenCode prefix when a streaming reasoning field is truncated at EOF", () => {
+  it("rejects a truncated OpenCode export instead of recovering a partial snapshot", () => {
     const input = writeUpload("truncated-opencode-export.json", [
       '{"info":{"id":"session"},"messages":[',
       '{"info":{"id":"user","role":"user"},"parts":[{"type":"text","text":"visible user"}]},',
@@ -179,14 +279,14 @@ describe("context file upload", () => {
       '{"info":{"id":"incomplete","role":"assistant"},"parts":[{"type":"reasoning","reasoningEncryptedContent":"unterminated',
     ].join(""));
 
-    const snapshot = prepareContextUploadSnapshot(project, session, input);
-    const body = snapshotBody(snapshot.bytes);
-
-    expect(snapshot.format).toBe("opencode");
-    expect(body.entries).toMatchObject([
-      { role: "user", content: "visible user" },
-      { role: "assistant", content: "completed assistant" },
-    ]);
+    let caught: unknown;
+    try {
+      prepareContextUploadSnapshot(project, session, input);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(ContextUploadFileError);
+    expect((caught as ContextUploadFileError).code).toBe("CONTEXT_UPLOAD_PARSE_FAILED");
   });
 
   it.each([
@@ -204,8 +304,44 @@ describe("context file upload", () => {
     expect(mockApi.postOctetStream).not.toHaveBeenCalled();
   });
 
-  it("rejects oversized, traversal, insecure-mode, symlink, and hardlink inputs before upload", () => {
-    const oversized = writeUpload("oversized.txt", Buffer.alloc(CONTEXT_UPLOAD_MAX_FILE_BYTES + 1, "x"));
+  it("keeps the 8 MiB limit for simple JSON, JSONL, Markdown, and text inputs", () => {
+    const oversizedSimpleJson = writeUpload("oversized-simple.json", JSON.stringify({
+      entries: [{ role: "user", content: "x".repeat(CONTEXT_UPLOAD_MAX_FILE_BYTES) }],
+    }));
+    const oversizedJsonl = writeOversizedUpload("oversized.jsonl", CONTEXT_UPLOAD_MAX_FILE_BYTES);
+    const oversizedMarkdown = writeOversizedUpload("oversized.md", CONTEXT_UPLOAD_MAX_FILE_BYTES);
+    const oversizedText = writeOversizedUpload("oversized.txt", CONTEXT_UPLOAD_MAX_FILE_BYTES);
+
+    for (const input of [oversizedSimpleJson, oversizedJsonl, oversizedMarkdown, oversizedText]) {
+      let caught: unknown;
+      try {
+        prepareContextUploadSnapshot(project, session, input);
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(ContextUploadFileError);
+      expect((caught as ContextUploadFileError).code).toBe("CONTEXT_UPLOAD_TOO_LARGE");
+    }
+  });
+
+  it("rejects a raw OpenCode JSON candidate over 64 MiB before JSON parsing", () => {
+    const oversized = writeOversizedUpload("oversized-opencode-export.json", CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES);
+    const parse = vi.spyOn(JSON, "parse");
+    let caught: unknown;
+    try {
+      prepareContextUploadSnapshot(project, session, oversized);
+    } catch (error) {
+      caught = error;
+    } finally {
+      parse.mockRestore();
+    }
+
+    expect(caught).toBeInstanceOf(ContextUploadFileError);
+    expect((caught as ContextUploadFileError).code).toBe("CONTEXT_UPLOAD_TOO_LARGE");
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("rejects traversal, insecure-mode, symlink, and hardlink inputs before upload", () => {
     const safe = writeUpload("safe.txt", "safe content");
     const traversal = `${uploadDirectory}/../safe.txt`;
     const insecure = writeUpload("insecure.txt", "insecure", 0o644);
@@ -214,7 +350,7 @@ describe("context file upload", () => {
     const hardlink = fixturePath("hardlink.txt");
     linkSync(safe, hardlink);
 
-    for (const input of [oversized, traversal, insecure, symlink, hardlink]) {
+    for (const input of [traversal, insecure, symlink, hardlink]) {
       expect(() => prepareContextUploadSnapshot(project, session, input)).toThrow(ContextUploadFileError);
     }
     expect(mockApi.postOctetStream).not.toHaveBeenCalled();
