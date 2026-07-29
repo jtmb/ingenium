@@ -163,6 +163,32 @@ describe("child MCP definitions", () => {
     }), "MCP_TOOL_NAME_CONFLICT");
   });
 
+  it("uses the Thread child-MCP namespace while preserving rejection of retired thread", () => {
+    const project = createIsolatedProject("child-mcp-threadbridge");
+    childMcpServers.createChildMcpServer(project.id, { name: "threadbridge", executable: "node" });
+    childMcpServers.recordChildMcpDiscovery(project.id, "threadbridge", {
+      status: "ready",
+      tools: [{
+        name: "thread_upload_file",
+        description: "Upload one generated JSONL file to Thread.",
+        input_schema: {
+          type: "object",
+          required: ["session", "file_path"],
+          properties: { session: { type: "string" }, file_path: { type: "string" } },
+        },
+      }],
+    });
+
+    expect(childMcpServers.listEffectiveChildMcpTools(project.id)).toContainEqual(expect.objectContaining({
+      canonical_name: "ingenium_threadbridge_thread_upload_file",
+      category: "Child MCP / threadbridge",
+    }));
+    expectErrorCode(() => childMcpServers.createChildMcpServer(project.id, {
+      name: "thread",
+      executable: "node",
+    }), "INVALID_CHILD_MCP_SERVER");
+  });
+
   it("upgrades the original generic child category without losing discovered tools", () => {
     const project = createIsolatedProject("child-mcp-category-upgrade");
     childMcpServers.createChildMcpServer(project.id, { name: "calendar", executable: "npx" });

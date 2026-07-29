@@ -14,7 +14,8 @@ import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "./logger.js";
 
 export const CHILD_MCP_STARTUP_TIMEOUT_MS = 5_000;
-export const CHILD_MCP_REQUEST_TIMEOUT_MS = 10_000;
+/** One bounded multipart file upload may take longer than an ordinary tool call. */
+export const CHILD_MCP_REQUEST_TIMEOUT_MS = 30_000;
 export const CHILD_MCP_SHUTDOWN_TIMEOUT_MS = 3_000;
 
 const MAX_CHILD_MCP_ARGS = 32;
@@ -148,7 +149,9 @@ function cloneDefinition(definition: ChildMcpRuntimeDefinition): ChildMcpRuntime
 }
 
 function validateDefinition(definition: ChildMcpRuntimeDefinition): void {
-  if (!CHILD_SERVER_NAME_PATTERN.test(definition.name)) throw new ChildMcpRuntimeError("CHILD_MCP_CONFIG_INVALID");
+  if (!CHILD_SERVER_NAME_PATTERN.test(definition.name) || definition.name === "thread") {
+    throw new ChildMcpRuntimeError("CHILD_MCP_CONFIG_INVALID");
+  }
   if (
     definition.executable.length === 0
     || definition.executable.length > 1_024

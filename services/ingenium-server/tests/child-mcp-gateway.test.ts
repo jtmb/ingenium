@@ -7,9 +7,10 @@ import {
   type ChildMcpRuntimeDefinitionResponse,
   type ChildMcpToolHost,
 } from "../lib/child-mcp-gateway.js";
-import { ChildMcpRuntimeManager } from "../lib/proxy.js";
+import { CHILD_MCP_REQUEST_TIMEOUT_MS, ChildMcpRuntimeManager } from "../lib/proxy.js";
 
 const fixture = new URL("./fixtures/child-mcp-server.mjs", import.meta.url).pathname;
+const threadFixture = new URL("./fixtures/threadbridge-mcp-server.mjs", import.meta.url).pathname;
 const gateways: ChildMcpGateway[] = [];
 
 interface RegisteredTool {
@@ -29,6 +30,18 @@ function runtimeDefinition(): ChildMcpRuntimeDefinitionResponse {
   };
 }
 
+function threadRuntimeDefinition(): ChildMcpRuntimeDefinitionResponse {
+  return {
+    name: "threadbridge",
+    executable: process.execPath,
+    args: [threadFixture],
+    environment: {},
+    scope: "project",
+    owned: true,
+    revision: "2026-07-28T00:00:00.000Z",
+  };
+}
+
 function createHost() {
   const tools = new Map<string, RegisteredTool>();
   const host: ChildMcpToolHost = {
@@ -45,6 +58,7 @@ function createHost() {
 function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
   let toolState: "enabled" | "disabled" | "unavailable" = "enabled";
   const reports: ChildMcpDiscoveryReport[] = [];
+  const checkedTools: string[] = [];
   const api: ChildMcpGatewayApi = {
     async listRuntimeDefinitions() {
       return { definitions, unavailableCount: 0 };
@@ -53,13 +67,15 @@ function createApi(definitions: ChildMcpRuntimeDefinitionResponse[]) {
       reports.push(report);
       return true;
     },
-    async toolEnabled() {
+    async toolEnabled(_project, toolName) {
+      checkedTools.push(toolName);
       return toolState;
     },
   };
   return {
     api,
     reports,
+    checkedTools,
     setToolState: (next: typeof toolState) => { toolState = next; },
   };
 }
@@ -194,5 +210,53 @@ describe("ChildMcpGateway", () => {
     await waitFor(() => !tools.has("fixture_echo"));
     await waitFor(() => host.sendToolListChanged!.mock.calls.length === 2);
     expect(host.sendToolListChanged).toHaveBeenCalledTimes(2);
+  });
+
+  it("exposes the canonical Thread bridge upload tool, forwards nested arguments, fails closed, and reaps it on shutdown", async () => {
+    const definitions = [threadRuntimeDefinition()];
+    const { host, tools } = createHost();
+    const api = createApi(definitions);
+    const manager = new ChildMcpRuntimeManager({ startupMs: 750, requestMs: CHILD_MCP_REQUEST_TIMEOUT_MS, shutdownMs: 750 });
+    const gateway = new ChildMcpGateway(host, "threadbridge-project", api.api, manager);
+    gateways.push(gateway);
+
+    // A single multipart upload gets a bounded 30-second child request budget.
+    expect(CHILD_MCP_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
+    await gateway.start();
+
+    const transportName = "threadbridge_thread_upload_file";
+    const handler = tools.get(transportName)?.handler;
+    expect(handler).toBeTypeOf("function");
+    expect(api.reports[0]).toMatchObject({
+      status: "ready",
+      tools: [expect.objectContaining({ name: "thread_upload_file" })],
+    });
+
+    const forwarded = await handler!({
+      project: "threadbridge-project",
+      arguments: { session: "session_123", file_path: "/safe/run/thread-export.jsonl" },
+    });
+    expect(forwarded).toMatchObject({
+      content: [{ type: "text", text: JSON.stringify({ accepted: true, session: "session_123", file_path: "/safe/run/thread-export.jsonl" }) }],
+    });
+    expect(api.checkedTools).toContain("ingenium_threadbridge_thread_upload_file");
+
+    api.setToolState("disabled");
+    await expect(handler!({
+      project: "threadbridge-project",
+      arguments: { session: "session_123", file_path: "/must-not-forward.jsonl" },
+    })).resolves.toEqual({
+      content: [{ type: "text", text: JSON.stringify({ error: { code: "TOOL_DISABLED", message: "This child MCP tool is disabled for the project." } }) }],
+    });
+    await expect(handler!({
+      project: "other-project",
+      arguments: { session: "session_123", file_path: "/must-not-forward.jsonl" },
+    })).resolves.toEqual({
+      content: [{ type: "text", text: JSON.stringify({ error: { code: "PROJECT_IDENTITY_REQUIRED", message: "A valid explicit project identity is required for this child MCP tool." } }) }],
+    });
+
+    await gateway.shutdown();
+    expect(tools.has(transportName)).toBe(false);
+    expect(manager.getStatus("threadbridge")).toMatchObject({ state: "stopped", pid: null });
   });
 });
