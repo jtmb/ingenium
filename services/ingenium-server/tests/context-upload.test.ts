@@ -26,6 +26,8 @@ vi.mock("../lib/client.js", () => ({ api: mockApi }));
 const {
   CONTEXT_UPLOAD_MAX_FILE_BYTES,
   CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES,
+  CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS,
+  CONTEXT_UPLOAD_TIMING_MAX_TOTAL_MS,
   ContextUploadFileError,
   prepareContextUploadSnapshot,
   uploadContextFile,
@@ -114,6 +116,31 @@ function snapshotBody(bytes: Uint8Array): Record<string, unknown> {
 
 function resultBody(result: { content: Array<{ text: string }> }): Record<string, unknown> {
   return JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+}
+
+function timingBody(result: Record<string, unknown>): Record<string, unknown> {
+  const metadata = result.metadata as Record<string, unknown>;
+  return metadata.timing as Record<string, unknown>;
+}
+
+function expectBoundedTiming(timing: Record<string, unknown>): void {
+  const stages = [
+    "pathOpenStatReadMs",
+    "parseFilterSnapshotPreparationMs",
+    "apiRequestMs",
+  ] as const;
+  expect(timing.totalMs).toEqual(expect.any(Number));
+  for (const [key, duration] of Object.entries(timing)) {
+    expect(duration).toEqual(expect.any(Number));
+    expect(Number.isInteger(duration)).toBe(true);
+    expect(duration as number).toBeGreaterThanOrEqual(0);
+    expect(duration as number).toBeLessThanOrEqual(
+      key === "totalMs" ? CONTEXT_UPLOAD_TIMING_MAX_TOTAL_MS : CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS,
+    );
+  }
+  expect(timing.totalMs as number).toBeGreaterThanOrEqual(
+    stages.reduce((total, stage) => total + (timing[stage] as number), 0),
+  );
 }
 
 beforeEach(() => {
@@ -271,6 +298,84 @@ describe("context file upload", () => {
     expect(body.snapshotHash).toBe(snapshot.snapshotHash);
   });
 
+  it("returns bounded metadata-only timings for initial and replay responses", async () => {
+    const input = writeUpload("timed.md", "Only visible timing fixture text.");
+    mockApi.postOctetStream
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        data: {
+          appended: 1,
+          revision: 1,
+          created: true,
+          adopted: false,
+          idempotent: false,
+          timing: {
+            bodyReadMs: 3.9,
+            coreImportMs: 7,
+            path: input,
+            content: "must not be returned",
+            sourceSessionId: session,
+            token: "must-not-be-returned",
+            jsonValidationMs: -1,
+          },
+          coreTiming: {
+            validationMs: 5,
+            transactionMs: 9,
+            path: input,
+            sessionId: session,
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: {
+          appended: 0,
+          revision: 1,
+          created: false,
+          adopted: false,
+          idempotent: true,
+          metadata: {
+            timing: {
+              jsonValidationMs: 2,
+              coreImportMs: 0,
+              sessionId: session,
+              token: "must-not-be-returned",
+            },
+          },
+        },
+      });
+
+    const initial = resultBody(await uploadContextFile(project, session, input, {}, project));
+    const replay = resultBody(await uploadContextFile(project, session, input, {}, project));
+    const initialTiming = timingBody(initial);
+    const replayTiming = timingBody(replay);
+
+    expect(mockApi.postOctetStream).toHaveBeenCalledTimes(2);
+    expect(initial).toMatchObject({ idempotent: false, created: true });
+    expect(replay).toMatchObject({ idempotent: true, created: false });
+    expect(initialTiming).toMatchObject({
+      apiBodyReadMs: 3,
+      apiCoreImportMs: 7,
+      coreValidationMs: 5,
+      coreTransactionMs: 9,
+    });
+    expect(replayTiming).toMatchObject({ apiJsonValidationMs: 2, apiCoreImportMs: 0 });
+    expectBoundedTiming(initialTiming);
+    expectBoundedTiming(replayTiming);
+    for (const timing of [initialTiming, replayTiming]) {
+      const serialized = JSON.stringify(timing);
+      expect(serialized).not.toContain(input);
+      expect(serialized).not.toContain(session);
+      expect(serialized).not.toContain("must-not-be-returned");
+      expect(timing).not.toHaveProperty("path");
+      expect(timing).not.toHaveProperty("content");
+      expect(timing).not.toHaveProperty("sourceSessionId");
+      expect(timing).not.toHaveProperty("token");
+    }
+  });
+
   it.each([
     ["truncated streaming reasoning", "truncated-opencode-export.json", [
       '{"info":{"id":"session"},"messages":[',
@@ -390,5 +495,19 @@ describe("context file upload", () => {
     expect(output).not.toContain("secret response text");
     expect(output).not.toContain("/not/returned");
     expect(output).not.toContain(input);
+  });
+
+  it("preserves sanitized error results without timing metadata or retries", async () => {
+    const input = writeUpload("unavailable.md", "Only this text is importable.");
+    mockApi.postOctetStream.mockRejectedValueOnce(new Error(`token=secret path=${input} session=${session}`));
+
+    const unavailable = resultBody(await uploadContextFile(project, session, input, {}, project));
+    expect(unavailable).toEqual({ error: { code: "CONTEXT_UPLOAD_UNAVAILABLE" } });
+    expect(mockApi.postOctetStream).toHaveBeenCalledTimes(1);
+    const serialized = JSON.stringify(unavailable);
+    expect(serialized).not.toContain(input);
+    expect(serialized).not.toContain(session);
+    expect(serialized).not.toContain("secret");
+    expect(unavailable).not.toHaveProperty("metadata");
   });
 });

@@ -18,6 +18,7 @@ import {
   type Stats,
 } from "node:fs";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { performance } from "node:perf_hooks";
 import { api } from "../client.js";
 
 export const CONTEXT_UPLOAD_MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -26,6 +27,9 @@ export const CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES = 64 * 1024 * 1024;
 export const CONTEXT_UPLOAD_MAX_ENTRIES = 10_000;
 export const CONTEXT_UPLOAD_MAX_MESSAGE_CHARS = 262_144;
 export const CONTEXT_UPLOAD_SNAPSHOT_PATH = "/context/conversations/import";
+/** Metadata timings are intentionally coarse, bounded integer milliseconds. */
+export const CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS = 60_000;
+export const CONTEXT_UPLOAD_TIMING_MAX_TOTAL_MS = CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS * 3;
 
 const CONTEXT_UPLOAD_SESSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -64,6 +68,19 @@ export interface PreparedContextUploadSnapshot {
   bytes: Uint8Array;
 }
 
+interface ContextUploadTiming {
+  pathOpenStatReadMs: number;
+  parseFilterSnapshotPreparationMs: number;
+  apiRequestMs: number;
+  totalMs: number;
+}
+
+interface PreparedContextUpload {
+  snapshot: PreparedContextUploadSnapshot;
+  pathOpenStatReadMs: number;
+  parseFilterSnapshotPreparationMs: number;
+}
+
 export type ContextUploadErrorCode =
   | "PROJECT_IDENTITY_REQUIRED"
   | "CONTEXT_UPLOAD_INVALID"
@@ -85,6 +102,20 @@ export class ContextUploadFileError extends Error {
 
 function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function boundedElapsedMs(startedAt: number, maximum: number): number {
+  const elapsed = performance.now() - startedAt;
+  if (!Number.isFinite(elapsed) || elapsed <= 0) return 0;
+  return Math.min(Math.floor(elapsed), maximum);
+}
+
+function boundedTotalMs(startedAt: number, timings: readonly number[]): number {
+  const phaseTotal = timings.reduce((total, timing) => total + timing, 0);
+  return Math.min(
+    CONTEXT_UPLOAD_TIMING_MAX_TOTAL_MS,
+    Math.max(boundedElapsedMs(startedAt, CONTEXT_UPLOAD_TIMING_MAX_TOTAL_MS), phaseTotal),
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -566,17 +597,24 @@ function snapshotHash(
 }
 
 /** Build the exact bounded Context snapshot from a protected descriptor-read file. */
-export function prepareContextUploadSnapshot(
+function prepareContextUpload(
   project: string,
   session: string,
   filePath: string,
   options: ContextUploadFileOptions = {},
-): PreparedContextUploadSnapshot {
+): PreparedContextUpload {
+  const pathOpenStatReadStartedAt = performance.now();
   const safeProject = safeSession(project);
   const safeSourceSession = safeSession(session);
   const safePath = safeInputPath(filePath);
   validateConversationId(options.conversationId);
   const sourceBytes = readProtectedUploadFile(safeProject, safePath, maxRawSourceBytes(safePath));
+  const pathOpenStatReadMs = boundedElapsedMs(
+    pathOpenStatReadStartedAt,
+    CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS,
+  );
+
+  const parseFilterSnapshotPreparationStartedAt = performance.now();
   const sourceFileHash = sha256(sourceBytes);
   const parsed = parseSourceFile(safePath, sourceBytes);
   if (parsed.format !== "opencode" && sourceBytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES) {
@@ -605,14 +643,31 @@ export function prepareContextUploadSnapshot(
     throw new ContextUploadFileError("CONTEXT_UPLOAD_SNAPSHOT_TOO_LARGE");
   }
   return {
-    format: parsed.format,
-    sourceFileHash,
-    sourceKey,
-    sourceSessionId: safeSourceSession,
-    snapshotHash: hash,
-    entryCount: entries.length,
-    bytes,
+    snapshot: {
+      format: parsed.format,
+      sourceFileHash,
+      sourceKey,
+      sourceSessionId: safeSourceSession,
+      snapshotHash: hash,
+      entryCount: entries.length,
+      bytes,
+    },
+    pathOpenStatReadMs,
+    parseFilterSnapshotPreparationMs: boundedElapsedMs(
+      parseFilterSnapshotPreparationStartedAt,
+      CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS,
+    ),
   };
+}
+
+/** Build the exact bounded Context snapshot from a protected descriptor-read file. */
+export function prepareContextUploadSnapshot(
+  project: string,
+  session: string,
+  filePath: string,
+  options: ContextUploadFileOptions = {},
+): PreparedContextUploadSnapshot {
+  return prepareContextUpload(project, session, filePath, options).snapshot;
 }
 
 function apiMetadata(data: unknown): Record<string, unknown> {
@@ -639,6 +694,57 @@ function apiMetadata(data: unknown): Record<string, unknown> {
   return result;
 }
 
+const SAFE_API_TIMING_FIELDS = new Map([
+  ["bodyReadMs", "apiBodyReadMs"],
+  ["decompressionMs", "apiDecompressionMs"],
+  ["jsonValidationMs", "apiJsonValidationMs"],
+  ["coreImportMs", "apiCoreImportMs"],
+  ["totalMs", "apiTotalMs"],
+]);
+
+const SAFE_CORE_TIMING_FIELDS = new Map([
+  ["validationMs", "coreValidationMs"],
+  ["prefixQueryMs", "corePrefixQueryMs"],
+  ["transactionMs", "coreTransactionMs"],
+  ["checkpointMs", "coreCheckpointMs"],
+]);
+
+/**
+ * API/core timing is optional and untrusted at this boundary. Preserve only
+ * explicitly named non-negative duration fields; identifiers and diagnostics
+ * are deliberately excluded.
+ */
+function apiCoreTimingMetadata(data: unknown): Record<string, number> {
+  const response = asRecord(data);
+  const metadata = response ? asRecord(response.metadata) : null;
+  const result: Record<string, number> = {};
+  const appendSafeTiming = (timing: Record<string, unknown> | null, fields: ReadonlyMap<string, string>): void => {
+    if (!timing) return;
+    for (const [sourceKey, resultKey] of fields) {
+      const value = timing[sourceKey];
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        continue;
+      }
+      result[resultKey] = Math.min(Math.floor(value), CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS);
+    }
+  };
+
+  appendSafeTiming(response ? asRecord(response.timing) : null, SAFE_API_TIMING_FIELDS);
+  appendSafeTiming(metadata ? asRecord(metadata.timing) : null, SAFE_API_TIMING_FIELDS);
+  appendSafeTiming(response ? asRecord(response.coreTiming) : null, SAFE_CORE_TIMING_FIELDS);
+  appendSafeTiming(metadata ? asRecord(metadata.coreTiming) : null, SAFE_CORE_TIMING_FIELDS);
+  return result;
+}
+
+function uploadTimingMetadata(timing: ContextUploadTiming, data: unknown) {
+  return {
+    timing: {
+      ...apiCoreTimingMetadata(data),
+      ...timing,
+    },
+  };
+}
+
 /**
  * Validate launcher binding, create one complete request body, and submit it
  * through the raw protected API boundary. Response content is never relayed.
@@ -653,32 +759,46 @@ export async function uploadContextFile(
   if (!launcherProject || project !== launcherProject) {
     return safeResultError("PROJECT_IDENTITY_REQUIRED");
   }
-  let snapshot: PreparedContextUploadSnapshot;
+  const uploadStartedAt = performance.now();
+  let prepared: PreparedContextUpload;
   try {
-    snapshot = prepareContextUploadSnapshot(project, session, filePath, options);
+    prepared = prepareContextUpload(project, session, filePath, options);
   } catch (error) {
     return safeResultError(error instanceof ContextUploadFileError ? error.code : "CONTEXT_UPLOAD_FILE_REJECTED");
   }
 
   try {
     // This is intentionally the only Context API write made by this tool.
+    const apiRequestStartedAt = performance.now();
     const response = await api.postOctetStream(
       CONTEXT_UPLOAD_SNAPSHOT_PATH,
-      snapshot.bytes,
+      prepared.snapshot.bytes,
       { project },
     );
+    const apiRequestMs = boundedElapsedMs(apiRequestStartedAt, CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS);
     if (!response.ok) return safeResultError("CONTEXT_UPLOAD_REJECTED");
+    const timing: ContextUploadTiming = {
+      pathOpenStatReadMs: prepared.pathOpenStatReadMs,
+      parseFilterSnapshotPreparationMs: prepared.parseFilterSnapshotPreparationMs,
+      apiRequestMs,
+      totalMs: boundedTotalMs(uploadStartedAt, [
+        prepared.pathOpenStatReadMs,
+        prepared.parseFilterSnapshotPreparationMs,
+        apiRequestMs,
+      ]),
+    };
     return {
       content: [{
         type: "text" as const,
         text: JSON.stringify({
-          sourceKey: snapshot.sourceKey,
-          sourceSessionId: snapshot.sourceSessionId,
-          sourceFileHash: snapshot.sourceFileHash,
-          snapshotHash: snapshot.snapshotHash,
-          format: snapshot.format,
-          entryCount: snapshot.entryCount,
+          sourceKey: prepared.snapshot.sourceKey,
+          sourceSessionId: prepared.snapshot.sourceSessionId,
+          sourceFileHash: prepared.snapshot.sourceFileHash,
+          snapshotHash: prepared.snapshot.snapshotHash,
+          format: prepared.snapshot.format,
+          entryCount: prepared.snapshot.entryCount,
           ...apiMetadata(response.data),
+          metadata: uploadTimingMetadata(timing, response.data),
         }),
       }],
     };
