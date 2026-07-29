@@ -276,6 +276,53 @@ the `/api/v1/mcp-servers` API and use shell-free executables plus vault
 environment references. Discovered child tools use exactly one lowercase
 `ingenium_<server>_<tool>` namespace.
 
+### Thread bridge (dynamic, external FTS)
+
+The Docker deployment's Thread integration is discovered from the
+project-registered `threadbridge` child server. These tools are dynamic; do
+not add them to the **269 built-in tools / 28 baseline categories** count:
+
+| Dynamic tool | Purpose |
+|---|---|
+| `ingenium_threadbridge_thread_upload_file` | Upload one receipt-verified export to Thread's fixed `ingenium` session |
+| `ingenium_threadbridge_thread_search` | Search Thread's external FTS index (`query`, optional `limit` 1–100 and `use_cache`) |
+| `ingenium_threadbridge_thread_read_entries` | Read entries (`limit` 1–200, optional `after` and `sort`) |
+| `ingenium_threadbridge_thread_read_entries_batch` | Read selected entries (`ids`, 1–100 positive integers) |
+| `ingenium_threadbridge_thread_get_tags` | List Thread tags |
+| `ingenium_threadbridge_thread_get_stats` | Get bounded Thread statistics |
+
+The upload call accepts only the private export artifact and matching receipt,
+plus optional tags and priority:
+
+```json
+{
+  "name": "ingenium_threadbridge_thread_upload_file",
+  "arguments": {
+    "project": "global-default",
+    "arguments": {
+      "file_path": "/workspace/ingenium/.ingenium/thread-exports/thread-export-<uuid>.jsonl",
+      "receipt_path": "/workspace/ingenium/.ingenium/thread-exports/thread-export-<uuid>.jsonl.receipt.json",
+      "tags": "optional,comma-separated,tags",
+      "priority": 5
+    }
+  }
+}
+```
+
+The guard verifies mode `0600`, ownership, canonical paths, receipt keys,
+byte length, SHA-256, and one source-session fingerprint. It ignores any
+caller-supplied session and forces `session: "ingenium"` for upload, search,
+read, batch, tags, and stats. It accepts no write/delete/admin Thread tools.
+The child request and guard request each have a bounded 30-second budget.
+Private temporary upload files are deleted after the upstream call, whether it
+succeeds or fails.
+
+Thread is external FTS, not immutable `/context` conversation storage and not
+Context RAG. Thread uploads are not Context conversations, are not
+automatically ingested into Context RAG, and do not appear in the Context UI.
+Use `ingenium_context_conversation_*` and `ingenium_context_message_*` for
+append-only history, or the Context RAG tools for project-scoped RAG sources.
+
 ## AGENTS — AI sub-personalities
 
 `ingenium_agent_list`, `ingenium_agent_get`, `ingenium_agent_create`, `ingenium_agent_update`, `ingenium_agent_delete`, `ingenium_agent_enable`, `ingenium_agent_disable`, `ingenium_agent_sync`.

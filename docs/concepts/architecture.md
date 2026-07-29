@@ -739,6 +739,48 @@ All context operations follow the HARD RULE `checkpointAfterWrite()` must be cal
 Context documents are a separate, project-scoped RAG corpus. They never inherit
 the generic RAG route's optional global-project fallback.
 
+### Thread external context bridge
+
+Thread is a separate, fast external FTS store used through a project-registered
+dynamic child MCP server named `threadbridge`. It is not part of the built-in
+catalog count and is not a second `/context` implementation. Thread is pinned
+to commit `a3d2d4246e2a0222242d1a848abd3f0bd79a690b`.
+
+```text
+OpenCode / Ingenium child stdio
+  └─ run-thread-bridge.mjs
+       └─ thread-guard:8081/v1/call (authoritative guard)
+            └─ official pinned Python bridge
+                 └─ thread:5000 (raw Thread, backend network only)
+```
+
+The `thread` sidecar has no host port and is attached only to internal
+`thread-backend`. `thread-guard` is non-root, read-only, has no host port, and
+alone spans `thread-backend` and internal `thread-frontend`. Ingenium reaches
+only the guard; it never receives a raw Thread client, route, or host access to
+Thread. The guard forces every operation into fixed session `ingenium`,
+validates receipt-backed uploads, and uses bounded 30-second request
+timeouts. It removes its private temporary upload after each upstream attempt.
+
+The local `ingenium-thread-export` adapter makes one explicit
+`opencode export <session-id>` call, writes receipt-verified private JSONL, and
+does not call the Ingenium API per message. After a successful upload, the
+caller must explicitly run the CLI cleanup form; cleanup is refused unless
+`--upload-succeeded` is present and the receipt/artifact still verify.
+
+Thread search/read tools are dynamic names under
+`ingenium_threadbridge_thread_*`. They query Thread's external FTS/session
+store and are distinct from:
+
+- **Immutable `/context` conversations** — append-only project-scoped messages,
+  revisions, checkpoints, and explicit content retrieval.
+- **Context RAG** — project-scoped RAG sources and chunks used by RAG search/ask.
+
+Thread uploads are not immutable Context conversations, are not automatically
+copied into Context RAG, and do not appear in the Context UI. Project
+registration and the guarded `threadbridge` path are required before dynamic
+Thread tools become available.
+
 | Input | Route | Bound and lifecycle |
 |-------|-------|---------------------|
 | Direct text / Markdown / JSON / JSONL | `POST /api/v1/context/uploads` | ≤1 MiB UTF-8; SHA-256 deduplicated per project; source, chunks, embeddings, and provenance commit together. |
