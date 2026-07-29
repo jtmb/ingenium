@@ -69,6 +69,30 @@ tokens, or transport diagnostics.
 
 Web and CLI sessions share the same backend process state.
 
+## Context-native file upload
+
+OpenCode can import a protected local export with
+`ingenium_context_upload_file`. Its exact schema is:
+
+```text
+project, session, file_path, conversation_id?, tags?, priority?
+```
+
+The file must be a private regular file below the project-bound
+`.ingenium/context-uploads` root and is read once through a descriptor-safe
+`O_NOFOLLOW` check. OpenCode export JSON, simple JSON, JSONL/NDJSON, Markdown,
+and text are supported. Only visible user and completed assistant messages are
+kept. The tool makes one protected internal snapshot handoff and one
+transactional import; it is not a public bulk API.
+
+Without `conversation_id`, a new immutable Context conversation is created. An
+existing conversation can be adopted only when the imported prefix matches;
+replays are idempotent, matching extensions append and refresh the suffix, and
+shorter or divergent snapshots are rejected. Imported conversations become
+visible in the dashboard `/context` workspace, whose existing search, read, and
+batch message surfaces load content explicitly. There is no external Thread
+service or bridge, and no current-session/OpenCode-session import tool.
+
 ## Gateway boundaries
 
 - **Rate limits are separate**: dashboard traffic uses its own `30r/s` bucket
@@ -99,4 +123,4 @@ Web and CLI sessions share the same backend process state.
 
 - The workspace (`~/repos`) is mounted to `/workspace` in the container via Docker volume.
 - The `appuser` has passwordless `sudo` access inside the container for package installation.
-- Use the OpenCode interface to interact with the built-in 267-tool Ingenium MCP catalog across 28 baseline categories (265 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.
+- Use the OpenCode interface to interact with the built-in 268-tool Ingenium MCP catalog across 28 baseline categories (266 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories dynamically.

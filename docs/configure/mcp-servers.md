@@ -31,7 +31,7 @@ vault and are never returned by the browser/API projection.
 ## Tool Manager
 
 The Tools tab shows the current project-scoped total. The built-in catalog
-contains 267 tools in 28 baseline categories (265 server registrations plus 2
+contains 268 tools in 28 baseline categories (266 server registrations plus 2
 extension tools); discovered child tools are added dynamically and may increase
 both the total and the category list for that project.
 

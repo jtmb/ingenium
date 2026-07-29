@@ -1,12 +1,12 @@
 ---
 title: MCP Tools Reference
-description: Reference for the 267-tool built-in Ingenium MCP catalog across 28 baseline categories, plus project-scoped discovered child tools.
+description: Reference for the 268-tool built-in Ingenium MCP catalog across 28 baseline categories, plus project-scoped discovered child tools.
 ---
 
 # MCP Tools Reference
 
-The built-in catalog contains **267 tools** across **28 baseline categories**:
-265 tools registered by the server and 2 extension tools. A project-scoped
+The built-in catalog contains **268 tools** across **28 baseline categories**:
+266 tools registered by the server and 2 extension tools. A project-scoped
 catalog may contain additional dynamically discovered child tools, so dashboard
 totals and category counts are runtime values rather than a fixed global count.
 Every tool needs a **project** name (except where noted).
@@ -139,6 +139,54 @@ include bearer tokens or upstream error text.
 | `ingenium_context_delete` | Delete a context entry |
 | `ingenium_context_batch_get` | Batch retrieve multiple context entries by ID (max 100) |
 
+### Context-native file upload
+
+`ingenium_context_upload_file` imports one protected local file as a bounded,
+immutable Context conversation snapshot. Its exact input schema is:
+
+```typescript
+{
+  project: string;
+  session: string;
+  file_path: string; // absolute safe path
+  conversation_id?: string; // UUID
+  tags?: string[];
+  priority?: number; // integer 0–10
+}
+```
+
+`project`, `session`, and `file_path` are required; `conversation_id`, `tags`,
+and `priority` are optional. The launcher requires the project to match its
+bound project. The file must be a private regular file below the verified
+project root `.ingenium/context-uploads`; symlinked roots, parents, and files
+are rejected. The upload is bounded to 8 MiB and is read once via a single
+`O_NOFOLLOW` descriptor with identity checks before and after the read.
+
+Supported input is OpenCode export JSON, simple JSON, JSONL/NDJSON, Markdown,
+and plain text. Parsing keeps visible `user` and completed `assistant`
+messages, excludes synthetic/ignored/hidden entries, and never imports other
+roles or invisible parts. The MCP transport creates one complete
+descriptor-safe snapshot and makes one protected internal handoff; the API
+performs one transactional snapshot import rather than exposing a public
+bulk-message API.
+
+Without `conversation_id`, the snapshot creates a conversation. With it, the
+target conversation is adopted only when it belongs to the project and the
+incoming entries match the existing prefix. Replays are idempotent; a longer
+matching snapshot appends only its suffix and refreshes the imported suffix
+mapping. Shorter snapshots, source-key reuse, or divergent prefixes are
+rejected without partial writes.
+
+The dashboard Context workspace makes imported conversations visible at
+`/context`. Its index remains metadata-only; selecting a conversation uses
+`ingenium_context_conversation_list`,
+`ingenium_context_conversation_get`,
+`ingenium_context_message_search`,
+`ingenium_context_message_retrieve`, and
+`ingenium_context_message_batch_retrieve` to load ordered content. There is no
+external Thread service or bridge, and no old current-session or OpenCode-session
+import tool surface.
+
 Context entries are project-isolated, taggable, priority-ranked (0–10), and FTS5-searchable. They persist working context across sessions — the task management and plan surface reads from the same `context_entries` table. The `plan_*` tools remain supported for backward compatibility; `context_*` tools provide the canonical CRUD surface. See `services/ingenium-api/lib/routes/context.ts` and `packages/ingenium-core/lib/tools/context.ts`.
 
 Immutable conversation tools are project-scoped and use optimistic `expectedRevision` values for message appends, checkpoint creation, and maintenance. Optional idempotency keys make creation retries safe; reusing a key with a different request returns a conflict. List and search tools return only metadata and content hashes. Content is returned only by the explicit retrieve tools.
@@ -266,6 +314,6 @@ Full route reference: [docs-workspace.md](docs-workspace.md).
 
 ---
 
-**Built-in baseline: 267 tools across 28 categories (265 server + 2 extension).** Project-scoped child
+**Built-in baseline: 268 tools across 28 categories (266 server + 2 extension).** Project-scoped child
 discovery can add tools and categories at runtime; use the project-scoped
 catalog endpoint for the current total.

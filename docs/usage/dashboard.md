@@ -14,7 +14,7 @@ Ingenium's dashboard provides visual management for all your AI agent developmen
 docker compose up --build
 ```
 
-Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-web (internal :4098), and ttyd-opencode (internal :4099). Browser access uses the local `localhost:3000` dashboard root and `opencode.localhost:3000` / `cli.localhost:3000` OpenCode roots without browser credentials. Direct 4098/4099 access is not supported. The built-in MCP catalog contains **267 tools** across **28 baseline categories** (265 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories at runtime. Build-time UID matching ensures write access to workspace.
+Docker starts a single container running 4 processes under supervisord: API (:4097), Dashboard (:3000), opencode-web (internal :4098), and ttyd-opencode (internal :4099). Browser access uses the local `localhost:3000` dashboard root and `opencode.localhost:3000` / `cli.localhost:3000` OpenCode roots without browser credentials. Direct 4098/4099 access is not supported. The built-in MCP catalog contains **268 tools** across **28 baseline categories** (266 server registrations plus 2 extension tools); project-scoped child discovery can add tools and categories at runtime. Build-time UID matching ensures write access to workspace.
 
 ### Connecting an MCP Client
 
@@ -146,7 +146,8 @@ The Ingenium Dashboard provides **21 primary routes** plus the Settings overlay:
 
 ## Context
 
-**What it does**: Browse immutable, project-scoped context conversations. The
+**What it does**: Browse immutable, project-scoped context conversations,
+including conversations imported through `ingenium_context_upload_file`. The
 conversation index deliberately exposes metadata only; message content is loaded
 only after selecting a conversation or running a bounded in-conversation search.
 

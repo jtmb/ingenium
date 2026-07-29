@@ -311,6 +311,34 @@ These routes are project-scoped under `/api/v1/context`.
 | POST | `/learning/ingest` | Explicitly snapshot current learning into a RAG source, or return `{ noOp: true, reason: "NO_CURRENT_LEARNING" }`. |
 | GET | `/conversations/:conversationId/checkpoints/:checkpointId/rag/search?q=` | Search only the immutable RAG source set cited by that checkpoint and return historical citations. |
 
+#### Context-native OpenCode snapshot transport
+
+`ingenium_context_upload_file` uses the authenticated internal
+`POST /api/v1/context/conversations/import` transport. This octet-stream route
+is not a browser-facing or public bulk-message API: dashboard-originated
+requests are rejected, and the route accepts one complete protected snapshot.
+The MCP tool schema is exactly `{ project, session, file_path,
+conversation_id?, tags?, priority? }`; `priority` is an integer from 0 through
+10, `conversation_id` is a UUID, and `file_path` must be absolute. The launcher
+binds `project` to its project identity and permits only a private regular file
+under `.ingenium/context-uploads`, read once through one `O_NOFOLLOW`
+descriptor. Supported formats are OpenCode export JSON, simple JSON,
+JSONL/NDJSON, Markdown, and text. Only visible user and completed assistant
+messages are retained.
+
+The MCP side makes one protected snapshot handoff and the API invokes one
+transactional import. A new snapshot creates a conversation; an explicit
+conversation target is adopted only after project ownership and imported-prefix
+verification. Matching replays are idempotent, matching longer snapshots append
+only their suffix and refresh the mapping, and shorter or divergent snapshots
+return a conflict without partial writes. The response is metadata only.
+
+This is the only Context-native OpenCode file import surface. There is no
+external Thread service or bridge and no current-session/OpenCode-session import
+tool. Imported conversations appear in the dashboard `/context` workspace,
+which uses the existing conversation and message list/get/search/retrieve/batch
+surfaces rather than this internal transport for browsing.
+
 Context checkpoint links freeze their referenced RAG source/chunks and persist a
 citation snapshot. Attempts to re-ingest or delete such a source are rejected;
 normal checkpoint and source ownership checks remain project-scoped.

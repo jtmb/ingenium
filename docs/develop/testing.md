@@ -5,6 +5,22 @@ description: Test-suite selection, isolated E2E runs, and external-suite safegua
 
 # Testing Guide
 
+## Context-native upload verification
+
+The final Context-native upload implementation is covered by focused tests for
+the protected one-descriptor file read and path/TOCTOU guards
+(`services/ingenium-server/tests/context-upload.test.ts` and
+`context-upload-toctou.test.ts`), the authenticated single-snapshot API
+transport (`services/ingenium-api/tests/context-snapshot-ingest-api.test.ts`),
+and the transactional importer
+(`packages/ingenium-core/tests/context-snapshot-import.test.ts`). These checks
+cover OpenCode export/simple JSON, JSONL, Markdown/text, visible user and
+completed assistant filtering, new conversation creation, existing-conversation
+adoption, prefix verification, suffix refresh, idempotent replay, and shorter or
+divergent snapshot rejection without partial writes. The transport-parity check
+also verifies `ingenium_context_upload_file` and the **268-tool** inventory
+(266 server registrations plus 2 extension tools).
+
 ## Default test run
 
 The default Playwright configuration is the deterministic Phase 5 fixture E2E

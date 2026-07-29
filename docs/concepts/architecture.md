@@ -162,7 +162,7 @@ Email Client → OAuth2 + Gmail REST API / SMTP → Gmail Provider
 ```
 
 - `ingenium-api` is the **sole database authority**. No other service imports `ingenium-core` or any SQL library.
-- `ingenium-server` runs as an MCP stdio transport with **265 built-in registered tools** across **28 baseline categories**. Two extension-registered tools bring the built-in catalog to **267**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
+- `ingenium-server` runs as an MCP stdio transport with **266 built-in registered tools** across **28 baseline categories**. Two extension-registered tools bring the built-in catalog to **268**. Project-scoped child discovery adds dynamic tools/categories to the effective catalog. The server talks to the API over HTTP. Zero DB access.
 - `ingenium-dashboard` is a Next.js 16 App Router frontend with **21 primary routes plus the Settings overlay**. It talks to the API over HTTP.
 
 ## Usage Telemetry
@@ -755,6 +755,32 @@ timestamps only—never message bodies, free-form metadata, or raw tokens.
 There is no checkpoint deletion path; database immutability triggers protect
 checkpoints and maintenance audit rows even from direct SQL mutation.
 
+### Context-native OpenCode file snapshots (CTX-005)
+
+The canonical OpenCode import path is the `ingenium_context_upload_file` MCP
+tool. It accepts `project`, `session`, and `file_path`, plus optional
+`conversation_id`, `tags`, and `priority`. The launcher accepts only a private
+regular file under the verified project-bound `.ingenium/context-uploads` root,
+performs one descriptor-safe `O_NOFOLLOW` read with pre/post identity checks,
+and supports OpenCode export JSON, simple JSON, JSONL/NDJSON, Markdown, and
+text. Only visible `user` and completed `assistant` content is retained;
+synthetic, ignored, hidden, non-text, and other-role entries are filtered.
+
+The MCP side builds one bounded snapshot and performs one protected internal
+handoff to the API. The API validates that snapshot and invokes one protected
+transactional import; this route is an internal transport boundary, not a
+public bulk API. New snapshots create a conversation. A requested existing
+conversation is adopted only after project ownership and prefix verification.
+Matching replays are idempotent, matching extensions append only the suffix and
+refresh its mapping, while shorter or divergent snapshots fail without partial
+writes.
+
+Imported conversations are visible in the dashboard Context workspace. The UI
+uses the existing project-scoped conversation list/get and message
+list/search/retrieve/batch surfaces for metadata, search, and explicit content
+loading. No external Thread service or bridge exists, and the retired
+current-session/OpenCode-session import surfaces are not part of the system.
+
 ## RAG Indexing Architecture (Phase 3)
 
 The RAG (Retrieval-Augmented Generation) system provides two indexing paths feeding a unified search index.
@@ -882,7 +908,7 @@ Citations are deduplicated by source ID. The LLM prompt includes `"Answer with c
 |---------|-------------|-----------|
 | `packages/ingenium-core/` | Shared library: SQLite WAL + FTS5, Zod schemas (DB access allowed) | Yes |
 | `services/ingenium-api/` | Express REST API on :4097. Sole database authority. | Yes |
-| `services/ingenium-server/` | MCP stdio server with 265 built-in tools. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
+| `services/ingenium-server/` | MCP stdio server with 266 built-in tools. Project-scoped child discovery can add dynamic tools. Calls API via HTTP. Zero DB access. | No |
 | `services/ingenium-dashboard/` | Next.js 16 App Router frontend with 20 primary routes plus the Settings overlay. Calls API via HTTP. Zero DB access. | No |
 | `packages/ingenium-email/` | Gmail REST API + SMTP email engine (fetch-based, nodemailer). DB Access: No. | No |
 
@@ -927,8 +953,8 @@ Additional `page.tsx` entrypoints support `/settings` redirect, `/standalone` em
 
 ### MCP Tool Count
 
-The built-in system catalog exposes **267 tools** across **28 baseline
-categories** (**265 server + 2 extension**). Project-scoped child discovery can increase the effective total
+The built-in system catalog exposes **268 tools** across **28 baseline
+categories** (**266 server + 2 extension**). Project-scoped child discovery can increase the effective total
 and category count. Canonical catalog at `packages/ingenium-core/lib/tools/mcp-tool-catalog.ts`.
 
 | Category | Count | Tools |
