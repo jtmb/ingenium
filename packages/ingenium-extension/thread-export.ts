@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   readFileSync,
@@ -13,6 +14,7 @@ import {
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export const THREAD_EXPORT_SCHEMA_VERSION = 1;
+export const THREAD_EXPORT_RECEIPT_SCHEMA_VERSION = 1;
 export const THREAD_EXPORT_DIRECTORY = ".ingenium/thread-exports";
 export const THREAD_EXPORT_DEFAULT_TIMEOUT_MS = 30_000;
 export const THREAD_EXPORT_MAX_TIMEOUT_MS = 60_000;
@@ -22,6 +24,8 @@ export const THREAD_EXPORT_MAX_MESSAGES = 10_000;
 
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const EXPORT_FILE_PATTERN = /^thread-export-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/;
+const RECEIPT_FILE_PATTERN = /^thread-export-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl\.receipt\.json$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export type ThreadExportFailure =
   | "invalid_input"
@@ -57,6 +61,7 @@ export interface ThreadJsonlEntry {
 
 export interface ThreadExportReceipt {
   path: string;
+  receiptPath: string;
   sha256: string;
   byteLength: number;
   messageCount: number;
@@ -92,7 +97,7 @@ export interface ThreadExportOptions {
 
 export interface ThreadExportCleanupOptions {
   worktree: string;
-  receipt: Pick<ThreadExportReceipt, "path" | "sha256">;
+  receipt: Pick<ThreadExportReceipt, "path" | "receiptPath" | "sha256">;
   /** This must be true only after the separate Thread upload has succeeded. */
   uploadSucceeded: boolean;
 }
@@ -107,6 +112,14 @@ interface ThreadExportLimits {
 interface OpenCodeExportMessage {
   info: Record<string, unknown>;
   parts: unknown[];
+}
+
+interface ThreadExportReceiptDocument {
+  schemaVersion: typeof THREAD_EXPORT_RECEIPT_SCHEMA_VERSION;
+  exportFile: string;
+  sourceSessionSha256: string;
+  byteLength: number;
+  sha256: string;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -162,14 +175,35 @@ export function resolveCanonicalWorktree(value: unknown): string {
   return canonical;
 }
 
+function processUid(): number | null {
+  return typeof process.getuid === "function" ? process.getuid() : null;
+}
+
 function assertOwnedDirectory(path: string): void {
   try {
     const entry = lstatSync(path);
-    if (!entry.isDirectory() || entry.isSymbolicLink()) fail("write_failed");
+    if (
+      !entry.isDirectory()
+      || entry.isSymbolicLink()
+      || (entry.mode & 0o777) !== 0o700
+      || (processUid() !== null && entry.uid !== processUid())
+    ) fail("write_failed");
   } catch (error) {
     if (error instanceof ThreadExportError) throw error;
     fail("write_failed");
   }
+}
+
+function assertOwnedPrivateFile(path: string, failure: "write_failed" | "cleanup_denied") {
+  const entry = lstatSync(path);
+  if (
+    !entry.isFile()
+    || entry.isSymbolicLink()
+    || entry.nlink !== 1
+    || (entry.mode & 0o777) !== 0o600
+    || (processUid() !== null && entry.uid !== processUid())
+  ) fail(failure);
+  return entry;
 }
 
 function exportDirectory(worktree: string): string {
@@ -178,6 +212,11 @@ function exportDirectory(worktree: string): string {
     mkdirSync(stateDirectory, { mode: 0o700 });
   } catch (error) {
     if (!(error as NodeJS.ErrnoException).code || (error as NodeJS.ErrnoException).code !== "EEXIST") fail("write_failed");
+  }
+  try {
+    chmodSync(stateDirectory, 0o700);
+  } catch {
+    fail("write_failed");
   }
   assertOwnedDirectory(stateDirectory);
 
@@ -280,6 +319,33 @@ function serializeEntries(entries: ThreadJsonlEntry[], maxBytes: number): Buffer
   return Buffer.from(lines.join(""), "utf8");
 }
 
+function writeReceipt(path: string, contents: ThreadExportReceiptDocument): string {
+  const receiptPath = `${path}.receipt.json`;
+  const temporaryPath = `${receiptPath}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporaryPath, JSON.stringify(contents), { encoding: "utf8", mode: 0o600, flag: "wx" });
+    chmodSync(temporaryPath, 0o600);
+    assertOwnedPrivateFile(temporaryPath, "write_failed");
+    // link(2) publishes the complete receipt without replacing an existing
+    // path. The generated export UUID makes any EEXIST a hard failure.
+    linkSync(temporaryPath, receiptPath);
+    unlinkSync(temporaryPath);
+    assertOwnedPrivateFile(receiptPath, "write_failed");
+    return receiptPath;
+  } catch (error) {
+    try {
+      const temporary = lstatSync(temporaryPath);
+      if (temporary.isFile() && !temporary.isSymbolicLink() && temporary.nlink === 1 && (temporary.mode & 0o777) === 0o600) {
+        unlinkSync(temporaryPath);
+      }
+    } catch {
+      // Best-effort deletion of a failed, generated temporary artifact.
+    }
+    if (error instanceof ThreadExportError) throw error;
+    fail("write_failed");
+  }
+}
+
 /** Run the local CLI with an argument vector; neither a shell nor API is involved. */
 export const runOpenCodeExport: OpenCodeExportRunner = async (sessionId, worktree, options) => await new Promise<string>((resolveOutput, rejectOutput) => {
   let settled = false;
@@ -337,24 +403,32 @@ function writeExport(worktree: string, sessionId: string, entries: ThreadJsonlEn
   const contents = serializeEntries(entries, maxJsonlBytes);
   const directory = exportDirectory(worktree);
   const path = join(directory, `thread-export-${randomUUID()}.jsonl`);
+  const sourceSessionSha256 = sha256(sessionId);
   try {
     writeFileSync(path, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
     chmodSync(path, 0o600);
-    const written = lstatSync(path);
-    if (!written.isFile() || written.isSymbolicLink() || (written.mode & 0o777) !== 0o600) fail("write_failed");
+    assertOwnedPrivateFile(path, "write_failed");
   } catch (error) {
     if (error instanceof ThreadExportError) throw error;
     fail("write_failed");
   }
+  const receiptPath = writeReceipt(path, {
+    schemaVersion: THREAD_EXPORT_RECEIPT_SCHEMA_VERSION,
+    exportFile: basename(path),
+    sourceSessionSha256,
+    byteLength: contents.length,
+    sha256: sha256(contents),
+  });
   return {
     path,
+    receiptPath,
     sha256: sha256(contents),
     byteLength: contents.length,
     messageCount: entries.length,
     metadata: {
       source: "opencode-export",
       schemaVersion: THREAD_EXPORT_SCHEMA_VERSION,
-      sourceSessionSha256: sha256(sessionId),
+      sourceSessionSha256,
     },
   };
 }
@@ -382,27 +456,85 @@ export async function exportOpenCodeSessionToThread(options: ThreadExportOptions
 }
 
 /**
- * Delete only a receipt-verified, mode-0600 file produced under this worktree's
- * private run directory. Callers must affirm that the separate upload succeeded.
+ * Delete only receipt-verified, mode-0600 export and receipt artifacts produced
+ * under this worktree's private run directory. Callers must affirm upload success.
  */
 export function cleanupThreadExport(options: ThreadExportCleanupOptions): void {
   if (options.uploadSucceeded !== true) fail("cleanup_denied");
   const worktree = resolveCanonicalWorktree(options.worktree);
   const directory = exportDirectory(worktree);
   const receipt = options.receipt;
-  if (!receipt || typeof receipt.path !== "string" || typeof receipt.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(receipt.sha256)) {
+  if (
+    !receipt
+    || typeof receipt.path !== "string"
+    || typeof receipt.receiptPath !== "string"
+    || typeof receipt.sha256 !== "string"
+    || !SHA256_PATTERN.test(receipt.sha256)
+  ) {
     fail("cleanup_denied");
   }
   const path = receipt.path;
-  if (!isAbsolute(path) || resolve(path) !== path || dirname(path) !== directory || !EXPORT_FILE_PATTERN.test(basename(path))) {
+  const receiptPath = receipt.receiptPath;
+  if (
+    !isAbsolute(path)
+    || resolve(path) !== path
+    || dirname(path) !== directory
+    || !EXPORT_FILE_PATTERN.test(basename(path))
+    || !isAbsolute(receiptPath)
+    || resolve(receiptPath) !== receiptPath
+    || dirname(receiptPath) !== directory
+    || receiptPath !== `${path}.receipt.json`
+    || !RECEIPT_FILE_PATTERN.test(basename(receiptPath))
+  ) {
     fail("cleanup_denied");
   }
   try {
-    const entry = lstatSync(path);
-    if (!entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1 || (entry.mode & 0o777) !== 0o600) fail("cleanup_denied");
-    if (typeof process.getuid === "function" && entry.uid !== process.getuid()) fail("cleanup_denied");
-    if (sha256(readFileSync(path)) !== receipt.sha256) fail("cleanup_denied");
+    const exportEntry = assertOwnedPrivateFile(path, "cleanup_denied");
+    const exportBytes = readFileSync(path);
+    const exportAfterRead = assertOwnedPrivateFile(path, "cleanup_denied");
+    if (exportEntry.dev !== exportAfterRead.dev || exportEntry.ino !== exportAfterRead.ino || exportEntry.size !== exportAfterRead.size) fail("cleanup_denied");
+    if (sha256(exportBytes) !== receipt.sha256) fail("cleanup_denied");
+    const receiptEntry = assertOwnedPrivateFile(receiptPath, "cleanup_denied");
+    const receiptBytes = readFileSync(receiptPath);
+    const receiptAfterRead = assertOwnedPrivateFile(receiptPath, "cleanup_denied");
+    if (receiptEntry.dev !== receiptAfterRead.dev || receiptEntry.ino !== receiptAfterRead.ino || receiptEntry.size !== receiptAfterRead.size) fail("cleanup_denied");
+    let document: unknown;
+    try {
+      document = JSON.parse(receiptBytes.toString("utf8"));
+    } catch {
+      fail("cleanup_denied");
+    }
+    const receiptDocument = asRecord(document);
+    const receiptKeys = receiptDocument ? Object.keys(receiptDocument).sort() : [];
+    const expectedReceiptKeys = ["byteLength", "exportFile", "schemaVersion", "sha256", "sourceSessionSha256"];
+    if (
+      !receiptDocument
+      || receiptKeys.length !== expectedReceiptKeys.length
+      || receiptKeys.some((key, index) => key !== expectedReceiptKeys[index])
+      || receiptDocument.schemaVersion !== THREAD_EXPORT_RECEIPT_SCHEMA_VERSION
+      || receiptDocument.exportFile !== basename(path)
+      || typeof receiptDocument.sourceSessionSha256 !== "string"
+      || !SHA256_PATTERN.test(receiptDocument.sourceSessionSha256)
+      || receiptDocument.byteLength !== exportBytes.length
+      || receiptDocument.sha256 !== receipt.sha256
+    ) fail("cleanup_denied");
+    if (exportBytes.length > 0) {
+      const entries = exportBytes.toString("utf8").split("\n");
+      if (entries.at(-1) === "") entries.pop();
+      if (entries.length === 0) fail("cleanup_denied");
+      for (const entry of entries) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(entry);
+        } catch {
+          fail("cleanup_denied");
+        }
+        const metadata = asRecord(asRecord(parsed)?.metadata);
+        if (!metadata || metadata.sourceSessionSha256 !== receiptDocument.sourceSessionSha256) fail("cleanup_denied");
+      }
+    }
     unlinkSync(path);
+    unlinkSync(receiptPath);
   } catch (error) {
     if (error instanceof ThreadExportError) throw error;
     fail("cleanup_denied");

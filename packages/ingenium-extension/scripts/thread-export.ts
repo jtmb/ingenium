@@ -10,7 +10,7 @@ import {
 
 export const THREAD_EXPORT_USAGE = `Usage:
   ingenium-thread-export --session <safe-session-id> --worktree <canonical-worktree> [--timeout-ms <milliseconds>]
-  ingenium-thread-export --cleanup <export-file> --sha256 <sha256> --worktree <canonical-worktree> --upload-succeeded
+  ingenium-thread-export --cleanup <export-file> --receipt <export-receipt> --sha256 <sha256> --worktree <canonical-worktree> --upload-succeeded
 
 The command only exports local OpenCode data. It never starts or uploads to Thread.
 `;
@@ -18,7 +18,7 @@ The command only exports local OpenCode data. It never starts or uploads to Thre
 export type ParsedThreadExportArgs =
   | { help: true }
   | { mode: "export"; sessionId: string; worktree: string; timeoutMs?: number }
-  | { mode: "cleanup"; path: string; sha256: string; worktree: string; uploadSucceeded: true };
+  | { mode: "cleanup"; path: string; receiptPath: string; sha256: string; worktree: string; uploadSucceeded: true };
 
 function requireValue(args: string[], index: number, flag: string): string {
   const value = args[index + 1];
@@ -31,6 +31,7 @@ export function parseThreadExportArgs(args: string[]): ParsedThreadExportArgs {
   let sessionId: string | undefined;
   let worktree: string | undefined;
   let cleanupPath: string | undefined;
+  let receiptPath: string | undefined;
   let sha256: string | undefined;
   let timeoutMs: number | undefined;
   let uploadSucceeded = false;
@@ -64,6 +65,10 @@ export function parseThreadExportArgs(args: string[]): ParsedThreadExportArgs {
       if (sha256 !== undefined) throw new Error("--sha256 may be supplied once");
       sha256 = requireValue(args, index, argument);
       index += 1;
+    } else if (argument === "--receipt") {
+      if (receiptPath !== undefined) throw new Error("--receipt may be supplied once");
+      receiptPath = requireValue(args, index, argument);
+      index += 1;
     } else if (argument === "--upload-succeeded") {
       uploadSucceeded = true;
     } else {
@@ -72,11 +77,11 @@ export function parseThreadExportArgs(args: string[]): ParsedThreadExportArgs {
   }
 
   if (!worktree) throw new Error("--worktree is required");
-  if (cleanupPath !== undefined || sha256 !== undefined || uploadSucceeded) {
-    if (sessionId !== undefined || timeoutMs !== undefined || !cleanupPath || !sha256 || !uploadSucceeded) {
-      throw new Error("cleanup requires --cleanup, --sha256, --worktree, and --upload-succeeded only");
+  if (cleanupPath !== undefined || receiptPath !== undefined || sha256 !== undefined || uploadSucceeded) {
+    if (sessionId !== undefined || timeoutMs !== undefined || !cleanupPath || !receiptPath || !sha256 || !uploadSucceeded) {
+      throw new Error("cleanup requires --cleanup, --receipt, --sha256, --worktree, and --upload-succeeded only");
     }
-    return { mode: "cleanup", path: cleanupPath, sha256, worktree, uploadSucceeded: true };
+    return { mode: "cleanup", path: cleanupPath, receiptPath, sha256, worktree, uploadSucceeded: true };
   }
   if (!sessionId) throw new Error("--session is required");
   return { mode: "export", sessionId, worktree, ...(timeoutMs === undefined ? {} : { timeoutMs }) };
@@ -91,10 +96,10 @@ export async function runThreadExport(args = process.argv.slice(2)): Promise<num
   if (parsed.mode === "cleanup") {
     cleanupThreadExport({
       worktree: parsed.worktree,
-      receipt: { path: parsed.path, sha256: parsed.sha256 },
+      receipt: { path: parsed.path, receiptPath: parsed.receiptPath, sha256: parsed.sha256 },
       uploadSucceeded: true,
     });
-    process.stdout.write(`${JSON.stringify({ deleted: true, path: parsed.path })}\n`);
+    process.stdout.write(`${JSON.stringify({ deleted: true })}\n`);
     return 0;
   }
   const receipt: ThreadExportReceipt = await exportOpenCodeSessionToThread({

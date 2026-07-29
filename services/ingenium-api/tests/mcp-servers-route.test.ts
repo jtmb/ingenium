@@ -376,8 +376,8 @@ describe("canonical child MCP server API", () => {
           description: "Upload one generated JSONL file to Thread.",
           input_schema: {
             type: "object",
-            required: ["session", "file_path"],
-            properties: { session: { type: "string" }, file_path: { type: "string" } },
+            required: ["file_path"],
+            properties: { file_path: { type: "string" } },
           },
         }],
       }),
@@ -388,6 +388,8 @@ describe("canonical child MCP server API", () => {
       canonical_name: "ingenium_threadbridge_thread_upload_file",
       category: "Child MCP / threadbridge",
     }));
+    const upload = visible.data.find((tool: { canonical_name: string }) => tool.canonical_name === "ingenium_threadbridge_thread_upload_file");
+    expect(JSON.stringify(upload)).not.toContain("session");
 
     const retired = await fetch(`${baseUrl}/mcp-servers?project=threadbridge-project`, {
       method: "POST",

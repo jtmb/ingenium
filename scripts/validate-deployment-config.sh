@@ -13,6 +13,7 @@ supervisor_config="${repo_root}/supervisord.conf"
 image_provenance_validator="${repo_root}/scripts/validate-image-provenance.mjs"
 opencode_global_projector="${repo_root}/scripts/project-opencode-global-config.mjs"
 thread_bridge_launcher="${repo_root}/scripts/run-thread-bridge.mjs"
+thread_bridge_guard="${repo_root}/scripts/thread-bridge-guard.mjs"
 thread_revision="a3d2d4246e2a0222242d1a848abd3f0bd79a690b"
 
 require_file() {
@@ -62,7 +63,7 @@ service_block() {
   ' "$compose_file"
 }
 
-for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$thread_bridge_launcher"; do
+for path in "$dockerfile" "$compose_file" "$dockerignore" "$entrypoint" "$windows_helper" "$env_example" "$supervisor_config" "$image_provenance_validator" "$opencode_global_projector" "$thread_bridge_launcher" "$thread_bridge_guard"; do
   require_file "$path"
 done
 
@@ -167,15 +168,21 @@ if ! printf '%s\n' "$thread_service" | grep -F -q -- "- thread-internal" || \
   exit 1
 fi
 
-# The launcher deliberately supplies only the fixed, non-secret server URL.
-# Callers must pass session=ingenium explicitly rather than trusting a default.
+# The launcher deliberately supplies only the fixed, non-secret server URL; the
+# guard rewrites every allowed upstream session to the exact Ingenium value.
 require_literal "$thread_bridge_launcher" 'THREAD_SERVER_URL: "http://thread:5000"'
 require_literal "$thread_bridge_launcher" '"-m", "thread_bridge.bridge"'
-require_literal "$thread_bridge_launcher" "shell: false"
+require_literal "$thread_bridge_guard" "shell: false"
+require_literal "$thread_bridge_guard" 'THREAD_BRIDGE_SESSION = "ingenium"'
+require_literal "$thread_bridge_guard" 'THREAD_BRIDGE_EXPORT_DIRECTORY = "/workspace/ingenium/.ingenium/thread-exports"'
+require_literal "$thread_bridge_guard" 'thread_upload_file'
+require_literal "$thread_bridge_guard" 'thread_search'
+require_literal "$thread_bridge_guard" 'thread_read'
 reject_literal "$thread_bridge_launcher" "THREAD_DEFAULT_SESSION"
 reject_literal "$thread_bridge_launcher" "THREAD_API_TOKEN"
 reject_literal "$thread_bridge_launcher" "THREAD_AUTH_PASSWORD"
 require_literal "$dockerfile" "scripts/run-thread-bridge.mjs"
+require_literal "$dockerfile" "scripts/thread-bridge-guard.mjs"
 require_literal "$dockerfile" "--chmod=0555 scripts/run-thread-bridge.mjs"
 
 reject_literal "$compose_file" "INGENIUM_GATEWAY_PASSWORD"

@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   ChildMcpGateway,
   resolveChildMcpProjectIdentity,
@@ -11,7 +15,9 @@ import { CHILD_MCP_REQUEST_TIMEOUT_MS, ChildMcpRuntimeManager } from "../lib/pro
 
 const fixture = new URL("./fixtures/child-mcp-server.mjs", import.meta.url).pathname;
 const threadFixture = new URL("./fixtures/threadbridge-mcp-server.mjs", import.meta.url).pathname;
+const threadGuardFixture = new URL("./fixtures/threadbridge-guard.mjs", import.meta.url).pathname;
 const gateways: ChildMcpGateway[] = [];
+const temporaryDirectories: string[] = [];
 
 interface RegisteredTool {
   handler: (args: Record<string, unknown>) => Promise<unknown>;
@@ -30,12 +36,129 @@ function runtimeDefinition(): ChildMcpRuntimeDefinitionResponse {
   };
 }
 
-function threadRuntimeDefinition(): ChildMcpRuntimeDefinitionResponse {
+interface ThreadSandbox {
+  exportDirectory: string;
+  validPath: string;
+  receiptPath: string;
+  secretPath: string;
+  configPath: string;
+  traversalPath: string;
+  symlinkPath: string;
+  hardlinkPath: string;
+  mismatchedReceiptPath: string;
+  mismatchedFingerprintPath: string;
+  wrongModePath: string;
+  nonRegularPath: string;
+  dotAliasPath: string;
+  controlPath: string;
+  auditPath: string;
+}
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function writeExportArtifact(
+  path: string,
+  sourceSessionSha256: string,
+  receiptSha256?: string,
+  receiptSourceSessionSha256 = sourceSessionSha256,
+): string {
+  const contents = `${JSON.stringify({
+    role: "user",
+    content: "fixture context",
+    metadata: {
+      source: "opencode-export",
+      schemaVersion: 1,
+      sourceSessionSha256,
+      sourceMessageSha256: sha256("fixture-message"),
+      sourceMessageIndex: 0,
+      visiblePartCount: 1,
+    },
+  })}\n`;
+  writeFileSync(path, contents, { mode: 0o600 });
+  chmodSync(path, 0o600);
+  const receiptPath = `${path}.receipt.json`;
+  writeFileSync(receiptPath, JSON.stringify({
+    schemaVersion: 1,
+    exportFile: path.split("/").at(-1),
+    sourceSessionSha256: receiptSourceSessionSha256,
+    byteLength: Buffer.byteLength(contents),
+    sha256: receiptSha256 ?? sha256(contents),
+  }), { mode: 0o600 });
+  chmodSync(receiptPath, 0o600);
+  return receiptPath;
+}
+
+function createThreadSandbox(): ThreadSandbox {
+  const directory = mkdtempSync(join(tmpdir(), "ingenium-threadbridge-guard-"));
+  temporaryDirectories.push(directory);
+  const worktree = join(directory, "workspace", "ingenium");
+  const privateDirectory = join(worktree, ".ingenium");
+  const exportDirectory = join(privateDirectory, "thread-exports");
+  mkdirSync(exportDirectory, { recursive: true, mode: 0o700 });
+  chmodSync(privateDirectory, 0o700);
+  chmodSync(exportDirectory, 0o700);
+  const sourceSessionSha256 = sha256("source-session-123");
+  const validPath = join(exportDirectory, "thread-export-00000000-0000-4000-8000-000000000001.jsonl");
+  const receiptPath = writeExportArtifact(validPath, sourceSessionSha256);
+  const secretDirectory = join(directory, ".opencode");
+  mkdirSync(secretDirectory, { mode: 0o700 });
+  const secretPath = join(secretDirectory, ".ingenium-api-token");
+  const configPath = join(directory, "opencode.json");
+  writeFileSync(secretPath, "do-not-read", { mode: 0o600 });
+  writeFileSync(configPath, "do-not-read", { mode: 0o600 });
+  const symlinkPath = join(exportDirectory, "thread-export-00000000-0000-4000-8000-000000000002.jsonl");
+  symlinkSync(secretPath, symlinkPath);
+  const hardlinkSource = join(exportDirectory, "thread-export-00000000-0000-4000-8000-000000000003.jsonl");
+  writeExportArtifact(hardlinkSource, sourceSessionSha256);
+  const hardlinkPath = join(exportDirectory, "thread-export-00000000-0000-4000-8000-000000000004.jsonl");
+  linkSync(hardlinkSource, hardlinkPath);
+  const mismatchedReceiptPath = join(exportDirectory, "thread-export-00000000-0000-4000-8000-000000000005.jsonl");
+  writeExportArtifact(mismatchedReceiptPath, sourceSessionSha256, "0".repeat(64));
+  const mismatchedFingerprintPath = join(exportDirectory, "thread-export-00000000-0000-4000-8000-000000000006.jsonl");
+  writeExportArtifact(mismatchedFingerprintPath, sourceSessionSha256, undefined, sha256("different-source-session"));
+  const wrongModePath = join(exportDirectory, "thread-export-00000000-0000-4000-8000-000000000007.jsonl");
+  writeExportArtifact(wrongModePath, sourceSessionSha256);
+  chmodSync(wrongModePath, 0o640);
+  const nonRegularPath = join(exportDirectory, "thread-export-00000000-0000-4000-8000-000000000008.jsonl");
+  mkdirSync(nonRegularPath, { mode: 0o700 });
+  const auditPath = join(directory, "upstream-audit.jsonl");
+  writeFileSync(auditPath, "", { mode: 0o600 });
+  return {
+    exportDirectory,
+    validPath,
+    receiptPath,
+    secretPath,
+    configPath,
+    traversalPath: `${exportDirectory}/../.ingenium-api-token`,
+    symlinkPath,
+    hardlinkPath,
+    mismatchedReceiptPath,
+    mismatchedFingerprintPath,
+    wrongModePath,
+    nonRegularPath,
+    dotAliasPath: `${exportDirectory}/./${validPath.split("/").at(-1)}`,
+    controlPath: `${validPath}\u0000`,
+    auditPath,
+  };
+}
+
+function readAudit(path: string): Array<{ name: string; session: string }> {
+  const contents = readFileSync(path, "utf8").trim();
+  return contents ? contents.split("\n").map((line) => JSON.parse(line) as { name: string; session: string }) : [];
+}
+
+function threadRuntimeDefinition(sandbox: ThreadSandbox): ChildMcpRuntimeDefinitionResponse {
   return {
     name: "threadbridge",
     executable: process.execPath,
-    args: [threadFixture],
-    environment: {},
+    args: [threadGuardFixture],
+    environment: {
+      THREAD_BRIDGE_UPSTREAM_FIXTURE: threadFixture,
+      THREAD_BRIDGE_EXPORT_DIRECTORY: sandbox.exportDirectory,
+      THREAD_BRIDGE_AUDIT_FILE: sandbox.auditPath,
+    },
     scope: "project",
     owned: true,
     revision: "2026-07-28T00:00:00.000Z",
@@ -90,6 +213,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1_500): Promise<voi
 
 afterEach(async () => {
   await Promise.all(gateways.splice(0).map((gateway) => gateway.shutdown()));
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
 describe("ChildMcpGateway", () => {
@@ -212,8 +336,9 @@ describe("ChildMcpGateway", () => {
     expect(host.sendToolListChanged).toHaveBeenCalledTimes(2);
   });
 
-  it("exposes the canonical Thread bridge upload tool, forwards nested arguments, fails closed, and reaps it on shutdown", async () => {
-    const definitions = [threadRuntimeDefinition()];
+  it("guards Thread uploads and session access before the upstream bridge, then reaps the proxy group on shutdown", async () => {
+    const sandbox = createThreadSandbox();
+    const definitions = [threadRuntimeDefinition(sandbox)];
     const { host, tools } = createHost();
     const api = createApi(definitions);
     const manager = new ChildMcpRuntimeManager({ startupMs: 750, requestMs: CHILD_MCP_REQUEST_TIMEOUT_MS, shutdownMs: 750 });
@@ -227,33 +352,84 @@ describe("ChildMcpGateway", () => {
     const transportName = "threadbridge_thread_upload_file";
     const handler = tools.get(transportName)?.handler;
     expect(handler).toBeTypeOf("function");
+    expect(tools.has("threadbridge_thread_search")).toBe(true);
+    expect(tools.has("threadbridge_thread_read")).toBe(true);
+    expect(tools.has("threadbridge_thread_list_sessions")).toBe(false);
+    expect(tools.has("threadbridge_thread_write")).toBe(false);
+    expect(tools.has("threadbridge_thread_delete")).toBe(false);
+    expect(tools.has("threadbridge_thread_admin_dump")).toBe(false);
     expect(api.reports[0]).toMatchObject({
       status: "ready",
-      tools: [expect.objectContaining({ name: "thread_upload_file" })],
+      tools: [
+        expect.objectContaining({ name: "thread_upload_file" }),
+        expect.objectContaining({ name: "thread_search" }),
+        expect.objectContaining({ name: "thread_read" }),
+      ],
     });
+    const uploadedSchema = api.reports[0]!.tools!.find((tool) => tool.name === "thread_upload_file")!.input_schema;
+    expect((uploadedSchema.properties as Record<string, unknown>).session).toBeUndefined();
 
     const forwarded = await handler!({
       project: "threadbridge-project",
-      arguments: { session: "session_123", file_path: "/safe/run/thread-export.jsonl" },
+      arguments: { session: "attacker-session", file_path: sandbox.validPath, receipt_path: sandbox.receiptPath },
     });
     expect(forwarded).toMatchObject({
-      content: [{ type: "text", text: JSON.stringify({ accepted: true, session: "session_123", file_path: "/safe/run/thread-export.jsonl" }) }],
+      content: [{ type: "text", text: JSON.stringify({ accepted: true }) }],
     });
+    expect(JSON.stringify(forwarded)).not.toContain(sandbox.validPath);
+    await expect(tools.get("threadbridge_thread_search")!.handler({
+      project: "threadbridge-project",
+      arguments: { session: "other-session", query: "fixture" },
+    })).resolves.toMatchObject({ content: [{ type: "text", text: JSON.stringify({ accepted: true, session: "ingenium" }) }] });
+    await expect(tools.get("threadbridge_thread_read")!.handler({
+      project: "threadbridge-project",
+      arguments: { session: "admin-session", context_id: "fixture" },
+    })).resolves.toMatchObject({ content: [{ type: "text", text: JSON.stringify({ accepted: true, session: "ingenium" }) }] });
     expect(api.checkedTools).toContain("ingenium_threadbridge_thread_upload_file");
+
+    for (const filePath of [
+      sandbox.secretPath,
+      sandbox.configPath,
+      sandbox.traversalPath,
+      sandbox.symlinkPath,
+      sandbox.hardlinkPath,
+      sandbox.mismatchedReceiptPath,
+      sandbox.mismatchedFingerprintPath,
+      sandbox.wrongModePath,
+      sandbox.nonRegularPath,
+      sandbox.dotAliasPath,
+      sandbox.controlPath,
+    ]) {
+      const rejected = await handler!({
+        project: "threadbridge-project",
+        arguments: { session: "attacker-session", file_path: filePath },
+      });
+      expect(JSON.stringify(rejected)).not.toContain(filePath);
+      expect(JSON.stringify(rejected)).not.toContain("attacker-session");
+    }
+    await expect(manager.callTool("threadbridge", "thread_admin_dump", { session: "attacker-session" })).rejects.toMatchObject({
+      code: "CHILD_MCP_UNKNOWN_TOOL",
+    });
+    expect(readAudit(sandbox.auditPath)).toEqual([
+      { name: "thread_upload_file", session: "ingenium" },
+      { name: "thread_search", session: "ingenium" },
+      { name: "thread_read", session: "ingenium" },
+    ]);
 
     api.setToolState("disabled");
     await expect(handler!({
       project: "threadbridge-project",
-      arguments: { session: "session_123", file_path: "/must-not-forward.jsonl" },
+      arguments: { session: "session_123", file_path: sandbox.validPath },
     })).resolves.toEqual({
       content: [{ type: "text", text: JSON.stringify({ error: { code: "TOOL_DISABLED", message: "This child MCP tool is disabled for the project." } }) }],
     });
     await expect(handler!({
       project: "other-project",
-      arguments: { session: "session_123", file_path: "/must-not-forward.jsonl" },
+      arguments: { session: "session_123", file_path: sandbox.validPath },
     })).resolves.toEqual({
       content: [{ type: "text", text: JSON.stringify({ error: { code: "PROJECT_IDENTITY_REQUIRED", message: "A valid explicit project identity is required for this child MCP tool." } }) }],
     });
+    expect(readAudit(sandbox.auditPath)).toHaveLength(3);
 
     await gateway.shutdown();
     expect(tools.has(transportName)).toBe(false);

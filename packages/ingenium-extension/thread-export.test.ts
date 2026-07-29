@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { chmodSync, existsSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -188,7 +188,7 @@ describe("OpenCode Thread export adapter", () => {
     );
   });
 
-  it("writes a mode-0600 run-owned JSONL file and cleans only receipt-verified output after upload success", async () => {
+  it("atomically writes mode-0600 export and receipt artifacts and cleans both only after upload success", async () => {
     const directory = worktree();
     const receipt = await exportOpenCodeSessionToThread({
       sessionId: "session_123",
@@ -196,11 +196,21 @@ describe("OpenCode Thread export adapter", () => {
       runner: async () => JSON.stringify(exportEnvelope()),
     });
     const stat = lstatSync(receipt.path);
+    const receiptStat = lstatSync(receipt.receiptPath);
     expect(stat.isFile()).toBe(true);
     expect(stat.mode & 0o777).toBe(0o600);
+    expect(receiptStat.isFile()).toBe(true);
+    expect(receiptStat.mode & 0o777).toBe(0o600);
     expect(receipt).toMatchObject({
       messageCount: 1,
       metadata: { source: "opencode-export", sourceSessionSha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    });
+    expect(JSON.parse(readFileSync(receipt.receiptPath, "utf8"))).toEqual({
+      schemaVersion: 1,
+      exportFile: receipt.path.split("/").at(-1),
+      sourceSessionSha256: receipt.metadata.sourceSessionSha256,
+      byteLength: receipt.byteLength,
+      sha256: receipt.sha256,
     });
     expect(JSON.stringify(receipt)).not.toContain("hello");
 
@@ -209,13 +219,14 @@ describe("OpenCode Thread export adapter", () => {
       "cleanup_denied",
     );
     expect(existsSync(receipt.path)).toBe(true);
+    expect(existsSync(receipt.receiptPath)).toBe(true);
 
     const unrelated = join(directory, "unrelated.jsonl");
     writeFileSync(unrelated, "do-not-delete", { mode: 0o600 });
     await expectFailure(
       () => cleanupThreadExport({
         worktree: directory,
-        receipt: { path: unrelated, sha256: receipt.sha256 },
+        receipt: { path: unrelated, receiptPath: receipt.receiptPath, sha256: receipt.sha256 },
         uploadSucceeded: true,
       }),
       "cleanup_denied",
@@ -225,15 +236,38 @@ describe("OpenCode Thread export adapter", () => {
     await expectFailure(
       () => cleanupThreadExport({
         worktree: directory,
-        receipt: { path: receipt.path, sha256: "0".repeat(64) },
+        receipt: { path: receipt.path, receiptPath: receipt.receiptPath, sha256: "0".repeat(64) },
         uploadSucceeded: true,
       }),
       "cleanup_denied",
     );
     expect(existsSync(receipt.path)).toBe(true);
 
+    writeFileSync(receipt.receiptPath, JSON.stringify({
+      schemaVersion: 1,
+      exportFile: receipt.path.split("/").at(-1),
+      sourceSessionSha256: receipt.metadata.sourceSessionSha256,
+      byteLength: receipt.byteLength,
+      sha256: "0".repeat(64),
+    }), { mode: 0o600 });
+    await expectFailure(
+      () => cleanupThreadExport({ worktree: directory, receipt, uploadSucceeded: true }),
+      "cleanup_denied",
+    );
+    expect(existsSync(receipt.path)).toBe(true);
+    expect(existsSync(receipt.receiptPath)).toBe(true);
+
+    writeFileSync(receipt.receiptPath, JSON.stringify({
+      schemaVersion: 1,
+      exportFile: receipt.path.split("/").at(-1),
+      sourceSessionSha256: receipt.metadata.sourceSessionSha256,
+      byteLength: receipt.byteLength,
+      sha256: receipt.sha256,
+    }), { mode: 0o600 });
+
     cleanupThreadExport({ worktree: directory, receipt, uploadSucceeded: true });
     expect(existsSync(receipt.path)).toBe(false);
+    expect(existsSync(receipt.receiptPath)).toBe(false);
   });
 
   it("requires explicit success confirmation for the cleanup command", () => {
@@ -244,9 +278,10 @@ describe("OpenCode Thread export adapter", () => {
     ])).toThrow(/upload-succeeded/);
     expect(parseThreadExportArgs([
       "--cleanup", "/tmp/thread-export.jsonl",
+      "--receipt", "/tmp/thread-export.jsonl.receipt.json",
       "--sha256", "a".repeat(64),
       "--worktree", "/tmp/worktree",
       "--upload-succeeded",
-    ])).toMatchObject({ mode: "cleanup", uploadSucceeded: true });
+    ])).toMatchObject({ mode: "cleanup", receiptPath: "/tmp/thread-export.jsonl.receipt.json", uploadSucceeded: true });
   });
 });

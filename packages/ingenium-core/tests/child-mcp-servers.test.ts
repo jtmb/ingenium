@@ -173,8 +173,8 @@ describe("child MCP definitions", () => {
         description: "Upload one generated JSONL file to Thread.",
         input_schema: {
           type: "object",
-          required: ["session", "file_path"],
-          properties: { session: { type: "string" }, file_path: { type: "string" } },
+          required: ["file_path"],
+          properties: { file_path: { type: "string" } },
         },
       }],
     });
@@ -183,6 +183,8 @@ describe("child MCP definitions", () => {
       canonical_name: "ingenium_threadbridge_thread_upload_file",
       category: "Child MCP / threadbridge",
     }));
+    const discovered = childMcpServers.listOwnedChildMcpDiscoveredTools(project.id, "threadbridge");
+    expect(discovered[0]?.input_schema).not.toContain("session");
     expectErrorCode(() => childMcpServers.createChildMcpServer(project.id, {
       name: "thread",
       executable: "node",
