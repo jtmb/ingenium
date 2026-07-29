@@ -14,6 +14,10 @@ import { projectsRouter } from "../lib/routes/projects.js";
 import { skillsRouter } from "../lib/routes/skills.js";
 import { tasksRouter } from "../lib/routes/tasks.js";
 import { contextRouter } from "../lib/routes/context.js";
+import {
+  CONTEXT_SNAPSHOT_INGEST_PATH,
+  contextSnapshotIngestRouter,
+} from "../lib/routes/context-snapshot-ingest.js";
 import { pluginsRouter } from "../lib/routes/plugins.js";
 import { serversRouter } from "../lib/routes/servers.js";
 import {
@@ -137,6 +141,9 @@ app.get("/api/v1/health", (_req, res) => {
 app.use("/api/v1/auth", authPreflightRouter);
 
 // Routes
+// Mounted after bearer/CSRF protection. Its dedicated octet-stream media type
+// avoids the global JSON parser and it owns its own bounded raw parser.
+app.use(CONTEXT_SNAPSHOT_INGEST_PATH, contextSnapshotIngestRouter);
 // This is deliberately outside `/api/v1`, which is the dashboard's entire
 // rewrite namespace. It is a bearer-authenticated server-to-server handoff for
 // resolved child-MCP environment values, not a browser API route.
