@@ -24,7 +24,10 @@ export const THREAD_EXPORT_RECEIPT_SCHEMA_VERSION = 1;
 export const THREAD_EXPORT_DIRECTORY = ".ingenium/thread-exports";
 export const THREAD_EXPORT_DEFAULT_TIMEOUT_MS = 30_000;
 export const THREAD_EXPORT_MAX_TIMEOUT_MS = 60_000;
-export const THREAD_EXPORT_MAX_SOURCE_BYTES = 32 * 1024 * 1024;
+// OpenCode export envelopes can include large ignored reasoning/tool parts. The
+// bounded raw envelope limit accommodates those parts while the independently
+// bounded 16 MiB JSONL limit remains the maximum uploadable visible text.
+export const THREAD_EXPORT_MAX_SOURCE_BYTES = 64 * 1024 * 1024;
 export const THREAD_EXPORT_MAX_JSONL_BYTES = 16 * 1024 * 1024;
 export const THREAD_EXPORT_MAX_MESSAGES = 10_000;
 

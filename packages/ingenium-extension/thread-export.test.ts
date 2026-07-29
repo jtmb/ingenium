@@ -181,6 +181,27 @@ describe("OpenCode Thread export adapter", () => {
     expect(receipt.byteLength).toBeGreaterThan(256 * 1024);
   });
 
+  it("accepts a bounded large raw envelope when only ignored parts are large", async () => {
+    const directory = worktree();
+    const bin = temporaryDirectory("ingenium-thread-export-bin-");
+    const executable = join(bin, "opencode");
+    writeFileSync(
+      executable,
+      "#!/usr/bin/env node\nconst value = { info: { id: 'session_123' }, messages: [{ info: { id: 'user-1', role: 'user' }, parts: [{ type: 'text', text: 'ok' }] }, { info: { id: 'assistant-1', role: 'assistant', time: { completed: 1 } }, parts: [{ type: 'reasoning', text: 'x'.repeat(40 * 1024 * 1024) }] }] }; process.stdout.write(JSON.stringify(value)); process.exit(0);\n",
+      "utf8",
+    );
+    chmodSync(executable, 0o755);
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+
+    const receipt = await exportOpenCodeSessionToThread({
+      sessionId: "session_123",
+      worktree: directory,
+    });
+
+    expect(receipt.messageCount).toBe(1);
+    expect(receipt.byteLength).toBeLessThan(1024);
+  });
+
   it("enforces source-byte and message-count limits before writing a JSONL file", async () => {
     const directory = worktree();
     await expectFailure(

@@ -105,8 +105,10 @@ under `.ingenium/thread-exports/`. Its sole stdout line is a JSON receipt:
 {"path":"<...>.jsonl","receiptPath":"<...>.jsonl.receipt.json","sha256":"<64 lowercase hex>","byteLength":1234,"messageCount":2,"metadata":{"source":"opencode-export","schemaVersion":1,"sourceSessionSha256":"<64 lowercase hex>"}}
 ```
 
-The default export timeout is 30 seconds and the maximum is 60 seconds. Pass
-the receipt paths and returned SHA-256 to
+The default export timeout is 30 seconds and the maximum is 60 seconds. The
+raw OpenCode envelope is bounded to 64 MiB, while the filtered upload JSONL is
+independently bounded to 16 MiB; large ignored reasoning or tool parts do not
+consume the JSONL limit. Pass the receipt paths and returned SHA-256 to
 `ingenium_threadbridge_thread_upload_file` using the [MCP Tools
 Reference](../reference/mcp-tools.md), then run cleanup **only after upload
 succeeds**. Cleanup verifies both artifacts again before deleting them;
