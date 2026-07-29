@@ -2,15 +2,21 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
+  constants,
   linkSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
+  openSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export const THREAD_EXPORT_SCHEMA_VERSION = 1;
@@ -346,18 +352,72 @@ function writeReceipt(path: string, contents: ThreadExportReceiptDocument): stri
   }
 }
 
+interface SourceCapture {
+  directory: string;
+  path: string;
+  descriptor: number;
+}
+
+/**
+ * Capture CLI output in a private regular file instead of a pipe. OpenCode can
+ * terminate immediately after a large stdout write; a pipe can then lose its
+ * unwritten tail despite a zero exit status. A regular descriptor makes that
+ * write blocking while keeping the transient source envelope private.
+ */
+function createSourceCapture(): SourceCapture {
+  let directory: string | undefined;
+  let descriptor: number | undefined;
+  try {
+    directory = mkdtempSync(join(tmpdir(), "ingenium-thread-export-"));
+    chmodSync(directory, 0o700);
+    assertOwnedDirectory(directory);
+    const path = join(directory, "opencode-export.json");
+    descriptor = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    chmodSync(path, 0o600);
+    assertOwnedPrivateFile(path, "write_failed");
+    return { directory, path, descriptor };
+  } catch {
+    try {
+      if (descriptor !== undefined) closeSync(descriptor);
+    } catch {
+      // Best-effort cleanup of a private capture descriptor.
+    }
+    try {
+      if (directory !== undefined) rmSync(directory, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup of a private capture directory.
+    }
+    fail("write_failed");
+  }
+}
+
 /** Run the local CLI with an argument vector; neither a shell nor API is involved. */
 export const runOpenCodeExport: OpenCodeExportRunner = async (sessionId, worktree, options) => await new Promise<string>((resolveOutput, rejectOutput) => {
   let settled = false;
-  let outputBytes = 0;
   let timeout: NodeJS.Timeout | undefined;
-  const output: Buffer[] = [];
+  const capture = createSourceCapture();
+  let captureDescriptor: number | undefined = capture.descriptor;
+  const cleanupCapture = () => {
+    try {
+      if (captureDescriptor !== undefined) closeSync(captureDescriptor);
+    } catch {
+      // The descriptor can be closed after spawn before a timeout races it.
+    }
+    captureDescriptor = undefined;
+    try {
+      rmSync(capture.directory, { recursive: true, force: true });
+    } catch {
+      // Do not surface private temporary paths from best-effort cleanup.
+    }
+  };
   const settle = (callback: () => void) => {
     if (settled) return;
     settled = true;
     if (timeout) clearTimeout(timeout);
+    cleanupCapture();
     callback();
   };
+  let child: ReturnType<typeof spawn>;
   const terminate = () => {
     try {
       child.kill("SIGKILL");
@@ -365,27 +425,24 @@ export const runOpenCodeExport: OpenCodeExportRunner = async (sessionId, worktre
       // The child may have exited between a bound check and termination.
     }
   };
-  const child = spawn("opencode", ["export", sessionId], {
-    cwd: worktree,
-    shell: options.shell,
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  try {
+    child = spawn("opencode", ["export", sessionId], {
+      cwd: worktree,
+      shell: options.shell,
+      windowsHide: true,
+      stdio: ["ignore", capture.descriptor, "pipe"],
+    });
+    closeSync(capture.descriptor);
+    captureDescriptor = undefined;
+  } catch {
+    settle(() => rejectOutput(new ThreadExportError("command_failed")));
+    return;
+  }
   timeout = setTimeout(() => {
     terminate();
     settle(() => rejectOutput(new ThreadExportError("timeout")));
   }, options.timeoutMs);
 
-  child.stdout?.on("data", (chunk: Buffer) => {
-    const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    outputBytes += data.length;
-    if (outputBytes > options.maxOutputBytes) {
-      terminate();
-      settle(() => rejectOutput(new ThreadExportError("output_too_large")));
-      return;
-    }
-    output.push(data);
-  });
   // Export diagnostics are never surfaced because they can include transcript
   // or filesystem data. Draining avoids blocking a noisy subprocess.
   child.stderr?.resume();
@@ -395,7 +452,23 @@ export const runOpenCodeExport: OpenCodeExportRunner = async (sessionId, worktre
       settle(() => rejectOutput(new ThreadExportError("command_failed")));
       return;
     }
-    settle(() => resolveOutput(Buffer.concat(output).toString("utf8")));
+    let output: Buffer;
+    try {
+      const entry = assertOwnedPrivateFile(capture.path, "write_failed");
+      if (entry.size > options.maxOutputBytes) {
+        settle(() => rejectOutput(new ThreadExportError("output_too_large")));
+        return;
+      }
+      output = readFileSync(capture.path);
+      const afterRead = assertOwnedPrivateFile(capture.path, "write_failed");
+      if (entry.dev !== afterRead.dev || entry.ino !== afterRead.ino || entry.size !== afterRead.size || output.length !== entry.size) {
+        fail("write_failed");
+      }
+    } catch (error) {
+      settle(() => rejectOutput(error instanceof ThreadExportError ? error : new ThreadExportError("write_failed")));
+      return;
+    }
+    settle(() => resolveOutput(output.toString("utf8")));
   });
 });
 

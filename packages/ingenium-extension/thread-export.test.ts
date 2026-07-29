@@ -160,6 +160,27 @@ describe("OpenCode Thread export adapter", () => {
     );
   });
 
+  it("captures a large immediate local export without losing a stdout tail", async () => {
+    const directory = worktree();
+    const bin = temporaryDirectory("ingenium-thread-export-bin-");
+    const executable = join(bin, "opencode");
+    writeFileSync(
+      executable,
+      "#!/usr/bin/env node\nconst value = { info: { id: 'session_123' }, messages: [{ info: { id: 'user-1', role: 'user' }, parts: [{ type: 'text', text: 'x'.repeat(256 * 1024) }] }] }; process.stdout.write(JSON.stringify(value)); process.exit(0);\n",
+      "utf8",
+    );
+    chmodSync(executable, 0o755);
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+
+    const receipt = await exportOpenCodeSessionToThread({
+      sessionId: "session_123",
+      worktree: directory,
+    });
+
+    expect(receipt.messageCount).toBe(1);
+    expect(receipt.byteLength).toBeGreaterThan(256 * 1024);
+  });
+
   it("enforces source-byte and message-count limits before writing a JSONL file", async () => {
     const directory = worktree();
     await expectFailure(
