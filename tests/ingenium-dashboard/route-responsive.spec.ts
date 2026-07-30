@@ -201,11 +201,10 @@ test.describe("responsive route regressions at 390x844", () => {
     await expectVisibleInBounds(page.getByRole("button", { name: "Delete" }));
   });
 
-  test("/backups contains its table and exposes named schedule switches", async ({ page }) => {
+  test("/backups displays its mobile backup card and exposes named schedule switches", async ({ page }) => {
     await openMobileRoute(page, "/backups", "Backups");
-    await expect(page.getByText(`${LONG_TOKEN}.sqlite`, { exact: true })).toBeVisible();
-    const table = page.getByRole("region", { name: "Backups table" });
-    await expect(table).toHaveAttribute("tabindex", "0");
+    const mobileCard = page.getByTestId("backup-mobile-card-backup-1");
+    await expect(mobileCard.getByText(`${LONG_TOKEN}.sqlite`, { exact: true })).toBeVisible();
     await expectNoDocumentOverflow(page);
     await expectVisibleInBounds(page.getByRole("button", { name: "Create Backup Now" }));
     await expectVisibleInBounds(page.getByRole("switch", { name: "Enable hourly backups" }));

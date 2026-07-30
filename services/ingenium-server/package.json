@@ -3,8 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "files": ["dist/", "README.md"],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
+    "prepack": "npm run build",
     "start": "node dist/scripts/mcp-server.js",
     "dev": "tsx watch scripts/mcp-server.ts",
     "test": "vitest run",

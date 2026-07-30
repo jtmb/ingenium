@@ -9,8 +9,10 @@
     ".": { "import": "./dist/lib/index.js", "types": "./dist/lib/index.d.ts" },
     "./lib/*": { "import": "./dist/lib/*.js", "types": "./dist/lib/*.d.ts" }
   },
+  "files": ["dist/", "README.md"],
   "scripts": {
     "build": "rm -rf dist && tsc && cp -r data dist/data",
+    "prepack": "npm run build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
