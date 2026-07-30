@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build --workspace=ingenium-core && tsc",
     "start": "npm run build && node dist/scripts/api-server.js",
     "dev": "tsx watch scripts/api-server.ts",
-    "test": "vitest run",
+    "test": "vitest run --config vitest.config.ts",
     "test:live-opencode": "RUN_OPENCODE_LIVE=1 vitest run --config vitest.live.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "node scripts/typecheck-with-clean-core.mjs"
   },
   "dependencies": {
     "@types/formidable": "^3.5.1",
