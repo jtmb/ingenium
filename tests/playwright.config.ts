@@ -2,13 +2,14 @@ import { defineConfig } from "@playwright/test";
 import { resolve } from "node:path";
 import {
   cleanupTestRun,
+  getCanonicalRepoRoot,
   getPlaywrightOutputDirectory,
   readTestRunManifest,
   TEST_RUN_MANIFEST_ENV,
 } from "./test-run-context";
 import { getDefaultSuiteRuntime } from "./ingenium-dashboard/default-suite-runtime";
 
-const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "..");
+const PLAYWRIGHT_REPO_ROOT = getCanonicalRepoRoot(resolve(__dirname, ".."));
 
 /**
  * Playwright E2E configuration for the isolated fixture run.

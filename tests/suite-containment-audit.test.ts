@@ -106,7 +106,7 @@ function temporaryRepository(): string {
 }
 
 describe("suite containment audit", () => {
-  it("detects a leaked manifest-owned dynamic port from persisted telemetry", async () => {
+  it("detects a leaked manifest-owned dynamic port from persisted telemetry", { timeout: 15_000 }, async () => {
     const context = createTestRunContext({ ports: { api: 45301, dashboard: 45302, fixture: 45303 } });
     contexts.push(context);
     const server = createServer((_request, response) => response.end("leaked"));

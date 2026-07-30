@@ -64,6 +64,13 @@ describe("default Playwright suite containment", () => {
     }
   });
 
+  it("uses a CJS-compatible canonical repository root in the default config", () => {
+    const config = sourceFor("tests/playwright.config.ts");
+    expect(config).toContain("getCanonicalRepoRoot(");
+    expect(config).toContain("resolve(__dirname, \"..\")");
+    expect(config).not.toContain("import.meta.dirname");
+  });
+
   it("resolves every Playwright output directory from the canonical repository root", () => {
     for (const file of PLAYWRIGHT_CONFIGS) {
       const config = sourceFor(file);
