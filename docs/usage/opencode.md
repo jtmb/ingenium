@@ -9,6 +9,13 @@ description: Using the embedded OpenCode Web and CLI interfaces in the Ingenium 
 
 The dashboard includes an embedded OpenCode service at `/opencode` with a **Web (iframe) and CLI (ttyd iframe) dual-mode interface** for interacting with the Ingenium MCP tools. The dashboard root (`http://localhost:3000/`), Web root (`http://opencode.localhost:3000/`), and CLI root (`http://cli.localhost:3000/`) are local Windows↔WSL gateway roots and do not use HTTP Basic Auth or browser bearer tokens. Direct host ports 4098/4099 are private and are not supported.
 
+The supported runtime is OpenCode **1.18.9**. Docker verifies the pinned
+archive SHA-256 and executable version, while package compatibility tests verify
+that the root, extension, and local `.opencode` manifests and lockfiles all
+resolve `@opencode-ai/plugin` and `@opencode-ai/sdk` to `1.18.9`. OpenCode
+**1.18.3+** is retained as the historical boundary for root-relative assets;
+the current contract is tested against 1.18.9.
+
 For the conversational chat interface, see [Ingenium Chat](/chat).
 
 ## OpenCode Web/CLI Mode Switch
@@ -84,6 +91,13 @@ The file must be a private regular file below the project-bound
 and text are supported. Only visible user and completed assistant messages are
 kept. The tool makes one protected internal snapshot handoff and one
 transactional import; it is not a public bulk API.
+
+Visibility markers fail closed: `hidden`, `synthetic`, `ignored`, and `ignore`
+must be absent or exactly `false`, `0`, `"false"`, or `"0"`. Any other present
+value excludes the record, including markers nested in message, author, or
+part objects. The descriptor read also compares complete file identity,
+including nanosecond timestamps, before and after reading and re-hashes the
+same descriptor; same-inode in-place mutation is rejected.
 
 Without `conversation_id`, a new immutable Context conversation is created. An
 existing conversation can be adopted only when the imported prefix matches;

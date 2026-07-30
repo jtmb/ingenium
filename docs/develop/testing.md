@@ -17,7 +17,10 @@ and the transactional importer
 cover OpenCode export/simple JSON, JSONL, Markdown/text, visible user and
 completed assistant filtering, new conversation creation, existing-conversation
 adoption, prefix verification, suffix refresh, idempotent replay, and shorter or
-divergent snapshot rejection without partial writes. The transport-parity check
+divergent snapshot rejection without partial writes. The tests also verify
+fail-closed normalization of `hidden`, `synthetic`, `ignored`, and `ignore`
+markers and rejection of same-inode, same-size mutation during the
+descriptor-bound read. The transport-parity check
 also verifies `ingenium_context_upload_file` and the **268-tool** inventory
 (266 server registrations plus 2 extension tools).
 
@@ -41,6 +44,23 @@ passing: it was not run.
 `INGENIUM_E2E_SKIP_BUILD=1` is allowed only when the production artifacts have
 already been built. It skips the build step, not production mode: the
 dashboard still runs with `next start`.
+
+### Strict containment ownership
+
+The strict audit does not treat a configured or expected port number as proof
+of ownership. A listening fixture port is accepted only when its manifest and
+process identity prove it belongs to the current run. Compose ports `3000`,
+`4097`, and `1455` are accepted only after read-only Docker inspection proves
+one running, healthy container has the exact repository Compose labels, exact
+host mappings, and (when requested) the expected OCI revision; a stable second
+inspection must agree. A rogue listener, an unverified Compose container, an
+unexpected mapping, or an unavailable inspection is classified as
+unverified/unowned and fails strict mode.
+
+Playwright output is resolved below the canonical repository root at
+`tests/artifacts/playwright/<suite>`. The helper rejects unsafe scopes,
+symlinks, path escapes, and the legacy `tests/tests` nesting. Manifestless
+temporary evidence is retained and reported, not deleted.
 
 ### Phase 5E isolation and recovery
 
@@ -177,7 +197,8 @@ environment or secret manager; never add them to docs, source, or config.
 
 ## Evidence, cleanup, and audits
 
-- Playwright output is separated by suite under `artifacts/playwright/`.
+- Playwright output is separated by suite under the canonical
+  `tests/artifacts/playwright/` root.
 - The runner's retained telemetry is canonical under
   `tests/artifacts/test-runs/<run-id>/runner-telemetry.json`; it is recovery
   evidence, not disposable scratch data. Do not relocate it to `/tmp` or

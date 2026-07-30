@@ -14,7 +14,7 @@ description: Languages, frameworks, packages, and tools used in the Ingenium mon
 - **Frontend**: Next.js 16 App Router, React 19, Tailwind CSS 4
 - **Syntax Highlighting**: highlight.js (`github.css` + custom `hljs-dark.css`) — Preview and Source modes in skill detail overlay
 - **State / Persistence**: Docs RAG system for cross-session context
-- **Container**: Docker multi-stage build (node:22-alpine), supervisord (4 processes: API + Dashboard + opencode-web + ttyd-opencode)
+- **Container**: Docker multi-stage build (glibc-based `node:22-slim`), supervisord (6 processes: API, API boundary, Dashboard, gateway, opencode-web, and ttyd-opencode)
 - **Packages**: `ingenium-core` (shared lib), `ingenium-extension` (client-side OpenCode — MCP server, observer plugin, skill-sync plugin, auto-observer thin trigger), `ingenium-email` (IMAP/SMTP client)
 - **Testing**: Vitest, Playwright
 - **Linting**: ESLint, TypeScript compiler
@@ -49,5 +49,25 @@ Ingenium currently has 68 numbered migrations (`001`–`068`):
 - `066`: context checkpoint maintenance authorization and append-only audit governance
 - `067`: transactional forward-only repair for recoverable legacy/partial 063 context schemas before 065/066 probes
 - `068`: provider-neutral, metadata-only usage events (including nullable agent attribution and numeric reasoning-token metadata), explicit OpenCode project mappings/quarantine, and per-project sync cursors
+
+## OpenCode runtime and package contract
+
+The supported OpenCode runtime is **1.18.9**. The Docker image downloads the
+`v1.18.9` Linux archive, verifies SHA-256
+`a0fa4b7b8bdacbd013e79a5f69d4220d36b545cd3ea296ba765f3016fa501b5b`, and then
+requires `opencode --version` to report exactly `1.18.9`. The root package,
+the extension package, and `.opencode/package.json` all pin
+`@opencode-ai/plugin` to `1.18.9`; both root lockfiles pin the plugin and its
+transitive `@opencode-ai/sdk` to `1.18.9` with locked integrity values. The
+extension compatibility test verifies every manifest and lock entry.
+
+OpenCode **1.18.3+** introduced the root-relative asset/WebSocket behavior
+that requires dedicated root origins rather than a shared dashboard subpath;
+the current implementation is verified against 1.18.9.
+
+Generated `dist/` directories and TypeScript `*.tsbuildinfo` files are build
+products and remain untracked. The core and server packages expose only their
+runtime distribution and README, and `prepack` regenerates `dist/` before a
+package is packed.
 
 The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.

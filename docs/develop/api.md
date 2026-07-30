@@ -326,6 +326,19 @@ descriptor. Supported formats are OpenCode export JSON, simple JSON,
 JSONL/NDJSON, Markdown, and text. Only visible user and completed assistant
 messages are retained.
 
+The importer fails closed on visibility markers. The `hidden`, `synthetic`,
+`ignored`, and `ignore` markers are accepted as visible only when absent or
+exactly `false`, `0`, `"false"`, or `"0"`; any other present value, including
+`null`, objects, or unexpected strings, excludes the record. The rule is
+applied to the envelope and nested message/author/part records.
+
+The protected read is descriptor-bound and checks file identity before and
+after each read phase. Identity includes device, inode, link count, owner,
+mode, size, and nanosecond `mtime`/`ctime`; the descriptor bytes are hashed
+and re-hashed in a second stream. A same-inode, same-size in-place mutation
+therefore fails with `CONTEXT_UPLOAD_FILE_REJECTED` rather than being
+imported.
+
 The MCP side makes one protected snapshot handoff and the API invokes one
 transactional import. A new snapshot creates a conversation; an explicit
 conversation target is adopted only after project ownership and imported-prefix
@@ -511,7 +524,7 @@ itself remains private and bearer-protected. SSE routes stream
 | GET | `/api/v1/opencode/sessions/:id/messages` | Get messages (with optional `limit` and `before` pagination) |
 | GET | `/api/v1/opencode/sessions/:id/messages/:msgId` | Get a single message |
 | DELETE | `/api/v1/opencode/sessions/:id/messages/:msgId` | Delete a message |
-| POST | `/api/v1/opencode/sessions/:id/prompt` | Accept a prompt for asynchronous processing. The body uses the `parts` array per the v1.18.3 contract; success returns HTTP `202` with `{ data: { accepted: true } }`. This response is only an acknowledgement and does not contain the assistant response. |
+| POST | `/api/v1/opencode/sessions/:id/prompt` | Accept a prompt for asynchronous processing. The body uses the `parts` array per the current OpenCode 1.18.9 contract; success returns HTTP `202` with `{ data: { accepted: true } }`. This response is only an acknowledgement and does not contain the assistant response. |
 | POST | `/api/v1/opencode/sessions/:id/abort` | Abort session |
 | POST | `/api/v1/opencode/sessions/:id/fork` | Fork session |
 | POST | `/api/v1/opencode/sessions/:id/share` | Share session |
@@ -536,7 +549,7 @@ itself remains private and bearer-protected. SSE routes stream
 | GET | `/api/v1/opencode/permissions` | Pending permissions (global) |
 | POST | `/api/v1/opencode/sessions/:id/permissions/:permId` | Reply to a permission request (session-scoped) |
 | POST | `/api/v1/opencode/upload` | File upload for chat attachments (multipart, validated MIME allowlist) |
-| GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in v1.18.3) |
+| GET | `/api/v1/opencode/questions` | Pending questions (read-only; no reply endpoint in OpenCode 1.18.9) |
 
 ### Chat prompt response lifecycle
 
@@ -568,7 +581,7 @@ values, endpoints, headers, cookies, sessions, or other credentials. Unsafe
 scalars are rejected or replaced with a safe fallback; they are never partially
 redacted and returned as opaque identifiers.
 
-> **Known gap**: Questions cannot be replied to via the REST API in v1.18.3. They are TUI-only — delivered through the control channel. There is no `POST /questions/:id/reply` endpoint.
+> **Known gap**: Questions cannot be replied to via the REST API in OpenCode 1.18.9. They are TUI-only — delivered through the control channel. There is no `POST /questions/:id/reply` endpoint.
 
 ## Data Flow
 
