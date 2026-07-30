@@ -13,8 +13,9 @@ import {
   fstatSync,
   lstatSync,
   openSync,
-  readFileSync,
+  readSync,
   realpathSync,
+  type BigIntStats,
   type Stats,
 } from "node:fs";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -79,6 +80,11 @@ interface PreparedContextUpload {
   snapshot: PreparedContextUploadSnapshot;
   pathOpenStatReadMs: number;
   parseFilterSnapshotPreparationMs: number;
+}
+
+interface ProtectedFileRead {
+  bytes: Uint8Array;
+  sourceFileHash: string;
 }
 
 export type ContextUploadErrorCode =
@@ -157,23 +163,30 @@ function isPrivateDirectory(stat: Stats): boolean {
     && (stat.mode & 0o022) === 0;
 }
 
-function isPrivateRegularFile(stat: Stats): boolean {
+function isPrivateRegularFile(stat: BigIntStats): boolean {
   const uid = currentUid();
   return stat.isFile()
     && !stat.isSymbolicLink()
-    && stat.nlink === 1
-    && (uid === null || stat.uid === uid)
-    && (stat.mode & 0o400) !== 0
-    && (stat.mode & 0o077) === 0;
+    && stat.nlink === 1n
+    && (uid === null || stat.uid === BigInt(uid))
+    && (stat.mode & 0o400n) !== 0n
+    && (stat.mode & 0o077n) === 0n;
 }
 
-function equalFileIdentity(left: Stats, right: Stats): boolean {
+/**
+ * Compare all metadata that must remain stable while a descriptor is read.
+ * BigInt nanosecond timestamps avoid losing a same-size in-place replacement
+ * on filesystems whose modification happens within one millisecond.
+ */
+function equalFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
   return left.dev === right.dev
     && left.ino === right.ino
     && left.nlink === right.nlink
     && left.uid === right.uid
     && left.mode === right.mode
-    && left.size === right.size;
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs;
 }
 
 function safeSession(value: string): string {
@@ -298,38 +311,83 @@ function verifyFileParents(root: string, filePath: string): void {
   }
 }
 
+/**
+ * Read exactly the initially fstat'd size from one descriptor while producing
+ * the source hash. The snapshot needs these bytes to parse, so this is its one
+ * source-sized allocation.
+ */
+function readAndHashDescriptor(descriptor: number, size: number): ProtectedFileRead {
+  const bytes = Buffer.allocUnsafe(size);
+  const hash = createHash("sha256");
+  let offset = 0;
+  while (offset < size) {
+    const bytesRead = readSync(descriptor, bytes, offset, size - offset, offset);
+    if (!Number.isSafeInteger(bytesRead) || bytesRead <= 0 || bytesRead > size - offset) {
+      throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
+    }
+    hash.update(bytes.subarray(offset, offset + bytesRead));
+    offset += bytesRead;
+  }
+  return { bytes, sourceFileHash: hash.digest("hex") };
+}
+
+/** Re-hash the same open descriptor without allocating another source-sized buffer. */
+function hashDescriptorStream(descriptor: number, size: number): string {
+  const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, size));
+  const hash = createHash("sha256");
+  let offset = 0;
+  while (offset < size) {
+    const expected = Math.min(chunk.byteLength, size - offset);
+    const bytesRead = readSync(descriptor, chunk, 0, expected, offset);
+    if (!Number.isSafeInteger(bytesRead) || bytesRead <= 0 || bytesRead > expected) {
+      throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
+    }
+    hash.update(chunk.subarray(0, bytesRead));
+    offset += bytesRead;
+  }
+  return hash.digest("hex");
+}
+
 /** Read the regular file through one O_NOFOLLOW descriptor after pre/post checks. */
-function readProtectedUploadFile(project: string, inputPath: string, maxBytes: number): Uint8Array {
+function readProtectedUploadFile(project: string, inputPath: string, maxBytes: number): ProtectedFileRead {
   const filePath = safeInputPath(inputPath);
   const root = resolveVerifiedUploadRoot(project, filePath);
   verifyFileParents(root, filePath);
 
-  let before: Stats;
+  let before: BigIntStats;
   try {
-    before = lstatSync(filePath);
+    before = lstatSync(filePath, { bigint: true });
   } catch {
     throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
   }
   if (!isPrivateRegularFile(before)) throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
-  if (before.size > maxBytes) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
+  if (before.size > BigInt(maxBytes)) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
 
   let descriptor: number | undefined;
   try {
     descriptor = openSync(filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const opened = fstatSync(descriptor);
+    const opened = fstatSync(descriptor, { bigint: true });
     if (!isPrivateRegularFile(opened) || !equalFileIdentity(before, opened)) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
-    if (opened.size > maxBytes) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
-    const bytes = readFileSync(descriptor);
-    const afterRead = fstatSync(descriptor);
+    if (opened.size > BigInt(maxBytes)) throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
+    const source = readAndHashDescriptor(descriptor, Number(opened.size));
+    const afterRead = fstatSync(descriptor, { bigint: true });
     if (!isPrivateRegularFile(afterRead) || !equalFileIdentity(opened, afterRead)) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
     }
-    if (bytes.byteLength > maxBytes || bytes.byteLength !== opened.size) {
+    const secondHash = hashDescriptorStream(descriptor, Number(opened.size));
+    const finalStat = fstatSync(descriptor, { bigint: true });
+    if (!isPrivateRegularFile(finalStat) || !equalFileIdentity(opened, finalStat)) {
+      throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
+    }
+    if (source.bytes.byteLength > maxBytes || source.bytes.byteLength !== Number(opened.size)) {
       throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
     }
-    return bytes;
+    if (source.sourceFileHash !== secondHash) {
+      throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
+    }
+    return source;
   } catch (error) {
     if (error instanceof ContextUploadFileError) throw error;
     throw new ContextUploadFileError("CONTEXT_UPLOAD_FILE_REJECTED");
@@ -338,11 +396,19 @@ function readProtectedUploadFile(project: string, inputPath: string, maxBytes: n
   }
 }
 
+const VISIBILITY_MARKERS = ["hidden", "synthetic", "ignored", "ignore"] as const;
+
+/**
+ * Marker-bearing exports are untrusted: only the four explicit visible values
+ * are accepted. Every other present value fails closed so schema drift cannot
+ * accidentally import hidden or synthetic content.
+ */
 function excluded(record: Record<string, unknown>): boolean {
-  return record.synthetic === true
-    || record.ignored === true
-    || record.ignore === true
-    || record.hidden === true;
+  return VISIBILITY_MARKERS.some((marker) => {
+    if (!Object.hasOwn(record, marker)) return false;
+    const value = record[marker];
+    return value !== false && value !== 0 && value !== "false" && value !== "0";
+  });
 }
 
 function roleFrom(record: Record<string, unknown>): UploadRole | null {
@@ -402,9 +468,11 @@ function parseOpenCodeMessages(messages: unknown[]): RawEntry[] {
 function parseSimpleEntry(candidate: unknown): RawEntry | null {
   const record = asRecord(candidate);
   if (!record || excluded(record)) return null;
-  const role = roleFrom(record) ?? roleFrom(asRecord(record.author) ?? {}) ?? roleFrom(asRecord(record.message) ?? {});
-  if (!role) return null;
+  const author = asRecord(record.author);
   const nestedMessage = asRecord(record.message);
+  if ((author && excluded(author)) || (nestedMessage && excluded(nestedMessage))) return null;
+  const role = roleFrom(record) ?? roleFrom(author ?? {}) ?? roleFrom(nestedMessage ?? {});
+  if (!role) return null;
   const content = simpleContent(record) ?? (nestedMessage ? simpleContent(nestedMessage) : undefined);
   if (content === undefined || content.trim().length === 0) return null;
   return { role, content, sourceId: sourceIdFrom(record) ?? (nestedMessage ? sourceIdFrom(nestedMessage) : undefined) };
@@ -608,16 +676,15 @@ function prepareContextUpload(
   const safeSourceSession = safeSession(session);
   const safePath = safeInputPath(filePath);
   validateConversationId(options.conversationId);
-  const sourceBytes = readProtectedUploadFile(safeProject, safePath, maxRawSourceBytes(safePath));
+  const source = readProtectedUploadFile(safeProject, safePath, maxRawSourceBytes(safePath));
   const pathOpenStatReadMs = boundedElapsedMs(
     pathOpenStatReadStartedAt,
     CONTEXT_UPLOAD_TIMING_MAX_STAGE_MS,
   );
 
   const parseFilterSnapshotPreparationStartedAt = performance.now();
-  const sourceFileHash = sha256(sourceBytes);
-  const parsed = parseSourceFile(safePath, sourceBytes);
-  if (parsed.format !== "opencode" && sourceBytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES) {
+  const parsed = parseSourceFile(safePath, source.bytes);
+  if (parsed.format !== "opencode" && source.bytes.byteLength > CONTEXT_UPLOAD_MAX_FILE_BYTES) {
     throw new ContextUploadFileError("CONTEXT_UPLOAD_TOO_LARGE");
   }
   const entries = snapshotEntries(safeSourceSession, parsed.entries);
@@ -645,7 +712,7 @@ function prepareContextUpload(
   return {
     snapshot: {
       format: parsed.format,
-      sourceFileHash,
+      sourceFileHash: source.sourceFileHash,
       sourceKey,
       sourceSessionId: safeSourceSession,
       snapshotHash: hash,

@@ -143,6 +143,77 @@ function expectBoundedTiming(timing: Record<string, unknown>): void {
   );
 }
 
+const markerAliases = ["hidden", "synthetic", "ignored", "ignore"] as const;
+const markerValues: ReadonlyArray<{ label: string; value: unknown; visible: boolean }> = [
+  { label: "missing", value: undefined, visible: true },
+  { label: "false", value: false, visible: true },
+  { label: "zero", value: 0, visible: true },
+  { label: "string false", value: "false", visible: true },
+  { label: "string zero", value: "0", visible: true },
+  { label: "true", value: true, visible: false },
+  { label: "one", value: 1, visible: false },
+  { label: "string true", value: "true", visible: false },
+  { label: "string one", value: "1", visible: false },
+  { label: "null", value: null, visible: false },
+  { label: "unexpected string", value: "visible", visible: false },
+  { label: "object", value: { unexpected: true }, visible: false },
+];
+const markerTargets = ["envelope", "info", "part", "record", "message", "author"] as const;
+type MarkerAlias = typeof markerAliases[number];
+type MarkerTarget = typeof markerTargets[number];
+
+function applyMarker(record: Record<string, unknown>, alias: MarkerAlias, value: unknown): void {
+  if (value !== undefined) record[alias] = value;
+}
+
+function markerFixture(target: MarkerTarget, alias: MarkerAlias, value: unknown): unknown {
+  if (target === "envelope" || target === "info" || target === "part") {
+    const candidateEnvelope: Record<string, unknown> = {
+      info: { id: "candidate-opencode", role: "user" },
+      parts: [{ type: "text", text: "candidate visible" }],
+    };
+    const candidateInfo = candidateEnvelope.info as Record<string, unknown>;
+    const candidatePart = (candidateEnvelope.parts as Array<Record<string, unknown>>)[0]!;
+    applyMarker(
+      target === "envelope" ? candidateEnvelope : target === "info" ? candidateInfo : candidatePart,
+      alias,
+      value,
+    );
+    return {
+      info: { id: "marker-opencode-session" },
+      messages: [
+        { info: { id: "baseline-opencode", role: "user" }, parts: [{ type: "text", text: "baseline visible" }] },
+        candidateEnvelope,
+      ],
+    };
+  }
+
+  const candidate: Record<string, unknown> = {
+    id: "candidate-simple",
+    role: "user",
+    content: "candidate visible",
+  };
+  if (target === "message") {
+    delete candidate.content;
+    candidate.message = { text: "candidate visible" };
+    applyMarker(candidate.message as Record<string, unknown>, alias, value);
+  } else if (target === "author") {
+    delete candidate.role;
+    delete candidate.content;
+    candidate.author = { role: "user" };
+    candidate.message = { text: "candidate visible" };
+    applyMarker(candidate.author as Record<string, unknown>, alias, value);
+  } else {
+    applyMarker(candidate, alias, value);
+  }
+  return {
+    entries: [
+      { id: "baseline-simple", role: "user", content: "baseline visible" },
+      candidate,
+    ],
+  };
+}
+
 beforeEach(() => {
   fixtureRoot = mkdtempSync(join(tmpdir(), "ingenium-context-upload-"));
   worktree = join(fixtureRoot, project);
@@ -241,7 +312,7 @@ describe("context file upload", () => {
     expect(JSON.stringify(resultData)).not.toContain(input);
   });
 
-  it("imports a generated 50+ MiB OpenCode export as one bounded visible snapshot", async () => {
+  it("imports a generated 52+ MiB OpenCode export as one bounded visible snapshot", async () => {
     const input = writeGeneratedLargeOpenCodeExport("large-opencode-export.json");
     const rawBytes = statSync(input).size;
     const heapBeforeImport = process.memoryUsage().heapUsed;
@@ -250,7 +321,7 @@ describe("context file upload", () => {
     const result = await uploadContextFile(project, session, input, {}, project);
     const elapsedMs = performance.now() - startedAt;
 
-    expect(rawBytes).toBeGreaterThan(50 * 1024 * 1024);
+    expect(rawBytes).toBeGreaterThanOrEqual(52 * 1024 * 1024);
     expect(rawBytes).toBeLessThanOrEqual(CONTEXT_UPLOAD_MAX_OPENCODE_EXPORT_BYTES);
     expect(elapsedMs).toBeLessThan(20_000);
     expect(process.memoryUsage().heapUsed - heapBeforeImport)
@@ -288,6 +359,24 @@ describe("context file upload", () => {
       { role: "assistant", content: "A Thread assistant response" },
     ]);
   });
+
+  it.each(markerAliases.flatMap((alias) => markerValues.flatMap((marker) => (
+    markerTargets.map((target) => ({ alias, target, ...marker }))
+  ))))(
+    "fails closed for $target $alias marker with $label value",
+    ({ alias, target, value, visible }) => {
+      const input = writeUpload(
+        `marker-${target}-${alias}.json`,
+        JSON.stringify(markerFixture(target, alias, value)),
+      );
+
+      const body = snapshotBody(prepareContextUploadSnapshot(project, session, input).bytes);
+      const contents = (body.entries as Array<{ content: string }>).map((entry) => entry.content);
+      expect(contents).toEqual(visible
+        ? ["baseline visible", "candidate visible"]
+        : ["baseline visible"]);
+    },
+  );
 
   it("includes an explicitly targeted existing conversation in the single snapshot", () => {
     const input = writeUpload("conversation.md", "# Imported\n\nUse this conversation.");

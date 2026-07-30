@@ -1,24 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const race = vi.hoisted(() => ({
-  enabled: false,
+  mode: "none" as "none" | "replace-before-open" | "mutate-before-second-stream",
   target: "",
   replacement: "",
+  readCount: 0,
 }));
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
-    openSync(path: string | Buffer | URL, flags: number) {
-      if (race.enabled && typeof path === "string" && path === race.target) {
-        race.enabled = false;
+    openSync(...args: Parameters<typeof actual.openSync>) {
+      const [path] = args;
+      if (race.mode === "replace-before-open" && typeof path === "string" && path === race.target) {
+        race.mode = "none";
         renameSync(race.replacement, race.target);
       }
-      return actual.openSync(path, flags);
+      return actual.openSync(...args);
+    },
+    readSync(...args: Parameters<typeof actual.readSync>) {
+      race.readCount += 1;
+      if (race.mode === "mutate-before-second-stream" && race.readCount === 2) {
+        race.mode = "none";
+        actual.writeFileSync(race.target, race.replacement);
+      }
+      return actual.readSync(...args);
     },
   };
 });
@@ -39,9 +49,10 @@ beforeEach(() => {
   for (const directory of [worktree, join(worktree, ".ingenium"), uploads]) chmodSync(directory, 0o700);
   priorWorktree = process.env.INGENIUM_WORKTREE;
   process.env.INGENIUM_WORKTREE = worktree;
-  race.enabled = false;
+  race.mode = "none";
   race.target = "";
   race.replacement = "";
+  race.readCount = 0;
 });
 
 afterEach(() => {
@@ -62,7 +73,7 @@ describe("context upload descriptor TOCTOU defense", () => {
     chmodSync(replacement, 0o600);
     race.target = source;
     race.replacement = replacement;
-    race.enabled = true;
+    race.mode = "replace-before-open";
 
     let caught: unknown;
     try {
@@ -70,6 +81,34 @@ describe("context upload descriptor TOCTOU defense", () => {
     } catch (error) {
       caught = error;
     }
+    expect(caught).toBeInstanceOf(ContextUploadFileError);
+    expect((caught as ContextUploadFileError).code).toBe("CONTEXT_UPLOAD_FILE_REJECTED");
+  });
+
+  it("rejects same-inode same-size mutation before the descriptor-bound second hash stream", () => {
+    const uploads = join(root, project, ".ingenium", "context-uploads");
+    const source = join(uploads, "in-place.md");
+    const original = "original visible text".padEnd(4_096, "a");
+    const replacement = "mutated visible text".padEnd(4_096, "b");
+    writeFileSync(source, original, { mode: 0o600 });
+    chmodSync(source, 0o600);
+    const before = statSync(source, { bigint: true });
+    race.target = source;
+    race.replacement = replacement;
+    race.mode = "mutate-before-second-stream";
+
+    let caught: unknown;
+    try {
+      prepareContextUploadSnapshot(project, "in-place-race-session", source);
+    } catch (error) {
+      caught = error;
+    }
+
+    const after = statSync(source, { bigint: true });
+    expect(race.readCount).toBeGreaterThanOrEqual(2);
+    expect(after.dev).toBe(before.dev);
+    expect(after.ino).toBe(before.ino);
+    expect(after.size).toBe(before.size);
     expect(caught).toBeInstanceOf(ContextUploadFileError);
     expect((caught as ContextUploadFileError).code).toBe("CONTEXT_UPLOAD_FILE_REJECTED");
   });
