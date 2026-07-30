@@ -12,6 +12,7 @@ const wrapperSpecs = [
   "./packages/ingenium-extension/plugins/observer.ts",
   "./packages/ingenium-extension/plugins/resource-sync.ts",
 ] as const;
+const ponytailPluginSpec = "./packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
 const OPENCODE_VERSION = "1.18.9";
 const OPENCODE_PLUGIN_INTEGRITY = "sha512-0kFX9Usj+3N+WupIe9VnEdDNzMNbW4/C5GeIzdj02/t5kQoXsNrFpW3Br9aABebazcaYsQEWdlaLV0zQISy3OA==";
 const OPENCODE_SDK_INTEGRITY = "sha512-oDJSmsmiGW+3lNLmZYj3EpUkpiT3ITZBKffH3mrmu2KMJXlkxQ/Nvv7jqPffSM7o8lCdBZS/aCE+2GkA3/92gQ==";
@@ -96,7 +97,7 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
   it("uses explicit local wrapper specs and rejects bare package-like paths", () => {
     const config = JSON.parse(readFileSync(resolve(repositoryRoot, "opencode.json"), "utf8")) as { plugin: string[] };
 
-    expect(config.plugin).toEqual(wrapperSpecs);
+    expect(config.plugin).toEqual([...wrapperSpecs, ponytailPluginSpec]);
     for (const spec of config.plugin) {
       expect(isOpenCode1189PathPluginSpec(spec)).toBe(true);
       expect(resolveOpenCode1189PathPlugin(spec, repositoryRoot)).toBe(

@@ -24,6 +24,7 @@ const configuredPluginPaths = [
   "packages/ingenium-extension/plugins/auto-observer.ts",
   "packages/ingenium-extension/plugins/observer.ts",
   "packages/ingenium-extension/plugins/resource-sync.ts",
+  "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
 ];
 
 function write(relativePath: string, content: string): void {

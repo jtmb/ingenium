@@ -10,6 +10,7 @@ Client-side OpenCode package for connecting to the Ingenium MCP Server.
 - **observer.ts** — Session event handling, observation import, synthesis trigger
 - **resource-sync.ts** — Unified SHA-256 manifest-based bidirectional sync for skills, agents, plugins, commands, and config between the API and local `.opencode/`
 - **auto-observer.ts** — Thin trigger (~62 lines) that POSTs to `/api/v1/extraction/run` on session idle
+- **ponytail/** — Official immutable Ponytail OpenCode checkout pinned to upstream SHA `16f29800fd2681bdf24f3eb4ccffe38be3baec6b` with MIT provenance. It is loaded once from `./packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs` in repository configs; the container uses the equivalent `/app/.../ponytail.mjs` path. The published `@dietrichgebert/ponytail@4.8.4` package is not used because its named export is incompatible with OpenCode 1.18.9. The adapter is prompt-only and provides six `/ponytail*` commands; it adds no MCP tools or permissions.
 
 **MCP server:** `dist/scripts/mcp-server.js` — stdio server with 243 tools. The package's two extension-registered tools bring the complete catalog to 245.
 

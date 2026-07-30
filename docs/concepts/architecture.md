@@ -329,6 +329,22 @@ Plugins are stored in the `plugins` SQLite table and synced to disk as `.ts` fil
 - **Seeding**: `seedPlugins()` writes `.ts` files to `.opencode/plugins/`, inserts into the `plugins` table with `enabled = 1`, and syncs `opencode.json`. Uses `INSERT OR IGNORE` for idempotency.
 - **MCP tools**: `ingenium_plugin_list`, `ingenium_plugin_get`, `ingenium_plugin_enable`, `ingenium_plugin_disable`, `ingenium_plugin_create`, `ingenium_plugin_delete`, `ingenium_plugin_update`.
 
+### Ponytail checkout integration
+
+The extension ships an official Ponytail OpenCode adapter as an immutable,
+MIT-provenance checkout at `packages/ingenium-extension/ponytail/`, pinned to
+upstream SHA `16f29800fd2681bdf24f3eb4ccffe38be3baec6b`. Local projects register
+the project-relative plugin path once; the container registers the equivalent
+`/app/.../ponytail.mjs` path once in its global config. The published npm
+package `@dietrichgebert/ponytail@4.8.4` is excluded because its named export
+does not match the OpenCode 1.18.9 loader contract.
+
+The adapter's boundary is prompt-only: it appends the Ponytail ruleset to chat
+system prompts and registers six commands, but adds no MCP tools or execution
+permissions. Its mode state is stored beside the OpenCode config in
+`.ponytail-active`; plugin or config changes require an OpenCode restart. The
+checkout's `PROVENANCE.md` records upstream file hashes for update review.
+
 ## Self-Learning Pipeline
 
 The self-learning pipeline enables agents to learn from user interactions through three phases:

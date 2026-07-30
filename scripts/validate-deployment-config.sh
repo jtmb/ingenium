@@ -78,6 +78,7 @@ require_literal "$dockerfile" "RUN sh scripts/validate-deployment-config.sh"
 for extension_source in auto-observer.ts plugins/auto-observer.ts observer.ts plugins/observer.ts resource-sync.ts plugins/resource-sync.ts skill-sync.ts observer-core.ts project-resolver.ts api-auth.ts; do
   require_literal "$dockerfile" "COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/${extension_source} ./packages/ingenium-extension/${extension_source}"
 done
+require_literal "$dockerfile" "COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail"
 reject_literal "$dockerfile" "COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ ./packages/ingenium-extension/"
 web_arg_line="$(grep -n -F 'ARG NEXT_PUBLIC_OPENCODE_WEB_URL=' "$dockerfile" | cut -d: -f1)"
 cli_arg_line="$(grep -n -F 'ARG NEXT_PUBLIC_OPENCODE_CLI_URL=' "$dockerfile" | cut -d: -f1)"
@@ -152,6 +153,7 @@ require_line_before "$dockerfile" "COPY --chown=appuser:appuser --chmod=0555 scr
 require_literal "$entrypoint" "project-opencode-global-config.mjs"
 require_literal "$entrypoint" '"INGENIUM_WORKTREE": "/workspace"'
 require_literal "$entrypoint" '"/app/packages/ingenium-extension/plugins/resource-sync.ts"'
+require_literal "$entrypoint" '"/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"'
 require_literal "$entrypoint" '/app/scripts/normalize-agent-profiles.sh "$WORKSPACE_AGENTS_DIR"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_API_TOKEN_FILE="/workspace/.opencode/.ingenium-api-token"'
 require_literal "${repo_root}/scripts/start-opencode-web.sh" 'INGENIUM_WORKTREE="/workspace"'

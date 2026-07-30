@@ -17,11 +17,13 @@ const temporaryDirectories: string[] = [];
 const originalProject = process.env.INGENIUM_PROJECT;
 const originalToken = process.env.INGENIUM_API_TOKEN;
 const originalTokenFile = process.env.INGENIUM_API_TOKEN_FILE;
-const configuredPluginPaths = [
+const extensionPluginPaths = [
   "packages/ingenium-extension/plugins/auto-observer.ts",
   "packages/ingenium-extension/plugins/observer.ts",
   "packages/ingenium-extension/plugins/resource-sync.ts",
 ];
+const ponytailPluginPath = "packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs";
+const configuredPluginPaths = [...extensionPluginPaths, ponytailPluginPath];
 
 function temporaryDirectory(prefix: string): string {
   const directory = mkdtempSync(join(tmpdir(), prefix));
@@ -55,12 +57,13 @@ function createRuntimeWorktree(): string {
   copyFileSync(join(repositoryRoot, "opencode.json"), join(worktree, "opencode.json"));
   cpSync(join(repositoryRoot, ".opencode", "skills"), join(worktree, ".opencode", "skills"), { recursive: true });
   cpSync(join(repositoryRoot, ".opencode", "agents"), join(worktree, ".opencode", "agents"), { recursive: true });
-  for (const pluginPath of configuredPluginPaths) {
+  for (const pluginPath of extensionPluginPaths) {
     const target = join(worktree, pluginPath);
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(join(repositoryRoot, pluginPath), target);
     expect(readFileSync(target, "utf8")).toBe(readFileSync(join(repositoryRoot, pluginPath), "utf8"));
   }
+  cpSync(join(repositoryRoot, "packages", "ingenium-extension", "ponytail"), join(worktree, "packages", "ingenium-extension", "ponytail"), { recursive: true });
   return worktree;
 }
 
@@ -117,9 +120,10 @@ describe("ingenium-init-project production runtime contract", () => {
     expect(dockerfile).toContain("/usr/local/bin/ingenium-init-project");
     expect(dockerfile).toContain("/usr/local/bin/ingenium-init-project --help");
     expect(dockerfile).not.toContain("/app/node_modules/.bin/ingenium-init-project");
-    for (const pluginPath of configuredPluginPaths) {
+    for (const pluginPath of extensionPluginPaths) {
       expect(dockerfile).toContain(`/app/${pluginPath} ./${pluginPath}`);
     }
+    expect(dockerfile).toContain("/app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail");
     expect(dockerfile).toContain(`"plugin":[${configuredPluginPaths.map((pluginPath) => JSON.stringify(`/app/${pluginPath}`)).join(",")}]`);
     expect(dockerfile).not.toContain("packages/ingenium-extension/dist/auto-observer.js");
   });
@@ -252,7 +256,7 @@ describe("ingenium-init-project production runtime contract", () => {
           response.end(JSON.stringify({ data: { summary: {
             skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
             agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
-            plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 3 },
+            plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 4 },
           } } }));
           return;
         }
@@ -331,7 +335,7 @@ describe("ingenium-init-project production runtime contract", () => {
         response.end(JSON.stringify({ data: { summary: {
           skill: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 10 },
           agent: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 11 },
-          plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 3 },
+            plugin: { created: 0, updated: 0, renamed: 0, archived: 0, removed: 0, unchanged: 4 },
         } } }));
         return;
       }

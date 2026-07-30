@@ -71,3 +71,13 @@ runtime distribution and README, and `prepack` regenerates `dist/` before a
 package is packed.
 
 The definitive per-migration table, ordering constraints, repair procedures, and risk notes live in [Database Migrations Reference](../develop/database.md). Keep that file as the sole exhaustive migration inventory rather than duplicating a partial list here.
+
+## Ponytail OpenCode integration
+
+The extension includes the official Ponytail checkout closure under
+`packages/ingenium-extension/ponytail/`, pinned to upstream commit
+`16f29800fd2681bdf24f3eb4ccffe38be3baec6b` with MIT provenance and recorded
+SHA-256 file hashes. It is deliberately not an npm dependency: published
+`@dietrichgebert/ponytail@4.8.4` has a named export incompatible with OpenCode
+1.18.9. The single adapter registers six commands, the Ponytail skills path,
+and a system-prompt transform; it does not register MCP tools or capabilities.

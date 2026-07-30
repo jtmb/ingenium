@@ -76,6 +76,28 @@ tokens, or transport diagnostics.
 
 Web and CLI sessions share the same backend process state.
 
+## Ponytail
+
+The supported Ponytail integration is an immutable upstream checkout pinned to
+`16f29800fd2681bdf24f3eb4ccffe38be3baec6b` under
+`packages/ingenium-extension/ponytail/`; its MIT provenance and file hashes are
+in `PROVENANCE.md`. It is loaded once from the project-relative path in local
+`opencode.json`, or once from the container-absolute path in the generated
+global config. The published `@dietrichgebert/ponytail@4.8.4` package is not
+used because its named export is incompatible with OpenCode 1.18.9.
+
+Ponytail contributes six slash commands (`/ponytail`, `/ponytail-audit`,
+`/ponytail-debt`, `/ponytail-gain`, `/ponytail-help`, `/ponytail-review`) and
+prompt instructions only. It does not expose MCP tools or permissions. The
+runtime modes are `off`, `lite`, `full` (default), and `ultra`; the default is
+resolved from `PONYTAIL_DEFAULT_MODE`, then the platform Ponytail config file,
+then `full`. The active mode is stored in `.ponytail-active` under the
+OpenCode config directory and changes apply on the next message. Restart
+OpenCode after changing plugin registration.
+
+For installation, hash review, update, and legacy/npm cleanup, see
+[Ponytail OpenCode Integration](../configure/plugins.md#ponytail-opencode-integration).
+
 ## Context-native file upload
 
 OpenCode can import a protected local export with

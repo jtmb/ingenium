@@ -28,6 +28,8 @@ describe("container OpenCode global-config projection", () => {
       "provider": { "example": { "enabled": true } },
       "mcp": {
         "other": { "command": ["other"] },
+        "unrelated-ponytail": { "command": ["unrelated-ponytail"] },
+        "ponytail": { "command": ["legacy-ponytail"] },
         "ingenium": {
           "command": ["node", "legacy.js"],
           "environment": {
@@ -40,6 +42,12 @@ describe("container OpenCode global-config projection", () => {
         "/app/packages/ingenium-extension/auto-observer.ts",
         "/app/packages/ingenium-extension/observer.ts",
         "/app/packages/ingenium-extension/resource-sync.ts",
+        "@dietrichgebert/ponytail",
+        "@dietrichgebert/ponytail@4.8.4",
+        "@dietrichgebert/ponytail@latest",
+        "@other/ponytail",
+        "@dietrichgebert/ponytail-extra",
+        "/app/legacy/.opencode/plugins/ponytail.mjs",
         "/app/packages/ingenium-extension/skill-sync.ts",
         "plugins/operator-plugin.ts",
       ],
@@ -51,12 +59,19 @@ describe("container OpenCode global-config projection", () => {
     const raw = readFileSync(configPath, "utf8");
     const config = JSON.parse(raw) as {
       provider: { example: { enabled: boolean } };
-      mcp: { other: unknown; ingenium: { command: string[]; environment: Record<string, string> } };
+      mcp: {
+        other: unknown;
+        ponytail?: unknown;
+        "unrelated-ponytail": unknown;
+        ingenium: { command: string[]; environment: Record<string, string> };
+      };
       plugin: string[];
     };
     expect(raw).not.toContain(inlineToken);
     expect(config.provider).toEqual({ example: { enabled: true } });
     expect(config.mcp.other).toEqual({ command: ["other"] });
+    expect(config.mcp["unrelated-ponytail"]).toEqual({ command: ["unrelated-ponytail"] });
+    expect(config.mcp.ponytail).toBeUndefined();
     expect(config.mcp.ingenium.command).toEqual([
       "node",
       "/app/packages/ingenium-extension/dist/scripts/mcp-server.js",
@@ -70,10 +85,13 @@ describe("container OpenCode global-config projection", () => {
     });
     expect(config.mcp.ingenium.environment.INGENIUM_API_TOKEN).toBeUndefined();
     expect(config.plugin).toEqual([
+      "@other/ponytail",
+      "@dietrichgebert/ponytail-extra",
       "plugins/operator-plugin.ts",
       "/app/packages/ingenium-extension/plugins/auto-observer.ts",
       "/app/packages/ingenium-extension/plugins/observer.ts",
       "/app/packages/ingenium-extension/plugins/resource-sync.ts",
+      "/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
     ]);
     expect(statSync(configPath).mode & 0o777).toBe(0o600);
   });

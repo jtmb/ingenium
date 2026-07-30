@@ -113,6 +113,10 @@ COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ski
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/observer-core.ts ./packages/ingenium-extension/observer-core.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/project-resolver.ts ./packages/ingenium-extension/project-resolver.ts
 COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/api-auth.ts ./packages/ingenium-extension/api-auth.ts
+# Ponytail is an official immutable local checkout, not an npm dependency. Its
+# CommonJS companions, commands, and skills form the adapter's complete runtime
+# closure and remain outside the worktree .opencode/plugins discovery root.
+COPY --from=builder --chown=appuser:appuser /app/packages/ingenium-extension/ponytail ./packages/ingenium-extension/ponytail
 # The init wrapper invokes this helper during its build-time smoke check. Copy
 # the helper first with a non-writable executable mode so it is available without
 # widening the runtime copy surface or requiring a privileged repair.
@@ -156,7 +160,7 @@ RUN mkdir -p /app/config /app/.ingenium/logs /app/.opencode/skills /workspace &&
 # Pre-create appuser home for OpenCode config persistence
 RUN mkdir -p /home/appuser/.config/opencode /home/appuser/.local/share/opencode/log && chown -R appuser:appuser /home/appuser
 # Pre-create both the container default and the fallback opencode.json
- RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["/app/packages/ingenium-extension/plugins/auto-observer.ts","/app/packages/ingenium-extension/plugins/observer.ts","/app/packages/ingenium-extension/plugins/resource-sync.ts"]}' > /app/config/opencode.container.json && \
+ RUN echo '{"$schema":"https://opencode.ai/config.json","skills":{"paths":[".opencode/skills"]},"mcp":{"playwright":{"type":"local","command":["npx","-y","@playwright/mcp@0.0.78","--caps=vision"],"enabled":true},"ingenium":{"type":"local","command":["node","/app/packages/ingenium-extension/dist/scripts/mcp-server.js"],"enabled":true,"environment":{"INGENIUM_API_URL":"http://localhost:4097/api/v1","INGENIUM_API_TIMEOUT":"10000","INGENIUM_CORE_DB_PATH":"/app/.ingenium/data","INGENIUM_PROJECT":"global-default"}}},"plugin":["/app/packages/ingenium-extension/plugins/auto-observer.ts","/app/packages/ingenium-extension/plugins/observer.ts","/app/packages/ingenium-extension/plugins/resource-sync.ts","/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs"]}' > /app/config/opencode.container.json && \
   cp /app/config/opencode.container.json /app/opencode.json && \
   chown appuser:appuser /app/config/opencode.container.json /app/opencode.json
 

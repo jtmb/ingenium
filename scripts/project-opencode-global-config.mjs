@@ -8,6 +8,7 @@ const REQUIRED_PLUGINS = [
   "/app/packages/ingenium-extension/plugins/auto-observer.ts",
   "/app/packages/ingenium-extension/plugins/observer.ts",
   "/app/packages/ingenium-extension/plugins/resource-sync.ts",
+  "/app/packages/ingenium-extension/ponytail/.opencode/plugins/ponytail.mjs",
 ];
 
 function isRecord(value) {
@@ -111,7 +112,11 @@ function readConfig(configPath) {
 }
 
 function isManagedPlugin(value) {
-  return typeof value === "string" && /(?:^|\/)(?:auto-observer|observer|resource-sync)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value);
+  return typeof value === "string" && (
+    /(?:^|\/)(?:auto-observer|observer|resource-sync)(?:-plugin)?(?:\.ts|\.js)?$|(?:^|\/)skill-sync(?:\.ts|\.js)?$/.test(value)
+    || /^@dietrichgebert\/ponytail(?:@[^/]+)?$/.test(value)
+    || /(?:^|\/)\.opencode\/plugins\/ponytail\.mjs$/.test(value)
+  );
 }
 
 function writeAtomically(configPath, value) {
@@ -146,6 +151,7 @@ function writeAtomically(configPath, value) {
 export function projectOpenCodeGlobalConfig(configPath = DEFAULT_CONFIG) {
   const config = readConfig(configPath);
   const mcp = isRecord(config.mcp) ? config.mcp : {};
+  delete mcp.ponytail;
   const existingIngenium = isRecord(mcp.ingenium) ? mcp.ingenium : {};
   const environment = isRecord(existingIngenium.environment) ? { ...existingIngenium.environment } : {};
 
