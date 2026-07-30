@@ -50,7 +50,7 @@ describe("OpenCode session event route", () => {
     const reader = response.body?.getReader();
     expect(reader).toBeDefined();
 
-    // This is the shape emitted by deployed OpenCode 1.18.3: `properties`
+    // This is the shape emitted by deployed OpenCode 1.18.9: `properties`
     // carries sessionID, and semantic part type arrives before text deltas.
     // Intentionally leave the stream open after session.idle: real /event
     // connections are persistent rather than response-per-turn streams.

@@ -288,7 +288,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const mappedType = state.partTypes[key];
       const target = msgs.find((m) => m.id === action.messageID);
 
-      // v1.18.3 deltas use field: "text" for both answer and reasoning.
+      // v1.18.9 deltas use field: "text" for both answer and reasoning.
       // Only a preceding part.updated record is authoritative about which one
       // the part is, so an unmapped delta must never fabricate reasoning.
       if (!target || mappedType !== action.partType) {
@@ -515,7 +515,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 }
 
 /* ------------------------------------------------------------------ */
-/*  SSE event types (verified v1.18.3 contract)                       */
+/*  SSE event types (verified v1.18.9 contract)                       */
 /* ------------------------------------------------------------------ */
 
 interface SSEEnvelope {
@@ -691,7 +691,7 @@ function yieldSSEEventRender(): Promise<void> {
  *
  * - Loads historical messages on sessionId change
  * - Opens SSE stream for real-time events after sending a prompt
- * - Parses v1.18.3 contract events: message.part.delta, message.part.updated,
+ * - Parses v1.18.9 contract events: message.part.delta, message.part.updated,
  *   message.updated, session.status, session.idle, session.diff, session.error
  * - Idempotent reducer using messageID + partID as stable keys
  * - Exponential backoff reconnection (1s, 2s, 4s, max 30s, 3 attempts)
@@ -996,7 +996,7 @@ export function useOpenCodeChat(sessionId: string | null) {
             delta,
             partType,
           });
-          // field is always "text" in v1.18.3. The prior part.updated type,
+          // field is always "text" in v1.18.9. The prior part.updated type,
           // not the delta field, determines whether this is live reasoning.
           dispatch({
             type: "SET_STREAM_ACTIVITY",

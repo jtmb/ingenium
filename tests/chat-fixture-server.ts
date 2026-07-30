@@ -108,7 +108,7 @@ function makeSession(id: string, title: string): FixtureSession {
     projectID: "fixture-project",
     directory: "/workspace",
     path: "/workspace",
-    version: "1.18.3",
+    version: "1.18.9",
     time: { created: now, updated: now },
     cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
@@ -211,7 +211,7 @@ function parseBody(req: IncomingMessage): Promise<string> {
  *
  * Two modes:
  * - "simple": basic text-only response (backward compatible)
- * - "rich": full v1.18.3 pipeline — reasoning deltas, shell and Web Search
+ * - "rich": full v1.18.9 pipeline — reasoning deltas, shell and Web Search
  *           calls, response text, completed metadata, session.idle
  *
  * In rich mode, small delays between event groups give the frontend time
@@ -261,7 +261,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
   });
 
   if (mode === "rich") {
-    // ── Rich mode: full v1.18.3 pipeline ──
+    // ── Rich mode: full v1.18.9 pipeline ──
 
     // 1. session.status: busy
     writeSse(res,
@@ -292,7 +292,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // 3. v1.18.3 announces the semantic part before its deltas. Reasoning
+    // 3. v1.18.9 announces the semantic part before its deltas. Reasoning
     // deltas themselves use field: "text", just like answer text does.
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
@@ -446,7 +446,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
 
     await delay(300);
 
-    // 7. The answer part follows the same v1.18.3 part-updated → text-delta
+    // 7. The answer part follows the same v1.18.9 part-updated → text-delta
     // contract. Its different part type keeps answer and reasoning separate.
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
@@ -540,7 +540,7 @@ async function streamSSE(res: ServerResponse, mode: "simple" | "rich" = "rich"):
       })}\n\n`,
     );
 
-    // 2. v1.18.3 announces the text part before its text delta.
+    // 2. v1.18.9 announces the text part before its text delta.
     writeSse(res,
       `event: message.part.updated\ndata: ${JSON.stringify({
         type: "message.part.updated",

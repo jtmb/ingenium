@@ -2,7 +2,7 @@ import { logger } from "ingenium-core";
 import { config } from "../config/index.js";
 
 /**
- * Server-side typed HTTP client for the OpenCode v1.18.3 REST API.
+ * Server-side typed HTTP client for the OpenCode v1.18.9 REST API.
  *
  * Routes all requests through `fetch` with HTTP Basic auth, normalizing errors
  * into a consistent `{ error: { message, code } }` shape. The SSE streaming
@@ -13,7 +13,7 @@ import { config } from "../config/index.js";
  * - The Authorization header value is never serialized to error messages.
  * - Runtime checks prevent `undefined` passwords from reaching the wire.
  *
- * 🔴 Verified against: OpenCode v1.18.3 contract (see /tmp/opencode-contract.md)
+ * 🔴 Verified against: OpenCode v1.18.9 contract (see /tmp/opencode-contract.md)
  */
 
 /* ── Types ── */
@@ -62,7 +62,7 @@ export interface FilePartInput {
   filename?: string;
 }
 
-/** Shape for prompt send request body (v1.18.3 contract) */
+/** Shape for prompt send request body (v1.18.9 contract) */
 export interface SendPromptBody {
   parts: Array<TextPartInput | FilePartInput>;
   model?: { providerID: string; modelID: string };
@@ -160,7 +160,7 @@ export interface CommandBody {
   arguments?: string[];
 }
 
-/* ── Message shape (v1.18.3 contract) ── */
+/* ── Message shape (v1.18.9 contract) ── */
 
 export interface MessageInfo {
   id: string;
@@ -207,7 +207,7 @@ export interface MessageEnvelope {
   parts: MessagePart[];
 }
 
-/* ── Session shape (v1.18.3 contract) ── */
+/* ── Session shape (v1.18.9 contract) ── */
 
 export interface SessionTime {
   created: number;
@@ -262,7 +262,7 @@ export interface SessionInfo {
   revert?: SessionRevert;
 }
 
-/* ── Provider shape (v1.18.3 contract) ── */
+/* ── Provider shape (v1.18.9 contract) ── */
 
 export interface ProviderModel {
   id: string;
@@ -347,7 +347,7 @@ interface V2Response<T> {
   data: T;
 }
 
-/* ── Agent shape (v1.18.3 contract) ── */
+/* ── Agent shape (v1.18.9 contract) ── */
 
 export interface AgentInfo {
   name: string;
@@ -362,7 +362,7 @@ export interface AgentInfo {
   options: Record<string, unknown>;
 }
 
-/* ── Skill shape (v1.18.3 contract) ── */
+/* ── Skill shape (v1.18.9 contract) ── */
 
 export interface SkillInfo {
   name: string;
@@ -375,9 +375,9 @@ export interface SkillInfo {
 
 export interface McpServerInfo {
   name: string;
-  /** OpenCode v1.18.3 connection state. */
+  /** OpenCode v1.18.9 connection state. */
   status?: "connected" | "disabled" | "failed" | "needs_auth" | "needs_client_registration";
-  /** Legacy compatibility for pre-v1.18.3 servers. */
+  /** Legacy compatibility for pre-v1.18.9 servers. */
   connected?: boolean;
   toolCount?: number;
   tools?: number | unknown[];
@@ -417,7 +417,7 @@ const PROVIDER_CATALOG_ERROR: OpenCodeErrorShape["error"] = {
 
 /**
  * Build a Basic auth header value from the configured password.
- * Uses "opencode" as the username per the v1.18.3 contract:
+ * Uses "opencode" as the username per the v1.18.9 contract:
  *   Authorization: Basic base64("opencode:<PASSWORD>")
  *
  * Returns `null` if OPENCODE_SERVER_PASSWORD is not set — callers
@@ -642,12 +642,12 @@ export function isOpenCodeError<T>(result: OpenCodeResult<T>): result is OpenCod
 /* ── Client ── */
 
 /**
- * Singleton OpenCode API client for v1.18.3.
+ * Singleton OpenCode API client for v1.18.9.
  *
  * Every method returns a `OpenCodeResult<T>` — callers should check
  * `isOpenCodeError(result)` before accessing the payload.
  *
- * Endpoints verified against the v1.18.3 contract at /tmp/opencode-contract.md.
+ * Endpoints verified against the v1.18.9 contract at /tmp/opencode-contract.md.
  */
 export const opencodeClient = {
   /* ── Health ── */
@@ -945,7 +945,7 @@ export const opencodeClient = {
   listAgents: (): Promise<OpenCodeResult<AgentInfo[]>> =>
     request<AgentInfo[]>("/agent"),
 
-  /* ── Skills (v1.18.3: GET /skill works, but we DO NOT proxy it — skills are
+  /* ── Skills (v1.18.9: GET /skill works, but we DO NOT proxy it — skills are
          managed by the Ingenium skill system, not OpenCode) ── */
 
   listSkills: (): Promise<OpenCodeResult<SkillInfo[]>> =>
@@ -975,14 +975,14 @@ export const opencodeClient = {
 
   /**
    * Get pending permission requests (global).
-   * v1.18.3 contract: GET /permission returns array of PermissionRequest objects.
+   * v1.18.9 contract: GET /permission returns array of PermissionRequest objects.
    */
   getPermissions: (directory?: string): Promise<OpenCodeResult<PermissionRequest[]>> =>
     request<PermissionRequest[]>("/permission", { query: { directory } }),
 
   /**
    * Reply to a session-scoped permission request.
-   * v1.18.3 contract: POST /session/{sessionId}/permissions/{permissionId}
+   * v1.18.9 contract: POST /session/{sessionId}/permissions/{permissionId}
    *   body: { "response": "once" | "always" | "reject" }
    */
   replyPermission: (
@@ -1001,7 +1001,7 @@ export const opencodeClient = {
 
   /**
    * Get pending questions (global).
-   * v1.18.3 contract: GET /question returns array of QuestionInfo objects.
+   * v1.18.9 contract: GET /question returns array of QuestionInfo objects.
    * Note: Questions also arrive via SSE events and message parts.
    */
   getQuestions: (directory?: string): Promise<OpenCodeResult<QuestionInfo[]>> =>
@@ -1011,7 +1011,7 @@ export const opencodeClient = {
 
   /**
    * Returns a ReadableStream piping SSE events from the OpenCode /event endpoint.
-   * v1.18.3 contract: GET /event?session={id} for filtered, or /event?directory=/workspace.
+   * v1.18.9 contract: GET /event?session={id} for filtered, or /event?directory=/workspace.
    * When `sessionId` is provided, events are filtered to that session.
    * When `directory` is provided, events are filtered to that directory.
    */

@@ -91,7 +91,7 @@ const upload = multer({
  * SQLite database outside the API authority pattern, because the OpenCode DB is a
  * separate process's database mounted via docker-compose volume.
  *
- * Proxy routes validated against the v1.18.3 contract at /tmp/opencode-contract.md.
+ * Proxy routes validated against the v1.18.9 contract at /tmp/opencode-contract.md.
  */
 export const opencodeRouter = Router();
 
@@ -683,7 +683,7 @@ opencodeRouter.put("/chat-selection", async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   OpenCode HTTP API proxy routes (v1.18.3 contract)
+   OpenCode HTTP API proxy routes (v1.18.9 contract)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Health ── */
@@ -781,7 +781,7 @@ opencodeRouter.delete("/sessions/:id/messages/:msgId", async (req, res) => {
   sendResult(req, res, result);
 });
 
-/* ── Prompt (POST /sessions/:id/message — uses parts array per v1.18.3) ── */
+/* ── Prompt (POST /sessions/:id/message — uses parts array per v1.18.9) ── */
 
 function isPromptPart(part: unknown): boolean {
   if (part === null || typeof part !== "object") return false;

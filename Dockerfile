@@ -55,8 +55,8 @@ RUN printf '%s' "$IMAGE_REVISION" | grep -Eq '^[0-9a-f]{40}$' && \
 LABEL org.opencontainers.image.revision="${IMAGE_REVISION}" \
       org.opencontainers.image.source="${IMAGE_SOURCE}"
 
-ARG OPENCODE_VERSION=1.18.3
-ARG OPENCODE_SHA256=60f27b2679f00a511b6539f97e02448afaf58d9c66e2448285ea0c517ca84583
+ARG OPENCODE_VERSION=1.18.9
+ARG OPENCODE_SHA256=a0fa4b7b8bdacbd013e79a5f69d4220d36b545cd3ea296ba765f3016fa501b5b
 RUN apt-get update && apt-get install -y --no-install-recommends \
     supervisor nginx curl ca-certificates tzdata git && \
     rm -rf /var/lib/apt/lists/*
@@ -64,6 +64,8 @@ RUN curl -fsSL -o /tmp/opencode.tar.gz "https://github.com/anomalyco/opencode/re
     echo "${OPENCODE_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin/ opencode && \
     chmod +x /usr/local/bin/opencode && \
+    test "$(opencode --version)" = "${OPENCODE_VERSION}" && \
+    opencode --version && \
     rm /tmp/opencode.tar.gz
 RUN curl -fsSL -o /tmp/ttyd.x86_64 "https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64" && \
     echo "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55  /tmp/ttyd.x86_64" | sha256sum -c - && \

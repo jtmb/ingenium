@@ -127,7 +127,7 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
     return allSessions.filter((s) => s.title.toLowerCase().includes(q));
   }, [allSessions, searchQuery]);
 
-  /** Archive is not supported in the V1.18.3 API — always empty. */
+  /** Archive is not supported in the V1.18.9 API — always empty. */
   const archivedSessions: OpenCodeSession[] = [];
 
   /* ---- actions ---- */
@@ -401,7 +401,7 @@ export function useOpenCodeSessions(): UseOpenCodeSessionsReturn {
       const session = allSessions.find((s) => s.id === id);
 
       if (session && supportsArchive(session)) {
-        // V2: archive endpoint would go here — not available in V1.18.3
+        // V2: archive endpoint would go here — not available in V1.18.9
         // Placeholder for when the API is upgraded
         setError("Archive not supported by current API version");
         return;

@@ -322,7 +322,7 @@ describe("request — error normalization", () => {
     }
   });
 
-  it("extracts error code from name field (OpenCode v1.18.3 errors)", async () => {
+  it("extracts error code from name field (OpenCode v1.18.9 errors)", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -370,7 +370,7 @@ describe("opencodeClient — method routing", () => {
   it("health() calls GET /global/health", async () => {
     const fetchSpy = vi
       .fn()
-      .mockResolvedValue(mockResponse(200, { healthy: true, version: "1.18.3" }));
+      .mockResolvedValue(mockResponse(200, { healthy: true, version: "1.18.9" }));
     vi.stubGlobal("fetch", fetchSpy);
 
     const result = await opencodeClient.health();
@@ -378,7 +378,7 @@ describe("opencodeClient — method routing", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const url = fetchSpy.mock.calls[0][0] as string;
     expect(url).toContain("/global/health");
-    expect(result).toEqual({ healthy: true, version: "1.18.3" });
+    expect(result).toEqual({ healthy: true, version: "1.18.9" });
   });
 
   it("updateGlobalConfig() patches the running global configuration", async () => {

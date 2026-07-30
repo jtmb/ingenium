@@ -1,7 +1,7 @@
 /**
  * MCP status projection for the dashboard-facing OpenCode proxy.
  *
- * OpenCode v1.18.3 reports a tagged status rather than the legacy boolean
+ * OpenCode v1.18.9 reports a tagged status rather than the legacy boolean
  * `connected` flag. Keep accepting that boolean for older installations, but
  * never forward arbitrary upstream diagnostics to the browser.
  */
@@ -67,7 +67,7 @@ export function normalizeMcpServerStatus(info: unknown, name?: string): Sanitize
     };
   }
 
-  // v1.18.3 status takes precedence over the legacy boolean when both exist.
+  // v1.18.9 status takes precedence over the legacy boolean when both exist.
   const status: McpConnectionStatus = isKnownStatus(info.status)
     ? info.status
     : typeof info.status === "undefined" && typeof info.connected === "boolean"

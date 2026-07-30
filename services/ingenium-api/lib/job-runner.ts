@@ -496,7 +496,7 @@ function terminateProcess(runId: string, proc: ChildProcess): Promise<void> {
 /**
  * Execute a job run by spawning the opencode CLI.
  *
- * Feasibility gate: opencode v1.17.18 supports `opencode run "<prompt>" --agent <name>`
+ * Feasibility gate: opencode v1.18.9 supports `opencode run "<prompt>" --agent <name>`
  * The message is a positional argument, not a flag. The `--auto` flag enables
  * non-interactive auto-approval of permissions.
  */

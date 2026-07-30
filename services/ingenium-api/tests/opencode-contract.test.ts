@@ -3,7 +3,7 @@
  *
  * These are contract-level tests that verify the proxy route handlers at
  * `routes/opencode.ts` correctly forward fields, construct bodies, and handle
- * edge cases according to the OpenCode v1.18.3 contract. The opencode client
+ * edge cases according to the OpenCode v1.18.9 contract. The opencode client
  * is mocked so no real OpenCode server is needed.
  *
  * Each test maps to a verified defect from the audit:
@@ -582,7 +582,7 @@ describe("Defect 4: Permissions response shape", () => {
     // the frontend cannot display which session is requesting permission.
     //
     // To fix: Add `sessionID: string` to PermissionRequest interface and
-    // verify the OpenCode v1.18.3 /permission endpoint returns it.
+    // verify the OpenCode v1.18.9 /permission endpoint returns it.
     const perm: PermissionRequest = {
       id: "test",
       permission: "read",

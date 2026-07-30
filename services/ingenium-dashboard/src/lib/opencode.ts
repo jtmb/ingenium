@@ -11,7 +11,7 @@ async function oc<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Types matching the verified OpenCode v1.18.3 contract             */
+/*  Types matching the verified OpenCode v1.18.9 contract             */
 /* ------------------------------------------------------------------ */
 
 /* ----- Session ----- */
@@ -675,7 +675,7 @@ export const opencode = {
   questions: {
     /**
      * List pending questions for a session/directory.
-     * v1.18.3 contract: GET /question returns array of { id, text } objects.
+     * v1.18.9 contract: GET /question returns array of { id, text } objects.
      */
     list: (directory?: string) =>
       oc<Array<{ id: string; text?: string }>>(

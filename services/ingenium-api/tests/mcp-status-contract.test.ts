@@ -60,7 +60,7 @@ describe("OpenCode MCP status proxy contract", () => {
     "failed",
     "needs_auth",
     "needs_client_registration",
-  ] as const)("normalizes the v1.18.3 %s status", async (status) => {
+  ] as const)("normalizes the v1.18.9 %s status", async (status) => {
     mocks.getMCPStatus.mockResolvedValue({ alpha: { status, tools: 2, error: "upstream diagnostic" } });
 
     const response = await fetch(`${baseUrl}/mcp`);

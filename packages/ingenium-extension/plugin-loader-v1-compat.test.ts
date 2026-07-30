@@ -12,6 +12,9 @@ const wrapperSpecs = [
   "./packages/ingenium-extension/plugins/observer.ts",
   "./packages/ingenium-extension/plugins/resource-sync.ts",
 ] as const;
+const OPENCODE_VERSION = "1.18.9";
+const OPENCODE_PLUGIN_INTEGRITY = "sha512-0kFX9Usj+3N+WupIe9VnEdDNzMNbW4/C5GeIzdj02/t5kQoXsNrFpW3Br9aABebazcaYsQEWdlaLV0zQISy3OA==";
+const OPENCODE_SDK_INTEGRITY = "sha512-oDJSmsmiGW+3lNLmZYj3EpUkpiT3ITZBKffH3mrmu2KMJXlkxQ/Nvv7jqPffSM7o8lCdBZS/aCE+2GkA3/92gQ==";
 
 type V1Plugin = {
   id: string;
@@ -109,6 +112,45 @@ describe.sequential("OpenCode 1.18.9 plugin-loader compatibility", () => {
     expect(resolveOpenCode1189ServerEntrypoint("./packages/ingenium-extension/resource-sync.ts", repositoryRoot)).toBe(
       pathToFileURL(resolve(extensionRoot, "dist/index.js")).href,
     );
+  });
+
+  it("pins every direct plugin declaration and its locked SDK transitively to 1.18.9", () => {
+    const rootManifest = JSON.parse(readFileSync(resolve(repositoryRoot, "package.json"), "utf8")) as {
+      devDependencies: Record<string, string>;
+    };
+    const extensionManifest = JSON.parse(readFileSync(resolve(extensionRoot, "package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    const localManifest = JSON.parse(readFileSync(resolve(repositoryRoot, ".opencode/package.json"), "utf8")) as {
+      dependencies: Record<string, string>;
+    };
+    const rootLock = JSON.parse(readFileSync(resolve(repositoryRoot, "package-lock.json"), "utf8")) as {
+      packages: Record<string, { dependencies?: Record<string, string>; devDependencies?: Record<string, string>; version?: string; integrity?: string }>;
+    };
+    const localLock = JSON.parse(readFileSync(resolve(repositoryRoot, ".opencode/package-lock.json"), "utf8")) as {
+      packages: Record<string, { dependencies?: Record<string, string>; version?: string; integrity?: string }>;
+    };
+
+    expect(rootManifest.devDependencies["@opencode-ai/plugin"]).toBe(OPENCODE_VERSION);
+    expect(extensionManifest.dependencies["@opencode-ai/plugin"]).toBe(OPENCODE_VERSION);
+    expect(localManifest.dependencies["@opencode-ai/plugin"]).toBe(OPENCODE_VERSION);
+    expect(rootLock.packages[""]?.devDependencies?.["@opencode-ai/plugin"]).toBe(OPENCODE_VERSION);
+    expect(rootLock.packages["packages/ingenium-extension"]?.dependencies?.["@opencode-ai/plugin"]).toBe(OPENCODE_VERSION);
+    expect(localLock.packages[""]?.dependencies?.["@opencode-ai/plugin"]).toBe(OPENCODE_VERSION);
+
+    for (const lock of [rootLock, localLock]) {
+      const plugin = lock.packages["node_modules/@opencode-ai/plugin"];
+      const sdk = lock.packages["node_modules/@opencode-ai/sdk"];
+      expect(plugin).toMatchObject({
+        version: OPENCODE_VERSION,
+        integrity: OPENCODE_PLUGIN_INTEGRITY,
+        dependencies: { "@opencode-ai/sdk": OPENCODE_VERSION },
+      });
+      expect(sdk).toMatchObject({
+        version: OPENCODE_VERSION,
+        integrity: OPENCODE_SDK_INTEGRITY,
+      });
+    }
   });
 
   it("packages V1-only default wrappers and invokes only their server implementations", async () => {
