@@ -11,6 +11,7 @@ import {
   cleanupTestRun,
   createTestRunContext,
   getApprovedTempRoot,
+  getPlaywrightOutputDirectory,
   getTestRunDashboardUrl,
   getTestRunArtifactRoot,
   getTestRunPortLockPath,
@@ -92,6 +93,16 @@ describe("test-run context", () => {
     expect(route.searchParams.get("project")).toBe(context.project);
     expect(route.searchParams.get("source")).toBe("agent");
     expect(() => getTestRunDashboardUrl(context, "https://example.test/pipeline")).toThrow(/fixture origin/);
+  });
+
+  it("resolves Playwright output only below the canonical repository artifact root", () => {
+    expect(getPlaywrightOutputDirectory("default", process.cwd())).toBe(
+      join(process.cwd(), "tests", "artifacts", "playwright", "default"),
+    );
+    expect(() => getPlaywrightOutputDirectory("tests/test-results", process.cwd()))
+      .toThrow(/single safe path component/);
+    expect(() => getPlaywrightOutputDirectory("..", process.cwd()))
+      .toThrow(/single safe path component/);
   });
 
   it("uses atomic run-owned reservations for concurrent runners", () => {

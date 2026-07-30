@@ -342,6 +342,29 @@ export function getTestRunArtifactRoot(repoRoot = getCanonicalRepoRoot()): strin
   return artifactRoot;
 }
 
+/**
+ * Resolve the only Playwright output root accepted by this repository.
+ *
+ * Config files pass their source-derived repository root rather than relying
+ * on Playwright's current working directory. This prevents a config loaded
+ * from `tests/` from silently writing into `tests/tests/test-results`.
+ */
+export function getPlaywrightOutputDirectory(scope: string, repoRoot: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(scope) || scope === "." || scope === "..") {
+    throw new Error("Playwright output scope must be a single safe path component");
+  }
+  const canonicalRepoRoot = getCanonicalRepoRoot(repoRoot);
+  const outputRoot = join(canonicalRepoRoot, "tests", "artifacts", "playwright");
+  assertCanonicalPathForWrite(outputRoot, canonicalRepoRoot, "Playwright output root");
+  const outputDirectory = join(outputRoot, scope);
+  assertCanonicalPathForWrite(outputDirectory, outputRoot, "Playwright output directory");
+  if (!pathIsInside(outputRoot, outputDirectory)
+    || outputDirectory.includes(`${join("tests", "tests")}${process.platform === "win32" ? "\\" : "/"}`)) {
+    throw new Error("Playwright output directory escaped the canonical artifact root");
+  }
+  return outputDirectory;
+}
+
 function telemetryPathFor(manifest: Pick<TestRunManifest, "repoRoot" | "runId">): string {
   return join(getTestRunArtifactRoot(manifest.repoRoot), manifest.runId, TEST_RUN_TELEMETRY_FILENAME);
 }

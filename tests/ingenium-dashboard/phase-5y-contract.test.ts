@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { manualArtifactDirectory } from "./visual-qa-artifacts";
 
 const require = createRequire(import.meta.url);
@@ -119,6 +119,25 @@ describe("Phase 5Y screenshot and artifact hygiene", () => {
     expect(result.status).not.toBe(0);
     expect(`${result.stdout}${result.stderr}`).toMatch(/loose artifact/i);
     expect(readFileSync(loose, "utf8")).toBe("preserve me");
+  });
+
+  it("does not misclassify agent reference Markdown as a loose test artifact", () => {
+    const repository = temporaryRepository();
+    const reference = join(
+      repository,
+      ".agents",
+      "skills",
+      "input-systems",
+      "references",
+      "buffering-and-accessibility.md",
+    );
+    mkdirSync(dirname(reference), { recursive: true });
+    writeFileSync(reference, "reference material\n");
+
+    const result = runHygiene(repository);
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(reference, "utf8")).toBe("reference material\n");
   });
 
   it("reports a manual capture placed directly under the manual root", () => {

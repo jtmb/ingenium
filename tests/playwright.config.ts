@@ -1,10 +1,14 @@
 import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
 import {
   cleanupTestRun,
+  getPlaywrightOutputDirectory,
   readTestRunManifest,
   TEST_RUN_MANIFEST_ENV,
 } from "./test-run-context";
 import { getDefaultSuiteRuntime } from "./ingenium-dashboard/default-suite-runtime";
+
+const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "..");
 
 /**
  * Playwright E2E configuration for the isolated fixture run.
@@ -76,7 +80,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: Boolean(process.env.CI),
-  outputDir: "artifacts/playwright/default",
+  outputDir: getPlaywrightOutputDirectory("default", PLAYWRIGHT_REPO_ROOT),
   globalSetup: "./playwright-global-setup.ts",
   globalTeardown: "./playwright-global-teardown.ts",
   use: {

@@ -1,4 +1,8 @@
 import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
+import { getPlaywrightOutputDirectory } from "./test-run-context";
+
+const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "..");
 
 /**
  * Explicit mail-suite config. Mocked mail UI tests and live mail tests share
@@ -21,7 +25,7 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   fullyParallel: false,
-  outputDir: "artifacts/playwright/mail",
+  outputDir: getPlaywrightOutputDirectory("mail", PLAYWRIGHT_REPO_ROOT),
   use: {
     baseURL: process.env.INGENIUM_E2E_DASHBOARD_URL ?? "http://localhost:3000",
     headless: true,

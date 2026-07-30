@@ -29,6 +29,14 @@ const OPT_IN_FILES = [
 ] as const;
 
 const DEV_PORTS = [3000, 4097, 4098, 4099, 4999];
+const PLAYWRIGHT_CONFIGS = [
+  "tests/playwright.config.ts",
+  "tests/playwright.docker.config.ts",
+  "tests/playwright.real-provider.config.ts",
+  "tests/playwright.mail.config.ts",
+  "tests/playwright.manual.config.ts",
+  "tests/dashboard-route-parity/playwright.config.ts",
+] as const;
 
 function sourceFor(relativePath: string): string {
   return readFileSync(resolve(process.cwd(), relativePath), "utf8");
@@ -53,6 +61,14 @@ describe("default Playwright suite containment", () => {
     const config = sourceFor("tests/playwright.config.ts");
     for (const file of OPT_IN_FILES) {
       expect(config).not.toContain(file);
+    }
+  });
+
+  it("resolves every Playwright output directory from the canonical repository root", () => {
+    for (const file of PLAYWRIGHT_CONFIGS) {
+      const config = sourceFor(file);
+      expect(config, `${file} must use the canonical output helper`).toContain("getPlaywrightOutputDirectory(");
+      expect(config, `${file} must not resolve output below tests/tests`).not.toContain("tests/tests");
     }
   });
 });

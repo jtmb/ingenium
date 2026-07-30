@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   TEST_RUN_MANIFEST_ENV,
+  TEST_RUN_TEMP_PREFIX,
   TEST_RUN_TELEMETRY_ENV,
   createTestRunContext,
   cleanupTestRun,
@@ -16,10 +18,26 @@ import {
   updateTestRunManifest,
 } from "./test-run-context";
 import { recoverStoppingTestRun } from "./test-server-lifecycle";
-import { auditSuiteContainment, strictFailures } from "./suite-containment-audit";
+import {
+  auditSuiteContainment,
+  inspectOwnedMisplacedTestResults,
+  removeOwnedMisplacedTestResults,
+  strictFailures,
+} from "./suite-containment-audit";
 
 const contexts: Array<ReturnType<typeof createTestRunContext>> = [];
 const servers: Server[] = [];
+const temporaryRepositories: string[] = [];
+const temporaryManifestlessEvidence: string[] = [];
+const testComposeOwnership = {
+  classification: "unverified" as const,
+  hostPorts: [3000, 4097, 1455],
+  reason: "unit test does not inspect Docker",
+};
+
+function auditContainment(options: Parameters<typeof auditSuiteContainment>[0] = {}) {
+  return auditSuiteContainment({ ...options, composeOwnership: options.composeOwnership ?? testComposeOwnership });
+}
 
 function createContextWithReservedPortRetry(
   options: Parameters<typeof createTestRunContext>[0] = {},
@@ -69,8 +87,23 @@ afterEach(async () => {
     }
     rmSync(dirname(context.telemetryPath!), { recursive: true, force: true });
   }
+  for (const repository of temporaryRepositories.splice(0)) {
+    rmSync(repository, { recursive: true, force: true });
+  }
+  for (const path of temporaryManifestlessEvidence.splice(0)) {
+    rmSync(path, { recursive: true, force: true });
+  }
   resetTestRunContextForTests();
 });
+
+function temporaryRepository(): string {
+  const repository = mkdtempSync(join(tmpdir(), "ingenium-containment-audit-"));
+  temporaryRepositories.push(repository);
+  mkdirSync(join(repository, "tests", "test-results"), { recursive: true });
+  writeFileSync(join(repository, "package.json"), "{}\n");
+  execFileSync("git", ["init", "--quiet", repository], { encoding: "utf8" });
+  return repository;
+}
 
 describe("suite containment audit", () => {
   it("detects a leaked manifest-owned dynamic port from persisted telemetry", async () => {
@@ -81,7 +114,7 @@ describe("suite containment audit", () => {
     await new Promise<void>((resolve) => server.listen(context.ports.api, "127.0.0.1", resolve));
 
     cleanupTestRun(context.manifestPath);
-    const report = await auditSuiteContainment({ includeRepositoryTelemetry: true });
+    const report = await auditContainment({ includeRepositoryTelemetry: true });
 
     expect(report.managedPorts).toContain(context.ports.api);
     expect(report.ports.find(({ port }) => port === context.ports.api)).toMatchObject({
@@ -104,7 +137,7 @@ describe("suite containment audit", () => {
     if (!child.pid) throw new Error("dynamic listener child did not expose a PID");
     try {
       await new Promise((resolve) => setTimeout(resolve, 150));
-      const report = await auditSuiteContainment();
+      const report = await auditContainment();
       const candidate = report.discoveredProcesses.find(({ pid }) => pid === child.pid);
 
       expect(candidate).toBeDefined();
@@ -144,7 +177,7 @@ describe("suite containment audit", () => {
     process.env.INGENIUM_AUDIT_TEMP_PREFIX = "ingenium-phase-5g-no-other-temp-";
     try {
       await recoverStoppingTestRun(context.manifestPath, { portTimeoutMs: 50 });
-      const report = await auditSuiteContainment();
+      const report = await auditContainment();
       expect(report.telemetry.find(({ runId }) => runId === context.runId)?.resolution?.status).toBe("resolved");
       expect(strictFailures(report).some((failure) => failure.includes(context.runId))).toBe(false);
     } finally {
@@ -167,7 +200,7 @@ describe("suite containment audit", () => {
       telemetryPaths.push(context.telemetryPath!);
     }
 
-    const report = await auditSuiteContainment({ telemetryPaths });
+    const report = await auditContainment({ telemetryPaths });
     const failures = strictFailures(report);
     for (const manifestPath of missingManifestPaths) {
       const telemetryPath = report.telemetry.find((entry) => entry.manifestPath === manifestPath)?.path;
@@ -185,7 +218,7 @@ describe("suite containment audit", () => {
       contexts.push(context);
       updateTestRunManifest(context.manifestPath, { status });
 
-      const report = await auditSuiteContainment();
+      const report = await auditContainment();
       const telemetry = report.telemetry.find(({ runId }) => runId === context.runId);
       expect(telemetry).toMatchObject({ status, manifestState: "valid", activeProcessCount: 0 });
       expect(strictFailures(report).some((failure) => failure.includes("not terminally resolved")
@@ -202,7 +235,7 @@ describe("suite containment audit", () => {
     process.env[TEST_RUN_MANIFEST_ENV] = context.manifestPath;
     process.env[TEST_RUN_TELEMETRY_ENV] = context.telemetryPath!;
     try {
-      const report = await auditSuiteContainment();
+      const report = await auditContainment();
       expect(report.telemetryErrors.some((error) => error.includes(context.telemetryPath!))).toBe(true);
       expect(strictFailures(report).some((failure) => failure.startsWith("telemetry:")
         && failure.includes(context.telemetryPath!))).toBe(true);
@@ -227,7 +260,7 @@ describe("suite containment audit", () => {
     process.env[TEST_RUN_MANIFEST_ENV] = context.manifestPath;
     process.env[TEST_RUN_TELEMETRY_ENV] = context.telemetryPath!;
     try {
-      const report = await auditSuiteContainment();
+      const report = await auditContainment();
       const cleanReport = {
         ...report,
         ports: [],
@@ -269,12 +302,12 @@ describe("suite containment audit", () => {
     contexts.push(first, second);
 
     const [firstReport, secondReport] = await Promise.all([
-      auditSuiteContainment({
+      auditContainment({
         manifestPath: first.manifestPath,
         telemetryPaths: [first.telemetryPath!],
         includeRepositoryTelemetry: false,
       }),
-      auditSuiteContainment({
+      auditContainment({
         manifestPath: second.manifestPath,
         telemetryPaths: [second.telemetryPath!],
         includeRepositoryTelemetry: false,
@@ -292,7 +325,7 @@ describe("suite containment audit", () => {
     mkdirSync(legacyDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(join(legacyDirectory, "evidence.txt"), "retained legacy evidence\n");
     try {
-      const report = await auditSuiteContainment({
+      const report = await auditContainment({
         manifestPath: "",
         telemetryPaths: [],
         includeRepositoryTelemetry: false,
@@ -341,7 +374,7 @@ describe("suite containment audit", () => {
     writeFileSync(context.telemetryPath!, JSON.stringify(historicalTelemetry));
     rmSync(context.manifestPath, { force: true });
 
-    const report = await auditSuiteContainment({ includeRepositoryTelemetry: true });
+    const report = await auditContainment({ includeRepositoryTelemetry: true });
     const entry = report.telemetry.find(({ runId }) => runId === context.runId);
 
     expect(entry).toMatchObject({
@@ -366,7 +399,7 @@ describe("suite containment audit", () => {
     mkdirSync(malformedDirectory, { recursive: true, mode: 0o700 });
     writeFileSync(malformedTelemetryPath, "not valid telemetry\n");
     try {
-      const report = await auditSuiteContainment({ includeRepositoryTelemetry: true });
+      const report = await auditContainment({ includeRepositoryTelemetry: true });
       const current = report.telemetry.find(({ runId }) => runId === context.runId);
 
       expect(current).toMatchObject({ manifestState: "missing", evidenceDisposition: "current" });
@@ -376,5 +409,84 @@ describe("suite containment audit", () => {
     } finally {
       rmSync(malformedDirectory, { recursive: true, force: true });
     }
+  });
+
+  it("does not let a raw expected-port exemption mask an unverified listener", async () => {
+    const previousExpectedPorts = process.env.INGENIUM_AUDIT_EXPECT_PORTS;
+    process.env.INGENIUM_AUDIT_EXPECT_PORTS = "3000";
+    try {
+      const report = await auditContainment({
+        manifestPath: "",
+        telemetryPaths: [],
+        includeRepositoryTelemetry: false,
+        composeOwnership: {
+          classification: "unverified",
+          hostPorts: [3000, 4097, 1455],
+          reason: "rogue listener has no verified Compose owner",
+        },
+        portProbe: async (port) => port === 3000,
+      });
+
+      expect(report.ports.find(({ port }) => port === 3000)).toMatchObject({
+        listening: true,
+        ownership: "unverified",
+      });
+      expect(strictFailures(report).some((failure) => failure.includes("listening ports: 3000"))).toBe(true);
+    } finally {
+      if (previousExpectedPorts === undefined) delete process.env.INGENIUM_AUDIT_EXPECT_PORTS;
+      else process.env.INGENIUM_AUDIT_EXPECT_PORTS = previousExpectedPorts;
+    }
+  });
+
+  it("retains manifestless temporary evidence as informational instead of deleting or misclassifying it", async () => {
+    const evidence = mkdtempSync(join(tmpdir(), `${TEST_RUN_TEMP_PREFIX}unowned-`));
+    temporaryManifestlessEvidence.push(evidence);
+    mkdirSync(join(evidence, ".ingenium"));
+
+    const report = await auditContainment({
+      manifestPath: "",
+      telemetryPaths: [],
+      includeRepositoryTelemetry: false,
+    });
+
+    expect(report.unownedTempEntries).toContain(evidence);
+    expect(report.tempEntries).not.toContain(evidence);
+    expect(report.informational).toContain(
+      `manifestless temp evidence retained (unowned, not deleted): ${evidence}`,
+    );
+    expect(existsSync(evidence)).toBe(true);
+  });
+
+  it("removes only the exact symlink-free nested test-results residual after stable inventory proof", () => {
+    const repository = temporaryRepository();
+    const canonicalResults = join(repository, "tests", "test-results", "keep.txt");
+    const misplaced = join(repository, "tests", "tests", "test-results");
+    writeFileSync(canonicalResults, "keep");
+    mkdirSync(join(misplaced, "case"), { recursive: true });
+    writeFileSync(join(misplaced, "case", "test-failed-1.png"), "owned residual");
+
+    const inspected = inspectOwnedMisplacedTestResults(repository);
+    const removed = removeOwnedMisplacedTestResults(repository);
+
+    expect(inspected?.inventory).toEqual([
+      { relativePath: "case", type: "directory" },
+      { relativePath: "case/test-failed-1.png", type: "file" },
+    ]);
+    expect(removed).toEqual(inspected);
+    expect(existsSync(misplaced)).toBe(false);
+    expect(readFileSync(canonicalResults, "utf8")).toBe("keep");
+  });
+
+  it("refuses to delete a nested test-results symlink and preserves its target evidence", () => {
+    const repository = temporaryRepository();
+    const nestedTests = join(repository, "tests", "tests");
+    const externalEvidence = join(repository, "preserve-me");
+    mkdirSync(nestedTests, { recursive: true });
+    mkdirSync(externalEvidence);
+    writeFileSync(join(externalEvidence, "evidence.txt"), "keep");
+    symlinkSync(externalEvidence, join(nestedTests, "test-results"));
+
+    expect(() => removeOwnedMisplacedTestResults(repository)).toThrow(/canonical owned directory/);
+    expect(readFileSync(join(externalEvidence, "evidence.txt"), "utf8")).toBe("keep");
   });
 });

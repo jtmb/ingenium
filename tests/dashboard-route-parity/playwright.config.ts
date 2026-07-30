@@ -1,8 +1,11 @@
 import { defineConfig } from "@playwright/test";
+import { resolve } from "node:path";
+import { getPlaywrightOutputDirectory } from "../test-run-context";
 import { productionDashboardUrl } from "./runtime";
 
 /** The exclusive allow-list intentionally selects no legacy dashboard specs. */
 export const ROUTE_PARITY_TEST_MATCH = "production-route-parity.spec.ts";
+const PLAYWRIGHT_REPO_ROOT = resolve(import.meta.dirname, "../..");
 
 export default defineConfig({
   testDir: ".",
@@ -14,7 +17,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   forbidOnly: Boolean(process.env.CI),
-  outputDir: "../../tests/artifacts/playwright/dashboard-route-parity",
+  outputDir: getPlaywrightOutputDirectory("dashboard-route-parity", PLAYWRIGHT_REPO_ROOT),
   use: {
     // The target must be an already-running production artifact/gateway. This
     // config never invokes `next dev`, `next start`, Docker, or a fixture.
