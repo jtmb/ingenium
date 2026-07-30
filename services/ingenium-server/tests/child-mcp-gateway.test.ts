@@ -10,6 +10,7 @@ import {
 import { ChildMcpRuntimeManager } from "../lib/proxy.js";
 
 const fixture = new URL("./fixtures/child-mcp-server.mjs", import.meta.url).pathname;
+const TEST_CHILD_MCP_STARTUP_TIMEOUT_MS = 3_000;
 const gateways: ChildMcpGateway[] = [];
 
 interface RegisteredTool {
@@ -27,6 +28,14 @@ function runtimeDefinition(): ChildMcpRuntimeDefinitionResponse {
     owned: true,
     revision: "2026-07-27T00:00:00.000Z",
   };
+}
+
+function createManager(): ChildMcpRuntimeManager {
+  return new ChildMcpRuntimeManager({
+    startupMs: TEST_CHILD_MCP_STARTUP_TIMEOUT_MS,
+    requestMs: 250,
+    shutdownMs: 750,
+  });
 }
 
 function createHost() {
@@ -84,7 +93,7 @@ describe("ChildMcpGateway", () => {
     const definitions = [runtimeDefinition()];
     const { host, tools } = createHost();
     const api = createApi(definitions);
-    const manager = new ChildMcpRuntimeManager({ startupMs: 750, requestMs: 250, shutdownMs: 750 });
+    const manager = createManager();
     const gateway = new ChildMcpGateway(host, "child-gateway-project", api.api, manager);
     gateways.push(gateway);
 
@@ -156,7 +165,7 @@ describe("ChildMcpGateway", () => {
   it("fails closed for an unavailable toggle state and rejects invalid session identity", async () => {
     const { host, tools } = createHost();
     const api = createApi([runtimeDefinition()]);
-    const manager = new ChildMcpRuntimeManager({ startupMs: 750, requestMs: 250, shutdownMs: 750 });
+    const manager = createManager();
     const gateway = new ChildMcpGateway(host, "child-gateway-project", api.api, manager);
     gateways.push(gateway);
 
@@ -183,7 +192,7 @@ describe("ChildMcpGateway", () => {
     const definitions: ChildMcpRuntimeDefinitionResponse[] = [];
     const { host, tools } = createHost();
     const api = createApi(definitions);
-    const manager = new ChildMcpRuntimeManager({ startupMs: 750, requestMs: 250, shutdownMs: 750 });
+    const manager = createManager();
     const gateway = new ChildMcpGateway(host, "child-gateway-project", api.api, manager, 50);
     gateways.push(gateway);
 

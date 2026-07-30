@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ChildMcpRuntimeManager, ChildMcpRuntimeError } from "../lib/proxy.js";
+import { ChildMcpRuntimeManager, ChildMcpRuntimeError, type ChildMcpTimeouts } from "../lib/proxy.js";
 
 const fixture = new URL("./fixtures/child-mcp-server.mjs", import.meta.url).pathname;
 const originalParentSecret = process.env.PARENT_MCP_SECRET;
+const TEST_CHILD_MCP_STARTUP_TIMEOUT_MS = 3_000;
 
 const managers: ChildMcpRuntimeManager[] = [];
 
-function createManager(): ChildMcpRuntimeManager {
-  const manager = new ChildMcpRuntimeManager({ startupMs: 750, requestMs: 250, shutdownMs: 750 });
+function createManager(timeouts: ChildMcpTimeouts = {}): ChildMcpRuntimeManager {
+  const manager = new ChildMcpRuntimeManager({
+    startupMs: TEST_CHILD_MCP_STARTUP_TIMEOUT_MS,
+    requestMs: 250,
+    shutdownMs: 750,
+    ...timeouts,
+  });
   managers.push(manager);
   return manager;
 }
@@ -69,6 +75,31 @@ describe("child MCP runtime", () => {
     });
   });
 
+  it("waits for delayed MCP initialization and reaps its process group during shutdown", async () => {
+    const manager = createManager();
+    manager.registerServer({
+      name: "fixture",
+      executable: process.execPath,
+      args: [fixture],
+      environment: { CHILD_MCP_STARTUP_DELAY_MS: "1000" },
+    });
+
+    const starting = manager.startServer("fixture");
+    expect(manager.getStatus("fixture")).toMatchObject({ state: "starting", toolCount: 0 });
+    const started = await starting;
+    expect(started).toMatchObject({ state: "ready", toolCount: 4 });
+    const directPid = started.pid!;
+
+    const descendant = await manager.callTool("fixture", "spawn_descendant");
+    const descendantPid = Number((descendant.content[0] as { text: string }).text);
+    expect(Number.isInteger(descendantPid)).toBe(true);
+    expect(isProcessAlive(descendantPid)).toBe(true);
+
+    await manager.stopServer("fixture");
+    await waitFor(() => !isProcessAlive(directPid) && !isProcessAlive(descendantPid));
+    expect(manager.getStatus("fixture")).toMatchObject({ state: "stopped", pid: null });
+  });
+
   it("reports child exit status, supports an explicit bounded reconnect, and terminates the child on stop", async () => {
     const manager = createManager();
     manager.registerServer({ name: "fixture", executable: process.execPath, args: [fixture] });
@@ -92,12 +123,12 @@ describe("child MCP runtime", () => {
   });
 
   it("bounds startup and call timeouts, records redacted diagnostics, and cleans up failed startup children", async () => {
-    const manager = createManager();
+    const manager = createManager({ startupMs: 150 });
     manager.registerServer({
       name: "hanging",
       executable: process.execPath,
       args: [fixture],
-      environment: { CHILD_MCP_HANG_INIT: "1", CHILD_MCP_CONFIGURED_VALUE: "secret-canary" },
+      environment: { CHILD_MCP_STARTUP_DELAY_MS: "500", CHILD_MCP_CONFIGURED_VALUE: "secret-canary" },
     });
 
     await expect(manager.startServer("hanging")).rejects.toMatchObject({ code: "CHILD_MCP_STARTUP_TIMEOUT" });
